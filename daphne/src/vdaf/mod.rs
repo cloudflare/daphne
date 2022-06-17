@@ -11,18 +11,17 @@ use crate::{
     },
     roles::HpkeDecrypter,
     vdaf::prio3::{
-        prio3_encode_prepare_message, prio3_get_decoded_verify_param, prio3_helper_prepare_finish,
-        prio3_leader_prepare_finish, prio3_prepare_start, prio3_setup, prio3_shard, prio3_unshard,
-        Prio3Error,
+        prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
+        prio3_prepare_start, prio3_shard, prio3_unshard, Prio3Error,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
     DapVerifyParam, VdafConfig,
 };
 use prio::{
-    codec::Encode,
+    codec::{CodecError, Encode},
     field::{Field128, Field64},
-    vdaf::prio3::{Prio3PrepareMessage, Prio3PrepareStep, Prio3VerifyParam},
+    vdaf::prio3::{Prio3PrepareShare, Prio3PrepareState},
 };
 use rand::prelude::*;
 use ring::hmac;
@@ -36,31 +35,21 @@ const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
 const CTX_ROLE_HELPER: u8 = 3;
 
-// TODO(MVP) This will be removed after moving to libprio 0.8.0.
 #[derive(Clone)]
-pub(crate) enum VdafVerifyParam {
-    Prio3(Prio3VerifyParam<16>),
-}
-
-#[cfg(test)]
-impl VdafVerifyParam {
-    pub(crate) fn into_prio3(self) -> Prio3VerifyParam<16> {
-        match self {
-            VdafVerifyParam::Prio3(verify_param) => verify_param,
-        }
-    }
+pub(crate) enum VdafVerifyKey {
+    Prio3([u8; 16]),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum VdafStep {
-    Prio3Field64(Prio3PrepareStep<Field64, 16>),
-    Prio3Field128(Prio3PrepareStep<Field128, 16>),
+pub(crate) enum VdafState {
+    Prio3Field64(Prio3PrepareState<Field64, 16>),
+    Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum VdafMessage {
-    Prio3Field64(Prio3PrepareMessage<Field64, 16>),
-    Prio3Field128(Prio3PrepareMessage<Field128, 16>),
+    Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
+    Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -72,20 +61,18 @@ pub(crate) enum VdafAggregateShare {
 impl Encode for VdafAggregateShare {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
-            VdafAggregateShare::Field64(vdaf_agg_share) => vdaf_agg_share.encode(bytes),
-            VdafAggregateShare::Field128(vdaf_agg_share) => vdaf_agg_share.encode(bytes),
+            VdafAggregateShare::Field64(agg_share) => bytes.append(&mut agg_share.into()),
+            VdafAggregateShare::Field128(agg_share) => bytes.append(&mut agg_share.into()),
         }
     }
 }
 
 impl VdafConfig {
-    pub(crate) fn get_decoded_verify_param(
-        &self,
-        data: &[u8],
-    ) -> Result<VdafVerifyParam, DapAbort> {
+    pub(crate) fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
-            Self::Prio3(prio3_config) => prio3_get_decoded_verify_param(prio3_config, data)
-                .map_err(|e| DapAbort::Internal(Box::new(e))),
+            Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(
+                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
         }
     }
 
@@ -103,23 +90,21 @@ impl VdafConfig {
     //
     // TODO We may need to change this API to accommodate a public parameter for the VDAF.
     pub fn setup(&self) -> Result<(DapVerifyParam, DapVerifyParam), DapAbort> {
-        let (leader_vdaf, helper_vdaf) = match self {
-            Self::Prio3(prio3_config) => {
-                prio3_setup(prio3_config).map_err(|e| DapAbort::Internal(Box::new(e)))?
-            }
+        let mut rng = thread_rng();
+        let verify_key = match self {
+            Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
         };
 
-        let mut rng = thread_rng();
         let hmac_key: [u8; 32] = rng.gen();
         let hmac = hmac::Key::new(hmac::HMAC_SHA256, &hmac_key);
 
         Ok((
             DapVerifyParam {
-                vdaf: leader_vdaf,
+                vdaf: verify_key.clone(),
                 hmac: hmac.clone(),
             },
             DapVerifyParam {
-                vdaf: helper_vdaf,
+                vdaf: verify_key,
                 hmac,
             },
         ))
@@ -227,7 +212,7 @@ impl VdafConfig {
         nonce: &Nonce,
         extensions: &[u8],
         encrypted_input_share: &HpkeCiphertext,
-    ) -> Result<(VdafStep, VdafMessage), DapError> {
+    ) -> Result<(VdafState, VdafMessage), DapError> {
         let mut info = Vec::with_capacity(CTX_INPUT_SHARE_PREFIX.len() + 34);
         task_id.encode(&mut info);
         info.extend_from_slice(CTX_INPUT_SHARE_PREFIX);
@@ -247,10 +232,17 @@ impl VdafConfig {
             decrypter.hpke_decrypt(task_id, &info, &aad, encrypted_input_share)?;
 
         let nonce_data = &aad[..nonce_len];
+        let agg_id = if is_leader { 0 } else { 1 };
         match (self, &verify_param.vdaf) {
-            (Self::Prio3(ref prio3_config), VdafVerifyParam::Prio3(ref verify_param)) => Ok(
-                prio3_prepare_start(prio3_config, verify_param, nonce_data, &input_share_data)?,
-            ),
+            (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
+                Ok(prio3_prepare_start(
+                    prio3_config,
+                    verify_key,
+                    agg_id,
+                    nonce_data,
+                    &input_share_data,
+                )?)
+            }
         }
     }
 

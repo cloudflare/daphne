@@ -46,7 +46,7 @@ const LEADER_TASK_LIST: &str = r#"{
             }
         },
         "dap_verify_param": {
-            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d00",
+            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d",
             "hmac": "4d56ee95444bd853742daa8e0570c6b9ec9d64bbb82f83847b475012e37b01e7"
         }
     },
@@ -64,7 +64,7 @@ const LEADER_TASK_LIST: &str = r#"{
             }
         },
         "dap_verify_param": {
-            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc00",
+            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc",
             "hmac": "c08de02035e2ad0c1a432dfe8a35b31d42cbd39a55da6f71b888fbee47a7ffb7"
         }
     }
@@ -88,7 +88,7 @@ const HELPER_TASK_LIST: &str = r#"{
             }
         },
         "dap_verify_param": {
-            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d01",
+            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d",
             "hmac": "4d56ee95444bd853742daa8e0570c6b9ec9d64bbb82f83847b475012e37b01e7"
         }
     }
@@ -109,7 +109,7 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
             }
         },
         "dap_verify_param": {
-            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc01",
+            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc",
             "hmac": "c08de02035e2ad0c1a432dfe8a35b31d42cbd39a55da6f71b888fbee47a7ffb7"
         }
     }

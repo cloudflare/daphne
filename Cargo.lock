@@ -426,7 +426,7 @@ dependencies = [
  "getrandom",
  "hex",
  "hpke",
- "prio 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "prio 0.8.0",
  "rand",
  "ring",
  "serde",
@@ -455,8 +455,8 @@ dependencies = [
  "janus_server",
  "janus_test_util",
  "lazy_static",
- "prio 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "prio 0.7.0 (git+https://github.com/divviup/libprio-rs?rev=229cd9c45924c7dae3ba754a6eb46b2a05ca8451)",
+ "prio 0.7.0",
+ "prio 0.8.0",
  "rand",
  "reqwest",
  "reqwest-wasm",
@@ -1118,7 +1118,7 @@ dependencies = [
  "hpke",
  "hpke-dispatch",
  "num_enum",
- "prio 0.7.0 (git+https://github.com/divviup/libprio-rs?rev=229cd9c45924c7dae3ba754a6eb46b2a05ca8451)",
+ "prio 0.7.0",
  "rand",
  "ring",
  "serde",
@@ -1148,7 +1148,7 @@ dependencies = [
  "num_enum",
  "opentelemetry",
  "postgres-types",
- "prio 0.7.0 (git+https://github.com/divviup/libprio-rs?rev=229cd9c45924c7dae3ba754a6eb46b2a05ca8451)",
+ "prio 0.7.0",
  "rand",
  "reqwest",
  "ring",
@@ -1690,8 +1690,7 @@ checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
 [[package]]
 name = "prio"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d0a11009f8d385435566fa31d195d5c2ef098fcad7b8bcc964c135245bf5a83"
+source = "git+https://github.com/divviup/libprio-rs?rev=229cd9c45924c7dae3ba754a6eb46b2a05ca8451#229cd9c45924c7dae3ba754a6eb46b2a05ca8451"
 dependencies = [
  "aes 0.8.1",
  "aes-gcm",
@@ -1709,8 +1708,9 @@ dependencies = [
 
 [[package]]
 name = "prio"
-version = "0.7.0"
-source = "git+https://github.com/divviup/libprio-rs?rev=229cd9c45924c7dae3ba754a6eb46b2a05ca8451#229cd9c45924c7dae3ba754a6eb46b2a05ca8451"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e58420a9eed730ff64632a63d8f01becd86367999562978c2ac891582ebb720"
 dependencies = [
  "aes 0.8.1",
  "aes-gcm",

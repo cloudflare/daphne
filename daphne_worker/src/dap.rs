@@ -502,8 +502,7 @@ impl<D> DapHelper for DaphneConfig<D> {
             .await?;
 
         let data = hex::decode(&helper_state_hex).map_err(|e| DapError::Fatal(e.to_string()))?;
-        let helper_state =
-            DapHelperState::get_decoded(&task_config.vdaf, &task_config.dap_verify_param, &data)?;
+        let helper_state = DapHelperState::get_decoded(&task_config.vdaf, &data)?;
 
         Ok(helper_state)
     }

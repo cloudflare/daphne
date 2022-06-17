@@ -18,8 +18,8 @@
 use crate::{
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
     vdaf::{
-        prio3::{prio3_append_prepare_step, prio3_decode_prepare_step, Prio3Error},
-        VdafAggregateShare, VdafMessage, VdafStep, VdafVerifyParam,
+        prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, Prio3Error},
+        VdafAggregateShare, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
 use prio::{
@@ -226,10 +226,8 @@ pub struct DapTaskConfig {
     pub min_batch_duration: u64, // seconds
     pub min_batch_size: u64,     // number of reports
     pub vdaf: VdafConfig,
-    // TODO(MVP) After upgrading to libprio 0.8.0 we should be able to make this
-    // crate-private.
     #[serde(skip_serializing)]
-    pub dap_verify_param: DapVerifyParam,
+    pub(crate) dap_verify_param: DapVerifyParam,
     #[serde(skip_serializing)]
     pub(crate) collector_hpke_config: HpkeConfig,
 }
@@ -273,7 +271,7 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
         let hmac = hmac::Key::new(hmac::HMAC_SHA256, &shadow.dap_verify_param.hmac[..]);
         let vdaf = shadow
             .vdaf
-            .get_decoded_verify_param(&shadow.dap_verify_param.vdaf)?;
+            .get_decoded_verify_key(&shadow.dap_verify_param.vdaf)?;
 
         let collector_hpke_config = HpkeConfig::get_decoded(&shadow.collector_hpke_config)?;
 
@@ -298,14 +296,13 @@ pub enum DapMeasurement {
 #[derive(Debug, PartialEq)]
 pub enum DapAggregateResult {
     U64(u64),
-    U64Vec(Vec<u64>),
+    U128(u128),
+    U128Vec(Vec<u128>),
 }
 
-/// An Aggregator's long-lived secrets including the VDAF verification parameter and HMAC key.
-//
-// TODO(MVP) Refactor after moving to libprio 0.8.0.
+/// An Aggregator's long-lived secrets for a DAP task.
 pub struct DapVerifyParam {
-    vdaf: VdafVerifyParam,
+    vdaf: VdafVerifyKey,
     hmac: hmac::Key,
 }
 
@@ -327,7 +324,7 @@ impl DapVerifyParam {
 /// The Leader's state after sending an AggregateInitReq.
 #[derive(Debug)]
 pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafStep, VdafMessage, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, VdafMessage, Nonce)>,
 }
 
 /// The Leader's state after sending an AggregateContReq.
@@ -339,7 +336,7 @@ pub struct DapLeaderUncommitted {
 /// The Helper's state during the aggregation flow.
 #[derive(Debug, PartialEq)]
 pub struct DapHelperState {
-    pub(crate) seq: Vec<(VdafStep, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, Nonce)>,
 }
 
 impl DapHelperState {
@@ -352,10 +349,10 @@ impl DapHelperState {
     /// Note that the encoding format is not specified by the DAP standard.
     pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
         let mut bytes = vec![];
-        for (step, nonce) in self.seq.iter() {
+        for (state, nonce) in self.seq.iter() {
             match vdaf_config {
                 VdafConfig::Prio3(prio3_config) => {
-                    prio3_append_prepare_step(&mut bytes, prio3_config, step)?;
+                    prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
                 }
             };
             nonce.encode(&mut bytes);
@@ -364,21 +361,17 @@ impl DapHelperState {
     }
 
     /// Decode the Helper state from a byte string.
-    pub fn get_decoded(
-        vdaf: &VdafConfig,
-        dap_verify_param: &DapVerifyParam,
-        data: &[u8],
-    ) -> Result<Self, DapError> {
+    pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut seq = vec![];
         let mut r = std::io::Cursor::new(data);
         while (r.position() as usize) < data.len() {
-            let step = match (vdaf, &dap_verify_param.vdaf) {
-                (VdafConfig::Prio3(param), VdafVerifyParam::Prio3(verify_param)) => {
-                    prio3_decode_prepare_step(param, verify_param, &mut r)?
+            let state = match vdaf_config {
+                VdafConfig::Prio3(ref prio3_config) => {
+                    prio3_decode_prepare_state(prio3_config, 1, &mut r)?
                 }
             };
             let nonce = Nonce::decode(&mut r)?;
-            seq.push((step, nonce))
+            seq.push((state, nonce))
         }
 
         Ok(DapHelperState { seq })
