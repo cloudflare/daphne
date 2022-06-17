@@ -1,0 +1,22 @@
+---
+name: DaphneCI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  Testing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Linting
+        run: cargo clippy
+      - name: Building
+        run: cargo build --release
+      - name: Testing
+        run: cargo test
