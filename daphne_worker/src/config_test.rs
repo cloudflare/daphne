@@ -22,7 +22,7 @@ const DAP_TASK_LIST: &str = r#"{
       }
     },
     "dap_verify_param": {
-      "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d00",
+      "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d",
       "hmac": "4d56ee95444bd853742daa8e0570c6b9ec9d64bbb82f83847b475012e37b01e7"
     }
   }

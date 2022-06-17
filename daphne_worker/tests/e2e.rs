@@ -312,7 +312,7 @@ async fn e2e_leader_collect_ok() {
             collect_resp.encrypted_agg_shares,
         )
         .unwrap();
-    assert_eq!(agg_res, DapAggregateResult::U64(t.min_batch_size as u64));
+    assert_eq!(agg_res, DapAggregateResult::U128(t.min_batch_size as u128));
 
     // Poll the collect URI once more. Expect failure because the request has already been
     // processed.

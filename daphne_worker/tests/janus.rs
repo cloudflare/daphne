@@ -13,6 +13,8 @@ use rand::prelude::*;
 use test_runner::{TestRunner, COLLECTOR_HPKE_SECRET_KEY};
 
 // Test that daphne can aggregate a report from a Janus client.
+//
+// TODO(MVP) Update Daphne to latest version of the draft to make this test pass.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_janus"), ignore)]
 async fn janus_client() {
@@ -68,8 +70,7 @@ async fn janus_client() {
 //
 // For tracing, run `cargo test` with RUST_LOG=aggregator=trace,janus=trace,warning.
 //
-// TODO Ideally we would spin up the Janus helper in a container. At the moment this is not
-// feasible.
+// TODO(MVP) Update Daphne to latest version of the draft to make this test pass.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_janus"), ignore)]
 async fn janus_helper() {

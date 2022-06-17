@@ -10,12 +10,12 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapVerifyParam, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafStep,
+    DapVerifyParam, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
 };
 use assert_matches::assert_matches;
 use prio::vdaf::{
-    prio3::{Prio3Aes128Count, Prio3Result},
-    Aggregatable, Aggregator as VdafAggregator, Collector as VdafCollector, PrepareTransition,
+    prio3::Prio3, Aggregatable, Aggregator as VdafAggregator, Collector as VdafCollector,
+    PrepareTransition,
 };
 use rand::prelude::*;
 use std::{collections::HashSet, fmt::Debug, time::SystemTime};
@@ -76,7 +76,7 @@ fn roundtrip_report() {
         )
         .unwrap();
 
-    let (leader_step, leader_msg) = TEST_VDAF
+    let (leader_step, leader_share) = TEST_VDAF
         .consume_report_share(
             &t.leader_hpke_secret_key,
             true, // is_leader
@@ -88,7 +88,7 @@ fn roundtrip_report() {
         )
         .unwrap();
 
-    let (helper_step, helper_msg) = TEST_VDAF
+    let (helper_step, helper_share) = TEST_VDAF
         .consume_report_share(
             &t.helper_hpke_secret_key,
             false, // is_leader
@@ -100,24 +100,26 @@ fn roundtrip_report() {
         )
         .unwrap();
 
-    match (leader_step, helper_step, leader_msg, helper_msg) {
+    match (leader_step, helper_step, leader_share, helper_share) {
         (
-            VdafStep::Prio3Field64(leader_step),
-            VdafStep::Prio3Field64(helper_step),
-            VdafMessage::Prio3Field64(leader_msg),
-            VdafMessage::Prio3Field64(helper_msg),
+            VdafState::Prio3Field64(leader_step),
+            VdafState::Prio3Field64(helper_step),
+            VdafMessage::Prio3ShareField64(leader_share),
+            VdafMessage::Prio3ShareField64(helper_share),
         ) => {
-            let vdaf = Prio3Aes128Count::new(2).unwrap();
-            let message = vdaf.prepare_preprocess([leader_msg, helper_msg]).unwrap();
+            let vdaf = Prio3::new_aes128_count(2).unwrap();
+            let message = vdaf
+                .prepare_preprocess([leader_share, helper_share])
+                .unwrap();
 
             let leader_out_share = assert_matches!(
-                vdaf.prepare_step(leader_step, Some(message.clone())),
+                vdaf.prepare_step(leader_step, message.clone()).unwrap(),
                 PrepareTransition::Finish(out_share) => out_share
             );
             let leader_agg_share = vdaf.aggregate(&(), [leader_out_share]).unwrap();
 
             let helper_out_share = assert_matches!(
-                vdaf.prepare_step(helper_step, Some(message)),
+                vdaf.prepare_step(helper_step, message).unwrap(),
                 PrepareTransition::Finish(out_share) => out_share
             );
             let helper_agg_share = vdaf.aggregate(&(), [helper_out_share]).unwrap();
@@ -125,7 +127,7 @@ fn roundtrip_report() {
             assert_eq!(
                 vdaf.unshard(&(), vec![leader_agg_share, helper_agg_share])
                     .unwrap(),
-                Prio3Result(1),
+                1,
             );
         }
         _ => {
@@ -376,11 +378,11 @@ fn agg_cont_req() {
         })
         .unwrap();
 
-    let vdaf = Prio3Aes128Count::new(2).unwrap();
+    let vdaf = Prio3::new_aes128_count(2).unwrap();
     assert_eq!(
         vdaf.unshard(&(), [leader_agg_share, helper_agg_share])
             .unwrap(),
-        Prio3Result(3),
+        3,
     );
 }
 
@@ -538,18 +540,11 @@ fn helper_state_serialization() {
     let (_, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
     let (want, _) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
 
-    let got = DapHelperState::get_decoded(
-        TEST_VDAF,
-        &t.helper_verify_param,
-        &want.get_encoded(TEST_VDAF).unwrap(),
-    )
-    .unwrap();
+    let got =
+        DapHelperState::get_decoded(TEST_VDAF, &want.get_encoded(TEST_VDAF).unwrap()).unwrap();
     assert_eq!(got, want);
 
-    assert!(
-        DapHelperState::get_decoded(TEST_VDAF, &t.helper_verify_param, b"invalid helper state")
-            .is_err()
-    )
+    assert!(DapHelperState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())
 }
 
 struct Test<'a> {
