@@ -1,0 +1,41 @@
+# Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+---
+version: "3.3"
+networks:
+  ppm_network:
+    driver: bridge
+services:
+  leader:
+    networks:
+      - ppm_network
+    ports:
+      - "8787"
+    build:
+      context: .
+      dockerfile: daphne_worker/tests/backend/miniflare.Dockerfile
+    command:
+      - "--port=8787"
+      - "--global-random"
+      - "--env=tests/backend/leader.env"
+  helper:
+    networks:
+      - ppm_network
+    ports:
+      - "8788"
+    build:
+      context: .
+      dockerfile: daphne_worker/tests/backend/miniflare.Dockerfile
+    command:
+      - "--port=8788"
+      - "--global-random"
+      - "--env=tests/backend/helper.env"
+  test:
+    networks:
+      - ppm_network
+    build:
+      context: .
+      dockerfile: daphne_worker/tests/backend/runtests.Dockerfile
+    depends_on:
+      - leader
+      - helper
