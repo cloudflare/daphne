@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Daphne-Worker deployment for running tests.
+
+name = "daphne-worker-dev"
+type = "javascript"
+workers_dev = true
+# TODO(MVP) Figure out the semantics of this field and update it.
+compatibility_date = "2021-11-12"
+
+[vars]
+WORKERS_RS_VERSION = "0.0.9"
+
+[build]
+# TODO Revert this change after the next release of workers-rs. Instead of
+# installing the latest release, it is necessary to build the version of
+# worker-build that matches wworkers-rs. We're currenntly checking out an
+# unreleased version.
+#command = "cargo install -q worker-build && worker-build --release" # required
+command = "worker-build --release" # required
+
+[build.upload]
+dir    = "build/worker"
+format = "modules"
+main   = "./shim.mjs"
+
+[[build.upload.rules]]
+globs = ["**/*.wasm"]
+type  = "CompiledWasm"
+
+# read more about configuring your Worker via wrangler.toml at:
+# https://developers.cloudflare.com/workers/cli-wrangler/configuration
+
+[durable_objects]
+bindings = [
+  { name = "DAP_REPORT_STORE", class_name = "ReportStore" },
+  { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+  { name = "DAP_LEADER_STATE_STORE", class_name = "LeaderStateStore" },
+  { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+]

@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: BSD-3-Clause
+
+[package]
+name = "daphne_worker"
+version = "0.1.0"
+authors = [
+  "Christopher Patton <cpatton@cloudflare.com>",
+  "Armando Faz Hernandez <armfazh@cloudflare.com>",
+]
+edition = "2021"
+license = "BSD-3-Clause"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+test_e2e = []
+test_janus = []
+
+[dependencies]
+daphne = { path = "../daphne" }
+async-trait = "0.1.56"
+base64 = "0.13.0"
+cfg-if = "0.1.2"
+# TODO Update after next workers-rs release. This temporary fix is needed in
+# order to resolve a dependency conflict with janus_server and to get
+# `worker-build` to install.
+#worker = "0.0.9"
+worker = { git = "https://github.com/cloudflare/workers-rs", rev = "eacdadd0c0b7d8e74963656e44b3e9c150a5a7d9", package = "worker" }
+serde_json = "1.0.67"
+getrandom = { version = "0.2", features = ["js"] } # Required for prio
+prio = "0.7.0"
+hpke = { version = "0.8.0", features = ["std", "serde_impls"] }
+ring = "0.16.20"
+hex = { version = "0.4.3", features = ["serde"] }
+serde = { version = "^1.0", features = ["derive"] }
+rand = "0.8.5"
+reqwest-wasm = { version = "0.11", features = ["json"] }
+thiserror = "1.0"
+url = { version = "2.2.2", features = ["serde"] }
+
+# The `console_error_panic_hook` crate provides better debugging of panics by
+# logging them with `console.error`. This is great for development, but requires
+# all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
+# code size when deploying.
+console_error_panic_hook = { version = "0.1.1", optional = true }
+
+[dev-dependencies]
+reqwest = { version = "0.11.7", features = ["json"] }
+assert_matches = "1.5.0"
+lazy_static = "1.4.0"
+futures = "0.3.21"
+janus = { git = "https://github.com/divviup/janus", rev = "54ba8e759e35996a6ea8773aa5f72973d19d4712" }
+janus_server = { git = "https://github.com/divviup/janus", rev = "54ba8e759e35996a6ea8773aa5f72973d19d4712" }
+janus_test_util = { git = "https://github.com/divviup/janus", rev = "54ba8e759e35996a6ea8773aa5f72973d19d4712" }
+# TODO Resolve this hack once the Janus team has finished their implementation
+# and are ready to cut a new version of libprio.
+janus_prio = { git = "https://github.com/divviup/libprio-rs", rev = "229cd9c45924c7dae3ba754a6eb46b2a05ca8451", package = "prio" }
+tokio = { version = "^1.9", features = ["full"] }
+
+# Dependencies for running janus_server.
+#
+# TODO Consider making the "janus_test" a workspace, as these depeendencies are
+# only required for Janus interop tests. Note that eventually we might be able
+# to just run Janus in a container,  at which point these dependencies would go
+# away.
+deadpool-postgres = "0.10.1"
+tracing = "0.1.34"
+testcontainers = "0.13.0"
+tokio-postgres = { version = "0.7.6", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: BSD-3-Clause
+
+[package]
+name = "daphne"
+version = "0.1.0"
+authors = [
+  "Christopher Patton <cpatton@cloudflare.com>",
+  "Armando Faz Hernandez <armfazh@cloudflare.com>",
+]
+edition = "2021"
+license = "BSD-3-Clause"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+async-trait = "0.1.56"
+base64 = "0.13.0"
+getrandom = { version = "0.2", features = ["js"] } # Required for prio
+# TODO Update after next workers-rs release. This temporary fix is needed in
+# order to resolve a dependency conflict with janus_server and to get
+# `worker-build` to install.
+#worker = "0.0.9"
+worker = { git = "https://github.com/cloudflare/workers-rs", rev = "eacdadd0c0b7d8e74963656e44b3e9c150a5a7d9", package = "worker" }
+serde_json = "1.0.67"
+prio = "0.7.0"
+hpke = { version = "0.8.0", features = ["std", "serde_impls"] }
+ring = "0.16.20"
+hex = { version = "0.4.3", features = ["serde"] }
+serde = { version = "^1.0", features = ["derive"] }
+rand = "0.8.5"
+thiserror = "1.0"
+url = { version = "2.2.2", features = ["serde"] }
+
+[dev-dependencies]
+assert_matches = "1.5.0"
