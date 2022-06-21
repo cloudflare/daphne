@@ -116,6 +116,10 @@ pub enum DapAbort {
     #[error("staleReport")]
     StaleReport,
 
+    /// Unauthorized HTTP request.
+    #[error("unauthorizedRequest")]
+    UnauthorizedRequest,
+
     /// Unrecognized HPKE config. Sent in response to an upload request for which the leader share
     /// is encrypted using an unrecognized HPKE configuration.
     //
@@ -142,6 +146,7 @@ impl DapAbort {
             | Self::InsufficientBatchSize
             | Self::ReplayedReport
             | Self::StaleReport
+            | Self::UnauthorizedRequest
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
             | Self::UnrecognizedTask => (self.to_string(), None),
@@ -209,7 +214,8 @@ pub struct DapTaskConfig {
     pub min_batch_size: u64,     // number of reports
     pub vdaf: VdafConfig,
     #[serde(skip_serializing)]
-    pub(crate) dap_verify_param: DapVerifyParam,
+    pub(crate) vdaf_verify_key: VdafVerifyKey,
+    pub(crate) leader_auth_token: String,
     #[serde(skip_serializing)]
     pub(crate) collector_hpke_config: HpkeConfig,
 }
@@ -227,19 +233,15 @@ impl DapTaskConfig {
 }
 
 #[derive(Deserialize, Serialize)]
-struct ShadowDapVerifyParam {
-    #[serde(with = "hex")]
-    vdaf: Vec<u8>,
-}
-
-#[derive(Deserialize, Serialize)]
 struct ShadowDapTaskConfig {
     leader_url: Url,
     helper_url: Url,
     min_batch_duration: u64,
     min_batch_size: u64,
     vdaf: VdafConfig,
-    dap_verify_param: ShadowDapVerifyParam,
+    #[serde(with = "hex")]
+    vdaf_verify_key: Vec<u8>,
+    leader_auth_token: String,
     #[serde(with = "hex")]
     collector_hpke_config: Vec<u8>,
 }
@@ -248,9 +250,9 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
     type Error = DapAbort;
 
     fn try_from(shadow: ShadowDapTaskConfig) -> std::result::Result<Self, Self::Error> {
-        let vdaf = shadow
+        let vdaf_verify_key = shadow
             .vdaf
-            .get_decoded_verify_key(&shadow.dap_verify_param.vdaf)?;
+            .get_decoded_verify_key(&shadow.vdaf_verify_key)?;
 
         let collector_hpke_config = HpkeConfig::get_decoded(&shadow.collector_hpke_config)?;
 
@@ -260,7 +262,8 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             min_batch_duration: shadow.min_batch_duration,
             min_batch_size: shadow.min_batch_size,
             vdaf: shadow.vdaf,
-            dap_verify_param: DapVerifyParam { vdaf },
+            vdaf_verify_key,
+            leader_auth_token: shadow.leader_auth_token,
             collector_hpke_config,
         })
     }
@@ -277,11 +280,6 @@ pub enum DapAggregateResult {
     U64(u64),
     U128(u128),
     U128Vec(Vec<u128>),
-}
-
-/// An Aggregator's long-lived secrets for a DAP task.
-pub struct DapVerifyParam {
-    vdaf: VdafVerifyKey,
 }
 
 /// The Leader's state after sending an AggregateInitReq.
@@ -474,13 +472,16 @@ pub enum Prio3Config {
 }
 
 /// DAP request.
+#[derive(Debug)]
 pub struct DapRequest {
     pub media_type: Option<&'static str>,
     pub payload: Vec<u8>,
     pub url: Url,
+    pub sender_auth_token: Option<String>,
 }
 
 /// DAP response.
+#[derive(Debug)]
 pub struct DapResponse {
     pub media_type: Option<&'static str>,
     pub payload: Vec<u8>,
@@ -518,4 +519,6 @@ pub mod messages;
 #[cfg(test)]
 mod messages_test;
 pub mod roles;
+#[cfg(test)]
+mod roles_test;
 mod vdaf;

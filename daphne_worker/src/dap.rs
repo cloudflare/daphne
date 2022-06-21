@@ -58,10 +58,17 @@ pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest
         None
     };
 
+    let sender_auth_token = if let Some(dap_auth_token) = req.headers().get("DAP-Auth-Token")? {
+        Some(dap_auth_token)
+    } else {
+        None
+    };
+
     Ok(DapRequest {
         payload: req.bytes().await?,
         url: req.url()?,
         media_type,
+        sender_auth_token,
     })
 }
 
@@ -355,10 +362,18 @@ impl<D> DapLeader for DaphneConfig<D> {
 
     async fn send_http_post(&self, req: DapRequest) -> std::result::Result<DapResponse, DapError> {
         let mut headers = reqwest_wasm::header::HeaderMap::new();
-        if let Some(media_type) = req.media_type {
+        if let Some(content_type) = req.media_type {
             headers.insert(
                 reqwest_wasm::header::CONTENT_TYPE,
-                reqwest_wasm::header::HeaderValue::from_str(media_type)
+                reqwest_wasm::header::HeaderValue::from_str(content_type)
+                    .map_err(|e| DapError::Fatal(e.to_string()))?,
+            );
+        }
+
+        if let Some(dap_auth_token) = req.sender_auth_token {
+            headers.insert(
+                reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
+                reqwest_wasm::header::HeaderValue::from_str(&dap_auth_token)
                     .map_err(|e| DapError::Fatal(e.to_string()))?,
             );
         }

@@ -23,6 +23,28 @@ use rand::prelude::*;
 use std::collections::HashMap;
 use url::Url;
 
+macro_rules! check_leader_auth_token {
+    (
+        $task_config:expr,
+        $req:expr
+    ) => {{
+        // TODO spec: Decide whether to check that the bearer token has the right format, say,
+        // following RFC 6750, Section 2.1.
+
+        let auth_token = $req
+            .sender_auth_token
+            .as_ref()
+            .ok_or(DapAbort::UnauthorizedRequest)?;
+
+        if !constant_time_eq(
+            auth_token.as_bytes(),
+            $task_config.leader_auth_token.as_bytes(),
+        ) {
+            return Err(DapAbort::UnauthorizedRequest);
+        }
+    }};
+}
+
 macro_rules! check_batch_param {
     (
         $task_config:expr,
@@ -114,23 +136,25 @@ pub trait DapAggregator: HpkeDecrypter + Sized {
     }
 }
 
-macro_rules! post {
+macro_rules! leader_post {
     (
-        $config:expr,
-        $helper_url:expr,
+        $role:expr,
+        $task_config:expr,
         $path:expr,
         $media_type:expr,
         $req_data:expr
     ) => {{
-        let url = $helper_url
+        let url = $task_config
+            .helper_url
             .join($path)
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let req = DapRequest {
             media_type: Some($media_type),
             payload: $req_data,
             url,
+            sender_auth_token: Some($task_config.leader_auth_token.clone()),
         };
-        $config.send_http_post(req).await?
+        $role.send_http_post(req).await?
     }};
 }
 
@@ -257,7 +281,7 @@ pub trait DapLeader: DapAggregator {
             let agg_job_id = Id(rng.gen());
             let transition = task_config.vdaf.produce_agg_init_req(
                 self,
-                &task_config.dap_verify_param,
+                &task_config.vdaf_verify_key,
                 task_id,
                 &agg_job_id,
                 reports,
@@ -271,9 +295,9 @@ pub trait DapLeader: DapAggregator {
             };
 
             // Send AggregateInitReq and receive AggregateResp.
-            let resp = post!(
+            let resp = leader_post!(
                 self,
-                task_config.helper_url,
+                task_config,
                 "/aggregate",
                 MEDIA_TYPE_AGG_INIT_REQ,
                 agg_init_req.get_encoded()
@@ -296,9 +320,9 @@ pub trait DapLeader: DapAggregator {
             };
 
             // Send AggregateContReq and receive AggregateResp.
-            let resp = post!(
+            let resp = leader_post!(
                 self,
-                task_config.helper_url,
+                task_config,
                 "/aggregate",
                 MEDIA_TYPE_AGG_CONT_REQ,
                 agg_cont_req.get_encoded()
@@ -344,9 +368,9 @@ pub trait DapLeader: DapAggregator {
             };
 
             // Send AggregateShareReq and receive AggregateShareResp.
-            let resp = post!(
+            let resp = leader_post!(
                 self,
-                task_config.helper_url,
+                task_config,
                 "/aggregate_share",
                 MEDIA_TYPE_AGG_SHARE_REQ,
                 agg_share_req.get_encoded()
@@ -409,6 +433,7 @@ pub trait DapHelper: DapAggregator {
         let task_config = self
             .get_task_config_for(&agg_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
+        check_leader_auth_token!(task_config, req);
 
         match &agg_req.var {
             AggregateReqVar::Init {
@@ -420,7 +445,7 @@ pub trait DapHelper: DapAggregator {
 
                 let transition = task_config.vdaf.handle_agg_init_req(
                     self,
-                    &task_config.dap_verify_param,
+                    &task_config.vdaf_verify_key,
                     &agg_req,
                     |nonce| early_fails.get(nonce).copied(),
                 )?;
@@ -472,7 +497,7 @@ pub trait DapHelper: DapAggregator {
         let task_config = self
             .get_task_config_for(&agg_share_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
-
+        check_leader_auth_token!(task_config, req);
         check_batch_param!(
             task_config,
             agg_share_req.batch_interval,

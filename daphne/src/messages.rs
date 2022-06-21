@@ -17,7 +17,7 @@ const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
 
 /// The identifier for a DAP task.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Id(#[serde(with = "hex")] pub [u8; 32]);
 
 impl Id {
@@ -188,6 +188,15 @@ pub enum AggregateReqVar {
     },
 }
 
+impl Default for AggregateReqVar {
+    fn default() -> Self {
+        Self::Init {
+            agg_param: Vec::default(),
+            seq: Vec::default(),
+        }
+    }
+}
+
 impl Encode for AggregateReqVar {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
@@ -354,7 +363,7 @@ impl Decode for AggregateResp {
 }
 
 /// A batch interval.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[allow(missing_docs)]
 pub struct Interval {
     pub start: u64,
@@ -448,7 +457,7 @@ impl Decode for CollectResp {
 /// An aggregate-share request.
 //
 // TODO Add serialization tests.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AggregateShareReq {
     pub task_id: Id,
     pub batch_interval: Interval,

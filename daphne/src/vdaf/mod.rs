@@ -16,7 +16,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapVerifyParam, VdafConfig,
+    VdafConfig,
 };
 use prio::{
     codec::{CodecError, Encode},
@@ -85,18 +85,11 @@ impl VdafConfig {
 
     /// Generate the Aggregators' shared verification parameters.
     #[cfg(test)]
-    pub(crate) fn setup(&self) -> Result<(DapVerifyParam, DapVerifyParam), DapAbort> {
+    pub(crate) fn gen_verify_key(&self) -> VdafVerifyKey {
         let mut rng = thread_rng();
-        let verify_key = match self {
+        match self {
             Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
-        };
-
-        Ok((
-            DapVerifyParam {
-                vdaf: verify_key.clone(),
-            },
-            DapVerifyParam { vdaf: verify_key },
-        ))
+        }
     }
 
     /// Generate a report for a measurement. This method is run by the Client.
@@ -181,7 +174,7 @@ impl VdafConfig {
     ///
     /// * `decryptor` is used to decrypt the input share.
     ///
-    /// * `verify_param` is the Aggregator's secret VDAF verification parameter.
+    /// * `verify_key` is the secret VDAF verification key shared by the Aggregators.
     ///
     /// * `task_id` is the DAP task ID indicated by the report.
     ///
@@ -196,7 +189,7 @@ impl VdafConfig {
         &self,
         decrypter: &D,
         is_leader: bool,
-        verify_param: &DapVerifyParam,
+        verify_key: &VdafVerifyKey,
         task_id: &Id,
         nonce: &Nonce,
         extensions: &[u8],
@@ -222,7 +215,7 @@ impl VdafConfig {
 
         let nonce_data = &aad[..nonce_len];
         let agg_id = if is_leader { 0 } else { 1 };
-        match (self, &verify_param.vdaf) {
+        match (self, verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
                 Ok(prio3_prepare_start(
                     prio3_config,
@@ -246,15 +239,15 @@ impl VdafConfig {
     ///
     /// * `decrypter` is used to decrypt the Leader's report shares.
     ///
-    /// * `verify_param` is the Leader's secret VDAF verification parameter.
+    /// * `verify_key` is the secret VDAF verification key shared by the Aggregators.
     ///
     /// * `task_id` indicates the DAP task for which the set of reports are being aggregated.
     ///
     /// * `reports` is the set of reports uploaded by Clients.
-    pub fn produce_agg_init_req<D: HpkeDecrypter>(
+    pub(crate) fn produce_agg_init_req<D: HpkeDecrypter>(
         &self,
         decrypter: &D,
-        verify_param: &DapVerifyParam,
+        verify_key: &VdafVerifyKey,
         task_id: &Id,
         agg_job_id: &Id,
         reports: Vec<Report>,
@@ -285,7 +278,7 @@ impl VdafConfig {
             match self.consume_report_share(
                 decrypter,
                 true, // is_leader
-                verify_param,
+                verify_key,
                 task_id,
                 &report.nonce,
                 &report.ignored_extensions,
@@ -340,7 +333,7 @@ impl VdafConfig {
     ///
     /// * `decrypter` is used to decrypt the Helper's report shares.
     ///
-    /// * `verify_param` is the Helper's secret VDAF verification parameter.
+    /// * `verify_key` is the secret VDAF verification key shared by the Aggregators.
     ///
     /// * `task_id` indicates the DAP task for which the reports are being processed.
     ///
@@ -349,10 +342,10 @@ impl VdafConfig {
     /// * `early_tran_fail_for` is a callback used to determine if a report should be rejected based on
     /// the sequence of aggregate and collect requests made for the task so far. Its input is the
     /// nonce of report share in `agg_req` and its return value is an optional transition failure.
-    pub fn handle_agg_init_req<D, F>(
+    pub(crate) fn handle_agg_init_req<D, F>(
         &self,
         decrypter: &D,
-        verify_param: &DapVerifyParam,
+        verify_key: &VdafVerifyKey,
         agg_req: &AggregateReq,
         early_tran_fail_for: F,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort>
@@ -381,7 +374,7 @@ impl VdafConfig {
             let var = match self.consume_report_share(
                 decrypter,
                 false, // is_leader
-                verify_param,
+                verify_key,
                 &agg_req.task_id,
                 &report_share.nonce,
                 &report_share.ignored_extensions,
@@ -422,7 +415,7 @@ impl VdafConfig {
     /// * `state` is the Leader's current state.
     ///
     /// * `agg_resp` is the previous aggregate response sent by the Helper.
-    pub fn handle_agg_resp(
+    pub(crate) fn handle_agg_resp(
         &self,
         task_id: &Id,
         agg_job_id: &Id,
@@ -517,7 +510,7 @@ impl VdafConfig {
     /// * `state` is the helper's current state.
     ///
     /// * `agg_req` is the aggregate request sent by the Leader.
-    pub fn handle_agg_cont_req(
+    pub(crate) fn handle_agg_cont_req(
         &self,
         state: DapHelperState,
         agg_req: &AggregateReq,
@@ -613,7 +606,7 @@ impl VdafConfig {
     /// the previous round that have not yet been commmitted to.
     ///
     /// * `agg_resp` is the previous aggregate response sent by the Helper.
-    pub fn handle_final_agg_resp(
+    pub(crate) fn handle_final_agg_resp(
         &self,
         uncommitted: DapLeaderUncommitted,
         agg_resp: AggregateResp,
@@ -659,7 +652,7 @@ impl VdafConfig {
     /// * `batch_interval` is the batch interval for the aggregate share.
     ///
     /// * `agg_share` is the aggregate share.
-    pub fn produce_leader_encrypted_agg_share(
+    pub(crate) fn produce_leader_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
@@ -671,7 +664,7 @@ impl VdafConfig {
 
     /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
     /// aggregate-share request.
-    pub fn produce_helper_encrypted_agg_share(
+    pub(crate) fn produce_helper_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
