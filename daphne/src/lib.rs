@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Daphne is an implementation of the [DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)
-//! protocol.
-//!
-//! Daphne includes supports for the following
-//! [VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/):
-//!
+//! protocol. Daphne includes supports for the following [VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/):
 //!  - Prio3Aes128Count
 //!  - Prio3Aes128Histogram
 //!  - Prio3Aes128Sum
@@ -23,10 +19,9 @@ use crate::{
     },
 };
 use prio::{
-    codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+    codec::{CodecError, Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
 };
-use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, convert::TryFrom, fmt::Debug};
 use url::Url;
@@ -106,10 +101,6 @@ pub enum DapAbort {
     #[error("invalidBatchInterval")]
     InvalidBatchInterval,
 
-    /// HMAC validation failure. Sent in response to an inuathentic message.
-    #[error("invalidHmac")]
-    InvalidHmac,
-
     /// Insufficient batch size. Sent in response to a CollectReq or AggregateShareReq.
     #[error("insufficientBatchSize")]
     InsufficientBatchSize,
@@ -147,7 +138,6 @@ impl DapAbort {
     pub fn to_problem_details(&self) -> ProblemDetails {
         let (typ, detail) = match self {
             Self::BatchMismatch
-            | Self::InvalidHmac
             | Self::InvalidBatchInterval
             | Self::InsufficientBatchSize
             | Self::ReplayedReport
@@ -178,16 +168,8 @@ impl From<DapError> for DapAbort {
 }
 
 impl From<CodecError> for DapAbort {
-    fn from(e: CodecError) -> Self {
-        match e {
-            CodecError::Other(inner) => {
-                return match inner.to_string().as_str() {
-                    "hmac" => Self::InvalidHmac,
-                    _ => Self::UnrecognizedMessage,
-                }
-            }
-            _ => Self::UnrecognizedMessage,
-        }
+    fn from(_e: CodecError) -> Self {
+        Self::UnrecognizedMessage
     }
 }
 
@@ -248,8 +230,6 @@ impl DapTaskConfig {
 struct ShadowDapVerifyParam {
     #[serde(with = "hex")]
     vdaf: Vec<u8>,
-    #[serde(with = "hex")]
-    hmac: [u8; 32],
 }
 
 #[derive(Deserialize, Serialize)]
@@ -268,7 +248,6 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
     type Error = DapAbort;
 
     fn try_from(shadow: ShadowDapTaskConfig) -> std::result::Result<Self, Self::Error> {
-        let hmac = hmac::Key::new(hmac::HMAC_SHA256, &shadow.dap_verify_param.hmac[..]);
         let vdaf = shadow
             .vdaf
             .get_decoded_verify_key(&shadow.dap_verify_param.vdaf)?;
@@ -281,7 +260,7 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             min_batch_duration: shadow.min_batch_duration,
             min_batch_size: shadow.min_batch_size,
             vdaf: shadow.vdaf,
-            dap_verify_param: DapVerifyParam { vdaf, hmac },
+            dap_verify_param: DapVerifyParam { vdaf },
             collector_hpke_config,
         })
     }
@@ -303,22 +282,6 @@ pub enum DapAggregateResult {
 /// An Aggregator's long-lived secrets for a DAP task.
 pub struct DapVerifyParam {
     vdaf: VdafVerifyKey,
-    hmac: hmac::Key,
-}
-
-impl DapVerifyParam {
-    // Encode and tag a message with the HMAC key.
-    pub fn encode_tagged_message<M: ParameterizedEncode<hmac::Key>>(&self, msg: &M) -> Vec<u8> {
-        msg.get_encoded_with_param(&self.hmac)
-    }
-
-    // Decode a message and check its tag with the HMAC key.
-    pub fn decode_tagged_message<M: ParameterizedDecode<hmac::Key>>(
-        &self,
-        data: &[u8],
-    ) -> Result<M, DapAbort> {
-        Ok(M::get_decoded_with_param(&self.hmac, data)?)
-    }
 }
 
 /// The Leader's state after sending an AggregateInitReq.

@@ -24,7 +24,6 @@ use prio::{
     vdaf::prio3::{Prio3PrepareShare, Prio3PrepareState},
 };
 use rand::prelude::*;
-use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryInto};
 
@@ -84,29 +83,19 @@ impl VdafConfig {
         }
     }
 
-    /// Generate the Aggregators' secret VDAF verification parameters. The first is used by the
-    /// Leader and the second is used by the Helper. This method is run out-of-band while
-    /// configuring the Aggregators.
-    //
-    // TODO We may need to change this API to accommodate a public parameter for the VDAF.
-    pub fn setup(&self) -> Result<(DapVerifyParam, DapVerifyParam), DapAbort> {
+    /// Generate the Aggregators' shared verification parameters.
+    #[cfg(test)]
+    pub(crate) fn setup(&self) -> Result<(DapVerifyParam, DapVerifyParam), DapAbort> {
         let mut rng = thread_rng();
         let verify_key = match self {
             Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
         };
 
-        let hmac_key: [u8; 32] = rng.gen();
-        let hmac = hmac::Key::new(hmac::HMAC_SHA256, &hmac_key);
-
         Ok((
             DapVerifyParam {
                 vdaf: verify_key.clone(),
-                hmac: hmac.clone(),
             },
-            DapVerifyParam {
-                vdaf: verify_key,
-                hmac,
-            },
+            DapVerifyParam { vdaf: verify_key },
         ))
     }
 
@@ -333,7 +322,6 @@ impl VdafConfig {
                     agg_param: Vec::new(),
                     seq,
                 },
-                tag: None,
             },
         ))
     }
@@ -418,7 +406,7 @@ impl VdafConfig {
 
         Ok(DapHelperTransition::Continue(
             DapHelperState { seq: states },
-            AggregateResp { seq, tag: None },
+            AggregateResp { seq },
         ))
     }
 
@@ -515,7 +503,6 @@ impl VdafConfig {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
                 var: AggregateReqVar::Continue { seq },
-                tag: None,
             },
         ))
     }
@@ -609,7 +596,7 @@ impl VdafConfig {
 
         Ok(DapHelperTransition::Finish(
             out_shares,
-            AggregateResp { seq, tag: None },
+            AggregateResp { seq },
         ))
     }
 
