@@ -10,7 +10,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapVerifyParam, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
+    Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState, VdafVerifyKey,
 };
 use assert_matches::assert_matches;
 use prio::vdaf::{
@@ -80,7 +80,7 @@ fn roundtrip_report() {
         .consume_report_share(
             &t.leader_hpke_secret_key,
             true, // is_leader
-            &t.leader_verify_param,
+            &t.vdaf_verify_key,
             &t.task_id,
             &report.nonce,
             &report.ignored_extensions,
@@ -92,7 +92,7 @@ fn roundtrip_report() {
         .consume_report_share(
             &t.helper_hpke_secret_key,
             false, // is_leader
-            &t.helper_verify_param,
+            &t.vdaf_verify_key,
             &t.task_id,
             &report.nonce,
             &report.ignored_extensions,
@@ -552,8 +552,7 @@ struct Test<'a> {
     vdaf: &'a VdafConfig,
     task_id: Id,
     agg_job_id: Id,
-    leader_verify_param: DapVerifyParam,
-    helper_verify_param: DapVerifyParam,
+    vdaf_verify_key: VdafVerifyKey,
     leader_hpke_secret_key: HpkeSecretKey,
     helper_hpke_secret_key: HpkeSecretKey,
     helper_reports_aggregated: HashSet<Nonce>,
@@ -572,7 +571,7 @@ impl<'a> Test<'a> {
             .as_secs();
         let task_id = Id(rng.gen());
         let agg_job_id = Id(rng.gen());
-        let (leader_verify_param, helper_verify_param) = vdaf.setup().unwrap();
+        let vdaf_verify_key = vdaf.gen_verify_key();
         let (leader_hpke_config, leader_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
         let (helper_hpke_config, helper_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
         let (collector_hpke_config, collector_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
@@ -582,8 +581,7 @@ impl<'a> Test<'a> {
             vdaf,
             task_id,
             agg_job_id,
-            leader_verify_param,
-            helper_verify_param,
+            vdaf_verify_key,
             leader_hpke_secret_key,
             helper_hpke_secret_key,
             helper_reports_aggregated: HashSet::new(),
@@ -616,7 +614,7 @@ impl<'a> Test<'a> {
         self.vdaf
             .produce_agg_init_req(
                 &self.leader_hpke_secret_key,
-                &self.leader_verify_param,
+                &self.vdaf_verify_key,
                 &self.task_id,
                 &self.agg_job_id,
                 reports,
@@ -632,7 +630,7 @@ impl<'a> Test<'a> {
             .vdaf
             .handle_agg_init_req(
                 &self.helper_hpke_secret_key,
-                &self.helper_verify_param,
+                &self.vdaf_verify_key,
                 &agg_init_req,
                 |nonce| self.helper_early_tran_fail_for(nonce),
             )

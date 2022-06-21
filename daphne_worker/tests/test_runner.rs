@@ -45,10 +45,8 @@ const LEADER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "dap_verify_param": {
-            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d",
-            "hmac": "4d56ee95444bd853742daa8e0570c6b9ec9d64bbb82f83847b475012e37b01e7"
-        }
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
+        "leader_auth_token": "This is an auth token ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
     },
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
         "leader_url": "http://leader:8787",
@@ -63,10 +61,8 @@ const LEADER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "dap_verify_param": {
-            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc",
-            "hmac": "c08de02035e2ad0c1a432dfe8a35b31d42cbd39a55da6f71b888fbee47a7ffb7"
-        }
+        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc",
+        "leader_auth_token": "This is a differnt token 72938088f14b7ef318ef42ba72395a22"
     }
 }"#;
 
@@ -87,10 +83,8 @@ const HELPER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "dap_verify_param": {
-            "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d",
-            "hmac": "4d56ee95444bd853742daa8e0570c6b9ec9d64bbb82f83847b475012e37b01e7"
-        }
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
+        "leader_auth_token": "This is an auth token ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
     }
 }"#;
 
@@ -108,10 +102,8 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "dap_verify_param": {
-            "vdaf": "01d6232e33fe7e63b4531e3706efa8cc",
-            "hmac": "c08de02035e2ad0c1a432dfe8a35b31d42cbd39a55da6f71b888fbee47a7ffb7"
-        }
+        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc",
+        "leader_auth_token": "This is a differnt token 72938088f14b7ef318ef42ba72395a22"
     }
 }"#;
 

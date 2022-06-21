@@ -21,9 +21,8 @@ const DAP_TASK_LIST: &str = r#"{
         }
       }
     },
-    "dap_verify_param": {
-      "vdaf": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-    }
+    "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
+    "leader_auth_token": "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
   }
 }"#;
 
