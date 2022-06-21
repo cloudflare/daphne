@@ -5,13 +5,7 @@ use crate::messages::{
     AggregateReq, AggregateReqVar, AggregateResp, HpkeAeadId, HpkeCiphertext, HpkeConfig,
     HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition, TransitionVar,
 };
-use assert_matches::assert_matches;
-use prio::codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode};
-
-const TEST_HMAC_KEY_DATA: [u8; 32] = [
-    104, 190, 224, 223, 112, 67, 73, 201, 254, 196, 12, 73, 163, 88, 229, 55, 36, 23, 112, 166, 8,
-    30, 25, 172, 38, 159, 75, 82, 123, 70, 176, 162,
-];
+use prio::codec::{Decode, Encode};
 
 #[test]
 fn read_nonce() {
@@ -55,9 +49,7 @@ fn read_report() {
 
 #[test]
 fn read_agg_init_req() {
-    let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &TEST_HMAC_KEY_DATA);
-
-    let mut want = AggregateReq {
+    let want = AggregateReq {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
         var: AggregateReqVar::Init {
@@ -89,21 +81,15 @@ fn read_agg_init_req() {
                 },
             ],
         },
-        tag: None,
     };
 
-    let got =
-        AggregateReq::get_decoded_with_param(&hmac_key, &want.get_encoded_with_param(&hmac_key))
-            .unwrap();
-    want.tag = got.tag;
+    let got = AggregateReq::get_decoded(&want.get_encoded()).unwrap();
     assert_eq!(got, want);
 }
 
 #[test]
 fn read_agg_req() {
-    let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &TEST_HMAC_KEY_DATA);
-
-    let mut want = AggregateReq {
+    let want = AggregateReq {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
         var: AggregateReqVar::Continue {
@@ -126,21 +112,15 @@ fn read_agg_req() {
                 },
             ],
         },
-        tag: None,
     };
 
-    let got =
-        AggregateReq::get_decoded_with_param(&hmac_key, &want.get_encoded_with_param(&hmac_key))
-            .unwrap();
-    want.tag = got.tag;
+    let got = AggregateReq::get_decoded(&want.get_encoded()).unwrap();
     assert_eq!(got, want);
 }
 
 #[test]
 fn read_agg_resp() {
-    let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &TEST_HMAC_KEY_DATA);
-
-    let mut want = AggregateResp {
+    let want = AggregateResp {
         seq: vec![
             Transition {
                 nonce: Nonce {
@@ -159,33 +139,10 @@ fn read_agg_resp() {
                 ),
             },
         ],
-        tag: None,
     };
 
-    let got =
-        AggregateResp::get_decoded_with_param(&hmac_key, &want.get_encoded_with_param(&hmac_key))
-            .unwrap();
-    want.tag = got.tag;
+    let got = AggregateResp::get_decoded(&want.get_encoded()).unwrap();
     assert_eq!(got, want);
-
-    // Test various error conditions.
-    let data = want.get_encoded_with_param(&hmac_key);
-    let mut inauthentic = data.clone();
-    inauthentic[data.len() - 1] ^= 255;
-    assert_matches!(
-        AggregateResp::get_decoded_with_param(&hmac_key, &inauthentic)
-            .err()
-            .unwrap(),
-        CodecError::Other(e) => {
-            assert_eq!(&e.to_string(), "hmac");
-        }
-    );
-    assert_matches!(
-        AggregateResp::get_decoded_with_param(&hmac_key, &data[..data.len() - 1])
-            .err()
-            .unwrap(),
-        CodecError::Io(..)
-    );
 }
 
 #[test]
