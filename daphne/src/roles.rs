@@ -20,7 +20,7 @@ use crate::{
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
-use std::{collections::HashMap, io::Cursor};
+use std::collections::HashMap;
 use url::Url;
 
 macro_rules! check_batch_param {
@@ -269,9 +269,6 @@ pub trait DapLeader: DapAggregator {
                     return Err(DapError::fatal("unexpected state transition (uncommitted)").into())
                 }
             };
-            let agg_init_req_data = task_config
-                .dap_verify_param
-                .encode_tagged_message(&agg_init_req);
 
             // Send AggregateInitReq and receive AggregateResp.
             let resp = post!(
@@ -279,11 +276,9 @@ pub trait DapLeader: DapAggregator {
                 task_config.helper_url,
                 "/aggregate",
                 MEDIA_TYPE_AGG_INIT_REQ,
-                agg_init_req_data
+                agg_init_req.get_encoded()
             );
-            let agg_resp: AggregateResp = task_config
-                .dap_verify_param
-                .decode_tagged_message(resp.payload.as_ref())?;
+            let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
             // Prepare AggreagteContReq.
             let transition =
@@ -299,9 +294,6 @@ pub trait DapLeader: DapAggregator {
                     return Err(DapError::fatal("unexpected state transition (continue)").into())
                 }
             };
-            let agg_cont_req_data = task_config
-                .dap_verify_param
-                .encode_tagged_message(&agg_cont_req);
 
             // Send AggregateContReq and receive AggregateResp.
             let resp = post!(
@@ -309,11 +301,9 @@ pub trait DapLeader: DapAggregator {
                 task_config.helper_url,
                 "/aggregate",
                 MEDIA_TYPE_AGG_CONT_REQ,
-                agg_cont_req_data
+                agg_cont_req.get_encoded()
             );
-            let agg_resp: AggregateResp = task_config
-                .dap_verify_param
-                .decode_tagged_message(resp.payload.as_ref())?;
+            let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
             // Commit the output shares.
             let out_shares = task_config
@@ -351,11 +341,7 @@ pub trait DapLeader: DapAggregator {
                 agg_param: collect_req.agg_param.clone(),
                 report_count: leader_agg_share.report_count,
                 checksum: leader_agg_share.checksum,
-                tag: None,
             };
-            let agg_share_req_data = task_config
-                .dap_verify_param
-                .encode_tagged_message(&agg_share_req);
 
             // Send AggregateShareReq and receive AggregateShareResp.
             let resp = post!(
@@ -363,11 +349,9 @@ pub trait DapLeader: DapAggregator {
                 task_config.helper_url,
                 "/aggregate_share",
                 MEDIA_TYPE_AGG_SHARE_REQ,
-                agg_share_req_data
+                agg_share_req.get_encoded()
             );
-            let agg_share_resp: AggregateShareResp = task_config
-                .dap_verify_param
-                .decode_tagged_message(&resp.payload)?;
+            let agg_share_resp = AggregateShareResp::get_decoded(&resp.payload)?;
 
             // Complete the collect job.
             let collect_resp = CollectResp {
@@ -421,23 +405,18 @@ pub trait DapHelper: DapAggregator {
     /// Handle an HTTP POST to `/aggregate`. The input is an AggregateInitializeReq and the
     /// response is an AggregateResp.
     async fn http_post_aggregate(&self, req: &DapRequest) -> Result<DapResponse, DapAbort> {
-        let mut r = Cursor::new(req.payload.as_ref());
-        let task_id = Id::decode(&mut r).map_err(DapAbort::from)?;
+        let agg_req = AggregateReq::get_decoded(&req.payload)?;
         let task_config = self
-            .get_task_config_for(&task_id)
+            .get_task_config_for(&agg_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
-
-        // Decode the tagged message.
-        let agg_req: AggregateReq = task_config
-            .dap_verify_param
-            .decode_tagged_message(&req.payload)
-            .map_err(DapAbort::from)?;
 
         match &agg_req.var {
             AggregateReqVar::Init {
                 seq: report_shares, ..
             } => {
-                let early_fails = self.mark_aggregated(&task_id, report_shares).await?;
+                let early_fails = self
+                    .mark_aggregated(&agg_req.task_id, report_shares)
+                    .await?;
 
                 let transition = task_config.vdaf.handle_agg_init_req(
                     self,
@@ -457,13 +436,9 @@ pub trait DapHelper: DapAggregator {
                     }
                 };
 
-                let agg_resp_data = task_config
-                    .dap_verify_param
-                    .encode_tagged_message(&agg_resp);
-
                 Ok(DapResponse {
                     media_type: Some(MEDIA_TYPE_AGG_RESP),
-                    payload: agg_resp_data,
+                    payload: agg_resp.get_encoded(),
                 })
             }
             AggregateReqVar::Continue { .. } => {
@@ -482,13 +457,9 @@ pub trait DapHelper: DapAggregator {
                     }
                 };
 
-                let agg_resp_data = task_config
-                    .dap_verify_param
-                    .encode_tagged_message(&agg_resp);
-
                 Ok(DapResponse {
                     media_type: Some(MEDIA_TYPE_AGG_RESP),
-                    payload: agg_resp_data,
+                    payload: agg_resp.get_encoded(),
                 })
             }
         }
@@ -497,17 +468,11 @@ pub trait DapHelper: DapAggregator {
     /// Handle an HTTP POST to `/aggregate_share`. The input is an AggregateShareReq and the
     /// response is an AggregateShareResp.
     async fn http_post_aggregate_share(&self, req: &DapRequest) -> Result<DapResponse, DapAbort> {
-        let mut r = Cursor::new(req.payload.as_ref());
-        let task_id = Id::decode(&mut r).map_err(DapAbort::from)?;
+        let agg_share_req = AggregateShareReq::get_decoded(&req.payload)?;
         let task_config = self
-            .get_task_config_for(&task_id)
+            .get_task_config_for(&agg_share_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
 
-        // Decode the tagged message.
-        let agg_share_req: AggregateShareReq = task_config
-            .dap_verify_param
-            .decode_tagged_message(&req.payload)
-            .map_err(DapAbort::from)?;
         check_batch_param!(
             task_config,
             agg_share_req.batch_interval,
@@ -515,7 +480,7 @@ pub trait DapHelper: DapAggregator {
         );
 
         let agg_share = self
-            .get_agg_share(&task_id, &agg_share_req.batch_interval)
+            .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_interval)
             .await?;
 
         // Check that we have aggreagted the same set of reports as the leader.
@@ -541,17 +506,13 @@ pub trait DapHelper: DapAggregator {
             &agg_share,
         )?;
 
-        let agg_share_resp_data =
-            task_config
-                .dap_verify_param
-                .encode_tagged_message(&AggregateShareResp {
-                    encrypted_agg_share,
-                    tag: None,
-                });
+        let agg_share_resp = AggregateShareResp {
+            encrypted_agg_share,
+        };
 
         Ok(DapResponse {
             media_type: Some(MEDIA_TYPE_AGG_SHARE_RESP),
-            payload: agg_share_resp_data,
+            payload: agg_share_resp.get_encoded(),
         })
     }
 }

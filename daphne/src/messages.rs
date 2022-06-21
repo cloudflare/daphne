@@ -4,11 +4,7 @@
 //! Messages in the DAP protocol.
 
 use crate::{DapAbort, DapTaskConfig};
-use prio::codec::{
-    decode_u16_items, encode_u16_items, CodecError, Decode, Encode, ParameterizedDecode,
-    ParameterizedEncode,
-};
-use ring::hmac;
+use prio::codec::{decode_u16_items, encode_u16_items, CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -19,50 +15,6 @@ use std::{
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
 const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
-
-#[derive(Debug, thiserror::Error)]
-enum MessageError {
-    #[error("hmac")]
-    Hmac,
-    #[error("parse")]
-    Parse,
-}
-
-macro_rules! read_checked_tag {
-    (
-        $hmac_key:expr,
-        $cursor:expr,
-        $start:expr
-    ) => {{
-        let data = &$cursor.get_ref()[$start..$cursor.position() as usize];
-        let mut tag = [0u8; 32];
-        $cursor.read_exact(&mut tag[..])?;
-        // NOTE We can't use `hmac_verify` here because `ring`'s implementation of
-        // constant-time compare doesn't compile to target wasm32-unknown-unknown.
-        let expected_tag = hmac::sign($hmac_key, data);
-        if !constant_time_eq(&tag, expected_tag.as_ref()) {
-            return Err(CodecError::Other(Box::new(MessageError::Hmac)));
-        }
-        Some(tag)
-    }};
-}
-
-macro_rules! append_unmodified_tag {
-    (
-        $msg:expr,
-        $hmac_key:expr,
-        $bytes:expr,
-        $start:expr
-    ) => {{
-        let tag = hmac::sign($hmac_key, &$bytes[$start..$bytes.len()]);
-        if let Some(expected_tag) = $msg.tag {
-            if !constant_time_eq(&tag.as_ref(), expected_tag.as_ref()) {
-                panic!("message contents have changed (tag mismatch)");
-            }
-        }
-        $bytes.extend_from_slice(tag.as_ref());
-    }};
-}
 
 /// The identifier for a DAP task.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -183,7 +135,6 @@ pub struct AggregateReq {
     pub task_id: Id,
     pub agg_job_id: Id,
     pub var: AggregateReqVar,
-    pub(crate) tag: Option<[u8; 32]>,
 }
 
 impl AggregateReq {
@@ -207,27 +158,20 @@ impl AggregateReq {
     }
 }
 
-impl ParameterizedEncode<hmac::Key> for AggregateReq {
-    fn encode_with_param(&self, hmac_key: &hmac::Key, bytes: &mut Vec<u8>) {
-        let start = bytes.len();
+impl Encode for AggregateReq {
+    fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
         self.var.encode(bytes);
-        append_unmodified_tag!(self, hmac_key, bytes, start);
     }
 }
 
-impl ParameterizedDecode<hmac::Key> for AggregateReq {
-    fn decode_with_param(
-        hmac_key: &hmac::Key,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let start = bytes.position() as usize;
+impl Decode for AggregateReq {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
             var: AggregateReqVar::decode(bytes)?,
-            tag: read_checked_tag!(hmac_key, bytes, start),
         })
     }
 }
@@ -270,7 +214,7 @@ impl Decode for AggregateReqVar {
             1 => Ok(Self::Continue {
                 seq: decode_u16_items(&(), bytes)?,
             }),
-            _ => Err(CodecError::Other(Box::new(MessageError::Parse))),
+            _ => Err(CodecError::UnexpectedValue),
         }
     }
 }
@@ -330,7 +274,7 @@ impl Decode for TransitionVar {
             0 => Ok(Self::Continued(decode_u16_bytes(bytes)?)),
             1 => Ok(Self::Finished),
             2 => Ok(Self::Failed(TransitionFailure::decode(bytes)?)),
-            _ => Err(CodecError::Other(Box::new(MessageError::Parse))),
+            _ => Err(CodecError::UnexpectedValue),
         }
     }
 }
@@ -357,7 +301,7 @@ impl TryFrom<u8> for TransitionFailure {
             b if b == Self::HpkeUnknownConfigId as u8 => Ok(Self::HpkeUnknownConfigId),
             b if b == Self::HpkeDecryptError as u8 => Ok(Self::HpkeDecryptError),
             b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
-            _ => Err(CodecError::Other(Box::new(MessageError::Parse))),
+            _ => Err(CodecError::UnexpectedValue),
         }
     }
 }
@@ -393,26 +337,18 @@ impl std::fmt::Display for TransitionFailure {
 #[allow(missing_docs)]
 pub struct AggregateResp {
     pub seq: Vec<Transition>,
-    pub(crate) tag: Option<[u8; 32]>,
 }
 
-impl ParameterizedEncode<hmac::Key> for AggregateResp {
-    fn encode_with_param(&self, hmac_key: &hmac::Key, bytes: &mut Vec<u8>) {
-        let start = bytes.len();
+impl Encode for AggregateResp {
+    fn encode(&self, bytes: &mut Vec<u8>) {
         encode_u16_items(bytes, &(), &self.seq);
-        append_unmodified_tag!(self, hmac_key, bytes, start);
     }
 }
 
-impl ParameterizedDecode<hmac::Key> for AggregateResp {
-    fn decode_with_param(
-        hmac_key: &hmac::Key,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let start = bytes.position() as usize;
+impl Decode for AggregateResp {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             seq: decode_u16_items(&(), bytes)?,
-            tag: read_checked_tag!(hmac_key, bytes, start),
         })
     }
 }
@@ -519,27 +455,20 @@ pub struct AggregateShareReq {
     pub agg_param: Vec<u8>,
     pub report_count: u64,
     pub checksum: [u8; 32],
-    pub(crate) tag: Option<[u8; 32]>,
 }
 
-impl ParameterizedEncode<hmac::Key> for AggregateShareReq {
-    fn encode_with_param(&self, hmac_key: &hmac::Key, bytes: &mut Vec<u8>) {
-        let start = bytes.len();
+impl Encode for AggregateShareReq {
+    fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.batch_interval.encode(bytes);
         encode_u16_bytes(bytes, &self.agg_param);
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
-        append_unmodified_tag!(self, hmac_key, bytes, start);
     }
 }
 
-impl ParameterizedDecode<hmac::Key> for AggregateShareReq {
-    fn decode_with_param(
-        hmac_key: &hmac::Key,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let start = bytes.position() as usize;
+impl Decode for AggregateShareReq {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             batch_interval: Interval::decode(bytes)?,
@@ -550,7 +479,6 @@ impl ParameterizedDecode<hmac::Key> for AggregateShareReq {
                 bytes.read_exact(&mut checksum[..])?;
                 checksum
             },
-            tag: read_checked_tag!(hmac_key, bytes, start),
         })
     }
 }
@@ -561,26 +489,18 @@ impl ParameterizedDecode<hmac::Key> for AggregateShareReq {
 #[derive(Debug)]
 pub struct AggregateShareResp {
     pub encrypted_agg_share: HpkeCiphertext,
-    pub(crate) tag: Option<[u8; 32]>,
 }
 
-impl ParameterizedEncode<hmac::Key> for AggregateShareResp {
-    fn encode_with_param(&self, hmac_key: &hmac::Key, bytes: &mut Vec<u8>) {
-        let start = bytes.len();
+impl Encode for AggregateShareResp {
+    fn encode(&self, bytes: &mut Vec<u8>) {
         self.encrypted_agg_share.encode(bytes);
-        append_unmodified_tag!(self, hmac_key, bytes, start);
     }
 }
 
-impl ParameterizedDecode<hmac::Key> for AggregateShareResp {
-    fn decode_with_param(
-        hmac_key: &hmac::Key,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let start = bytes.position() as usize;
+impl Decode for AggregateShareResp {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             encrypted_agg_share: HpkeCiphertext::decode(bytes)?,
-            tag: read_checked_tag!(hmac_key, bytes, start),
         })
     }
 }
