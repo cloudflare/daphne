@@ -515,7 +515,7 @@ pub mod hpke;
 #[cfg(test)]
 mod hpke_test;
 pub mod messages;
-#[cfg(tests)]
+#[cfg(test)]
 mod messages_test;
 pub mod roles;
 mod vdaf;
