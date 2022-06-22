@@ -12,6 +12,7 @@
 //! Daphne is not compatible with DAP tasks whose batch lifetime is longer than one aggregation.
 
 use crate::{
+    constants::{MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
     vdaf::{
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, Prio3Error},
@@ -215,7 +216,6 @@ pub struct DapTaskConfig {
     pub vdaf: VdafConfig,
     #[serde(skip_serializing)]
     pub(crate) vdaf_verify_key: VdafVerifyKey,
-    pub(crate) leader_auth_token: String,
     #[serde(skip_serializing)]
     pub(crate) collector_hpke_config: HpkeConfig,
 }
@@ -241,7 +241,6 @@ struct ShadowDapTaskConfig {
     vdaf: VdafConfig,
     #[serde(with = "hex")]
     vdaf_verify_key: Vec<u8>,
-    leader_auth_token: String,
     #[serde(with = "hex")]
     collector_hpke_config: Vec<u8>,
 }
@@ -263,7 +262,6 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             min_batch_size: shadow.min_batch_size,
             vdaf: shadow.vdaf,
             vdaf_verify_key,
-            leader_auth_token: shadow.leader_auth_token,
             collector_hpke_config,
         })
     }
@@ -473,11 +471,23 @@ pub enum Prio3Config {
 
 /// DAP request.
 #[derive(Debug)]
-pub struct DapRequest {
+pub struct DapRequest<S> {
     pub media_type: Option<&'static str>,
     pub payload: Vec<u8>,
     pub url: Url,
-    pub sender_auth_token: Option<String>,
+    pub sender_auth: Option<S>,
+}
+
+impl<S> DapRequest<S> {
+    /// Returns true if the request has a media type that suggests it was sent by the Leader.
+    pub fn from_leader(&self) -> bool {
+        match self.media_type {
+            Some(MEDIA_TYPE_AGG_INIT_REQ)
+            | Some(MEDIA_TYPE_AGG_CONT_REQ)
+            | Some(MEDIA_TYPE_AGG_SHARE_REQ) => true,
+            _ => false,
+        }
+    }
 }
 
 /// DAP response.
@@ -511,6 +521,7 @@ pub struct DapLeaderProcessTelemetry {
     pub reports_processed: u64,
 }
 
+pub mod auth;
 pub mod constants;
 pub mod hpke;
 #[cfg(test)]

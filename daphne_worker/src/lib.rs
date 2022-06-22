@@ -91,7 +91,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             let req = worker_request_to_dap(req).await?;
             let config = DaphneConfig::from_worker_context(ctx)?;
             // TODO(MVP) Have this method return a DapResponse.
-            match config.http_get_hpke_config(&req) {
+            match config.http_get_hpke_config(&req).await {
                 Ok(hpke_config_data) => dap_response_to_worker(DapResponse {
                     media_type: Some(constants::MEDIA_TYPE_HPKE_CONFIG),
                     payload: hpke_config_data,

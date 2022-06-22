@@ -15,6 +15,7 @@ use crate::{
     utils::{int_err, now},
 };
 use daphne::{
+    auth::BearerToken,
     hpke::HpkeSecretKey,
     messages::{HpkeConfig, Id, Interval, Nonce},
     roles::DapAggregator,
@@ -39,6 +40,7 @@ pub(crate) struct DaphneConfig<D> {
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
     pub(crate) hpke_config_list: Vec<HpkeConfig>,
     pub(crate) hpke_secret_key_list: Vec<HpkeSecretKey>,
+    pub(crate) leader_bearer_tokens: HashMap<Id, BearerToken>,
     // TODO(MVP) Make `bucket_Key` and `bucket_count` unique per task.
     bucket_key: Seed<16>,
     bucket_count: u64,
@@ -105,6 +107,18 @@ impl<D> DaphneConfig<D> {
                     Error::RustError(format!("Failed to parse DAP_BUCKET_COUNT: {}", err))
                 })?;
 
+        let leader_bearer_tokens: HashMap<Id, BearerToken> = serde_json::from_str(
+            ctx.var("DAP_LEADER_BEARER_TOKEN_LIST")?
+                .to_string()
+                .as_ref(),
+        )
+        .map_err(|e| {
+            Error::RustError(format!(
+                "Failed to parse DAP_LEADER_BEARER_TOKEN_LIST: {}",
+                e
+            ))
+        })?;
+
         Ok(Self {
             ctx: Arc::new(Mutex::new(Some(ctx))),
             // TODO(MVP) Configure this client to be HTTPS only, except if running in a test
@@ -113,6 +127,7 @@ impl<D> DaphneConfig<D> {
             tasks,
             hpke_config_list,
             hpke_secret_key_list,
+            leader_bearer_tokens,
             bucket_key,
             bucket_count,
         })
@@ -147,6 +162,7 @@ impl<D> DaphneConfig<D> {
             tasks: serde_json::from_str(json_task_list)?,
             hpke_config_list,
             hpke_secret_key_list: serde_json::from_str(json_hpke_secret_key_list)?,
+            leader_bearer_tokens: HashMap::default(),
             bucket_key,
             bucket_count,
         })

@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Implementation of DAP Aggregator roles for Daphne-Worker.
+//!
+//! Daphne-Worker uses bearer tokens for DAP request authorization as specified in
+//! draft-ietf-ppm-dap-01.
 
 use crate::{
     config::DaphneConfig,
@@ -28,16 +31,18 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
+    auth::BearerToken,
     constants,
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
         ReportShare, TransitionFailure,
     },
-    roles::{DapAggregator, DapHelper, DapLeader, HpkeDecrypter},
+    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, HpkeDecrypter},
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig, ProblemDetails,
 };
-use std::collections::HashMap;
+use prio::codec::Decode;
+use std::{collections::HashMap, io::Cursor};
 use worker::*;
 
 pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval";
@@ -49,7 +54,7 @@ const INT_ERR_PEER_RESP_UNRECOGNIZED_MEDIA_TYPE: &str =
 const INT_ERR_REQ_UNRECOGNIZED_MEDIA_TYPE: &str =
     "cannot construct request with unrecognized media type";
 
-pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest> {
+pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest<BearerToken>> {
     let media_type = if let Some(content_type) = req.headers().get("Content-Type")? {
         let media_type = constants::media_type_for(&content_type)
             .ok_or_else(|| int_err(INT_ERR_REQ_UNRECOGNIZED_MEDIA_TYPE))?;
@@ -58,8 +63,8 @@ pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest
         None
     };
 
-    let sender_auth_token = if let Some(dap_auth_token) = req.headers().get("DAP-Auth-Token")? {
-        Some(dap_auth_token)
+    let sender_auth = if let Some(token) = req.headers().get("DAP-Auth-Token")? {
+        Some(BearerToken::from(token))
     } else {
         None
     };
@@ -68,7 +73,7 @@ pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest
         payload: req.bytes().await?,
         url: req.url()?,
         media_type,
-        sender_auth_token,
+        sender_auth,
     })
 }
 
@@ -111,7 +116,52 @@ impl<D> HpkeDecrypter for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAggregator for DaphneConfig<D> {
+impl<D> DapAuthorizedSender<BearerToken> for DaphneConfig<D> {
+    async fn authorize(
+        &self,
+        task_id: &Id,
+        media_type: &'static str,
+        _payload: &[u8],
+    ) -> std::result::Result<BearerToken, DapError> {
+        if constants::media_type_from_leader(media_type) {
+            let token = self
+                .leader_bearer_tokens
+                .get(task_id)
+                .ok_or(DapError::Fatal(
+                    "attempted to authorize request with unknown task ID".into(),
+                ))?;
+            Ok(token.clone())
+        } else {
+            Err(DapError::Fatal(format!(
+                "attempted to authorize request of type '{}'",
+                media_type
+            )))
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl<D> DapAggregator<BearerToken> for DaphneConfig<D> {
+    async fn authorized(
+        &self,
+        req: &DapRequest<BearerToken>,
+    ) -> std::result::Result<bool, DapError> {
+        if req.from_leader() {
+            if let Some(ref got) = req.sender_auth {
+                // Parse the task ID from the front of the request payload and use it to look up
+                // the epxected bearer token.
+                let mut r = Cursor::new(req.payload.as_ref());
+                if let Ok(task_id) = Id::decode(&mut r) {
+                    if let Some(expected) = self.leader_bearer_tokens.get(&task_id) {
+                        return Ok(got == expected);
+                    }
+                }
+            }
+        }
+        // Deny request with unhandled or unknown media type.
+        Ok(false)
+    }
+
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
         self.tasks.get(task_id)
     }
@@ -191,7 +241,7 @@ impl<D> DapAggregator for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapLeader for DaphneConfig<D> {
+impl<D> DapLeader<BearerToken> for DaphneConfig<D> {
     type ReportSelector = InternalAggregateInfo;
 
     async fn put_reports<I: IntoIterator<Item = Report>>(
@@ -360,7 +410,10 @@ impl<D> DapLeader for DaphneConfig<D> {
         Ok(())
     }
 
-    async fn send_http_post(&self, req: DapRequest) -> std::result::Result<DapResponse, DapError> {
+    async fn send_http_post(
+        &self,
+        req: DapRequest<BearerToken>,
+    ) -> std::result::Result<DapResponse, DapError> {
         let mut headers = reqwest_wasm::header::HeaderMap::new();
         if let Some(content_type) = req.media_type {
             headers.insert(
@@ -370,10 +423,10 @@ impl<D> DapLeader for DaphneConfig<D> {
             );
         }
 
-        if let Some(dap_auth_token) = req.sender_auth_token {
+        if let Some(bearer_token) = req.sender_auth {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
-                reqwest_wasm::header::HeaderValue::from_str(&dap_auth_token)
+                reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref())
                     .map_err(|e| DapError::Fatal(e.to_string()))?,
             );
         }
@@ -441,7 +494,7 @@ impl<D> DapLeader for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapHelper for DaphneConfig<D> {
+impl<D> DapHelper<BearerToken> for DaphneConfig<D> {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
