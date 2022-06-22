@@ -23,28 +23,6 @@ use rand::prelude::*;
 use std::collections::HashMap;
 use url::Url;
 
-macro_rules! check_leader_auth_token {
-    (
-        $task_config:expr,
-        $req:expr
-    ) => {{
-        // TODO spec: Decide whether to check that the bearer token has the right format, say,
-        // following RFC 6750, Section 2.1.
-
-        let auth_token = $req
-            .sender_auth_token
-            .as_ref()
-            .ok_or(DapAbort::UnauthorizedRequest)?;
-
-        if !constant_time_eq(
-            auth_token.as_bytes(),
-            $task_config.leader_auth_token.as_bytes(),
-        ) {
-            return Err(DapAbort::UnauthorizedRequest);
-        }
-    }};
-}
-
 macro_rules! check_batch_param {
     (
         $task_config:expr,
@@ -81,9 +59,24 @@ pub trait HpkeDecrypter {
     ) -> Result<Vec<u8>, DapError>;
 }
 
+/// A party in the DAP protocol who is authorized to send requests to another party.
+#[async_trait(?Send)]
+pub trait DapAuthorizedSender<S> {
+    /// Add authorization to an outbound DAP request with the given task ID, media type, and payload.
+    async fn authorize(
+        &self,
+        task_id: &Id,
+        media_type: &'static str,
+        payload: &[u8],
+    ) -> Result<S, DapError>;
+}
+
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
-pub trait DapAggregator: HpkeDecrypter + Sized {
+pub trait DapAggregator<S>: HpkeDecrypter + Sized {
+    /// Decide whether the given DAP request is authorized.
+    async fn authorized(&self, req: &DapRequest<S>) -> Result<bool, DapError>;
+
     /// Look up the DAP task configuration for the given task ID.
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig>;
 
@@ -107,7 +100,7 @@ pub trait DapAggregator: HpkeDecrypter + Sized {
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`. Returns the encoded HPKE config to put
     /// in the body of the response.
-    fn http_get_hpke_config(&self, req: &DapRequest) -> Result<Vec<u8>, DapAbort> {
+    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<Vec<u8>, DapAbort> {
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;
         for (k, v) in req.url.query_pairs() {
@@ -139,6 +132,7 @@ pub trait DapAggregator: HpkeDecrypter + Sized {
 macro_rules! leader_post {
     (
         $role:expr,
+        $task_id:expr,
         $task_config:expr,
         $path:expr,
         $media_type:expr,
@@ -152,7 +146,7 @@ macro_rules! leader_post {
             media_type: Some($media_type),
             payload: $req_data,
             url,
-            sender_auth_token: Some($task_config.leader_auth_token.clone()),
+            sender_auth: Some($role.authorize(&$task_id, $media_type, &$req_data).await?),
         };
         $role.send_http_post(req).await?
     }};
@@ -160,7 +154,7 @@ macro_rules! leader_post {
 
 /// DAP Leader functionality.
 #[async_trait(?Send)]
-pub trait DapLeader: DapAggregator {
+pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;
 
@@ -206,11 +200,11 @@ pub trait DapLeader: DapAggregator {
     ) -> Result<(), DapError>;
 
     /// Send an HTTP POST request.
-    async fn send_http_post(&self, req: DapRequest) -> Result<DapResponse, DapError>;
+    async fn send_http_post(&self, req: DapRequest<S>) -> Result<DapResponse, DapError>;
 
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
-    async fn http_post_upload(&self, req: &DapRequest) -> Result<(), DapAbort> {
+    async fn http_post_upload(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
         let report = Report::get_decoded(req.payload.as_ref())?;
         if self.get_task_config_for(&report.task_id).is_none() {
             return Err(DapAbort::UnrecognizedTask);
@@ -234,7 +228,7 @@ pub trait DapLeader: DapAggregator {
     /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
-    async fn http_post_collect(&self, req: &DapRequest) -> Result<Url, DapAbort> {
+    async fn http_post_collect(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
         let collect_req = CollectReq::get_decoded(req.payload.as_ref()).map_err(DapAbort::from)?;
 
         let task_config = self
@@ -297,6 +291,7 @@ pub trait DapLeader: DapAggregator {
             // Send AggregateInitReq and receive AggregateResp.
             let resp = leader_post!(
                 self,
+                task_id,
                 task_config,
                 "/aggregate",
                 MEDIA_TYPE_AGG_INIT_REQ,
@@ -322,6 +317,7 @@ pub trait DapLeader: DapAggregator {
             // Send AggregateContReq and receive AggregateResp.
             let resp = leader_post!(
                 self,
+                task_id,
                 task_config,
                 "/aggregate",
                 MEDIA_TYPE_AGG_CONT_REQ,
@@ -370,6 +366,7 @@ pub trait DapLeader: DapAggregator {
             // Send AggregateShareReq and receive AggregateShareResp.
             let resp = leader_post!(
                 self,
+                task_id,
                 task_config,
                 "/aggregate_share",
                 MEDIA_TYPE_AGG_SHARE_REQ,
@@ -399,7 +396,7 @@ pub trait DapLeader: DapAggregator {
 
 /// DAP Helper functionality.
 #[async_trait(?Send)]
-pub trait DapHelper: DapAggregator {
+pub trait DapHelper<S>: DapAggregator<S> {
     /// Update the metadata for the given set of report shares, marking them as aggregated. The
     /// return value is the subset of the report shares that will not be aggregated due to a
     /// transition failure. This occurs if, for example, the report was previously aggregated, but
@@ -428,12 +425,15 @@ pub trait DapHelper: DapAggregator {
 
     /// Handle an HTTP POST to `/aggregate`. The input is an AggregateInitializeReq and the
     /// response is an AggregateResp.
-    async fn http_post_aggregate(&self, req: &DapRequest) -> Result<DapResponse, DapAbort> {
+    async fn http_post_aggregate(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+        if !self.authorized(req).await? {
+            return Err(DapAbort::UnauthorizedRequest);
+        }
+
         let agg_req = AggregateReq::get_decoded(&req.payload)?;
         let task_config = self
             .get_task_config_for(&agg_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
-        check_leader_auth_token!(task_config, req);
 
         match &agg_req.var {
             AggregateReqVar::Init {
@@ -492,12 +492,18 @@ pub trait DapHelper: DapAggregator {
 
     /// Handle an HTTP POST to `/aggregate_share`. The input is an AggregateShareReq and the
     /// response is an AggregateShareResp.
-    async fn http_post_aggregate_share(&self, req: &DapRequest) -> Result<DapResponse, DapAbort> {
+    async fn http_post_aggregate_share(
+        &self,
+        req: &DapRequest<S>,
+    ) -> Result<DapResponse, DapAbort> {
+        if !self.authorized(req).await? {
+            return Err(DapAbort::UnauthorizedRequest);
+        }
+
         let agg_share_req = AggregateShareReq::get_decoded(&req.payload)?;
         let task_config = self
             .get_task_config_for(&agg_share_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
-        check_leader_auth_token!(task_config, req);
         check_batch_param!(
             task_config,
             agg_share_req.batch_interval,

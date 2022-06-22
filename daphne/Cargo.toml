@@ -34,4 +34,4 @@ url = { version = "2.2.2", features = ["serde"] }
 
 [dev-dependencies]
 assert_matches = "1.5.0"
-tokio = { version = "^1.19", features = ["macros"] }
+tokio = { version = "^1.19", features = ["macros","rt"] }

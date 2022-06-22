@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
+    auth::BearerToken,
+    constants::{media_type_from_leader, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
     messages::{
         AggregateReq, AggregateReqVar, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
     },
-    roles::{DapAggregator, DapHelper, DapLeader, HpkeDecrypter},
+    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, HpkeDecrypter},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
     DapRequest, DapResponse, DapTaskConfig,
 };
@@ -32,19 +33,27 @@ const TASK_LIST: &str = r#"{
                 }
             }
         },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
-        "leader_auth_token": "This is an auth token ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     }
 }"#;
 
+const LEADER_AUTH_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
+
 struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
+
+    // For testing purposes, we will use a single bearer token for every task. Typically each task
+    // would have its own bearer token.
+    leader_bearer_token: BearerToken,
 }
 
 impl MockAggregator {
     fn new() -> Self {
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
-        Self { tasks }
+        Self {
+            tasks,
+            leader_bearer_token: BearerToken::from(LEADER_AUTH_TOKEN.to_string()),
+        }
     }
 
     /// Task to use for nominal tests.
@@ -75,7 +84,36 @@ impl HpkeDecrypter for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapAggregator for MockAggregator {
+impl DapAuthorizedSender<BearerToken> for MockAggregator {
+    async fn authorize(
+        &self,
+        _task_id: &Id,
+        media_type: &'static str,
+        _payload: &[u8],
+    ) -> Result<BearerToken, DapError> {
+        if media_type_from_leader(media_type) {
+            Ok(self.leader_bearer_token.clone())
+        } else {
+            Err(DapError::Fatal(format!(
+                "attempted to authorize request of type '{}'",
+                media_type
+            )))
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl DapAggregator<BearerToken> for MockAggregator {
+    async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
+        if req.from_leader() {
+            if let Some(ref token) = req.sender_auth {
+                return Ok(token == &self.leader_bearer_token);
+            }
+        }
+        // By default, don't authorize any request with unhandled or missing media type.
+        Ok(false)
+    }
+
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
         self.tasks.get(task_id)
     }
@@ -106,7 +144,7 @@ impl DapAggregator for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapHelper for MockAggregator {
+impl DapHelper<BearerToken> for MockAggregator {
     async fn mark_aggregated(
         &self,
         _task_id: &Id,
@@ -134,7 +172,7 @@ impl DapHelper for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapLeader for MockAggregator {
+impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = ();
 
     async fn put_reports<I: IntoIterator<Item = Report>>(
@@ -180,7 +218,7 @@ impl DapLeader for MockAggregator {
         unreachable!("not implemented");
     }
 
-    async fn send_http_post(&self, _req: DapRequest) -> Result<DapResponse, DapError> {
+    async fn send_http_post(&self, _req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
         unreachable!("not implemented");
     }
 }
@@ -201,7 +239,7 @@ async fn http_post_aggregate_unauthorized_request() {
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth_token: None,
+        sender_auth: None,
     };
 
     // Expect failure due to missing bearer token.
@@ -211,7 +249,7 @@ async fn http_post_aggregate_unauthorized_request() {
     );
 
     // Expect failure due to incorrect bearer token.
-    req.sender_auth_token = Some("incorrect auth token!".into());
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         agg.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest)
@@ -235,7 +273,7 @@ async fn http_post_aggregate_share_unauthorized_request() {
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate_share").unwrap(),
-        sender_auth_token: None,
+        sender_auth: None,
     };
 
     // Expect failure due to missing bearer token.
@@ -245,7 +283,7 @@ async fn http_post_aggregate_share_unauthorized_request() {
     );
 
     // Expect failure due to incorrect bearer token.
-    req.sender_auth_token = Some("incorrect auth token!".into());
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         agg.http_post_aggregate_share(&req).await,
         Err(DapAbort::UnauthorizedRequest)
