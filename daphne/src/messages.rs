@@ -300,24 +300,23 @@ impl std::fmt::Display for TransitionFailure {
     }
 }
 
-/// An aggregate response sent from the Helper to the Leader in response to an (initial) aggregate
-/// request. The contents of this structure pertain to a single task and batch.
+/// An aggregate response sent from the Helper to the Leader.
 #[derive(Debug, PartialEq, Default)]
 #[allow(missing_docs)]
 pub struct AggregateResp {
-    pub seq: Vec<Transition>,
+    pub transitions: Vec<Transition>,
 }
 
 impl Encode for AggregateResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_u16_items(bytes, &(), &self.seq);
+        encode_u16_items(bytes, &(), &self.transitions);
     }
 }
 
 impl Decode for AggregateResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
-            seq: decode_u16_items(&(), bytes)?,
+            transitions: decode_u16_items(&(), bytes)?,
         })
     }
 }

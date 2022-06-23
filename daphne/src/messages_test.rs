@@ -117,7 +117,7 @@ fn read_agg_cont_req() {
 #[test]
 fn read_agg_resp() {
     let want = AggregateResp {
-        seq: vec![
+        transitions: vec![
             Transition {
                 nonce: Nonce {
                     time: 1637361337,

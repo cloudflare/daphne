@@ -181,8 +181,8 @@ fn agg_init_req() {
 
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
-    assert_eq!(agg_resp.seq.len(), 3);
-    for (sub, report) in agg_resp.seq.iter().zip(reports.iter()) {
+    assert_eq!(agg_resp.transitions.len(), 3);
+    for (sub, report) in agg_resp.transitions.iter().zip(reports.iter()) {
         assert_eq!(sub.nonce, report.nonce);
     }
 }
@@ -209,9 +209,9 @@ fn agg_resp_fail_hpke_decrypt_err() {
     let (_, agg_req) = t.produce_agg_init_req(reports.clone()).unwrap_continue();
     let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
 
-    assert_eq!(agg_resp.seq.len(), 1);
+    assert_eq!(agg_resp.transitions.len(), 1);
     assert_matches!(
-        agg_resp.seq[0].var,
+        agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
     );
 }
@@ -227,9 +227,9 @@ fn agg_resp_fail_report_replayed() {
     let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
     let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
 
-    assert_eq!(agg_resp.seq.len(), 1);
+    assert_eq!(agg_resp.transitions.len(), 1);
     assert_matches!(
-        agg_resp.seq[0].var,
+        agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::ReportReplayed)
     );
 }
@@ -246,9 +246,9 @@ fn agg_resp_fail_batch_collected() {
     let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
     let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
 
-    assert_eq!(agg_resp.seq.len(), 1);
+    assert_eq!(agg_resp.transitions.len(), 1);
     assert_matches!(
-        agg_resp.seq[0].var,
+        agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::BatchCollected)
     );
 }
@@ -261,9 +261,9 @@ fn agg_resp_abort_transition_out_of_order() {
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
 
     // Helper sends transitions out of order.
-    let tmp = agg_resp.seq[0].clone();
-    agg_resp.seq[0] = agg_resp.seq[1].clone();
-    agg_resp.seq[1] = tmp;
+    let tmp = agg_resp.transitions[0].clone();
+    agg_resp.transitions[0] = agg_resp.transitions[1].clone();
+    agg_resp.transitions[1] = tmp;
 
     assert_matches!(
         t.handle_agg_resp_expect_err(leader_state, agg_resp),
@@ -279,8 +279,8 @@ fn agg_resp_abort_nonce_repeated() {
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
 
     // Helper sends a transition twice.
-    let repeated_transition = agg_resp.seq[0].clone();
-    agg_resp.seq.push(repeated_transition);
+    let repeated_transition = agg_resp.transitions[0].clone();
+    agg_resp.transitions.push(repeated_transition);
 
     assert_matches!(
         t.handle_agg_resp_expect_err(leader_state, agg_resp),
@@ -297,7 +297,7 @@ fn agg_resp_abort_unrecognized_nonce() {
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
 
     // Helper sent a transition with an unrecognized Nonce.
-    agg_resp.seq.push(Transition {
+    agg_resp.transitions.push(Transition {
         nonce: Nonce {
             time: rng.gen(),
             rand: rng.gen(),
@@ -319,7 +319,7 @@ fn agg_resp_abort_invalid_transition() {
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
 
     // Helper sent a transition with an unrecognized Nonce.
-    agg_resp.seq[0].var = TransitionVar::Finished;
+    agg_resp.transitions[0].var = TransitionVar::Finished;
 
     assert_matches!(
         t.handle_agg_resp_expect_err(leader_state, agg_resp),
@@ -348,7 +348,7 @@ fn agg_cont_req() {
         .handle_agg_cont_req(helper_state, &agg_cont_req)
         .unwrap_finish();
     assert_eq!(helper_out_shares.len(), 5);
-    assert_eq!(agg_resp.seq.len(), 5);
+    assert_eq!(agg_resp.transitions.len(), 5);
 
     let leader_out_shares = t.handle_final_agg_resp(leader_uncommitted, agg_resp);
     assert_eq!(leader_out_shares.len(), 5);
@@ -410,9 +410,15 @@ fn agg_cont_req_skip_vdaf_prep_error() {
         .unwrap_finish();
 
     assert_eq!(2, helper_output_shares.len());
-    assert_eq!(2, agg_resp.seq.len());
-    assert_eq!(agg_resp.seq[0].nonce, agg_init_req.report_shares[0].nonce);
-    assert_eq!(agg_resp.seq[1].nonce, agg_init_req.report_shares[2].nonce);
+    assert_eq!(2, agg_resp.transitions.len());
+    assert_eq!(
+        agg_resp.transitions[0].nonce,
+        agg_init_req.report_shares[0].nonce
+    );
+    assert_eq!(
+        agg_resp.transitions[1].nonce,
+        agg_init_req.report_shares[2].nonce
+    );
 }
 
 #[test]
