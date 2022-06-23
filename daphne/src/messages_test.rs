@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::messages::{
-    AggregateReq, AggregateReqVar, AggregateResp, HpkeAeadId, HpkeCiphertext, HpkeConfig,
-    HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition, TransitionVar,
+    AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeAeadId, HpkeCiphertext,
+    HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition, TransitionVar,
 };
 use prio::codec::{Decode, Encode};
 
@@ -49,72 +49,68 @@ fn read_report() {
 
 #[test]
 fn read_agg_init_req() {
-    let want = AggregateReq {
+    let want = AggregateInitializeReq {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
-        var: AggregateReqVar::Init {
-            agg_param: b"this is an aggregation parameter".to_vec(),
-            seq: vec![
-                ReportShare {
-                    nonce: Nonce {
-                        time: 1637361337,
-                        rand: 10496152761178246059,
-                    },
-                    ignored_extensions: b"these are extensions".to_vec(),
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 23,
-                        enc: b"encapsulated key".to_vec(),
-                        payload: b"ciphertext".to_vec(),
-                    },
+        agg_param: b"this is an aggregation parameter".to_vec(),
+        report_shares: vec![
+            ReportShare {
+                nonce: Nonce {
+                    time: 1637361337,
+                    rand: 10496152761178246059,
                 },
-                ReportShare {
-                    nonce: Nonce {
-                        time: 163736423,
-                        rand: 123897432897439,
-                    },
-                    ignored_extensions: vec![],
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 0,
-                        enc: vec![],
-                        payload: b"ciphertext".to_vec(),
-                    },
+                ignored_extensions: b"these are extensions".to_vec(),
+                encrypted_input_share: HpkeCiphertext {
+                    config_id: 23,
+                    enc: b"encapsulated key".to_vec(),
+                    payload: b"ciphertext".to_vec(),
                 },
-            ],
-        },
+            },
+            ReportShare {
+                nonce: Nonce {
+                    time: 163736423,
+                    rand: 123897432897439,
+                },
+                ignored_extensions: vec![],
+                encrypted_input_share: HpkeCiphertext {
+                    config_id: 0,
+                    enc: vec![],
+                    payload: b"ciphertext".to_vec(),
+                },
+            },
+        ],
     };
 
-    let got = AggregateReq::get_decoded(&want.get_encoded()).unwrap();
+    let got = AggregateInitializeReq::get_decoded(&want.get_encoded()).unwrap();
     assert_eq!(got, want);
 }
 
 #[test]
-fn read_agg_req() {
-    let want = AggregateReq {
+fn read_agg_cont_req() {
+    let want = AggregateContinueReq {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
-        var: AggregateReqVar::Continue {
-            seq: vec![
-                Transition {
-                    nonce: Nonce {
-                        time: 1637361337,
-                        rand: 10496152761178246059,
-                    },
-                    var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
+        transitions: vec![
+            Transition {
+                nonce: Nonce {
+                    time: 1637361337,
+                    rand: 10496152761178246059,
                 },
-                Transition {
-                    nonce: Nonce {
-                        time: 163736423,
-                        rand: 123897432897439,
-                    },
-                    var: TransitionVar::Continued(
-                        b"believe it or not this is *also* a VDAF-specific message".to_vec(),
-                    ),
+                var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
+            },
+            Transition {
+                nonce: Nonce {
+                    time: 163736423,
+                    rand: 123897432897439,
                 },
-            ],
-        },
+                var: TransitionVar::Continued(
+                    b"believe it or not this is *also* a VDAF-specific message".to_vec(),
+                ),
+            },
+        ],
     };
 
-    let got = AggregateReq::get_decoded(&want.get_encoded()).unwrap();
+    let got = AggregateContinueReq::get_decoded(&want.get_encoded()).unwrap();
     assert_eq!(got, want);
 }
 

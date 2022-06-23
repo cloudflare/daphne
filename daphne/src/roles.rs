@@ -10,9 +10,9 @@ use crate::{
     },
     hpke::HpkeDecrypter,
     messages::{
-        constant_time_eq, AggregateReq, AggregateReqVar, AggregateResp, AggregateShareReq,
-        AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce, Report, ReportShare,
-        TransitionFailure,
+        constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
+        AggregateShareReq, AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce,
+        Report, ReportShare, TransitionFailure,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapHelperTransition,
     DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare, DapRequest, DapResponse,
@@ -256,7 +256,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let reports = self.get_reports(task_id, selector).await?;
         telem.reports_processed += reports.len() as u64;
         if !reports.is_empty() {
-            // Prepare AggregateInitReq.
+            // Prepare AggregateInitializeReq.
             let agg_job_id = Id(rng.gen());
             let transition = task_config.vdaf.produce_agg_init_req(
                 self,
@@ -273,7 +273,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 }
             };
 
-            // Send AggregateInitReq and receive AggregateResp.
+            // Send AggregateInitializeReq and receive AggregateResp.
             let resp = leader_post!(
                 self,
                 task_id,
@@ -284,7 +284,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             );
             let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
-            // Prepare AggreagteContReq.
+            // Prepare AggreagteContinueReq.
             let transition =
                 task_config
                     .vdaf
@@ -299,7 +299,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 }
             };
 
-            // Send AggregateContReq and receive AggregateResp.
+            // Send AggregateContinueReq and receive AggregateResp.
             let resp = leader_post!(
                 self,
                 task_id,
@@ -415,30 +415,32 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::UnauthorizedRequest);
         }
 
-        let agg_req = AggregateReq::get_decoded(&req.payload)?;
-        let task_config = self
-            .get_task_config_for(&agg_req.task_id)
-            .ok_or(DapAbort::UnrecognizedTask)?;
+        match req.media_type {
+            Some(MEDIA_TYPE_AGG_INIT_REQ) => {
+                let agg_init_req = AggregateInitializeReq::get_decoded(&req.payload)?;
+                let task_config = self
+                    .get_task_config_for(&agg_init_req.task_id)
+                    .ok_or(DapAbort::UnrecognizedTask)?;
 
-        match &agg_req.var {
-            AggregateReqVar::Init {
-                seq: report_shares, ..
-            } => {
                 let early_fails = self
-                    .mark_aggregated(&agg_req.task_id, report_shares)
+                    .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
                     .await?;
 
                 let transition = task_config.vdaf.handle_agg_init_req(
                     self,
                     &task_config.vdaf_verify_key,
-                    &agg_req,
+                    &agg_init_req,
                     |nonce| early_fails.get(nonce).copied(),
                 )?;
 
                 let agg_resp = match transition {
                     DapHelperTransition::Continue(state, agg_resp) => {
-                        self.put_helper_state(&agg_req.task_id, &agg_req.agg_job_id, &state)
-                            .await?;
+                        self.put_helper_state(
+                            &agg_init_req.task_id,
+                            &agg_init_req.agg_job_id,
+                            &state,
+                        )
+                        .await?;
                         agg_resp
                     }
                     DapHelperTransition::Finish(..) => {
@@ -451,18 +453,24 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     payload: agg_resp.get_encoded(),
                 })
             }
-            AggregateReqVar::Continue { .. } => {
+            Some(MEDIA_TYPE_AGG_CONT_REQ) => {
+                let agg_cont_req = AggregateContinueReq::get_decoded(&req.payload)?;
+                let task_config = self
+                    .get_task_config_for(&agg_cont_req.task_id)
+                    .ok_or(DapAbort::UnrecognizedTask)?;
+
                 let state = self
-                    .get_helper_state(&agg_req.task_id, &agg_req.agg_job_id)
+                    .get_helper_state(&agg_cont_req.task_id, &agg_cont_req.agg_job_id)
                     .await?;
-                let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_req)?;
+                let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_cont_req)?;
 
                 let agg_resp = match transition {
                     DapHelperTransition::Continue(..) => {
                         return Err(DapError::fatal("unexpected transition (continued)").into());
                     }
                     DapHelperTransition::Finish(out_shares, agg_resp) => {
-                        self.put_out_shares(&agg_req.task_id, out_shares).await?;
+                        self.put_out_shares(&agg_cont_req.task_id, out_shares)
+                            .await?;
                         agg_resp
                     }
                 };
@@ -472,6 +480,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     payload: agg_resp.get_encoded(),
                 })
             }
+            //TODO spec: Specify this behavior.
+            _ => Err(DapAbort::BadRequest("unexpected media type".into())),
         }
     }
 
