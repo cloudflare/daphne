@@ -28,8 +28,8 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryInto};
 
-const CTX_INPUT_SHARE_PREFIX: &[u8] = b"ppm input share";
-const CTX_AGG_SHARE_PREFIX: &[u8] = b"ppm aggregate share";
+const CTX_INPUT_SHARE: &[u8] = b"dap-01 input share";
+const CTX_AGG_SHARE: &[u8] = b"dap-01 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -129,14 +129,13 @@ impl VdafConfig {
             return Err(DapError::Fatal("unexpected number of HPKE configs".into()));
         }
 
-        let mut info = Vec::with_capacity(CTX_INPUT_SHARE_PREFIX.len() + 34);
-        task_id.encode(&mut info);
-        info.extend_from_slice(CTX_INPUT_SHARE_PREFIX);
-        info.push(CTX_ROLE_CLIENT);
-        info.push(0); // Receiver role (overwritten below)
-        let receiver_role_index = info.len() - 1;
+        const N: usize = CTX_INPUT_SHARE.len();
+        let mut info = [0; N + 2];
+        info[..N].copy_from_slice(CTX_INPUT_SHARE);
+        info[N] = CTX_ROLE_CLIENT; // Sender role (receiver role set below)
 
-        let mut aad = Vec::with_capacity(10);
+        let mut aad = Vec::with_capacity(50);
+        task_id.encode(&mut aad);
         nonce.encode(&mut aad);
         0_u16.encode(&mut aad); // Empty extensions
 
@@ -146,11 +145,11 @@ impl VdafConfig {
             .zip(encoded_input_shares)
             .enumerate()
         {
-            info[receiver_role_index] = if i == 0 {
+            info[N + 1] = if i == 0 {
                 CTX_ROLE_LEADER
             } else {
                 CTX_ROLE_HELPER
-            };
+            }; // Receiver role
             let (enc, payload) = hpke_config.encrypt(&info, &aad, &input_share_data)?;
 
             encrypted_input_shares.push(HpkeCiphertext {
@@ -196,25 +195,27 @@ impl VdafConfig {
         extensions: &[u8],
         encrypted_input_share: &HpkeCiphertext,
     ) -> Result<(VdafState, VdafMessage), DapError> {
-        let mut info = Vec::with_capacity(CTX_INPUT_SHARE_PREFIX.len() + 34);
-        task_id.encode(&mut info);
-        info.extend_from_slice(CTX_INPUT_SHARE_PREFIX);
-        info.push(CTX_ROLE_CLIENT);
-        info.push(if is_leader {
+        const N: usize = CTX_INPUT_SHARE.len();
+        let mut info = [0; N + 2];
+        info[..N].copy_from_slice(CTX_INPUT_SHARE);
+        info[N] = CTX_ROLE_CLIENT; // Sender role
+        info[N + 1] = if is_leader {
             CTX_ROLE_LEADER
         } else {
             CTX_ROLE_HELPER
-        });
+        }; // Receiver role
 
-        let mut aad = Vec::with_capacity(10);
+        let mut aad = Vec::with_capacity(50 + extensions.len());
+        task_id.encode(&mut aad);
+        let nonce_start = aad.len();
         nonce.encode(&mut aad);
-        let nonce_len = aad.len();
+        let nonce_end = aad.len();
         encode_u16_bytes(&mut aad, extensions);
 
         let input_share_data =
             decrypter.hpke_decrypt(task_id, &info, &aad, encrypted_input_share)?;
 
-        let nonce_data = &aad[..nonce_len];
+        let nonce_data = &aad[nonce_start..nonce_end];
         let agg_id = if is_leader { 0 } else { 1 };
         match (self, verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
@@ -697,20 +698,18 @@ impl VdafConfig {
         batch_interval: &Interval,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
     ) -> Result<DapAggregateResult, DapError> {
-        // TODO Validate the batch interval.This requires adding the min batch duration to `Vdaf`.
-        let mut info = Vec::with_capacity(CTX_AGG_SHARE_PREFIX.len() + 34);
-        task_id.encode(&mut info);
-        info.extend_from_slice(CTX_AGG_SHARE_PREFIX);
-        info.push(0); // Sender role (overwritten below)
-        let sender_role_index = info.len() - 1;
-        info.push(CTX_ROLE_COLLECTOR);
+        const N: usize = CTX_AGG_SHARE.len();
+        let mut info = [0; N + 2];
+        info[..N].copy_from_slice(CTX_AGG_SHARE);
+        info[N + 1] = CTX_ROLE_COLLECTOR; // Receiver role (sender role set below)
 
-        let mut aad = Vec::with_capacity(8);
+        let mut aad = Vec::with_capacity(40);
+        task_id.encode(&mut aad);
         batch_interval.encode(&mut aad);
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
-            info[sender_role_index] = if i == 0 {
+            info[N] = if i == 0 {
                 CTX_ROLE_LEADER
             } else {
                 CTX_ROLE_HELPER
@@ -740,23 +739,25 @@ fn produce_encrypted_agg_share(
     batch_interval: &Interval,
     agg_share: &DapAggregateShare,
 ) -> Result<HpkeCiphertext, DapAbort> {
-    // TODO Validate the batch interval. This requires adding the min batch duration to `Vdaf`.
     let agg_share_data = agg_share
         .data
         .as_ref()
         .ok_or_else(|| DapError::fatal("empty aggregate share"))?
         .get_encoded();
 
-    let mut info = Vec::with_capacity(CTX_AGG_SHARE_PREFIX.len() + 34);
-    task_id.encode(&mut info);
-    info.extend_from_slice(CTX_AGG_SHARE_PREFIX);
-    info.push(match is_leader {
-        true => CTX_ROLE_LEADER,
-        false => CTX_ROLE_HELPER,
-    });
-    info.push(CTX_ROLE_COLLECTOR);
+    const N: usize = CTX_AGG_SHARE.len();
+    let mut info = [0; N + 2];
+    info[..N].copy_from_slice(CTX_AGG_SHARE);
+    info[N] = if is_leader {
+        CTX_ROLE_LEADER
+    } else {
+        CTX_ROLE_HELPER
+    }; // Sender role
+    info[N + 1] = CTX_ROLE_COLLECTOR; // Receiver role
 
-    let mut aad = Vec::with_capacity(8);
+    // TODO spec: Consider adding agg param to AAD.
+    let mut aad = Vec::with_capacity(40);
+    task_id.encode(&mut aad);
     batch_interval.encode(&mut aad);
 
     let (enc, payload) = hpke_config
