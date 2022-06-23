@@ -63,11 +63,10 @@ pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest
         None
     };
 
-    let sender_auth = if let Some(token) = req.headers().get("DAP-Auth-Token")? {
-        Some(BearerToken::from(token))
-    } else {
-        None
-    };
+    let sender_auth = req
+        .headers()
+        .get("DAP-Auth-Token")?
+        .map(|token| BearerToken::from(token));
 
     Ok(DapRequest {
         payload: req.bytes().await?,
