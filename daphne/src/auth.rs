@@ -4,7 +4,10 @@
 //! DAP request authorization.
 
 use crate::{
-    constants,
+    constants::{
+        media_type_from_leader, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ,
+        MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
+    },
     messages::{constant_time_eq, Id},
     DapError, DapRequest,
 };
@@ -57,14 +60,14 @@ pub trait BearerTokenProvider {
         task_id: &Id,
         media_type: &'static str,
     ) -> Result<BearerToken, DapError> {
-        if constants::media_type_from_leader(media_type) {
+        if media_type_from_leader(media_type) {
             let token = self
                 .get_leader_bearer_token_for(task_id)
                 .await?
-                .ok_or(DapError::Fatal(
-                    "attempted to authorize request with unknown task ID".into(),
-                ))?;
-            return Ok(token.clone());
+                .ok_or_else(|| {
+                    DapError::Fatal("attempted to authorize request with unknown task ID".into())
+                })?;
+            return Ok(token);
         }
 
         Err(DapError::Fatal(format!(
@@ -87,7 +90,12 @@ pub trait BearerTokenProvider {
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
         // for BearerToken` with `TryFrom<String>` so that a `DapError` can be returned if the
         // token is not formatted properly.
-        if req.from_leader() {
+        if matches!(
+            req.media_type,
+            Some(MEDIA_TYPE_AGG_INIT_REQ)
+                | Some(MEDIA_TYPE_AGG_CONT_REQ)
+                | Some(MEDIA_TYPE_AGG_SHARE_REQ)
+        ) {
             if let Some(ref got) = req.sender_auth {
                 if let Ok(ref task_id) = option_task_id {
                     if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
@@ -97,7 +105,7 @@ pub trait BearerTokenProvider {
             }
         }
 
-        if req.from_collector() {
+        if matches!(req.media_type, Some(MEDIA_TYPE_COLLECT_REQ)) {
             if let Some(ref got) = req.sender_auth {
                 if let Ok(ref task_id) = option_task_id {
                     if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {

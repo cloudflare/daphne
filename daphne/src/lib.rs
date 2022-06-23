@@ -12,10 +12,6 @@
 //! Daphne is not compatible with DAP tasks whose batch lifetime is longer than one aggregation.
 
 use crate::{
-    constants::{
-        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ,
-        MEDIA_TYPE_COLLECT_REQ,
-    },
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
     vdaf::{
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, Prio3Error},
@@ -479,26 +475,6 @@ pub struct DapRequest<S> {
     pub payload: Vec<u8>,
     pub url: Url,
     pub sender_auth: Option<S>,
-}
-
-impl<S> DapRequest<S> {
-    /// Returns true if the request has a media type that suggests it was sent by the Leader.
-    pub(crate) fn from_leader(&self) -> bool {
-        match self.media_type {
-            Some(MEDIA_TYPE_AGG_INIT_REQ)
-            | Some(MEDIA_TYPE_AGG_CONT_REQ)
-            | Some(MEDIA_TYPE_AGG_SHARE_REQ) => true,
-            _ => false,
-        }
-    }
-
-    /// Returns true if the request has a media type that suggests it was sent by the Collector.
-    pub(crate) fn from_collector(&self) -> bool {
-        match self.media_type {
-            Some(MEDIA_TYPE_COLLECT_REQ) => true,
-            _ => false,
-        }
-    }
 }
 
 /// DAP response.

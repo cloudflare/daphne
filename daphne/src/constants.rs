@@ -36,8 +36,8 @@ pub fn media_type_for(content_type: &str) -> Option<&'static str> {
 
 /// Returns true if the given media type is for a DAP request sent by the Leader.
 pub(crate) fn media_type_from_leader(media_type: &'static str) -> bool {
-    match media_type {
-        MEDIA_TYPE_AGG_INIT_REQ | MEDIA_TYPE_AGG_CONT_REQ | MEDIA_TYPE_AGG_SHARE_REQ => true,
-        _ => false,
-    }
+    matches!(
+        media_type,
+        MEDIA_TYPE_AGG_INIT_REQ | MEDIA_TYPE_AGG_CONT_REQ | MEDIA_TYPE_AGG_SHARE_REQ
+    )
 }
