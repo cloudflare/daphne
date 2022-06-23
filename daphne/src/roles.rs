@@ -5,8 +5,8 @@
 
 use crate::{
     constants::{
-        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_RESP,
-        MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_AGG_SHARE_RESP,
+        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_CONT_RESP, MEDIA_TYPE_AGG_INIT_REQ,
+        MEDIA_TYPE_AGG_INIT_RESP, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_AGG_SHARE_RESP,
     },
     hpke::HpkeDecrypter,
     messages::{
@@ -449,7 +449,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 };
 
                 Ok(DapResponse {
-                    media_type: Some(MEDIA_TYPE_AGG_RESP),
+                    media_type: Some(MEDIA_TYPE_AGG_INIT_RESP),
                     payload: agg_resp.get_encoded(),
                 })
             }
@@ -476,7 +476,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 };
 
                 Ok(DapResponse {
-                    media_type: Some(MEDIA_TYPE_AGG_RESP),
+                    media_type: Some(MEDIA_TYPE_AGG_CONT_RESP),
                     payload: agg_resp.get_encoded(),
                 })
             }
