@@ -26,7 +26,7 @@ use crate::{
             DURABLE_REPORT_STORE_PUT_PROCESSED,
         },
     },
-    utils::{int_err, now},
+    utils::now,
     InternalAggregateInfo,
 };
 use async_trait::async_trait;
@@ -40,7 +40,7 @@ use daphne::{
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
-    DapResponse, DapTaskConfig, ProblemDetails,
+    DapResponse, DapTaskConfig,
 };
 use std::collections::HashMap;
 use worker::*;
@@ -49,21 +49,15 @@ pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval"
 pub(crate) const INT_ERR_UNRECOGNIZED_TASK: &str = "unrecognized task";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
-const INT_ERR_PEER_RESP_UNRECOGNIZED_MEDIA_TYPE: &str =
-    "peer sent response with unrecognized media type";
-const INT_ERR_REQ_UNRECOGNIZED_MEDIA_TYPE: &str =
-    "cannot construct request with unrecognized media type";
 
 pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest<BearerToken>> {
-    let media_type = if let Some(content_type) = req.headers().get("Content-Type")? {
-        let media_type = constants::media_type_for(&content_type)
-            .ok_or_else(|| int_err(INT_ERR_REQ_UNRECOGNIZED_MEDIA_TYPE))?;
-        Some(media_type)
-    } else {
-        None
-    };
-
     let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
+    let content_type = req.headers().get("Content-Type")?;
+
+    let media_type = match content_type {
+        Some(s) => constants::media_type_for(&s),
+        None => None,
+    };
 
     Ok(DapRequest {
         payload: req.bytes().await?,
@@ -443,18 +437,6 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
                 .map_err(|e| DapError::Fatal(e.to_string()))?;
-
-            console_error!(
-                "{}: {}: {}: {}",
-                url,
-                status,
-                INT_ERR_PEER_RESP_UNRECOGNIZED_MEDIA_TYPE,
-                content_type
-            );
-            // TODO(MVP) Ensure that Janus sends correct media types.
-            //
-            // let media_type = constants::media_type_for(content_type)
-            //   .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_UNRECOGNIZED_MEDIA_TYPE))?;
             let media_type = constants::media_type_for(content_type);
 
             let payload = reqwest_resp
@@ -468,18 +450,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 media_type,
             })
         } else {
-            let problem_details = reqwest_resp
-                .json::<ProblemDetails>()
-                .await
-                .map_err(|e| DapError::Fatal(e.to_string()))?;
-
-            let mut err_info = problem_details.typ.clone();
-            if let Some(ref detail) = problem_details.detail {
-                err_info += ": ";
-                err_info += detail;
-            }
-
-            console_error!("{}: {}: {}: {}", url, status, INT_ERR_PEER_ABORT, err_info);
+            console_error!("{}: request failed: {:?}", url, reqwest_resp);
             Err(DapError::fatal(INT_ERR_PEER_ABORT))
         }
     }

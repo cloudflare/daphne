@@ -8,13 +8,11 @@ mod test_runner;
 use assert_matches::assert_matches;
 use daphne::constants;
 use daphne_worker::InternalAggregateInfo;
-use janus_prio::{codec::Decode, vdaf::prio3::Prio3Aes128Sum};
+use prio::{codec::Decode, vdaf::prio3::Prio3};
 use rand::prelude::*;
 use test_runner::{TestRunner, COLLECTOR_HPKE_SECRET_KEY};
 
 // Test that daphne can aggregate a report from a Janus client.
-//
-// TODO(MVP) Update Daphne to latest version of the draft to make this test pass.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_janus"), ignore)]
 async fn janus_client() {
@@ -31,7 +29,7 @@ async fn janus_client() {
 
     let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
         assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
-            Prio3Aes128Sum::new(2, *bits).unwrap()
+            Prio3::new_aes128_sum(2, *bits).unwrap()
         )
     });
 
@@ -48,7 +46,6 @@ async fn janus_client() {
     let janus_client = janus_server::client::Client::new(
         janus_client_parameters,
         vdaf,
-        (),
         client_clock,
         &client,
         leader_hpke_config,
@@ -110,6 +107,7 @@ async fn janus_helper() {
 
     // Aggregate first.
     let agg_telem = t.internal_process(&client, &agg_info).await;
+    assert_eq!(agg_telem.reports_processed, agg_info.agg_rate);
     assert_eq!(agg_telem.reports_aggregated, agg_info.agg_rate);
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(agg_telem.reports_aggregated, 3);
@@ -122,20 +120,14 @@ async fn janus_helper() {
         batch_interval: batch_interval.clone(),
         agg_param: Vec::new(),
     };
-    let url = t.leader_url.join("/collect").unwrap();
-    let resp = client
-        .post(url.as_str())
-        .body(collect_req.get_encoded())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 303);
+    let collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
 
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(agg_telem.reports_collected, 13);
 
     // Poll the collect URI before the ColleectResp is ready.
-    let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
     let resp = client.get(collect_uri).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
@@ -152,7 +144,7 @@ async fn janus_helper() {
             collect_resp.encrypted_agg_shares,
         )
         .unwrap();
-    assert_eq!(agg_res, daphne::DapAggregateResult::U64(13 as u64));
+    assert_eq!(agg_res, daphne::DapAggregateResult::U128(13 as u128));
 
     janus_helper.shutdown().await;
 }
