@@ -31,7 +31,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
-    auth::BearerToken,
+    auth::{BearerToken, BearerTokenProvider},
     constants,
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
@@ -41,8 +41,7 @@ use daphne::{
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig, ProblemDetails,
 };
-use prio::codec::Decode;
-use std::{collections::HashMap, io::Cursor};
+use std::collections::HashMap;
 use worker::*;
 
 pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval";
@@ -116,6 +115,16 @@ impl<D> HpkeDecrypter for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
+impl<D> BearerTokenProvider for DaphneConfig<D> {
+    async fn get_leader_bearer_token_for(
+        &self,
+        task_id: &Id,
+    ) -> std::result::Result<Option<BearerToken>, DapError> {
+        Ok(self.leader_bearer_tokens.get(task_id).cloned())
+    }
+}
+
+#[async_trait(?Send)]
 impl<D> DapAuthorizedSender<BearerToken> for DaphneConfig<D> {
     async fn authorize(
         &self,
@@ -123,20 +132,7 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneConfig<D> {
         media_type: &'static str,
         _payload: &[u8],
     ) -> std::result::Result<BearerToken, DapError> {
-        if constants::media_type_from_leader(media_type) {
-            let token = self
-                .leader_bearer_tokens
-                .get(task_id)
-                .ok_or(DapError::Fatal(
-                    "attempted to authorize request with unknown task ID".into(),
-                ))?;
-            Ok(token.clone())
-        } else {
-            Err(DapError::Fatal(format!(
-                "attempted to authorize request of type '{}'",
-                media_type
-            )))
-        }
+        self.authorize_with_bearer_token(task_id, media_type).await
     }
 }
 
@@ -146,20 +142,7 @@ impl<D> DapAggregator<BearerToken> for DaphneConfig<D> {
         &self,
         req: &DapRequest<BearerToken>,
     ) -> std::result::Result<bool, DapError> {
-        if req.from_leader() {
-            if let Some(ref got) = req.sender_auth {
-                // Parse the task ID from the front of the request payload and use it to look up
-                // the epxected bearer token.
-                let mut r = Cursor::new(req.payload.as_ref());
-                if let Ok(task_id) = Id::decode(&mut r) {
-                    if let Some(expected) = self.leader_bearer_tokens.get(&task_id) {
-                        return Ok(got == expected);
-                    }
-                }
-            }
-        }
-        // Deny request with unhandled or unknown media type.
-        Ok(false)
+        self.bearer_token_authorized(req).await
     }
 
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {

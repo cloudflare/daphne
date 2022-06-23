@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    auth::BearerToken,
-    constants::{media_type_from_leader, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
+    auth::{BearerToken, BearerTokenProvider},
+    constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
     messages::{
         AggregateReq, AggregateReqVar, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
@@ -37,29 +37,32 @@ const TASK_LIST: &str = r#"{
     }
 }"#;
 
-const LEADER_AUTH_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
+const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
 
 struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
-
-    // For testing purposes, we will use a single bearer token for every task. Typically each task
-    // would have its own bearer token.
-    leader_bearer_token: BearerToken,
 }
 
 impl MockAggregator {
     fn new() -> Self {
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
-        Self {
-            tasks,
-            leader_bearer_token: BearerToken::from(LEADER_AUTH_TOKEN.to_string()),
-        }
+        Self { tasks }
     }
 
     /// Task to use for nominal tests.
     fn nominal_task_id(&self) -> &Id {
         // Just use the first key in the hash map.
         self.tasks.keys().next().as_ref().unwrap()
+    }
+}
+
+#[async_trait(?Send)]
+impl BearerTokenProvider for MockAggregator {
+    async fn get_leader_bearer_token_for(
+        &self,
+        _task_id: &Id,
+    ) -> Result<Option<BearerToken>, DapError> {
+        Ok(Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())))
     }
 }
 
@@ -87,31 +90,18 @@ impl HpkeDecrypter for MockAggregator {
 impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
-        _task_id: &Id,
+        task_id: &Id,
         media_type: &'static str,
         _payload: &[u8],
     ) -> Result<BearerToken, DapError> {
-        if media_type_from_leader(media_type) {
-            Ok(self.leader_bearer_token.clone())
-        } else {
-            Err(DapError::Fatal(format!(
-                "attempted to authorize request of type '{}'",
-                media_type
-            )))
-        }
+        self.authorize_with_bearer_token(task_id, media_type).await
     }
 }
 
 #[async_trait(?Send)]
 impl DapAggregator<BearerToken> for MockAggregator {
     async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
-        if req.from_leader() {
-            if let Some(ref token) = req.sender_auth {
-                return Ok(token == &self.leader_bearer_token);
-            }
-        }
-        // By default, don't authorize any request with unhandled or missing media type.
-        Ok(false)
+        self.bearer_token_authorized(req).await
     }
 
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
