@@ -355,7 +355,7 @@ impl VdafConfig {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut states = Vec::with_capacity(num_reports);
-        let mut seq = Vec::with_capacity(num_reports);
+        let mut transitions = Vec::with_capacity(num_reports);
         for report_share in agg_init_req.report_shares.iter() {
             if processed.contains(&report_share.nonce) {
                 return Err(DapAbort::UnrecognizedMessage);
@@ -363,7 +363,7 @@ impl VdafConfig {
             processed.insert(report_share.nonce.clone());
 
             if let Some(failure) = early_tran_fail_for(&report_share.nonce) {
-                seq.push(Transition {
+                transitions.push(Transition {
                     nonce: report_share.nonce.clone(),
                     var: TransitionVar::Failed(failure),
                 });
@@ -390,7 +390,7 @@ impl VdafConfig {
                 Err(e) => return Err(DapAbort::Internal(Box::new(e))),
             };
 
-            seq.push(Transition {
+            transitions.push(Transition {
                 nonce: report_share.nonce.clone(),
                 var,
             });
@@ -398,7 +398,7 @@ impl VdafConfig {
 
         Ok(DapHelperTransition::Continue(
             DapHelperState { seq: states },
-            AggregateResp { seq },
+            AggregateResp { transitions },
         ))
     }
 
@@ -421,14 +421,14 @@ impl VdafConfig {
         state: DapLeaderState,
         agg_resp: AggregateResp,
     ) -> Result<DapLeaderTransition<AggregateContinueReq>, DapAbort> {
-        if agg_resp.seq.len() != state.seq.len() {
+        if agg_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
         }
 
         let mut seq = Vec::with_capacity(state.seq.len());
         let mut states = Vec::with_capacity(state.seq.len());
         for (helper, (leader_step, leader_message, leader_nonce)) in
-            agg_resp.seq.into_iter().zip(state.seq.into_iter())
+            agg_resp.transitions.into_iter().zip(state.seq.into_iter())
         {
             // TODO spec: Consider removing the nonce from the AggregateResp.
             if helper.nonce != leader_nonce {
@@ -521,7 +521,7 @@ impl VdafConfig {
         }
 
         let num_reports = state.seq.len();
-        let mut seq = Vec::with_capacity(num_reports);
+        let mut transitions = Vec::with_capacity(num_reports);
         let mut out_shares = Vec::with_capacity(num_reports);
         let mut leader_iter = agg_cont_req.transitions.iter();
         let mut helper_iter = state.seq.into_iter();
@@ -577,7 +577,7 @@ impl VdafConfig {
                     }
                 };
 
-                seq.push(Transition {
+                transitions.push(Transition {
                     nonce: helper_nonce,
                     var,
                 });
@@ -588,7 +588,7 @@ impl VdafConfig {
 
         Ok(DapHelperTransition::Finish(
             out_shares,
-            AggregateResp { seq },
+            AggregateResp { transitions },
         ))
     }
 
@@ -610,13 +610,15 @@ impl VdafConfig {
         uncommitted: DapLeaderUncommitted,
         agg_resp: AggregateResp,
     ) -> Result<Vec<DapOutputShare>, DapAbort> {
-        if agg_resp.seq.len() != uncommitted.seq.len() {
+        if agg_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
         }
 
         let mut out_shares = Vec::with_capacity(uncommitted.seq.len());
-        for (helper, (out_share, leader_nonce)) in
-            agg_resp.seq.into_iter().zip(uncommitted.seq.into_iter())
+        for (helper, (out_share, leader_nonce)) in agg_resp
+            .transitions
+            .into_iter()
+            .zip(uncommitted.seq.into_iter())
         {
             // TODO spec: Consider removing the nonce from the AggregateResp.
             if helper.nonce != leader_nonce {
