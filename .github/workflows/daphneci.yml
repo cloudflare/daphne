@@ -11,10 +11,20 @@ jobs:
   Testing:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checking out
+        uses: actions/checkout@v3
+      - name: Setting up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: clippy
+          override: true
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v1
       - name: Linting
         run: cargo clippy
       - name: Building
         run: cargo build --release
       - name: Testing
-        run: cargo test
+        run: cargo test -- --nocapture
