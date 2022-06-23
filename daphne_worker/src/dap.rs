@@ -7,7 +7,7 @@
 //! draft-ietf-ppm-dap-01.
 
 use crate::{
-    config::DaphneConfig,
+    config::DaphneWorkerConfig,
     durable::{
         aggregate_store::{
             durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
@@ -82,7 +82,7 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     Ok(worker_resp)
 }
 
-impl<D> HpkeDecrypter for DaphneConfig<D> {
+impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
     fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
         if self.hpke_config_list.is_empty() {
             return None;
@@ -112,7 +112,7 @@ impl<D> HpkeDecrypter for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> BearerTokenProvider for DaphneConfig<D> {
+impl<D> BearerTokenProvider for DaphneWorkerConfig<D> {
     async fn get_leader_bearer_token_for(
         &self,
         task_id: &Id,
@@ -132,7 +132,7 @@ impl<D> BearerTokenProvider for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAuthorizedSender<BearerToken> for DaphneConfig<D> {
+impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
     async fn authorize(
         &self,
         task_id: &Id,
@@ -144,7 +144,7 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAggregator<BearerToken> for DaphneConfig<D> {
+impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
     async fn authorized(
         &self,
         req: &DapRequest<BearerToken>,
@@ -231,7 +231,7 @@ impl<D> DapAggregator<BearerToken> for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapLeader<BearerToken> for DaphneConfig<D> {
+impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
     type ReportSelector = InternalAggregateInfo;
 
     async fn put_reports<I: IntoIterator<Item = Report>>(
@@ -424,6 +424,8 @@ impl<D> DapLeader<BearerToken> for DaphneConfig<D> {
         let (payload, url) = (req.payload, req.url);
         let reqwest_req = self
             .client
+            .as_ref()
+            .ok_or_else(|| DapError::Fatal("helper cannot send HTTP requests".into()))?
             .post(url.as_str())
             .body(payload)
             .headers(headers);
@@ -484,7 +486,7 @@ impl<D> DapLeader<BearerToken> for DaphneConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapHelper<BearerToken> for DaphneConfig<D> {
+impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
     async fn mark_aggregated(
         &self,
         task_id: &Id,

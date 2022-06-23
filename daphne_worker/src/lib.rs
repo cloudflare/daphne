@@ -4,7 +4,7 @@
 //! Daphne-Worker implements a Workers backend for Daphne.
 
 use crate::{
-    config::DaphneConfig,
+    config::DaphneWorkerConfig,
     dap::{dap_response_to_worker, worker_request_to_dap},
 };
 use daphne::{
@@ -89,7 +89,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     let router = Router::new()
         .get_async("/hpke_config", |req, ctx| async move {
             let req = worker_request_to_dap(req).await?;
-            let config = DaphneConfig::from_worker_context(ctx)?;
+            let config = DaphneWorkerConfig::from_worker_context(ctx)?;
             // TODO(MVP) Have this method return a DapResponse.
             match config.http_get_hpke_config(&req).await {
                 Ok(hpke_config_data) => dap_response_to_worker(DapResponse {
@@ -103,7 +103,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             "/internal/test/reset/task/:task_id",
             |mut req, ctx| async move {
                 let task_id = parse_id!(ctx.param("task_id"));
-                let config = DaphneConfig::from_worker_context(ctx)?;
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                 let batch_info: Option<Interval> = req.json().await?;
                 match config.internal_reset(&task_id, &batch_info).await {
                     Ok(()) => Response::empty(),
@@ -117,7 +117,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             router
                 .post_async("/upload", |req, ctx| async move {
                     let req = worker_request_to_dap(req).await?;
-                    let config = DaphneConfig::from_worker_context(ctx)?;
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     match config.http_post_upload(&req).await {
                         Ok(()) => Response::empty(),
                         Err(e) => abort(e),
@@ -125,7 +125,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 })
                 .post_async("/collect", |req, ctx| async move {
                     let req = worker_request_to_dap(req).await?;
-                    let config = DaphneConfig::from_worker_context(ctx)?;
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     match config.http_post_collect(&req).await {
                         Ok(collect_uri) => {
                             let mut headers = Headers::new();
@@ -143,7 +143,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                     |_req, ctx| async move {
                         let task_id = parse_id!(ctx.param("task_id"));
                         let collect_id = parse_id!(ctx.param("collect_id"));
-                        let config = DaphneConfig::from_worker_context(ctx)?;
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         // TODO(MVP) Consider deriving the logic below.
                         match config.poll_collect_job(&task_id, &collect_id).await {
                             Ok(DapCollectJob::Done(collect_resp)) => {
@@ -167,7 +167,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                     "/internal/process/task/:task_id",
                     |mut req, ctx| async move {
                         let task_id = parse_id!(ctx.param("task_id"));
-                        let config = DaphneConfig::from_worker_context(ctx)?;
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let agg_info: InternalAggregateInfo = req.json().await?;
                         match config.process(&task_id, &agg_info).await {
                             Ok(telem) => Response::from_json(&telem),
@@ -180,7 +180,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
         "helper" => router
             .post_async("/aggregate", |req, ctx| async move {
                 let req = worker_request_to_dap(req).await?;
-                let config = DaphneConfig::from_worker_context(ctx)?;
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                 match config.http_post_aggregate(&req).await {
                     Ok(resp) => dap_response_to_worker(resp),
                     Err(e) => abort(e),
@@ -188,7 +188,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             })
             .post_async("/aggregate_share", |req, ctx| async move {
                 let req = worker_request_to_dap(req).await?;
-                let config = DaphneConfig::from_worker_context(ctx)?;
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                 match config.http_post_aggregate_share(&req).await {
                     Ok(resp) => dap_response_to_worker(resp),
                     Err(e) => abort(e),
