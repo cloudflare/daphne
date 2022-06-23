@@ -63,10 +63,7 @@ pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest
         None
     };
 
-    let sender_auth = req
-        .headers()
-        .get("DAP-Auth-Token")?
-        .map(|token| BearerToken::from(token));
+    let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
 
     Ok(DapRequest {
         payload: req.bytes().await?,
@@ -127,12 +124,9 @@ impl<D> BearerTokenProvider for DaphneConfig<D> {
         &self,
         task_id: &Id,
     ) -> std::result::Result<Option<BearerToken>, DapError> {
-        let tokens = self
-            .collector_bearer_tokens
-            .as_ref()
-            .ok_or(DapError::Fatal(
-                "helper cannot authorize requests from collector".into(),
-            ))?;
+        let tokens = self.collector_bearer_tokens.as_ref().ok_or_else(|| {
+            DapError::Fatal("helper cannot authorize requests from collector".into())
+        })?;
         Ok(tokens.get(task_id).cloned())
     }
 }
