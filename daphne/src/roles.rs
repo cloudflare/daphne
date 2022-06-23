@@ -212,12 +212,14 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
     async fn http_post_collect(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
-        let collect_req = CollectReq::get_decoded(req.payload.as_ref()).map_err(DapAbort::from)?;
+        if !self.authorized(req).await? {
+            return Err(DapAbort::UnauthorizedRequest);
+        }
 
+        let collect_req = CollectReq::get_decoded(req.payload.as_ref())?;
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or(DapAbort::UnrecognizedTask)?;
-
         check_batch_param!(
             task_config,
             collect_req.batch_interval,
