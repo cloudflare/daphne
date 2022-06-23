@@ -7,8 +7,9 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        encode_u16_bytes, AggregateReq, AggregateReqVar, AggregateResp, HpkeCiphertext, HpkeConfig,
-        Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure, TransitionVar,
+        encode_u16_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
+        HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report, ReportShare, Transition,
+        TransitionFailure, TransitionVar,
     },
     vdaf::prio3::{
         prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
@@ -251,7 +252,7 @@ impl VdafConfig {
         task_id: &Id,
         agg_job_id: &Id,
         reports: Vec<Report>,
-    ) -> Result<DapLeaderTransition<AggregateReq>, DapAbort> {
+    ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
         let mut seq = Vec::with_capacity(reports.len());
@@ -308,13 +309,11 @@ impl VdafConfig {
 
         Ok(DapLeaderTransition::Continue(
             DapLeaderState { seq: states },
-            AggregateReq {
+            AggregateInitializeReq {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
-                var: AggregateReqVar::Init {
-                    agg_param: Vec::new(),
-                    seq,
-                },
+                agg_param: Vec::default(),
+                report_shares: seq,
             },
         ))
     }
@@ -337,27 +336,27 @@ impl VdafConfig {
     ///
     /// * `task_id` indicates the DAP task for which the reports are being processed.
     ///
-    /// * `agg_req` is the aggregate request sent by the peer.
+    /// * `agg_init_req` is the request sent by the Leader.
     ///
     /// * `early_tran_fail_for` is a callback used to determine if a report should be rejected based on
     /// the sequence of aggregate and collect requests made for the task so far. Its input is the
-    /// nonce of report share in `agg_req` and its return value is an optional transition failure.
+    /// nonce of report share in `agg_init_req` and its return value is an optional transition failure.
     pub(crate) fn handle_agg_init_req<D, F>(
         &self,
         decrypter: &D,
         verify_key: &VdafVerifyKey,
-        agg_req: &AggregateReq,
+        agg_init_req: &AggregateInitializeReq,
         early_tran_fail_for: F,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort>
     where
         D: HpkeDecrypter,
         F: Fn(&Nonce) -> Option<TransitionFailure>,
     {
-        let report_shares = agg_req.get_report_shares_ref()?;
-        let mut processed = HashSet::with_capacity(report_shares.len());
-        let mut states = Vec::with_capacity(report_shares.len());
-        let mut seq = Vec::with_capacity(report_shares.len());
-        for report_share in report_shares.iter() {
+        let num_reports = agg_init_req.report_shares.len();
+        let mut processed = HashSet::with_capacity(num_reports);
+        let mut states = Vec::with_capacity(num_reports);
+        let mut seq = Vec::with_capacity(num_reports);
+        for report_share in agg_init_req.report_shares.iter() {
             if processed.contains(&report_share.nonce) {
                 return Err(DapAbort::UnrecognizedMessage);
             }
@@ -375,7 +374,7 @@ impl VdafConfig {
                 decrypter,
                 false, // is_leader
                 verify_key,
-                &agg_req.task_id,
+                &agg_init_req.task_id,
                 &report_share.nonce,
                 &report_share.ignored_extensions,
                 &report_share.encrypted_input_share,
@@ -421,7 +420,7 @@ impl VdafConfig {
         agg_job_id: &Id,
         state: DapLeaderState,
         agg_resp: AggregateResp,
-    ) -> Result<DapLeaderTransition<AggregateReq>, DapAbort> {
+    ) -> Result<DapLeaderTransition<AggregateContinueReq>, DapAbort> {
         if agg_resp.seq.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
         }
@@ -492,10 +491,10 @@ impl VdafConfig {
 
         Ok(DapLeaderTransition::Uncommitted(
             DapLeaderUncommitted { seq: states },
-            AggregateReq {
+            AggregateContinueReq {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
-                var: AggregateReqVar::Continue { seq },
+                transitions: seq,
             },
         ))
     }
@@ -509,11 +508,11 @@ impl VdafConfig {
     ///
     /// * `state` is the helper's current state.
     ///
-    /// * `agg_req` is the aggregate request sent by the Leader.
+    /// * `agg_cont_req` is the aggregate request sent by the Leader.
     pub(crate) fn handle_agg_cont_req(
         &self,
         state: DapHelperState,
-        agg_req: &AggregateReq,
+        agg_cont_req: &AggregateContinueReq,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let mut processed = HashSet::with_capacity(state.seq.len());
         let mut recognized = HashSet::with_capacity(state.seq.len());
@@ -521,10 +520,10 @@ impl VdafConfig {
             recognized.insert(nonce.clone());
         }
 
-        let leader_transitions = agg_req.get_transitions_ref()?;
-        let mut seq = Vec::with_capacity(state.seq.len());
-        let mut out_shares = Vec::with_capacity(state.seq.len());
-        let mut leader_iter = leader_transitions.iter();
+        let num_reports = state.seq.len();
+        let mut seq = Vec::with_capacity(num_reports);
+        let mut out_shares = Vec::with_capacity(num_reports);
+        let mut leader_iter = agg_cont_req.transitions.iter();
         let mut helper_iter = state.seq.into_iter();
         for leader in &mut leader_iter {
             // If the nonce is not recognized, then respond with a transition failure.

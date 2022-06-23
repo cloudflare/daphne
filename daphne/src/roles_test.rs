@@ -6,7 +6,7 @@ use crate::{
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
     hpke::HpkeDecrypter,
     messages::{
-        AggregateReq, AggregateReqVar, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
+        AggregateInitializeReq, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
@@ -231,10 +231,11 @@ async fn http_post_aggregate_unauthorized_request() {
 
     let mut req = DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: AggregateReq {
+        payload: AggregateInitializeReq {
             task_id: task_id.clone(),
             agg_job_id: Id(rng.gen()),
-            var: AggregateReqVar::default(),
+            agg_param: Vec::default(),
+            report_shares: Vec::default(),
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate").unwrap(),

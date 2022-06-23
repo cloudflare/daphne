@@ -3,7 +3,7 @@
 
 //! Messages in the DAP protocol.
 
-use crate::{DapAbort, DapTaskConfig};
+use crate::DapTaskConfig;
 use prio::codec::{decode_u16_items, encode_u16_items, CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -101,7 +101,7 @@ impl Decode for Report {
     }
 }
 
-/// An initial aggregate sub-request sent in an [`AggregateInitReq`]. The contents of this
+/// An initial aggregate sub-request sent in an [`AggregateInitializeReq`]. The contents of this
 /// structure pertain to a single report.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[allow(missing_docs)]
@@ -129,106 +129,66 @@ impl Decode for ReportShare {
     }
 }
 
-/// Aggregate request.
+/// Aggregate initialization request.
 #[derive(Clone, Debug, PartialEq)]
-pub struct AggregateReq {
+pub struct AggregateInitializeReq {
     pub task_id: Id,
     pub agg_job_id: Id,
-    pub var: AggregateReqVar,
+    pub agg_param: Vec<u8>,
+    pub report_shares: Vec<ReportShare>,
 }
 
-impl AggregateReq {
-    pub(crate) fn get_report_shares_ref(&self) -> Result<&[ReportShare], DapAbort> {
-        match &self.var {
-            AggregateReqVar::Init { agg_param: _, seq } => Ok(seq),
-            _ => Err(DapAbort::UnrecognizedMessage),
-        }
-    }
-
-    pub(crate) fn get_transitions_ref(&self) -> Result<&[Transition], DapAbort> {
-        match &self.var {
-            AggregateReqVar::Continue { seq } => Ok(seq),
-            _ => Err(DapAbort::UnrecognizedMessage),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn unwrap_agg_param_ref(&self) -> &[u8] {
-        assert_matches::assert_matches!(&self.var, AggregateReqVar::Init{ agg_param, .. } => agg_param)
-    }
-}
-
-impl Encode for AggregateReq {
+impl Encode for AggregateInitializeReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
-        self.var.encode(bytes);
+        encode_u16_bytes(bytes, &self.agg_param);
+        encode_u16_items(bytes, &(), &self.report_shares);
     }
 }
 
-impl Decode for AggregateReq {
+impl Decode for AggregateInitializeReq {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
-            var: AggregateReqVar::decode(bytes)?,
+            agg_param: decode_u16_bytes(bytes)?,
+            report_shares: decode_u16_items(&(), bytes)?,
         })
     }
 }
 
-/// Aggregate request variant.
+/// Aggregate continuation request.
 #[derive(Clone, Debug, PartialEq)]
-pub enum AggregateReqVar {
-    Init {
-        agg_param: Vec<u8>,
-        seq: Vec<ReportShare>,
-    },
-    Continue {
-        seq: Vec<Transition>,
-    },
+pub struct AggregateContinueReq {
+    pub task_id: Id,
+    pub agg_job_id: Id,
+    pub transitions: Vec<Transition>,
 }
 
-impl Default for AggregateReqVar {
-    fn default() -> Self {
-        Self::Init {
-            agg_param: Vec::default(),
-            seq: Vec::default(),
-        }
-    }
-}
-
-impl Encode for AggregateReqVar {
+impl Encode for AggregateContinueReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        match self {
-            AggregateReqVar::Init { agg_param, seq } => {
-                0_u8.encode(bytes);
-                encode_u16_bytes(bytes, agg_param);
-                encode_u16_items(bytes, &(), seq);
-            }
-            AggregateReqVar::Continue { seq } => {
-                1_u8.encode(bytes);
-                encode_u16_items(bytes, &(), seq);
-            }
-        }
+        self.task_id.encode(bytes);
+        self.agg_job_id.encode(bytes);
+        encode_u16_items(bytes, &(), &self.transitions);
     }
 }
 
-impl Decode for AggregateReqVar {
+impl Decode for AggregateContinueReq {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u8::decode(bytes)? {
-            0 => Ok(Self::Init {
-                agg_param: decode_u16_bytes(bytes)?,
-                seq: decode_u16_items(&(), bytes)?,
-            }),
-            1 => Ok(Self::Continue {
-                seq: decode_u16_items(&(), bytes)?,
-            }),
-            _ => Err(CodecError::UnexpectedValue),
-        }
+        Ok(Self {
+            task_id: Id::decode(bytes)?,
+            agg_job_id: Id::decode(bytes)?,
+            transitions: decode_u16_items(&(), bytes)?,
+        })
     }
 }
 
-/// Transition message.
+/// Transition message. This conveyes a message sent from one Aggregator to another during the
+/// preparation phase of VDAF evaluation.
+//
+// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-01. This is confusing because it
+// overloads a term used in draft-irtf-cfrg-draft-01.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transition {
     pub nonce: Nonce,

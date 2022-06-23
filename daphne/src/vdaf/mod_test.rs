@@ -4,9 +4,9 @@
 use crate::{
     hpke::HpkeSecretKey,
     messages::{
-        AggregateReq, AggregateReqVar, AggregateResp, HpkeAeadId, HpkeCiphertext, HpkeConfig,
-        HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition, TransitionFailure,
-        TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeAeadId, HpkeCiphertext,
+        HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition,
+        TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -170,17 +170,16 @@ fn agg_init_req() {
         DapMeasurement::U64(0),
     ]);
 
-    let (leader_state, agg_req) = t.produce_agg_init_req(reports.clone()).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports.clone()).unwrap_continue();
     assert_eq!(leader_state.seq.len(), 3);
-    assert_eq!(agg_req.task_id, t.task_id);
-    assert_eq!(agg_req.unwrap_agg_param_ref().len(), 0);
-    let report_shares = agg_req.get_report_shares_ref().unwrap();
-    assert_eq!(report_shares.len(), 3);
-    for (report_shares, report) in report_shares.iter().zip(reports.iter()) {
+    assert_eq!(agg_init_req.task_id, t.task_id);
+    assert_eq!(agg_init_req.agg_param.len(), 0);
+    assert_eq!(agg_init_req.report_shares.len(), 3);
+    for (report_shares, report) in agg_init_req.report_shares.iter().zip(reports.iter()) {
         assert_eq!(report_shares.nonce, report.nonce);
     }
 
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
     assert_eq!(agg_resp.seq.len(), 3);
     for (sub, report) in agg_resp.seq.iter().zip(reports.iter()) {
@@ -402,12 +401,9 @@ fn agg_cont_req_skip_vdaf_prep_error() {
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    assert_matches!(agg_cont_req.var, AggregateReqVar::Continue{ ref mut seq
-    } => {
-        // Simulate VDAF preparation error (due to the report being invalid, say). The leader will
-        // skip the report without processing it any further.
-        seq.remove(1);
-    });
+    // Simulate VDAF preparation error (due to the report being invalid, say). The leader will
+    // skip the report without processing it any further.
+    agg_cont_req.transitions.remove(1);
 
     let (helper_output_shares, agg_resp) = t
         .handle_agg_cont_req(helper_state, &agg_cont_req)
@@ -415,10 +411,8 @@ fn agg_cont_req_skip_vdaf_prep_error() {
 
     assert_eq!(2, helper_output_shares.len());
     assert_eq!(2, agg_resp.seq.len());
-    assert_matches!(agg_init_req.var, AggregateReqVar::Init{ agg_param: _, seq } => {
-        assert_eq!(agg_resp.seq[0].nonce, seq[0].nonce);
-        assert_eq!(agg_resp.seq[1].nonce, seq[2].nonce);
-    });
+    assert_eq!(agg_resp.seq[0].nonce, agg_init_req.report_shares[0].nonce);
+    assert_eq!(agg_resp.seq[1].nonce, agg_init_req.report_shares[2].nonce);
 }
 
 #[test]
@@ -432,17 +426,17 @@ fn agg_cont_abort_unrecognized_nonce() {
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    assert_matches!(agg_cont_req.var, AggregateReqVar::Continue{ ref mut seq
-    } => {
-        // Leader sends a Transition with an unrecognized nonce.
-        seq.insert(1, Transition{
+    // Leader sends a Transition with an unrecognized nonce.
+    agg_cont_req.transitions.insert(
+        1,
+        Transition {
             nonce: Nonce {
                 time: rng.gen(),
                 rand: rng.gen(),
             },
             var: TransitionVar::Finished, // Expected transition type for Prio3 at this stage
-        });
-    });
+        },
+    );
 
     assert_matches!(
         t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
@@ -460,13 +454,10 @@ fn agg_cont_req_abort_transition_out_of_order() {
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    assert_matches!(agg_cont_req.var, AggregateReqVar::Continue{ ref mut seq
-    } => {
-        // Leader sends transitions out of order.
-        let tmp = seq[0].clone();
-        seq[0] = seq[1].clone();
-        seq[1] = tmp;
-    });
+    // Leader sends transitions out of order.
+    let tmp = agg_cont_req.transitions[0].clone();
+    agg_cont_req.transitions[0] = agg_cont_req.transitions[1].clone();
+    agg_cont_req.transitions[1] = tmp;
 
     assert_matches!(
         t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
@@ -484,12 +475,9 @@ fn agg_cont_req_abort_nonce_repeated() {
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    assert_matches!(agg_cont_req.var, AggregateReqVar::Continue{ ref mut seq
-    } => {
-        // Leader sends a transition twice.
-        let repeated_transition = seq[0].clone();
-        seq.push(repeated_transition);
-    });
+    // Leader sends a transition twice.
+    let repeated_transition = agg_cont_req.transitions[0].clone();
+    agg_cont_req.transitions.push(repeated_transition);
 
     assert_matches!(
         t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
@@ -610,7 +598,10 @@ impl<'a> Test<'a> {
         reports
     }
 
-    fn produce_agg_init_req(&self, reports: Vec<Report>) -> DapLeaderTransition<AggregateReq> {
+    fn produce_agg_init_req(
+        &self,
+        reports: Vec<Report>,
+    ) -> DapLeaderTransition<AggregateInitializeReq> {
         self.vdaf
             .produce_agg_init_req(
                 &self.leader_hpke_secret_key,
@@ -624,7 +615,7 @@ impl<'a> Test<'a> {
 
     fn handle_agg_init_req(
         &mut self,
-        agg_init_req: AggregateReq,
+        agg_init_req: AggregateInitializeReq,
     ) -> DapHelperTransition<AggregateResp> {
         let agg_resp = self
             .vdaf
@@ -636,7 +627,7 @@ impl<'a> Test<'a> {
             )
             .unwrap();
 
-        for report_share in agg_init_req.get_report_shares_ref().unwrap() {
+        for report_share in agg_init_req.report_shares {
             self.helper_reports_aggregated
                 .insert(report_share.nonce.clone());
         }
@@ -648,7 +639,7 @@ impl<'a> Test<'a> {
         &self,
         leader_state: DapLeaderState,
         agg_resp: AggregateResp,
-    ) -> DapLeaderTransition<AggregateReq> {
+    ) -> DapLeaderTransition<AggregateContinueReq> {
         self.vdaf
             .handle_agg_resp(&self.task_id, &self.agg_job_id, leader_state, agg_resp)
             .unwrap()
@@ -668,20 +659,20 @@ impl<'a> Test<'a> {
     fn handle_agg_cont_req(
         &self,
         helper_state: DapHelperState,
-        agg_req: &AggregateReq,
+        agg_cont_req: &AggregateContinueReq,
     ) -> DapHelperTransition<AggregateResp> {
         self.vdaf
-            .handle_agg_cont_req(helper_state, agg_req)
+            .handle_agg_cont_req(helper_state, agg_cont_req)
             .unwrap()
     }
 
     fn handle_agg_cont_req_expect_err(
         &self,
         helper_state: DapHelperState,
-        agg_req: &AggregateReq,
+        agg_cont_req: &AggregateContinueReq,
     ) -> DapAbort {
         self.vdaf
-            .handle_agg_cont_req(helper_state, agg_req)
+            .handle_agg_cont_req(helper_state, agg_cont_req)
             .err()
             .expect("handle_agg_cont_req() succeeded; expected failure")
     }
