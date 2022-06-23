@@ -27,7 +27,7 @@ platform locally using [miniflare](https://github.com/cloudflare/miniflare). To
 get it to work you'll also need to upgrade node to the latest version.
 
 ```
-$ nvm use 17.1.0 && npm install -g miniflare@2.5.0
+$ nvm use 18.4.0 && npm install -g miniflare@2.5.1
 ```
 
 To run the Leader: from the `daphne_worker` directory, do

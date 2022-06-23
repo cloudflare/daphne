@@ -21,7 +21,7 @@ use std::{convert::TryFrom, fmt::Debug, io::Cursor};
 pub(crate) enum Prio3Error {
     #[error("Codec error: {0}")]
     Codec(#[from] CodecError),
-    #[error("VDAF error: {0}")]
+    #[error("{0}")]
     Vdaf(#[from] VdafError),
 }
 
