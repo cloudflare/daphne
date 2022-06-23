@@ -4,11 +4,12 @@
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
+    hpke::HpkeDecrypter,
     messages::{
         AggregateReq, AggregateReqVar, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
     },
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, HpkeDecrypter},
+    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
     DapRequest, DapResponse, DapTaskConfig,
 };

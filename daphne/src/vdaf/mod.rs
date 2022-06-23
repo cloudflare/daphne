@@ -5,11 +5,11 @@
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
 use crate::{
+    hpke::HpkeDecrypter,
     messages::{
         encode_u16_bytes, AggregateReq, AggregateReqVar, AggregateResp, HpkeCiphertext, HpkeConfig,
         Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure, TransitionVar,
     },
-    roles::HpkeDecrypter,
     vdaf::prio3::{
         prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
         prio3_prepare_start, prio3_shard, prio3_unshard, Prio3Error,
