@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::config::DaphneConfig;
+use crate::config::DaphneWorkerConfig;
 use daphne::{
     hpke::HpkeDecrypter,
     messages::{Interval, Nonce},
@@ -44,7 +44,7 @@ const DAP_BUCKET_KEY: &str = "773a0e77ffcfa580c11ad031c35cad02";
 fn daphne_param() {
     let now = 1637364244;
     let bucket_count = 5;
-    let config: DaphneConfig<String> = DaphneConfig::from_test_config(
+    let config: DaphneWorkerConfig<String> = DaphneWorkerConfig::from_test_config(
         DAP_TASK_LIST,
         DAP_HPKE_CONFIG_LIST,
         DAP_HPKE_SECRET_KEY_LIST,

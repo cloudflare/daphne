@@ -32,11 +32,13 @@ use std::{
 use worker::*;
 
 /// Long-lived parameters used a daphne across DAP tasks.
-//
-// TODO(MVP) Maybe rename this to DaphneWorkerConfig.
-pub(crate) struct DaphneConfig<D> {
+pub(crate) struct DaphneWorkerConfig<D> {
     ctx: Arc<Mutex<Option<RouteContext<D>>>>,
-    pub(crate) client: reqwest_wasm::Client,
+
+    /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
+    /// configured as the DAP Helper.
+    pub(crate) client: Option<reqwest_wasm::Client>,
+
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
     pub(crate) hpke_config_list: Vec<HpkeConfig>,
     pub(crate) hpke_secret_key_list: Vec<HpkeSecretKey>,
@@ -53,7 +55,7 @@ pub(crate) struct DaphneConfig<D> {
     bucket_count: u64,
 }
 
-impl<D> DaphneConfig<D> {
+impl<D> DaphneWorkerConfig<D> {
     /// Fetch DAP parameters from environment variables.
     pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
         let mut tasks: HashMap<Id, DapTaskConfig> =
@@ -126,7 +128,26 @@ impl<D> DaphneConfig<D> {
             ))
         })?;
 
-        let collector_bearer_tokens = if ctx.var("DAP_AGGREGATOR_ROLE")?.to_string() == "leader" {
+        let is_leader = match ctx.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
+            "leader" => true,
+            "helper" => false,
+            other => {
+                return Err(Error::RustError(format!(
+                    "Invalid value for DAP_AGGREGATOR_ROLE: '{}'",
+                    other
+                )))
+            }
+        };
+
+        let client = if is_leader {
+            // TODO Configure this client to use HTTPS only, excpet if running in a test
+            // environment (i.e., if DAP_ENV = true).
+            Some(reqwest_wasm::Client::new())
+        } else {
+            None
+        };
+
+        let collector_bearer_tokens = if is_leader {
             let tokens: HashMap<Id, BearerToken> = serde_json::from_str(
                 ctx.var("DAP_COLLECTOR_BEARER_TOKEN_LIST")?
                     .to_string()
@@ -145,9 +166,7 @@ impl<D> DaphneConfig<D> {
 
         Ok(Self {
             ctx: Arc::new(Mutex::new(Some(ctx))),
-            // TODO(MVP) Configure this client to be HTTPS only, except if running in a test
-            // evnironemnt (DAP_ENV=true).
-            client: reqwest_wasm::Client::new(),
+            client,
             tasks,
             hpke_config_list,
             hpke_secret_key_list,
@@ -158,7 +177,7 @@ impl<D> DaphneConfig<D> {
         })
     }
 
-    // TODO(MVP) This method is at the wrong level of abstraction. To construct a DaphneConfig we
+    // TODO This method is at the wrong level of abstraction. To construct a DaphneWorkerConfig we
     // need an HTTP client and a Worker context, neither of which is necessary for the unit tests
     // for which this method is used.
     #[cfg(test)]
@@ -181,9 +200,9 @@ impl<D> DaphneConfig<D> {
             hpke_config_list.push(hpke_config);
         }
 
-        Ok(DaphneConfig {
+        Ok(DaphneWorkerConfig {
             ctx: Arc::new(Mutex::new(None)),
-            client: reqwest_wasm::Client::new(),
+            client: None,
             tasks: serde_json::from_str(json_task_list)?,
             hpke_config_list,
             hpke_secret_key_list: serde_json::from_str(json_hpke_secret_key_list)?,
