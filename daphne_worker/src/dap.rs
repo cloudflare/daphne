@@ -33,11 +33,12 @@ use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
     constants,
+    hpke::HpkeDecrypter,
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
         ReportShare, TransitionFailure,
     },
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, HpkeDecrypter},
+    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig, ProblemDetails,
 };

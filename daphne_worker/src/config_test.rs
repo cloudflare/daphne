@@ -3,8 +3,8 @@
 
 use crate::config::DaphneConfig;
 use daphne::{
+    hpke::HpkeDecrypter,
     messages::{Interval, Nonce},
-    roles::HpkeDecrypter,
 };
 
 const DAP_TASK_LIST: &str = r#"{

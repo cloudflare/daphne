@@ -5,7 +5,6 @@
 
 use crate::{
     messages::{HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id},
-    roles::HpkeDecrypter,
     DapError,
 };
 use hpke::{aead, kdf, kem, Deserializable, HpkeError, Kem, OpModeR};
@@ -130,4 +129,22 @@ fn check_suite(config: &HpkeConfig) -> Result<(), DapError> {
             u16::from(aead_id)
         ))),
     }
+}
+
+/// HPKE decrypter functionality.
+pub trait HpkeDecrypter {
+    /// Look up the HPKE configuration to use for the given task ID.
+    fn get_hpke_config_for(&self, task_id: &Id) -> Option<&HpkeConfig>;
+
+    /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
+    fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> bool;
+
+    /// Decrypt the given HPKE ciphertext using the given info and AAD string.
+    fn hpke_decrypt(
+        &self,
+        task_id: &Id,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
+    ) -> Result<Vec<u8>, DapError>;
 }

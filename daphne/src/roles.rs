@@ -8,10 +8,11 @@ use crate::{
         MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_RESP,
         MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_AGG_SHARE_RESP,
     },
+    hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateReq, AggregateReqVar, AggregateResp, AggregateShareReq,
-        AggregateShareResp, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval,
-        Nonce, Report, ReportShare, TransitionFailure,
+        AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce, Report, ReportShare,
+        TransitionFailure,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapHelperTransition,
     DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare, DapRequest, DapResponse,
@@ -39,24 +40,6 @@ macro_rules! check_batch_param {
             return Err(DapAbort::UnrecognizedMessage);
         }
     }};
-}
-
-/// HPKE decrypter functionality.
-pub trait HpkeDecrypter {
-    /// Look up the HPKE configuration to use for the given task ID.
-    fn get_hpke_config_for(&self, task_id: &Id) -> Option<&HpkeConfig>;
-
-    /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
-    fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> bool;
-
-    /// Decrypt the given HPKE ciphertext using the given info and AAD string.
-    fn hpke_decrypt(
-        &self,
-        task_id: &Id,
-        info: &[u8],
-        aad: &[u8],
-        ciphertext: &HpkeCiphertext,
-    ) -> Result<Vec<u8>, DapError>;
 }
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
