@@ -40,7 +40,14 @@ pub(crate) struct DaphneConfig<D> {
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
     pub(crate) hpke_config_list: Vec<HpkeConfig>,
     pub(crate) hpke_secret_key_list: Vec<HpkeSecretKey>,
+
+    /// Leader's bearer token for each task.
     pub(crate) leader_bearer_tokens: HashMap<Id, BearerToken>,
+
+    /// Collector's bearer token for each task. This is only populated if Daphne-Worker is
+    /// configured as the DAP Leader, i.e., if `DAP_AGGREGATOR_ROLE == "leader"`.
+    pub(crate) collector_bearer_tokens: Option<HashMap<Id, BearerToken>>,
+
     // TODO(MVP) Make `bucket_Key` and `bucket_count` unique per task.
     bucket_key: Seed<16>,
     bucket_count: u64,
@@ -119,6 +126,23 @@ impl<D> DaphneConfig<D> {
             ))
         })?;
 
+        let collector_bearer_tokens = if ctx.var("DAP_AGGREGATOR_ROLE")?.to_string() == "leader" {
+            let tokens: HashMap<Id, BearerToken> = serde_json::from_str(
+                ctx.var("DAP_COLLECTOR_BEARER_TOKEN_LIST")?
+                    .to_string()
+                    .as_ref(),
+            )
+            .map_err(|e| {
+                Error::RustError(format!(
+                    "Failed to parse DAP_COLLECTOR_BEARER_TOKEN_LIST: {}",
+                    e
+                ))
+            })?;
+            Some(tokens)
+        } else {
+            None
+        };
+
         Ok(Self {
             ctx: Arc::new(Mutex::new(Some(ctx))),
             // TODO(MVP) Configure this client to be HTTPS only, except if running in a test
@@ -128,6 +152,7 @@ impl<D> DaphneConfig<D> {
             hpke_config_list,
             hpke_secret_key_list,
             leader_bearer_tokens,
+            collector_bearer_tokens,
             bucket_key,
             bucket_count,
         })
@@ -163,6 +188,7 @@ impl<D> DaphneConfig<D> {
             hpke_config_list,
             hpke_secret_key_list: serde_json::from_str(json_hpke_secret_key_list)?,
             leader_bearer_tokens: HashMap::default(),
+            collector_bearer_tokens: None,
             bucket_key,
             bucket_count,
         })

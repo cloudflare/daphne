@@ -122,6 +122,19 @@ impl<D> BearerTokenProvider for DaphneConfig<D> {
     ) -> std::result::Result<Option<BearerToken>, DapError> {
         Ok(self.leader_bearer_tokens.get(task_id).cloned())
     }
+
+    async fn get_collector_bearer_token_for(
+        &self,
+        task_id: &Id,
+    ) -> std::result::Result<Option<BearerToken>, DapError> {
+        let tokens = self
+            .collector_bearer_tokens
+            .as_ref()
+            .ok_or(DapError::Fatal(
+                "helper cannot authorize requests from collector".into(),
+            ))?;
+        Ok(tokens.get(task_id).cloned())
+    }
 }
 
 #[async_trait(?Send)]

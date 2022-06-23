@@ -3,7 +3,7 @@
 
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
-    constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ},
+    constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
     hpke::HpkeDecrypter,
     messages::{
         AggregateReq, AggregateReqVar, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
@@ -39,6 +39,7 @@ const TASK_LIST: &str = r#"{
 }"#;
 
 const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
+const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mYqO9hk=";
 
 struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
@@ -64,6 +65,13 @@ impl BearerTokenProvider for MockAggregator {
         _task_id: &Id,
     ) -> Result<Option<BearerToken>, DapError> {
         Ok(Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())))
+    }
+
+    async fn get_collector_bearer_token_for(
+        &self,
+        _task_id: &Id,
+    ) -> Result<Option<BearerToken>, DapError> {
+        Ok(Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())))
     }
 }
 
@@ -217,9 +225,9 @@ impl DapLeader<BearerToken> for MockAggregator {
 #[tokio::test]
 async fn http_post_aggregate_unauthorized_request() {
     let mut rng = thread_rng();
-    let agg = MockAggregator::new();
-    let task_id = agg.nominal_task_id();
-    let task_config = agg.get_task_config_for(task_id).unwrap();
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+    let task_config = helper.get_task_config_for(task_id).unwrap();
 
     let mut req = DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
@@ -235,23 +243,23 @@ async fn http_post_aggregate_unauthorized_request() {
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        agg.http_post_aggregate(&req).await,
+        helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest)
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        agg.http_post_aggregate(&req).await,
+        helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest)
     );
 }
 
 #[tokio::test]
 async fn http_post_aggregate_share_unauthorized_request() {
-    let agg = MockAggregator::new();
-    let task_id = agg.nominal_task_id();
-    let task_config = agg.get_task_config_for(task_id).unwrap();
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+    let task_config = helper.get_task_config_for(task_id).unwrap();
 
     let mut req = DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
@@ -269,14 +277,46 @@ async fn http_post_aggregate_share_unauthorized_request() {
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        agg.http_post_aggregate_share(&req).await,
+        helper.http_post_aggregate_share(&req).await,
         Err(DapAbort::UnauthorizedRequest)
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        agg.http_post_aggregate_share(&req).await,
+        helper.http_post_aggregate_share(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_post_collect_unauthorized_request() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+
+    let mut req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: CollectReq {
+            task_id: task_id.clone(),
+            batch_interval: Interval::default(),
+            agg_param: Vec::default(),
+        }
+        .get_encoded(),
+        url: task_config.leader_url.join("/collect").unwrap(),
+        sender_auth: None,
+    };
+
+    // Expect failure due to missing bearer token.
+    assert_matches!(
+        leader.http_post_collect(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+
+    // Expect failure due to incorrect bearer token.
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
+    assert_matches!(
+        leader.http_post_collect(&req).await,
         Err(DapAbort::UnauthorizedRequest)
     );
 }

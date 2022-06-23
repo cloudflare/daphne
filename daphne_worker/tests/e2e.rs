@@ -15,7 +15,7 @@ use daphne_worker::InternalAggregateInfo;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use std::time::SystemTime;
-use test_runner::{TestRunner, COLLECTOR_HPKE_SECRET_KEY};
+use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_SECRET_KEY};
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
@@ -62,6 +62,7 @@ async fn e2e_leader_upload() {
     // Try uploading the same report a second time (expect failure due to repeated nonce).
     t.leader_post_expect_abort(
         &client,
+        None, // dap_auth_token
         "/upload",
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded(),
@@ -73,6 +74,7 @@ async fn e2e_leader_upload() {
     // Try uploading a report with the incorrect task ID.
     t.leader_post_expect_abort(
         &client,
+        None, // dap_auth_token
         "/upload",
         constants::MEDIA_TYPE_REPORT,
         t.vdaf
@@ -102,6 +104,7 @@ async fn e2e_leader_upload() {
     report.encrypted_input_shares[0].config_id ^= 0xff;
     t.leader_post_expect_abort(
         &client,
+        None, // dap_auth_token
         "/upload",
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded(),
@@ -113,6 +116,7 @@ async fn e2e_leader_upload() {
     // Try uploading a malformed report.
     t.leader_post_expect_abort(
         &client,
+        None, // dap_auth_token
         "/upload",
         constants::MEDIA_TYPE_REPORT,
         b"junk data".to_vec(),
@@ -268,19 +272,13 @@ async fn e2e_leader_collect_ok() {
         batch_interval: batch_interval.clone(),
         agg_param: Vec::new(),
     };
-    let url = t.leader_url.join("/collect").unwrap();
-    let resp = client
-        .post(url.as_str())
-        .body(collect_req.get_encoded())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 303);
+    let collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+    println!("collect_uri: {}", collect_uri);
 
     // Poll the collect URI before the ColleectResp is ready.
-    let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
-    println!("collect_uri: {}", collect_uri);
-    let resp = client.get(collect_uri).send().await.unwrap();
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 202);
 
     // The reports are aggregated in the background.
@@ -298,7 +296,7 @@ async fn e2e_leader_collect_ok() {
     assert_eq!(agg_telem.reports_collected, t.min_batch_size);
 
     // Poll the collect URI.
-    let resp = client.get(collect_uri).send().await.unwrap();
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
     let decrypter: HpkeSecretKey = serde_json::from_str(COLLECTOR_HPKE_SECRET_KEY).unwrap();
@@ -316,13 +314,14 @@ async fn e2e_leader_collect_ok() {
 
     // Poll the collect URI once more. Expect failure because the request has already been
     // processed.
-    let resp = client.get(collect_uri).send().await.unwrap();
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 400);
 
     // Check that leader properly rejects late arriving reports.
     let now = rng.gen_range(batch_interval.start..batch_interval.end());
     t.leader_post_expect_abort(
         &client,
+        None, // dap_auth_token
         "/upload",
         constants::MEDIA_TYPE_REPORT,
         t.vdaf
@@ -367,14 +366,10 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         batch_interval: batch_interval.clone(),
         agg_param: Vec::new(),
     };
-    let url = t.leader_url.join("/collect").unwrap();
-    let resp = client
-        .post(url.as_str())
-        .body(collect_req.get_encoded())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 303);
+    let collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+    println!("collect_uri: {}", collect_uri);
 
     // The reports are aggregated in the background.
     let agg_telem = t
@@ -391,8 +386,6 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
     assert_eq!(agg_telem.reports_collected, 0);
 
     // Poll the collect URI before the ColleectResp is ready.
-    let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
-    println!("collect_uri: {}", collect_uri);
     let resp = client.get(collect_uri).send().await.unwrap();
     assert_eq!(resp.status(), 202);
 }
@@ -435,6 +428,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     };
     t.leader_post_expect_abort(
         &client,
+        Some(COLLECTOR_BEARER_TOKEN),
         "/collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
@@ -454,6 +448,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     };
     t.leader_post_expect_abort(
         &client,
+        Some(COLLECTOR_BEARER_TOKEN),
         "/collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),

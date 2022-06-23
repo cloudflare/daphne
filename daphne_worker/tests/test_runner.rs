@@ -7,6 +7,7 @@ janus_test_util::define_ephemeral_datastore!();
 
 use assert_matches::assert_matches;
 use daphne::{
+    constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
     DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
 };
@@ -45,8 +46,7 @@ const LEADER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
-        "leader_auth_token": "This is an auth token ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     },
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
         "leader_url": "http://leader:8787",
@@ -61,8 +61,7 @@ const LEADER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc",
-        "leader_auth_token": "This is a differnt token 72938088f14b7ef318ef42ba72395a22"
+        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
     }
 }"#;
 
@@ -83,8 +82,7 @@ const HELPER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d",
-        "leader_auth_token": "This is an auth token ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs="
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     }
 }"#;
 
@@ -102,10 +100,12 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
                 }
             }
         },
-        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc",
-        "leader_auth_token": "This is a differnt token 72938088f14b7ef318ef42ba72395a22"
+        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
     }
 }"#;
+
+#[allow(dead_code)]
+pub(crate) const COLLECTOR_BEARER_TOKEN: &str = "this is the bearer token of the Collector";
 
 #[allow(dead_code)]
 pub(crate) const COLLECTOR_HPKE_SECRET_KEY: &str = r#"{
@@ -251,6 +251,7 @@ impl TestRunner {
     pub async fn leader_post_expect_abort(
         &self,
         client: &reqwest::Client,
+        dap_auth_token: Option<&str>,
         path: &str,
         media_type: &str,
         data: Vec<u8>,
@@ -258,8 +259,16 @@ impl TestRunner {
         expected_err_type: &str,
     ) {
         let url = self.leader_url.join(path).unwrap();
+
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        if let Some(token) = dap_auth_token {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-auth-token"),
+                reqwest::header::HeaderValue::from_str(token).unwrap(),
+            );
+        }
+
         let resp = client
             .post(url.as_str())
             .body(data)
@@ -283,6 +292,30 @@ impl TestRunner {
         let problem_details: serde_json::Value = resp.json().await.unwrap();
         let got = problem_details.as_object().unwrap().get("type").unwrap();
         assert_eq!(got, expected_err_type);
+    }
+
+    pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
+        let url = self.leader_url.join("/collect").unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static(MEDIA_TYPE_COLLECT_REQ),
+        );
+        headers.insert(
+            reqwest::header::HeaderName::from_static("dap-auth-token"),
+            reqwest::header::HeaderValue::from_static(COLLECTOR_BEARER_TOKEN),
+        );
+        let resp = client
+            .post(url.as_str())
+            .body(data)
+            .headers(headers)
+            .send()
+            .await
+            .expect("request failed");
+
+        assert_eq!(resp.status(), 303);
+        let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
+        collect_uri.parse().unwrap()
     }
 
     #[allow(dead_code)]

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 /// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-01.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BearerToken(String);
 
 impl AsRef<str> for BearerToken {
@@ -40,6 +40,12 @@ impl From<String> for BearerToken {
 pub trait BearerTokenProvider {
     /// Fetch the Leader's bearer token for the given task, if the task is recognized.
     async fn get_leader_bearer_token_for(
+        &self,
+        task_id: &Id,
+    ) -> Result<Option<BearerToken>, DapError>;
+
+    /// Fetch the Collector's bearer token for the given task, if the task is recognized.
+    async fn get_collector_bearer_token_for(
         &self,
         task_id: &Id,
     ) -> Result<Option<BearerToken>, DapError>;
@@ -72,17 +78,29 @@ pub trait BearerTokenProvider {
         &self,
         req: &DapRequest<BearerToken>,
     ) -> Result<bool, DapError> {
+        // Parse the task ID from the front of the request payload and use it to look up
+        // the epxected bearer token.
+        let mut r = Cursor::new(req.payload.as_ref());
+        let option_task_id = Id::decode(&mut r);
+
         // TODO spec: Decide whether to check that the bearer token has the right format, say,
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
         // for BearerToken` with `TryFrom<String>` so that a `DapError` can be returned if the
         // token is not formatted properly.
         if req.from_leader() {
             if let Some(ref got) = req.sender_auth {
-                // Parse the task ID from the front of the request payload and use it to look up
-                // the epxected bearer token.
-                let mut r = Cursor::new(req.payload.as_ref());
-                if let Ok(task_id) = Id::decode(&mut r) {
-                    if let Some(expected) = self.get_leader_bearer_token_for(&task_id).await? {
+                if let Ok(ref task_id) = option_task_id {
+                    if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
+                        return Ok(got == &expected);
+                    }
+                }
+            }
+        }
+
+        if req.from_collector() {
+            if let Some(ref got) = req.sender_auth {
+                if let Ok(ref task_id) = option_task_id {
+                    if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
                         return Ok(got == &expected);
                     }
                 }
