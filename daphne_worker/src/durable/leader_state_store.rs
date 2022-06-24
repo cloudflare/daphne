@@ -76,7 +76,7 @@ impl DurableObject for LeaderStateStore {
                 // TODO Consider disallowing overlapping collect requests. Would this require a
                 // spec change?
                 //
-                // TODO(MVP) Figure out if we can avoid re-serializing by passing raw bytes here instead
+                // TODO Figure out if we can avoid re-serializing by passing raw bytes here instead
                 // of JSON.
                 let collect_req: CollectReq = req.json().await?;
                 let collect_req_digest = digest(&SHA256, &collect_req.get_encoded());

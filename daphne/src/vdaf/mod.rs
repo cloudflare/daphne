@@ -106,8 +106,6 @@ impl VdafConfig {
     /// * `task_id` is the DAP task for which this report is being generated.
     ///
     /// * `measurement` is the measurement.
-    //
-    // TODO We may need to change this API to accommodate a public parameter for the VDAF.
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],
@@ -181,9 +179,6 @@ impl VdafConfig {
     /// * `nonce` is the report nonce.
     ///
     /// * `encrypted_input_share` is the encrypted input share.
-    //
-    // TODO spec: Note in the spec that we MUST ignore extensions we don't recognize, as they may
-    // be intended for the other aggregator. (Does this make sense?)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn consume_report_share<D: HpkeDecrypter>(
         &self,
