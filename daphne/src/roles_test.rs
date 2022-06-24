@@ -174,10 +174,7 @@ impl DapHelper<BearerToken> for MockAggregator {
 impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = ();
 
-    async fn put_reports<I: IntoIterator<Item = Report>>(
-        &self,
-        _reports: I,
-    ) -> Result<(), DapError> {
+    async fn put_report(&self, _report: &Report) -> Result<(), DapError> {
         unreachable!("not implemented");
     }
 

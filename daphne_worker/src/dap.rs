@@ -228,27 +228,19 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
 impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
     type ReportSelector = InternalAggregateInfo;
 
-    async fn put_reports<I: IntoIterator<Item = Report>>(
-        &self,
-        reports: I,
-    ) -> std::result::Result<(), DapError> {
+    async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
         let durable_namespace = self.durable_object("DAP_REPORT_STORE")?;
-        for report in reports.into_iter() {
-            let task_config = self
-                .get_task_config_for(&report.task_id)
-                .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-            let durable_name =
-                self.durable_report_store_name(task_config, &report.task_id, &report.nonce);
-            let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
-            let mut resp = durable_post!(stub, DURABLE_REPORT_STORE_PUT_PENDING, &report).await?;
-            match resp.json().await? {
-                ReportStoreResult::Ok => (),
-                // TODO(MVP) Don't quit early if we get a transition failure. This will become a
-                // problem if we ever upload multiple reports
-                ReportStoreResult::Err(t) => return Err(DapError::Transition(t)),
-            };
+        let task_config = self
+            .get_task_config_for(&report.task_id)
+            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let durable_name =
+            self.durable_report_store_name(task_config, &report.task_id, &report.nonce);
+        let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
+        let mut resp = durable_post!(stub, DURABLE_REPORT_STORE_PUT_PENDING, &report).await?;
+        match resp.json().await? {
+            ReportStoreResult::Ok => Ok(()),
+            ReportStoreResult::Err(t) => return Err(DapError::Transition(t)),
         }
-        Ok(())
     }
 
     async fn get_reports(

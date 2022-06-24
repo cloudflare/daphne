@@ -141,12 +141,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;
 
-    /// Store a sequence of reports to use later on. Each input is the encoded report sent in the
-    /// body of an HTTP request.
-    //
-    // TODO(MVP) Just put one report with this interface.
-    async fn put_reports<I: IntoIterator<Item = Report>>(&self, reports: I)
-        -> Result<(), DapError>;
+    /// Store a report for use later on.
+    async fn put_report(&self, report: &Report) -> Result<(), DapError>;
 
     /// Fetch a sequence of reports to aggregate. The reports returned are removed from persistent
     /// storage.
@@ -205,7 +201,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             return Err(DapAbort::UnrecognizedHpkeConfig);
         }
 
-        Ok(self.put_reports([report]).await?)
+        Ok(self.put_report(&report).await?)
     }
 
     /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
