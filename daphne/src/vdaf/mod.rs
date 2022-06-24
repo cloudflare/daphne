@@ -13,7 +13,7 @@ use crate::{
     },
     vdaf::prio3::{
         prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-        prio3_prepare_start, prio3_shard, prio3_unshard, Prio3Error,
+        prio3_prepare_init, prio3_shard, prio3_unshard, Prio3Error,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -219,7 +219,7 @@ impl VdafConfig {
         let agg_id = if is_leader { 0 } else { 1 };
         match (self, verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
-                Ok(prio3_prepare_start(
+                Ok(prio3_prepare_init(
                     prio3_config,
                     verify_key,
                     agg_id,

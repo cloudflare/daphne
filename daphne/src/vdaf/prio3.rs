@@ -83,7 +83,7 @@ macro_rules! prep_start {
 }
 
 /// Consume an input share and return the corresponding VDAF step and message.
-pub(crate) fn prio3_prepare_start(
+pub(crate) fn prio3_prepare_init(
     config: &Prio3Config,
     verify_key: &[u8; 16],
     agg_id: usize,

@@ -4,7 +4,7 @@
 use crate::{
     vdaf::prio3::{
         prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-        prio3_prepare_start, prio3_shard, prio3_unshard, Prio3Error,
+        prio3_prepare_init, prio3_shard, prio3_unshard, Prio3Error,
     },
     DapAggregateResult, DapMeasurement, Prio3Config,
 };
@@ -58,10 +58,10 @@ fn test_prepare(
 
     // Prepare
     let (leader_state, leader_share) =
-        prio3_prepare_start(&config, &verify_key, 0, nonce, &encoded_input_shares[0])?;
+        prio3_prepare_init(&config, &verify_key, 0, nonce, &encoded_input_shares[0])?;
 
     let (helper_state, helper_share) =
-        prio3_prepare_start(&config, &verify_key, 1, nonce, &encoded_input_shares[1])?;
+        prio3_prepare_init(&config, &verify_key, 1, nonce, &encoded_input_shares[1])?;
 
     let helper_share_data = prio3_encode_prepare_message(&helper_share);
 
