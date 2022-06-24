@@ -1,15 +1,22 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Daphne is an implementation of the [DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)
-//! protocol. Daphne includes supports for the following [VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/):
-//!  - Prio3Aes128Count
-//!  - Prio3Aes128Histogram
-//!  - Prio3Aes128Sum
+//! This crate implements the core protocol logic for the Distributed Aggregation Protocol
+//! ([DAP](https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap)) standard under development in the
+//! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
+//! [VDAFs](https://github.com/cfrg/draft-irtf-cfrg-vdaf).
 //!
-//! Additional Prio3 variants can be added easily as need.
+//! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
+//! Instead, it defines traits for the functionalities that a concrete instantiation of the
+//! protocol is required to implement. For example, the `daphne_worker` crate implements a backend
+//! for the DAP Leader and Helper. See the [`crate::roles`](roles) module for details.
 //!
-//! Daphne is not compatible with DAP tasks whose batch lifetime is longer than one aggregation.
+//! Daphne is not yet feature complete. Known issues include:
+//!
+//! * Daphne is not compatible with DAP tasks whose maximum batch lifetime is longer than one.
+//!
+//! * Daphne does handle aborts precisely as specified. In particular, some fields in the "Problem
+//! Details" document are missing.
 
 use crate::{
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
@@ -519,4 +526,4 @@ mod messages_test;
 pub mod roles;
 #[cfg(test)]
 mod roles_test;
-mod vdaf;
+pub mod vdaf;
