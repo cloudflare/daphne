@@ -1,7 +1,7 @@
 # Daphne
 
 Daphne is a Rust implementation of the Distributed Aggregation Protocol
-([DAP])(https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap) standard. DAP is
+([DAP](https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap)) standard. DAP is
 under active development in the PPM working group of the IETF.
 
 This software is intended to support experimental DAP deployments and is not yet
@@ -77,3 +77,8 @@ The `daphne_worker` crate also has integration tests for
 ```
 DAP_ENV=dev cargo test --features=test_janus -- --test-threads 1
 ```
+
+## Acknowledgements
+
+The name "Daphne" is credited to Cloudflare Research interns Tim Alberdingk
+Thijm and James Larisch, who came up with the mame independently.
