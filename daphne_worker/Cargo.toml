@@ -23,11 +23,7 @@ daphne = { path = "../daphne" }
 async-trait = "0.1.56"
 base64 = "0.13.0"
 cfg-if = "0.1.2"
-# TODO Update after next workers-rs release. This temporary fix is needed in
-# order to resolve a dependency conflict with janus_server and to get
-# `worker-build` to install.
-#worker = "0.0.9"
-worker = { git = "https://github.com/cloudflare/workers-rs", rev = "eacdadd0c0b7d8e74963656e44b3e9c150a5a7d9", package = "worker" }
+worker = "0.0.10"
 serde_json = "1.0.67"
 getrandom = { version = "0.2", features = ["js"] } # Required for prio
 prio = "0.8.0"
