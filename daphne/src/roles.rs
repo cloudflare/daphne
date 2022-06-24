@@ -7,6 +7,7 @@ use crate::{
     constants::{
         MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_CONT_RESP, MEDIA_TYPE_AGG_INIT_REQ,
         MEDIA_TYPE_AGG_INIT_RESP, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_AGG_SHARE_RESP,
+        MEDIA_TYPE_HPKE_CONFIG,
     },
     hpke::HpkeDecrypter,
     messages::{
@@ -81,9 +82,8 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
     async fn mark_collected(&self, task_id: &Id, batch_interval: &Interval)
         -> Result<(), DapError>;
 
-    /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`. Returns the encoded HPKE config to put
-    /// in the body of the response.
-    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<Vec<u8>, DapAbort> {
+    /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
+    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;
         for (k, v) in req.url.query_pairs() {
@@ -105,7 +105,10 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
             let hpke_config = self
                 .get_hpke_config_for(task_id)
                 .ok_or(DapAbort::UnrecognizedTask)?;
-            Ok(hpke_config.get_encoded())
+            Ok(DapResponse {
+                media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+                payload: hpke_config.get_encoded(),
+            })
         } else {
             Err(DapAbort::BadRequest("missing query parameter".into()))
         }
