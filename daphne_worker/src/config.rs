@@ -50,7 +50,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// configured as the DAP Leader, i.e., if `DAP_AGGREGATOR_ROLE == "leader"`.
     pub(crate) collector_bearer_tokens: Option<HashMap<Id, BearerToken>>,
 
-    // TODO(MVP) Make `bucket_Key` and `bucket_count` unique per task.
+    // TODO(issue#12) Make `bucket_key` and `bucket_count` unique per task.
     bucket_key: Seed<16>,
     bucket_count: u64,
 }
@@ -78,7 +78,6 @@ impl<D> DaphneWorkerConfig<D> {
             ctx.var("DAP_HPKE_CONFIG_LIST")?.to_string().as_ref(),
         )
         .map_err(|e| Error::RustError(format!("Failed to parse DAP_HPKE_CONFIG_LIST: {}", e)))?;
-        // TODO(MVP) Encode as JSON objects rather than hex blobs.
         let mut hpke_config_list = Vec::with_capacity(hpke_config_list_hex.len());
         for hex in hpke_config_list_hex {
             let bytes = hex::decode(hex).map_err(int_err)?;
@@ -192,7 +191,6 @@ impl<D> DaphneWorkerConfig<D> {
             Seed::get_decoded(&hex::decode(json_bucket_key).map_err(int_err)?).map_err(int_err)?;
 
         let hpke_config_list_hex: Vec<String> = serde_json::from_str(json_hpke_config_list)?;
-        // TODO(MVP) Encode as JSON objects rather than hex blobs.
         let mut hpke_config_list = Vec::with_capacity(hpke_config_list_hex.len());
         for hex in hpke_config_list_hex {
             let bytes = hex::decode(hex).map_err(int_err)?;

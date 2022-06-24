@@ -8,7 +8,10 @@ mod test_runner;
 use assert_matches::assert_matches;
 use daphne::constants;
 use daphne_worker::InternalAggregateInfo;
-use prio::{codec::Decode, vdaf::prio3::Prio3};
+use prio::{
+    codec::{Decode, Encode},
+    vdaf::prio3::Prio3,
+};
 use rand::prelude::*;
 use test_runner::{TestRunner, COLLECTOR_HPKE_SECRET_KEY};
 
@@ -66,14 +69,9 @@ async fn janus_client() {
 // Test that daphne can run the aggregation sub-protocol with a Janus helper.
 //
 // For tracing, run `cargo test` with RUST_LOG=aggregator=trace,janus=trace,warning.
-//
-// TODO(MVP) Update Daphne to latest version of the draft to make this test pass.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_janus"), ignore)]
 async fn janus_helper() {
-    // TODO Use the same version of prio as Janus.
-    use prio::codec::{Decode, Encode};
-
     janus_server::trace::test_util::install_test_trace_subscriber();
     let (t, janus_helper) = TestRunner::janus_helper().await;
     let client = t.http_client();

@@ -90,7 +90,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
         .get_async("/hpke_config", |req, ctx| async move {
             let req = worker_request_to_dap(req).await?;
             let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-            // TODO(MVP) Have this method return a DapResponse.
+            // TODO(cjpatton) Have this method return a DapResponse.
             match config.http_get_hpke_config(&req).await {
                 Ok(hpke_config_data) => dap_response_to_worker(DapResponse {
                     media_type: Some(constants::MEDIA_TYPE_HPKE_CONFIG),
@@ -144,7 +144,6 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                         let task_id = parse_id!(ctx.param("task_id"));
                         let collect_id = parse_id!(ctx.param("collect_id"));
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        // TODO(MVP) Consider deriving the logic below.
                         match config.poll_collect_job(&task_id, &collect_id).await {
                             Ok(DapCollectJob::Done(collect_resp)) => {
                                 dap_response_to_worker(DapResponse {

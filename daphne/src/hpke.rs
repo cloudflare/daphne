@@ -99,7 +99,7 @@ impl HpkeSecretKey {
 
 impl HpkeDecrypter for HpkeSecretKey {
     fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
-        // TODO(MVP) Have HpkeSecretKey subsume the config.
+        // TODO(issue#12) Have HpkeSecretKey subsume the config.
         unreachable!("not implemented");
     }
 

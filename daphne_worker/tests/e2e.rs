@@ -143,18 +143,6 @@ async fn e2e_leader_upload() {
     );
 }
 
-// TODO Add tests for the following constants:
-//
-//  - Leader (resp. Helper) can't decrypt its input share (report gets dropped)
-//      - nonce/extension mismatch
-//      - unknown HPKE config ID
-//      - incorrect public key
-//  - Leader skips on init request (no valid reports)
-//  - Helper skips on init aggregate request
-//  - Input is invalid (report gets dropped)
-//  - Helper doesn't recognize the task ID
-//  - Helper can't parse (initial) aggregate request
-//  - Helper got repeated nonce
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_internal_leader_process() {
