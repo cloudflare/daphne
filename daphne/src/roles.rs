@@ -429,7 +429,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .get_task_config_for(&agg_init_req.task_id)
                     .ok_or(DapAbort::UnrecognizedTask)?;
 
-                let early_fails = self
+                let early_rejects = self
                     .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
                     .await?;
 
@@ -437,7 +437,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     self,
                     &task_config.vdaf_verify_key,
                     &agg_init_req,
-                    |nonce| early_fails.get(nonce).copied(),
+                    &early_rejects,
                 )?;
 
                 let agg_resp = match transition {

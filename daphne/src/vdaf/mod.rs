@@ -26,7 +26,10 @@ use prio::{
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::TryInto};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryInto,
+};
 
 const CTX_INPUT_SHARE: &[u8] = b"dap-01 input share";
 const CTX_AGG_SHARE: &[u8] = b"dap-01 aggregate share";
@@ -334,19 +337,18 @@ impl VdafConfig {
     ///
     /// * `agg_init_req` is the request sent by the Leader.
     ///
-    /// * `early_tran_fail_for` is a callback used to determine if a report should be rejected based on
-    /// the sequence of aggregate and collect requests made for the task so far. Its input is the
-    /// nonce of report share in `agg_init_req` and its return value is an optional transition failure.
-    pub(crate) fn handle_agg_init_req<D, F>(
+    /// * `early_rejects` is a tableindicating the set of reports in `agg_init_req` that the Helper
+    /// knows in advance it must reject. Each key is the report's nonce and the corresponding value
+    /// is the transition failure the Helper is to transmit.
+    pub(crate) fn handle_agg_init_req<D>(
         &self,
         decrypter: &D,
         verify_key: &VdafVerifyKey,
         agg_init_req: &AggregateInitializeReq,
-        early_tran_fail_for: F,
+        early_rejects: &HashMap<Nonce, TransitionFailure>,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort>
     where
         D: HpkeDecrypter,
-        F: Fn(&Nonce) -> Option<TransitionFailure>,
     {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -358,10 +360,10 @@ impl VdafConfig {
             }
             processed.insert(report_share.nonce.clone());
 
-            if let Some(failure) = early_tran_fail_for(&report_share.nonce) {
+            if let Some(failure) = early_rejects.get(&report_share.nonce) {
                 transitions.push(Transition {
                     nonce: report_share.nonce.clone(),
-                    var: TransitionVar::Failed(failure),
+                    var: TransitionVar::Failed(*failure),
                 });
                 continue;
             }
