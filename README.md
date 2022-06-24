@@ -11,12 +11,6 @@ docker-compose up --build --abort-on-container-exit --exit-code-from test
 
 ## Development environment
 
-During development it is convenient to run miniflare locally.
-
-> NOTE: In order to run `miniflare` you also need to install the proper version
-> of `worker-build`. See TODO in tests/backend/miniflare.Dockerfile. Note that
-> this is a temporary workaround.
-
 While iterating on the code it's often helpful to bypass docker-compose so that
 you don't have to wait for Docker containers to rebuild. Here are instructions
 for getting the Leader and Helper running without Docker.
@@ -27,7 +21,7 @@ platform locally using [miniflare](https://github.com/cloudflare/miniflare). To
 get it to work you'll also need to upgrade node to the latest version.
 
 ```
-$ nvm use 18.4.0 && npm install -g miniflare@2.5.1
+nvm use 18.4.0 && npm install -g miniflare@2.5.1
 ```
 
 To run the Leader: from the `daphne_worker` directory, do
