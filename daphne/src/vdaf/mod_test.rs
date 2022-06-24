@@ -18,7 +18,7 @@ use prio::vdaf::{
     PrepareTransition,
 };
 use rand::prelude::*;
-use std::{collections::HashSet, fmt::Debug, time::SystemTime};
+use std::{collections::HashMap, fmt::Debug, time::SystemTime};
 
 impl<M: Debug> DapLeaderTransition<M> {
     pub(crate) fn unwrap_continue(self) -> (DapLeaderState, M) {
@@ -222,7 +222,8 @@ fn agg_resp_fail_report_replayed() {
     let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Simulate the leader replaying a report.
-    t.helper_reports_aggregated.insert(reports[0].nonce.clone());
+    t.early_rejects
+        .insert(reports[0].nonce.clone(), TransitionFailure::ReportReplayed);
 
     let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
     let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
@@ -241,7 +242,8 @@ fn agg_resp_fail_batch_collected() {
 
     // Simulate the leader requesting aggregation of a report for a batch that has already been
     // collected.
-    t.helper_batch_collected = true;
+    t.early_rejects
+        .insert(reports[0].nonce.clone(), TransitionFailure::BatchCollected);
 
     let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
     let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
@@ -549,8 +551,7 @@ struct Test<'a> {
     vdaf_verify_key: VdafVerifyKey,
     leader_hpke_secret_key: HpkeSecretKey,
     helper_hpke_secret_key: HpkeSecretKey,
-    helper_reports_aggregated: HashSet<Nonce>,
-    helper_batch_collected: bool,
+    early_rejects: HashMap<Nonce, TransitionFailure>,
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_config: HpkeConfig,
     collector_hpke_secret_key: HpkeSecretKey,
@@ -578,8 +579,7 @@ impl<'a> Test<'a> {
             vdaf_verify_key,
             leader_hpke_secret_key,
             helper_hpke_secret_key,
-            helper_reports_aggregated: HashSet::new(),
-            helper_batch_collected: false,
+            early_rejects: HashMap::default(),
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
             collector_hpke_config,
             collector_hpke_secret_key,
@@ -629,13 +629,16 @@ impl<'a> Test<'a> {
                 &self.helper_hpke_secret_key,
                 &self.vdaf_verify_key,
                 &agg_init_req,
-                |nonce| self.helper_early_tran_fail_for(nonce),
+                &self.early_rejects,
             )
             .unwrap();
 
         for report_share in agg_init_req.report_shares {
-            self.helper_reports_aggregated
-                .insert(report_share.nonce.clone());
+            // Make sure the Leader doesn't try to aggregate these reports again.
+            self.early_rejects.insert(
+                report_share.nonce.clone(),
+                TransitionFailure::ReportReplayed,
+            );
         }
 
         agg_resp
@@ -736,14 +739,5 @@ impl<'a> Test<'a> {
                 enc_agg_shares,
             )
             .unwrap()
-    }
-
-    fn helper_early_tran_fail_for(&self, nonce: &Nonce) -> Option<TransitionFailure> {
-        if !self.helper_batch_collected && self.helper_reports_aggregated.contains(nonce) {
-            return Some(TransitionFailure::ReportReplayed);
-        } else if self.helper_batch_collected && !self.helper_reports_aggregated.contains(nonce) {
-            return Some(TransitionFailure::BatchCollected);
-        }
-        None
     }
 }
