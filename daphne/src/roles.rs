@@ -238,7 +238,12 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(self.init_collect_job(&collect_req).await?)
     }
 
-    /// Run an aggregation job if there are pending reports and process all pending collect jobs.
+    /// Run an aggregation job if there are pending reports, then process all pending collect jobs.
+    ///
+    /// This method is geared primarily towards testing. It also demonstrates how to properly
+    /// synchronize collect and aggregation jobs. If used in a large DAP deployment, it is likely
+    /// create a bottleneck. Such deployments can improve throughput by running many aggregation
+    /// jobs in parallel.
     async fn process(
         &self,
         task_id: &Id,
@@ -318,7 +323,10 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             telem.reports_aggregated += out_shares_count;
         }
 
-        // Process pending collect jobs.
+        // Process pending collect jobs. We wait until all aggregation jobs are finished before
+        // proceeding to this step. This is to prevent a race condition involving an aggregate
+        // share computed during a collect job and any output shares computed during an aggregation
+        // job.
         let pending = self.get_pending_collect_jobs(task_id).await?;
         for (collect_id, collect_req) in pending.into_iter() {
             let leader_agg_share = self
