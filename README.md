@@ -81,4 +81,4 @@ DAP_ENV=dev cargo test --features=test_janus -- --test-threads 1
 ## Acknowledgements
 
 The name "Daphne" is credited to Cloudflare Research interns Tim Alberdingk
-Thijm and James Larisch, who came up with the mame independently.
+Thijm and James Larisch, who came up with the name independently.
