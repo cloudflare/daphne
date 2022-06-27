@@ -1,2 +1,7 @@
 target
 node_modules
+.DS_Store
+**/*.rs.bk
+wasm-pack.log
+build/
+dist

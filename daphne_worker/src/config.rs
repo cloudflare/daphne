@@ -12,7 +12,7 @@ use crate::{
         leader_state_store::{durable_leader_state_name, DURABLE_LEADER_STATE_DELETE_ALL},
         report_store::{durable_report_store_name, DURABLE_REPORT_STORE_DELETE_ALL},
     },
-    utils::{int_err, now},
+    int_err, now,
 };
 use daphne::{
     auth::BearerToken,

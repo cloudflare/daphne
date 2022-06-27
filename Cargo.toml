@@ -5,6 +5,7 @@
 members = [
     "daphne",
     "daphne_worker",
+    "daphne_worker_test",
 ]
 
 [profile.release]

@@ -1,0 +1,32 @@
+name = "" # todo
+workers_dev = true
+type = "javascript" # required for wrangler<=2
+main = "build/worker/shim.mjs"
+compatibility_date = "2022-01-20"
+
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+
+[build.upload]
+dir    = "build/worker"
+format = "modules"
+main   = "./shim.mjs"
+
+[[build.upload.rules]]
+globs = ["**/*.wasm"]
+type  = "CompiledWasm"
+
+
+[durable_objects]
+bindings = [
+  { name = "DAP_REPORT_STORE", class_name = "ReportStore" },
+  { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+  { name = "DAP_LEADER_STATE_STORE", class_name = "LeaderStateStore" },
+  { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+]
+
+
+[vars]
+WORKERS_RS_VERSION = "0.0.10"
