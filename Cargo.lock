@@ -462,20 +462,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "daphne_worker"
+name = "daphne-worker-test"
 version = "0.0.1"
 dependencies = [
  "assert_matches",
- "async-trait",
  "base64",
  "cfg-if 0.1.10",
  "console_error_panic_hook",
  "daphne",
+ "daphne_worker",
  "deadpool-postgres",
  "futures",
- "getrandom",
  "hex",
- "hpke 0.8.0",
  "janus",
  "janus_server",
  "janus_test_util",
@@ -483,15 +481,33 @@ dependencies = [
  "prio",
  "rand",
  "reqwest",
+ "ring",
+ "serde_json",
+ "testcontainers",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "url",
+ "worker",
+]
+
+[[package]]
+name = "daphne_worker"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64",
+ "daphne",
+ "getrandom",
+ "hex",
+ "hpke 0.8.0",
+ "prio",
+ "rand",
  "reqwest-wasm",
  "ring",
  "serde",
  "serde_json",
- "testcontainers",
  "thiserror",
- "tokio",
- "tokio-postgres",
- "tracing",
  "url",
  "worker",
 ]

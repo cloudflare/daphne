@@ -79,13 +79,23 @@ macro_rules! parse_id {
     };
 }
 
-#[event(fetch, respond_with_errors)]
-pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
-    log_request(&req);
-
-    // Optionally, get more helpful error messages written to the console in the case of a panic.
-    utils::set_panic_hook();
-
+/// HTTP request handler for Daphne-Worker.
+///
+/// This methoed is typically called from the
+/// [workers-rs](https://github.com/cloudflare/workers-rs) `main` function. For example:
+///
+/// ```ignore
+/// use daphne_worker::run_daphne_worker;
+/// use worker::*;
+///
+/// #[event(fetch)]
+/// pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
+///     run_daphne_worker(req, env).await
+/// }
+/// ```
+//
+// TODO Document endpoints that aren't defined in the DAP spec
+pub async fn run_daphne_worker(req: Request, env: Env) -> Result<Response> {
     let router = Router::new()
         .get_async("/hpke_config", |req, ctx| async move {
             let req = worker_request_to_dap(req).await?;
@@ -197,14 +207,13 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     router.run(req, env).await
 }
 
-fn log_request(req: &Request) {
-    console_log!(
-        "{} - [{}], located at: {:?}, within: {}",
-        Date::now().to_string(),
-        req.path(),
-        req.cf().coordinates().unwrap_or_default(),
-        req.cf().region().unwrap_or_else(|| "unknown region".into())
-    );
+pub(crate) fn now() -> u64 {
+    Date::now().as_millis() / 1000
+}
+
+pub(crate) fn int_err<S: ToString>(s: S) -> Error {
+    console_error!("internal error: {}", s.to_string());
+    Error::RustError("internalError".to_string())
 }
 
 fn abort(e: DapAbort) -> Result<Response> {
@@ -226,7 +235,6 @@ fn abort(e: DapAbort) -> Result<Response> {
 mod config;
 mod dap;
 mod durable;
-mod utils;
 
 #[cfg(test)]
 mod config_test;

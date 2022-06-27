@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::utils::int_err;
+use crate::int_err;
 use daphne::DapAggregateShare;
 use worker::*;
 

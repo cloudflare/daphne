@@ -3,39 +3,39 @@
 ---
 version: "3.3"
 networks:
-  ppm_network:
+  dap_network:
     driver: bridge
 services:
   leader:
     networks:
-      - ppm_network
+      - dap_network
     ports:
       - "8787"
     build:
       context: .
-      dockerfile: daphne_worker/tests/backend/miniflare.Dockerfile
+      dockerfile: daphne_worker_test/docker/miniflare.Dockerfile
     command:
+      - "--env=leader.env"
       - "--port=8787"
       - "--global-random"
-      - "--env=tests/backend/leader.env"
   helper:
     networks:
-      - ppm_network
+      - dap_network
     ports:
       - "8788"
     build:
       context: .
-      dockerfile: daphne_worker/tests/backend/miniflare.Dockerfile
+      dockerfile: daphne_worker_test/docker/miniflare.Dockerfile
     command:
+      - "--env=helper.env"
       - "--port=8788"
       - "--global-random"
-      - "--env=tests/backend/helper.env"
   test:
     networks:
-      - ppm_network
+      - dap_network
     build:
       context: .
-      dockerfile: daphne_worker/tests/backend/runtests.Dockerfile
+      dockerfile: daphne_worker_test/docker/runtests.Dockerfile
     depends_on:
       - leader
       - helper

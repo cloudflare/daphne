@@ -26,8 +26,7 @@ use crate::{
             DURABLE_REPORT_STORE_PUT_PROCESSED,
         },
     },
-    utils::now,
-    InternalAggregateInfo,
+    now, InternalAggregateInfo,
 };
 use async_trait::async_trait;
 use daphne::{
