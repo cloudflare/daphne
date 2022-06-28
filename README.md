@@ -31,14 +31,15 @@ This repository contains three crates:
 ## Testing
 
 The `daphne` crate relies on unit tests. The `daphne_worker` crate relies mostly
-on integration tests implemented in `daphne_worker_test`. See
-[daphne_worker_test/README.md](daphne_worker_test/README.md) for details.
-
-Integration tests can be run via docker-compose:
+on integration tests implemented in `daphne_worker_test`. Integration tests can
+be run via docker-compose:
 
 ```
 docker-compose up --build --abort-on-container-exit --exit-code-from test
 ```
+
+See the README in that directory for instructions on running Daphne-Worker
+locally.
 
 ## Acknowledgements
 
