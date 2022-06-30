@@ -366,3 +366,70 @@ async fn http_post_collect_unauthorized_request() {
         Err(DapAbort::UnauthorizedRequest)
     );
 }
+
+#[test]
+fn hpke_decrypter() {
+    // Construct mock helper
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+
+    // Initialize variables for mock report
+    let info = b"info string";
+    let aad = b"associated data";
+    let plaintext = b"plaintext";
+    let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+    let config_bytes = hex::decode(&hpke_config_list_hex[0]).unwrap();
+    let config = HpkeConfig::get_decoded(&config_bytes).unwrap();
+    let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
+
+    // Construct mock report
+    let report = Report {
+        task_id: Id([23; 32]),
+        nonce: Nonce {
+            time: 1637364244,
+            rand: 10496152761178246059,
+        },
+        ignored_extensions: b"some extension".to_vec(),
+        encrypted_input_shares: vec![
+            HpkeCiphertext {
+                config_id: 23,
+                enc: enc,
+                payload: ciphertext,
+            },
+        ],
+    };
+
+    // Run test
+
+    // Expect false due to non-existing config ID.
+    assert_eq!(
+        helper.can_hpke_decrypt(&task_id, 0),
+        false
+    );
+
+    // Expect true due to existing config ID.
+    assert_eq!(
+        helper.can_hpke_decrypt(&task_id, report.encrypted_input_shares[0].config_id),
+        true
+    );
+
+    // Expect decryption to fail
+    assert_matches!(
+        helper.hpke_decrypt(
+            &report.task_id,
+            info,
+            aad,
+            &HpkeCiphertext { 
+                config_id: 0,
+                enc: vec![],
+                payload: b"ciphertext".to_vec(),
+            }),
+        Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
+    );
+
+    // Expect decryption to succeed
+    assert_eq!(
+        helper.hpke_decrypt(&report.task_id, info, aad, &report.encrypted_input_shares[0]).unwrap(),
+        plaintext
+    );
+}
