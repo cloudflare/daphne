@@ -4,7 +4,7 @@
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
-    hpke::HpkeDecrypter,
+    hpke::{HpkeDecrypter, HpkeSecretKey},
     messages::{
         AggregateInitializeReq, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
@@ -15,7 +15,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
-use prio::codec::Encode;
+use prio::codec::{Encode, Decode};
 use rand::prelude::*;
 use std::collections::HashMap;
 use url::Url;
@@ -38,17 +38,56 @@ const TASK_LIST: &str = r#"{
     }
 }"#;
 
+const HPKE_CONFIG_LIST: &str = r#"[
+    "1700200001000100205dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
+]"#;
+
+const HPKE_SECRET_KEY_LIST: &str = r#"[
+    {
+        "id": 23,
+        "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+    }
+]"#;
+
 const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
 const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mYqO9hk=";
 
 struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
+    hpke_config_list: Vec<HpkeConfig>,
+    hpke_secret_key_list: Vec<HpkeSecretKey>,
 }
 
 impl MockAggregator {
     fn new() -> Self {
+        // Task list
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
-        Self { tasks }
+
+        // Hpke config List
+        let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+        let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
+        for hex in hpke_config_list_hex {
+            let bytes: Vec<u8> = hex::decode(hex).unwrap();
+            let hpke_config = HpkeConfig::get_decoded(&bytes).unwrap();
+            hpke_config_list.push(hpke_config);
+        }
+
+        // Hpke secret key list
+        let hpke_secret_key_list: Vec<HpkeSecretKey> = serde_json::from_str(HPKE_SECRET_KEY_LIST).expect("Failed to parse HPKE secret key list");
+
+        Self {
+            tasks,
+            hpke_config_list, hpke_secret_key_list
+        }
+    }
+
+    fn get_hpke_secret_key_for(&self, hpke_config_id: u8) -> Option<&HpkeSecretKey> {
+        for hpke_secret_key in self.hpke_secret_key_list.iter() {
+            if hpke_config_id == hpke_secret_key.id {
+                return Some(hpke_secret_key);
+            }
+        }
+        None
     }
 
     /// Task to use for nominal tests.
@@ -77,21 +116,30 @@ impl BearerTokenProvider for MockAggregator {
 
 impl HpkeDecrypter for MockAggregator {
     fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
-        unreachable!("not implemented");
+        if self.hpke_config_list.is_empty() {
+            return None;
+        }
+
+        // Advertise the first HPKE config in the list.
+        Some(&self.hpke_config_list[0])
     }
 
-    fn can_hpke_decrypt(&self, _task_id: &Id, _config_id: u8) -> bool {
-        unreachable!("not implemented");
+    fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
+        self.get_hpke_secret_key_for(config_id).is_some()
     }
 
     fn hpke_decrypt(
         &self,
         _task_id: &Id,
-        _info: &[u8],
-        _aad: &[u8],
-        _ciphertext: &HpkeCiphertext,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        unreachable!("not implemented");
+        if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
+            Ok(hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+        } else {
+            Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
+        }
     }
 }
 
