@@ -9,9 +9,10 @@ use crate::{
         AggregateInitializeReq, AggregateShareReq, AggregateResp, CollectReq, CollectResp, HpkeCiphertext,
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionVar, TransitionFailure,
     },
+    Prio3Config, VdafConfig,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
-    DapRequest, DapResponse, DapTaskConfig,
+    DapRequest, DapResponse, DapTaskConfig, DapMeasurement,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -28,24 +29,25 @@ const TASK_LIST: &str = r#"{
         "min_batch_duration": 3600,
         "min_batch_size": 100,
         "vdaf": {
-            "prio3": {
-                "histogram": {
-                    "buckets": [77, 999]
-                }
-            }
+            "prio3": "count"
         },
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     }
 }"#;
 
 const HPKE_CONFIG_LIST: &str = r#"[
-    "1700200001000100205dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
+    "1700200001000100205dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765",
+    "0e0020000100010020b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
 ]"#;
 
 const HPKE_SECRET_KEY_LIST: &str = r#"[
     {
         "id": 23,
         "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+    },
+    {
+        "id": 14,
+        "sk": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
     }
 ]"#;
 
@@ -418,7 +420,54 @@ async fn http_post_aggregate_fake_ciphertext() {
     );
 }
 
-// TODO: Create a test case where we return TransitionVar::Continued
+#[tokio::test]
+async fn http_post_aggregate_genuine_ciphertext() {
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+    let task_config = helper.get_task_config_for(task_id).unwrap();
+
+    // Construct HPKE config list
+    let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+    let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
+    for config_hex in hpke_config_list_hex {
+        hpke_config_list.push(HpkeConfig::get_decoded(&hex::decode(&config_hex).unwrap()).unwrap());
+    }
+
+    // Construct report
+    let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
+    let report = vdaf_config.produce_report(&hpke_config_list, 1637361337, task_id, DapMeasurement::U64(1)).unwrap();
+
+    // Construct DapRequest
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
+        payload: AggregateInitializeReq {
+            task_id: task_id.clone(),
+            agg_job_id: Id([1; 32]),
+            agg_param: b"this is an aggregation parameter".to_vec(),
+            report_shares: vec![
+                ReportShare {
+                    nonce: report.nonce,
+                    ignored_extensions: report.ignored_extensions,
+                    // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper)
+                    encrypted_input_share: report.encrypted_input_shares[1].clone(),
+                },
+            ],
+        }
+        .get_encoded(),
+        url: task_config.helper_url.join("/aggregate").unwrap(),
+        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+    };
+
+    // Get AggregateResp and then extract the transition data from inside
+    let agg_resp = AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload).unwrap();
+    let transition = &agg_resp.transitions[0];
+
+    // Expect success due to genuine ciphertext
+    assert_matches!(
+        transition.var,
+        TransitionVar::Continued(_)
+    );
+}
 
 #[test]
 fn hpke_decrypter() {
