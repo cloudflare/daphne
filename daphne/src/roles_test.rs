@@ -378,7 +378,7 @@ async fn http_post_collect_unauthorized_request() {
 }
 
 #[tokio::test]
-async fn http_post_aggregate_fake_ciphertext() {
+async fn http_post_aggregate_invalid_ciphertext() {
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
@@ -398,8 +398,8 @@ async fn http_post_aggregate_fake_ciphertext() {
                     ignored_extensions: b"these are extensions".to_vec(),
                     encrypted_input_share: HpkeCiphertext {
                         config_id: 23,
-                        enc: b"fake encapsulated key".to_vec(),
-                        payload: b"fake ciphertext".to_vec(),
+                        enc: b"invalid encapsulated key".to_vec(),
+                        payload: b"invalid ciphertext".to_vec(),
                     },
                 },
             ],
@@ -421,7 +421,7 @@ async fn http_post_aggregate_fake_ciphertext() {
 }
 
 #[tokio::test]
-async fn http_post_aggregate_genuine_ciphertext() {
+async fn http_post_aggregate_valid_ciphertext() {
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
