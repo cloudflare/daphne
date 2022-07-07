@@ -415,8 +415,9 @@ pub trait DapHelper<S>: DapAggregator<S> {
         agg_job_id: &Id,
     ) -> Result<DapHelperState, DapError>;
 
-    /// Handle an HTTP POST to `/aggregate`. The input is an AggregateInitializeReq and the
-    /// response is an AggregateResp.
+    /// Handle an HTTP POST to `/aggregate`. The input is either an AggregateInitializeReq or
+    /// AggregateContinueReq and the response is an AggregateResp.
+    ///
     /// This is called during the Initialization and Continuation phases.
     async fn http_post_aggregate(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         if !self.authorized(req).await? {
@@ -434,7 +435,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
                     .await?;
 
-                // This is where the encrypted report share is decrypted
+                // This is where the encrypted report share is decrypted.
                 let transition = task_config.vdaf.handle_agg_init_req(
                     self,
                     &task_config.vdaf_verify_key,
@@ -494,8 +495,9 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
     }
 
-    /// Handle an HTTP POST to `/aggregate_share`. The input is an AggregateShareReq and the
-    /// response is an AggregateShareResp.
+    /// Handle an HTTP POST to `/aggregate_share`.
+    /// The input is an AggregateShareReq and the response is an AggregateShareResp.
+    ///
     /// This is called during the Collection phase.
     async fn http_post_aggregate_share(
         &self,
