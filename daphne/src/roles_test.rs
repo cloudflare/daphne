@@ -6,17 +6,17 @@ use crate::{
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
     hpke::{HpkeDecrypter, HpkeSecretKey},
     messages::{
-        AggregateInitializeReq, AggregateShareReq, AggregateResp, CollectReq, CollectResp, HpkeCiphertext,
-        HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionVar, TransitionFailure,
+        AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq, CollectResp,
+        HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
+        TransitionVar,
     },
-    Prio3Config, VdafConfig,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
-    DapRequest, DapResponse, DapTaskConfig, DapMeasurement,
+    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapMeasurement,
+    DapOutputShare, DapRequest, DapResponse, DapTaskConfig, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
-use prio::codec::{Encode, Decode};
+use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use std::{collections::HashMap, vec};
 use url::Url;
@@ -66,7 +66,8 @@ impl MockAggregator {
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
 
         // Hpke config List
-        let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+        let hpke_config_list_hex: Vec<String> =
+            serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
         let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
         for hex in hpke_config_list_hex {
             let bytes: Vec<u8> = hex::decode(hex).unwrap();
@@ -75,11 +76,13 @@ impl MockAggregator {
         }
 
         // Hpke secret key list
-        let hpke_secret_key_list: Vec<HpkeSecretKey> = serde_json::from_str(HPKE_SECRET_KEY_LIST).expect("Failed to parse HPKE secret key list");
+        let hpke_secret_key_list: Vec<HpkeSecretKey> = serde_json::from_str(HPKE_SECRET_KEY_LIST)
+            .expect("Failed to parse HPKE secret key list");
 
         Self {
             tasks,
-            hpke_config_list, hpke_secret_key_list
+            hpke_config_list,
+            hpke_secret_key_list,
         }
     }
 
@@ -140,7 +143,7 @@ impl HpkeDecrypter for MockAggregator {
         if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
             match hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload) {
                 Ok(plaintext) => Ok(plaintext),
-                Err(_) => Err(DapError::Transition(TransitionFailure::HpkeDecryptError))
+                Err(_) => Err(DapError::Transition(TransitionFailure::HpkeDecryptError)),
             }
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
@@ -202,8 +205,8 @@ impl DapHelper<BearerToken> for MockAggregator {
         _task_id: &Id,
         _report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        // Return empty HashMap (for now)
-        // TODO: Implement correct functionality
+        // Return empty HashMap (for now).
+        // TODO: Implement correct functionality.
         let early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
         return Ok(early_fails);
     }
@@ -214,8 +217,8 @@ impl DapHelper<BearerToken> for MockAggregator {
         _agg_job_id: &Id,
         _helper_state: &DapHelperState,
     ) -> Result<(), DapError> {
-        // Return empty Ok
-        // TODO: Implement correct functionality
+        // Return empty Ok (for now).
+        // TODO: Implement correct functionality.
         Ok(())
     }
 
@@ -389,35 +392,32 @@ async fn http_post_aggregate_invalid_ciphertext() {
             task_id: task_id.clone(),
             agg_job_id: Id([1; 32]),
             agg_param: b"this is an aggregation parameter".to_vec(),
-            report_shares: vec![
-                ReportShare {
-                    nonce: Nonce {
-                        time: 1637361337,
-                        rand: 10496152761178246059,
-                    },
-                    ignored_extensions: b"these are extensions".to_vec(),
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 23,
-                        enc: b"invalid encapsulated key".to_vec(),
-                        payload: b"invalid ciphertext".to_vec(),
-                    },
+            report_shares: vec![ReportShare {
+                nonce: Nonce {
+                    time: 1637361337,
+                    rand: 10496152761178246059,
                 },
-            ],
+                ignored_extensions: b"these are extensions".to_vec(),
+                encrypted_input_share: HpkeCiphertext {
+                    config_id: 23,
+                    enc: b"invalid encapsulated key".to_vec(),
+                    payload: b"invalid ciphertext".to_vec(),
+                },
+            }],
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate").unwrap(),
         sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
     };
 
-    // Get AggregateResp and then extract the transition data from inside
-    let agg_resp = AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload).unwrap();
+    // Get AggregateResp and then extract the transition data from inside.
+    let agg_resp =
+        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
+            .unwrap();
     let transition = &agg_resp.transitions[0];
 
-    // Expect failure due to fake ciphertext
-    assert_matches!(
-        transition.var,
-        TransitionVar::Failed(_)
-    );
+    // Expect failure due to invalid ciphertext.
+    assert_matches!(transition.var, TransitionVar::Failed(_));
 }
 
 #[tokio::test]
@@ -426,65 +426,71 @@ async fn http_post_aggregate_valid_ciphertext() {
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
 
-    // Construct HPKE config list
-    let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+    // Construct HPKE config list.
+    let hpke_config_list_hex: Vec<String> =
+        serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
     let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
     for config_hex in hpke_config_list_hex {
         hpke_config_list.push(HpkeConfig::get_decoded(&hex::decode(&config_hex).unwrap()).unwrap());
     }
 
-    // Construct report
+    // Construct report.
     let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-    let report = vdaf_config.produce_report(&hpke_config_list, 1637361337, task_id, DapMeasurement::U64(1)).unwrap();
+    let report = vdaf_config
+        .produce_report(
+            &hpke_config_list,
+            1637361337,
+            task_id,
+            DapMeasurement::U64(1),
+        )
+        .unwrap();
 
-    // Construct DapRequest
+    // Construct DapRequest.
     let req = DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
         payload: AggregateInitializeReq {
             task_id: task_id.clone(),
             agg_job_id: Id([1; 32]),
             agg_param: b"this is an aggregation parameter".to_vec(),
-            report_shares: vec![
-                ReportShare {
-                    nonce: report.nonce,
-                    ignored_extensions: report.ignored_extensions,
-                    // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper)
-                    encrypted_input_share: report.encrypted_input_shares[1].clone(),
-                },
-            ],
+            report_shares: vec![ReportShare {
+                nonce: report.nonce,
+                ignored_extensions: report.ignored_extensions,
+                // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
+                encrypted_input_share: report.encrypted_input_shares[1].clone(),
+            }],
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate").unwrap(),
         sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
     };
 
-    // Get AggregateResp and then extract the transition data from inside
-    let agg_resp = AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload).unwrap();
+    // Get AggregateResp and then extract the transition data from inside.
+    let agg_resp =
+        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
+            .unwrap();
     let transition = &agg_resp.transitions[0];
 
-    // Expect success due to genuine ciphertext
-    assert_matches!(
-        transition.var,
-        TransitionVar::Continued(_)
-    );
+    // Expect success due to valid ciphertext.
+    assert_matches!(transition.var, TransitionVar::Continued(_));
 }
 
 #[test]
 fn hpke_decrypter() {
-    // Construct mock helper
+    // Construct mock helper.
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
 
-    // Initialize variables for mock report
+    // Initialize variables for mock report.
     let info = b"info string";
     let aad = b"associated data";
     let plaintext = b"plaintext";
-    let hpke_config_list_hex: Vec<String> = serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
+    let hpke_config_list_hex: Vec<String> =
+        serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
     let config_bytes = hex::decode(&hpke_config_list_hex[0]).unwrap();
     let config = HpkeConfig::get_decoded(&config_bytes).unwrap();
     let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
 
-    // Construct mock report
+    // Construct mock report.
     let report = Report {
         task_id: Id([23; 32]),
         nonce: Nonce {
@@ -492,22 +498,15 @@ fn hpke_decrypter() {
             rand: 10496152761178246059,
         },
         ignored_extensions: b"some extension".to_vec(),
-        encrypted_input_shares: vec![
-            HpkeCiphertext {
-                config_id: 23,
-                enc: enc,
-                payload: ciphertext,
-            },
-        ],
+        encrypted_input_shares: vec![HpkeCiphertext {
+            config_id: 23,
+            enc: enc,
+            payload: ciphertext,
+        }],
     };
 
-    // Run test
-
     // Expect false due to non-existing config ID.
-    assert_eq!(
-        helper.can_hpke_decrypt(&task_id, 0),
-        false
-    );
+    assert_eq!(helper.can_hpke_decrypt(&task_id, 0), false);
 
     // Expect true due to existing config ID.
     assert_eq!(
@@ -515,23 +514,31 @@ fn hpke_decrypter() {
         true
     );
 
-    // Expect decryption to fail
+    // Expect decryption to fail.
     assert_matches!(
         helper.hpke_decrypt(
             &report.task_id,
             info,
             aad,
-            &HpkeCiphertext { 
+            &HpkeCiphertext {
                 config_id: 0,
                 enc: vec![],
                 payload: b"ciphertext".to_vec(),
-            }),
+            }
+        ),
         Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
     );
 
-    // Expect decryption to succeed
+    // Expect decryption to succeed.
     assert_eq!(
-        helper.hpke_decrypt(&report.task_id, info, aad, &report.encrypted_input_shares[0]).unwrap(),
+        helper
+            .hpke_decrypt(
+                &report.task_id,
+                info,
+                aad,
+                &report.encrypted_input_shares[0]
+            )
+            .unwrap(),
         plaintext
     );
 }
