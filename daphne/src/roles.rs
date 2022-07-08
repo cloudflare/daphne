@@ -495,8 +495,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
     }
 
-    /// Handle an HTTP POST to `/aggregate_share`.
-    /// The input is an AggregateShareReq and the response is an AggregateShareResp.
+    /// Handle an HTTP POST to `/aggregate_share`. The input is an AggregateShareReq and the
+    /// response is an AggregateShareResp.
     ///
     /// This is called during the Collection phase.
     async fn http_post_aggregate_share(
