@@ -7,7 +7,7 @@ mod test_runner;
 
 use daphne::{
     constants,
-    hpke::HpkeSecretKey,
+    hpke::HpkeReceiverConfig,
     messages::{CollectReq, CollectResp, Id, Interval},
     DapAggregateResult, DapMeasurement,
 };
@@ -15,7 +15,7 @@ use daphne_worker::InternalAggregateInfo;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use std::time::SystemTime;
-use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_SECRET_KEY};
+use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_RECEIVER_CONFIG};
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
@@ -287,7 +287,8 @@ async fn e2e_leader_collect_ok() {
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let decrypter: HpkeSecretKey = serde_json::from_str(COLLECTOR_HPKE_SECRET_KEY).unwrap();
+    let decrypter: HpkeReceiverConfig =
+        serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
     let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
         .vdaf

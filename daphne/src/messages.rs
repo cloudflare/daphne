@@ -653,7 +653,7 @@ pub(crate) fn encode_u16_bytes(bytes: &mut Vec<u8>, input: &[u8]) {
     bytes.extend_from_slice(input);
 }
 
-fn decode_u16_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
+pub(crate) fn decode_u16_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
     let len = u16::decode(bytes)? as usize;
     let mut out = vec![0; len];
     bytes.read_exact(&mut out)?;

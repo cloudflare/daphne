@@ -112,9 +112,15 @@ const JANUS_HELPER_TASK_LEADER_BEARER_TOKEN: &str =
 pub(crate) const COLLECTOR_BEARER_TOKEN: &str = "this is the bearer token of the Collector";
 
 #[allow(dead_code)]
-pub(crate) const COLLECTOR_HPKE_SECRET_KEY: &str = r#"{
-    "id": 244,
-    "sk": "68db815a534d3f92a6224c4cbbc2dd301be48ef32f112dbfb3709a4cbfe5f372"
+pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#"{
+    "config": {
+        "id": 244,
+        "kem_id": "X25519HkdfSha256",
+        "kdf_id": "HkdfSha256",
+        "aead_id": "Aes128Gcm",
+        "public_key": "a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f"
+    },
+    "secret_key": "68db815a534d3f92a6224c4cbbc2dd301be48ef32f112dbfb3709a4cbfe5f372"
 }"#;
 
 #[allow(dead_code)]
