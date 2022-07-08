@@ -6,8 +6,8 @@ use crate::{
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
     hpke::{HpkeDecrypter, HpkeSecretKey},
     messages::{
-        AggregateInitializeReq, AggregateShareReq, AggregateResp, CollectReq, CollectResp, HpkeCiphertext,
-        HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionVar, TransitionFailure,
+        AggregateInitializeReq, AggregateShareReq, CollectReq, CollectResp, HpkeCiphertext,
+        HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
@@ -17,7 +17,7 @@ use assert_matches::assert_matches;
 use async_trait::async_trait;
 use prio::codec::{Encode, Decode};
 use rand::prelude::*;
-use std::{collections::HashMap, vec};
+use std::collections::HashMap;
 use url::Url;
 
 const TASK_LIST: &str = r#"{
@@ -136,10 +136,7 @@ impl HpkeDecrypter for MockAggregator {
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
-            match hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload) {
-                Ok(plaintext) => Ok(plaintext),
-                Err(_) => Err(DapError::Transition(TransitionFailure::HpkeDecryptError))
-            }
+            Ok(hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }
@@ -200,10 +197,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         _task_id: &Id,
         _report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        // Return empty HashMap (for now)
-        // TODO: Implement correct functionality
-        let early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
-        return Ok(early_fails);
+        unreachable!("not implemented");
     }
 
     async fn put_helper_state(
@@ -212,9 +206,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         _agg_job_id: &Id,
         _helper_state: &DapHelperState,
     ) -> Result<(), DapError> {
-        // Return empty Ok
-        // TODO: Implement correct functionality
-        Ok(())
+        unreachable!("not implemented");
     }
 
     async fn get_helper_state(
@@ -374,51 +366,6 @@ async fn http_post_collect_unauthorized_request() {
         Err(DapAbort::UnauthorizedRequest)
     );
 }
-
-#[tokio::test]
-async fn http_post_aggregate_fake_ciphertext() {
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
-
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: AggregateInitializeReq {
-            task_id: task_id.clone(),
-            agg_job_id: Id([1; 32]),
-            agg_param: b"this is an aggregation parameter".to_vec(),
-            report_shares: vec![
-                ReportShare {
-                    nonce: Nonce {
-                        time: 1637361337,
-                        rand: 10496152761178246059,
-                    },
-                    ignored_extensions: b"these are extensions".to_vec(),
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 23,
-                        enc: b"fake encapsulated key".to_vec(),
-                        payload: b"fake ciphertext".to_vec(),
-                    },
-                },
-            ],
-        }
-        .get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
-
-    // Get AggregateResp and then extract the transition data from inside
-    let agg_resp = AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload).unwrap();
-    let transition = &agg_resp.transitions[0];
-
-    // Expect failure due to fake ciphertext
-    assert_matches!(
-        transition.var,
-        TransitionVar::Failed(_)
-    );
-}
-
-// TODO: Create a test case where we return TransitionVar::Continued
 
 #[test]
 fn hpke_decrypter() {
