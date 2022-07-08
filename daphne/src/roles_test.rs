@@ -156,7 +156,10 @@ impl HpkeDecrypter for MockAggregator {
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
-            Ok(hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+            match hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload) {
+                Ok(plaintext) => Ok(plaintext),
+                Err(_) => Err(DapError::Transition(TransitionFailure::HpkeDecryptError)),
+            }
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }
