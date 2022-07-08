@@ -494,9 +494,9 @@ async fn http_post_aggregate_valid_ciphertext() {
 
 #[test]
 fn hpke_decrypter() {
-    // Construct mock helper.
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
+    // Construct mock aggregator.
+    let aggregator = MockAggregator::new();
+    let task_id = aggregator.nominal_task_id();
 
     // Initialize variables for mock report.
     let info = b"info string";
@@ -524,17 +524,17 @@ fn hpke_decrypter() {
     };
 
     // Expect false due to non-existing config ID.
-    assert_eq!(helper.can_hpke_decrypt(&task_id, 0), false);
+    assert_eq!(aggregator.can_hpke_decrypt(&task_id, 0), false);
 
     // Expect true due to existing config ID.
     assert_eq!(
-        helper.can_hpke_decrypt(&task_id, report.encrypted_input_shares[0].config_id),
+        aggregator.can_hpke_decrypt(&task_id, report.encrypted_input_shares[0].config_id),
         true
     );
 
     // Expect decryption to fail.
     assert_matches!(
-        helper.hpke_decrypt(
+        aggregator.hpke_decrypt(
             &report.task_id,
             info,
             aad,
@@ -549,7 +549,7 @@ fn hpke_decrypter() {
 
     // Expect decryption to succeed.
     assert_eq!(
-        helper
+        aggregator
             .hpke_decrypt(
                 &report.task_id,
                 info,
