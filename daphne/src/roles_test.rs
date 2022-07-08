@@ -4,7 +4,7 @@
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
-    hpke::{HpkeDecrypter, HpkeSecretKey},
+    hpke::{HpkeDecrypter, HpkeReceiverConfig, HpkeSecretKey},
     messages::{
         AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq, CollectResp,
         HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report, ReportShare, TransitionFailure,
@@ -35,19 +35,32 @@ const TASK_LIST: &str = r#"{
     }
 }"#;
 
-const HPKE_CONFIG_LIST: &str = r#"[
-    "1700200001000100205dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765",
-    "0e0020000100010020b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
-]"#;
-
-const HPKE_SECRET_KEY_LIST: &str = r#"[
+const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
     {
-        "id": 23,
-        "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+        "config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key": "5dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
+        },
+        "secret_key": {
+            "id": 23,
+            "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+        }
     },
     {
-        "id": 14,
-        "sk": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
+        "config": {
+            "id": 14,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key": "b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
+        },
+        "secret_key": {
+            "id": 14,
+            "sk": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
+        }
     }
 ]"#;
 
@@ -62,22 +75,22 @@ struct MockAggregator {
 
 impl MockAggregator {
     fn new() -> Self {
-        // Task list
+        // Construct task list
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
 
-        // Hpke config List
-        let hpke_config_list_hex: Vec<String> =
-            serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
-        let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
-        for hex in hpke_config_list_hex {
-            let bytes: Vec<u8> = hex::decode(hex).unwrap();
-            let hpke_config = HpkeConfig::get_decoded(&bytes).unwrap();
-            hpke_config_list.push(hpke_config);
-        }
+        // Construct Hpke receiver config List
+        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
+            serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
+                .expect("failed to parse hpke_receiver_config_list");
 
-        // Hpke secret key list
-        let hpke_secret_key_list: Vec<HpkeSecretKey> = serde_json::from_str(HPKE_SECRET_KEY_LIST)
-            .expect("Failed to parse HPKE secret key list");
+        let mut hpke_config_list: Vec<HpkeConfig> =
+            Vec::with_capacity(hpke_receiver_config_list.len());
+        let mut hpke_secret_key_list: Vec<HpkeSecretKey> =
+            Vec::with_capacity(hpke_receiver_config_list.len());
+        for receiver_config in hpke_receiver_config_list {
+            hpke_config_list.push(receiver_config.config);
+            hpke_secret_key_list.push(receiver_config.secret_key);
+        }
 
         Self {
             tasks,
@@ -426,12 +439,15 @@ async fn http_post_aggregate_valid_ciphertext() {
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
 
+    // Construct Hpke receiver config List.
+    let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
+        serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
+            .expect("failed to parse hpke_receiver_config_list");
+
     // Construct HPKE config list.
-    let hpke_config_list_hex: Vec<String> =
-        serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
-    let mut hpke_config_list: Vec<HpkeConfig> = Vec::with_capacity(hpke_config_list_hex.len());
-    for config_hex in hpke_config_list_hex {
-        hpke_config_list.push(HpkeConfig::get_decoded(&hex::decode(&config_hex).unwrap()).unwrap());
+    let mut hpke_config_list = Vec::with_capacity(hpke_receiver_config_list.len());
+    for receiver_config in hpke_receiver_config_list {
+        hpke_config_list.push(receiver_config.config);
     }
 
     // Construct report.
@@ -484,10 +500,10 @@ fn hpke_decrypter() {
     let info = b"info string";
     let aad = b"associated data";
     let plaintext = b"plaintext";
-    let hpke_config_list_hex: Vec<String> =
-        serde_json::from_str(HPKE_CONFIG_LIST).expect("failed to parse HPKE config list");
-    let config_bytes = hex::decode(&hpke_config_list_hex[0]).unwrap();
-    let config = HpkeConfig::get_decoded(&config_bytes).unwrap();
+    let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
+        serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
+            .expect("failed to parse hpke_receiver_config_list");
+    let config = &hpke_receiver_config_list[0].config;
     let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
 
     // Construct mock report.
