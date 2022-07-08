@@ -35,6 +35,8 @@ const TASK_LIST: &str = r#"{
     }
 }"#;
 
+// TODO(nakatsuka-y) Merge secret key into `HpkeReceiverConfig` and remove `HpkeSecretKey`.
+// This removes the redundant "id" field in both of these structs. See issue #12.
 const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
     {
         "config": {
@@ -78,7 +80,7 @@ impl MockAggregator {
         // Construct task list
         let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
 
-        // Construct Hpke receiver config List
+        // Construct HPKE receiver config List
         let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
             serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
                 .expect("failed to parse hpke_receiver_config_list");
@@ -219,7 +221,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         _report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
         // Return empty HashMap (for now).
-        // TODO: Implement correct functionality.
+        // TODO(nakatsuka-y) Implement correct functionality.
         let early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
         return Ok(early_fails);
     }
@@ -231,7 +233,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         _helper_state: &DapHelperState,
     ) -> Result<(), DapError> {
         // Return empty Ok (for now).
-        // TODO: Implement correct functionality.
+        // TODO(nakatsuka-y) Implement correct functionality.
         Ok(())
     }
 
@@ -439,7 +441,7 @@ async fn http_post_aggregate_valid_ciphertext() {
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
 
-    // Construct Hpke receiver config List.
+    // Construct HPKE receiver config List.
     let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
         serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
             .expect("failed to parse hpke_receiver_config_list");
