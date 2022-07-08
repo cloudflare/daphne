@@ -36,7 +36,7 @@ impl HpkeConfig {
 }
 
 /// An HPKE configuration and corresponding secret key.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(try_from = "ShadowHpkeSecretKey")]
 pub struct HpkeSecretKey {
     pub id: u8,
@@ -150,7 +150,7 @@ pub trait HpkeDecrypter {
 }
 
 /// Struct that combines HpkeConfig and HpkeSecretKey
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
     pub secret_key: HpkeSecretKey,
