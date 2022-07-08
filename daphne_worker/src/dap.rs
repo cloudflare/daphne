@@ -77,16 +77,16 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 
 impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
     fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
-        if self.hpke_config_list.is_empty() {
+        if self.hpke_receiver_config_list.is_empty() {
             return None;
         }
 
         // Always advertise the first HPKE config in the list.
-        Some(&self.hpke_config_list[0])
+        Some(&(self.hpke_receiver_config_list[0]).config)
     }
 
     fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
-        self.get_hpke_secret_key_for(config_id).is_some()
+        self.get_hpke_receiver_config_for(config_id).is_some()
     }
 
     fn hpke_decrypt(
@@ -96,8 +96,9 @@ impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
-        if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
-            Ok(hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+        if let Some(hpke_receiver_config) = self.get_hpke_receiver_config_for(ciphertext.config_id)
+        {
+            Ok(hpke_receiver_config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    hpke::HpkeSecretKey,
+    hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeAeadId, HpkeCiphertext,
         HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition,
@@ -78,7 +78,7 @@ fn roundtrip_report() {
 
     let (leader_step, leader_share) = TEST_VDAF
         .consume_report_share(
-            &t.leader_hpke_secret_key,
+            &t.leader_hpke_receiver_config,
             true, // is_leader
             &t.vdaf_verify_key,
             &t.task_id,
@@ -90,7 +90,7 @@ fn roundtrip_report() {
 
     let (helper_step, helper_share) = TEST_VDAF
         .consume_report_share(
-            &t.helper_hpke_secret_key,
+            &t.helper_hpke_receiver_config,
             false, // is_leader
             &t.vdaf_verify_key,
             &t.task_id,
@@ -549,12 +549,12 @@ struct Test<'a> {
     task_id: Id,
     agg_job_id: Id,
     vdaf_verify_key: VdafVerifyKey,
-    leader_hpke_secret_key: HpkeSecretKey,
-    helper_hpke_secret_key: HpkeSecretKey,
+    leader_hpke_receiver_config: HpkeReceiverConfig,
+    helper_hpke_receiver_config: HpkeReceiverConfig,
     early_rejects: HashMap<Nonce, TransitionFailure>,
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_config: HpkeConfig,
-    collector_hpke_secret_key: HpkeSecretKey,
+    collector_hpke_receiver_config: HpkeReceiverConfig,
 }
 
 impl<'a> Test<'a> {
@@ -567,9 +567,12 @@ impl<'a> Test<'a> {
         let task_id = Id(rng.gen());
         let agg_job_id = Id(rng.gen());
         let vdaf_verify_key = vdaf.gen_verify_key();
-        let (leader_hpke_config, leader_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
-        let (helper_hpke_config, helper_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
-        let (collector_hpke_config, collector_hpke_secret_key) = HpkeSecretKey::gen(rng.gen());
+        let leader_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen());
+        let helper_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen());
+        let collector_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen());
+        let leader_hpke_config = leader_hpke_receiver_config.clone().config;
+        let helper_hpke_config = helper_hpke_receiver_config.clone().config;
+        let collector_hpke_config = collector_hpke_receiver_config.clone().config;
 
         Test {
             now,
@@ -577,12 +580,12 @@ impl<'a> Test<'a> {
             task_id,
             agg_job_id,
             vdaf_verify_key,
-            leader_hpke_secret_key,
-            helper_hpke_secret_key,
+            leader_hpke_receiver_config,
+            helper_hpke_receiver_config,
             early_rejects: HashMap::default(),
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
             collector_hpke_config,
-            collector_hpke_secret_key,
+            collector_hpke_receiver_config,
         }
     }
 
@@ -610,7 +613,7 @@ impl<'a> Test<'a> {
     ) -> DapLeaderTransition<AggregateInitializeReq> {
         self.vdaf
             .produce_agg_init_req(
-                &self.leader_hpke_secret_key,
+                &self.leader_hpke_receiver_config,
                 &self.vdaf_verify_key,
                 &self.task_id,
                 &self.agg_job_id,
@@ -626,7 +629,7 @@ impl<'a> Test<'a> {
         let agg_resp = self
             .vdaf
             .handle_agg_init_req(
-                &self.helper_hpke_secret_key,
+                &self.helper_hpke_receiver_config,
                 &self.vdaf_verify_key,
                 &agg_init_req,
                 &self.early_rejects,
@@ -733,7 +736,7 @@ impl<'a> Test<'a> {
     ) -> DapAggregateResult {
         self.vdaf
             .consume_encrypted_agg_shares(
-                &self.collector_hpke_secret_key,
+                &self.collector_hpke_receiver_config,
                 &self.task_id,
                 batch_interval,
                 enc_agg_shares,

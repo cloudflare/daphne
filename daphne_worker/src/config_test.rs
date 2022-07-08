@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::config::DaphneWorkerConfig;
-use daphne::{
-    hpke::HpkeDecrypter,
-    messages::{Interval, Nonce},
-};
+use daphne::messages::{Interval, Nonce};
 
 const DAP_TASK_LIST: &str = r#"{
   "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
@@ -25,16 +22,26 @@ const DAP_TASK_LIST: &str = r#"{
   }
 }"#;
 
-const DAP_HPKE_CONFIG_LIST: &str = r#"[
-    "1700200001000100205dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
-]"#;
-
-// TODO Encode the secret key as a hex string. Unfortunately it's not as simple as adding
-// #[serde(with = "hex")] to the struct definition.
-const DAP_HPKE_SECRET_KEY_LIST: &str = r#"[
+const DAP_HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
     {
-        "id": 23,
-        "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+        "config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key": "5dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
+        },
+        "secret_key": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
+    },
+    {
+        "config": {
+            "id": 14,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key": "b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
+        },
+        "secret_key": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
     }
 ]"#;
 
@@ -46,8 +53,7 @@ fn daphne_param() {
     let bucket_count = 5;
     let config: DaphneWorkerConfig<String> = DaphneWorkerConfig::from_test_config(
         DAP_TASK_LIST,
-        DAP_HPKE_CONFIG_LIST,
-        DAP_HPKE_SECRET_KEY_LIST,
+        DAP_HPKE_RECEIVER_CONFIG_LIST,
         DAP_BUCKET_KEY,
         bucket_count,
     )
@@ -89,8 +95,4 @@ fn daphne_param() {
             "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/4",
         ]
     );
-
-    // Try fetching the first HPKE config.
-    config.get_hpke_config_for(&task_id).unwrap();
-    // TODO Test that hpke_config() checks that the output can be parsed.
 }

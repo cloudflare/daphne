@@ -16,8 +16,8 @@ use crate::{
 };
 use daphne::{
     auth::BearerToken,
-    hpke::HpkeSecretKey,
-    messages::{HpkeConfig, Id, Interval, Nonce},
+    hpke::HpkeReceiverConfig,
+    messages::{Id, Interval, Nonce},
     roles::DapAggregator,
     DapError, DapTaskConfig,
 };
@@ -40,8 +40,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     pub(crate) client: Option<reqwest_wasm::Client>,
 
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
-    pub(crate) hpke_config_list: Vec<HpkeConfig>,
-    pub(crate) hpke_secret_key_list: Vec<HpkeSecretKey>,
+    pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
 
     /// Leader's bearer token for each task.
     pub(crate) leader_bearer_tokens: HashMap<Id, BearerToken>,
@@ -74,31 +73,19 @@ impl<D> DaphneWorkerConfig<D> {
             }
         }
 
-        let hpke_config_list_hex: Vec<String> = serde_json::from_str(
-            ctx.var("DAP_HPKE_CONFIG_LIST")?.to_string().as_ref(),
+        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> = serde_json::from_str(
+            ctx.var("DAP_HPKE_RECEIVER_CONFIG_LIST")?
+                .to_string()
+                .as_ref(),
         )
-        .map_err(|e| Error::RustError(format!("Failed to parse DAP_HPKE_CONFIG_LIST: {}", e)))?;
-        let mut hpke_config_list = Vec::with_capacity(hpke_config_list_hex.len());
-        for hex in hpke_config_list_hex {
-            let bytes = hex::decode(hex).map_err(int_err)?;
-            let hpke_config = HpkeConfig::get_decoded(&bytes).map_err(int_err)?;
-            hpke_config_list.push(hpke_config);
-        }
+        .map_err(|e| {
+            Error::RustError(format!(
+                "Failed to parse DAP_HPKE_RECEIVER_CONFIG_LIST: {}",
+                e
+            ))
+        })?;
 
-        let hpke_secret_key_list: Vec<HpkeSecretKey> =
-            serde_json::from_str(ctx.var("DAP_HPKE_SECRET_KEY_LIST")?.to_string().as_ref())
-                .map_err(|e| {
-                    Error::RustError(format!("Failed to parse DAP_HPKE_SECRET_KEY_LIST: {}", e))
-                })?;
-
-        if hpke_secret_key_list.len() != hpke_config_list.len() {
-            return Err(Error::RustError(
-                "Length of DAP_HPKE_CONFIG_LIST does not match length of DAP_HPKE_SECRET_KEY_LIST"
-                    .to_string(),
-            ));
-        }
-
-        if hpke_config_list.is_empty() {
+        if hpke_receiver_config_list.is_empty() {
             return Err(Error::RustError("empty DAP_HPKE_CONFIG_LIST".to_string()));
         }
 
@@ -167,8 +154,7 @@ impl<D> DaphneWorkerConfig<D> {
             ctx: Arc::new(Mutex::new(Some(ctx))),
             client,
             tasks,
-            hpke_config_list,
-            hpke_secret_key_list,
+            hpke_receiver_config_list,
             leader_bearer_tokens,
             collector_bearer_tokens,
             bucket_key,
@@ -182,28 +168,21 @@ impl<D> DaphneWorkerConfig<D> {
     #[cfg(test)]
     pub(crate) fn from_test_config(
         json_task_list: &str,
-        json_hpke_config_list: &str,
-        json_hpke_secret_key_list: &str,
+        json_hpke_receiver_config_list: &str,
         json_bucket_key: &str,
         bucket_count: u64,
     ) -> Result<Self> {
         let bucket_key =
             Seed::get_decoded(&hex::decode(json_bucket_key).map_err(int_err)?).map_err(int_err)?;
 
-        let hpke_config_list_hex: Vec<String> = serde_json::from_str(json_hpke_config_list)?;
-        let mut hpke_config_list = Vec::with_capacity(hpke_config_list_hex.len());
-        for hex in hpke_config_list_hex {
-            let bytes = hex::decode(hex).map_err(int_err)?;
-            let hpke_config = HpkeConfig::get_decoded(&bytes).map_err(int_err)?;
-            hpke_config_list.push(hpke_config);
-        }
+        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
+            serde_json::from_str(json_hpke_receiver_config_list)?;
 
         Ok(DaphneWorkerConfig {
             ctx: Arc::new(Mutex::new(None)),
             client: None,
             tasks: serde_json::from_str(json_task_list)?,
-            hpke_config_list,
-            hpke_secret_key_list: serde_json::from_str(json_hpke_secret_key_list)?,
+            hpke_receiver_config_list: hpke_receiver_config_list,
             leader_bearer_tokens: HashMap::default(),
             collector_bearer_tokens: None,
             bucket_key,
@@ -276,10 +255,13 @@ impl<D> DaphneWorkerConfig<D> {
             .durable_object(binding)
     }
 
-    pub(crate) fn get_hpke_secret_key_for(&self, hpke_config_id: u8) -> Option<&HpkeSecretKey> {
-        for hpke_secret_key in self.hpke_secret_key_list.iter() {
-            if hpke_config_id == hpke_secret_key.id {
-                return Some(hpke_secret_key);
+    pub(crate) fn get_hpke_receiver_config_for(
+        &self,
+        hpke_config_id: u8,
+    ) -> Option<&HpkeReceiverConfig> {
+        for hpke_receiver_config in self.hpke_receiver_config_list.iter() {
+            if hpke_config_id == hpke_receiver_config.config.id {
+                return Some(hpke_receiver_config);
             }
         }
         None

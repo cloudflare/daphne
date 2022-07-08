@@ -13,7 +13,7 @@ use prio::{
     vdaf::prio3::Prio3,
 };
 use rand::prelude::*;
-use test_runner::{TestRunner, COLLECTOR_HPKE_SECRET_KEY};
+use test_runner::{TestRunner, COLLECTOR_HPKE_RECEIVER_CONFIG};
 
 // Test that daphne can aggregate a report from a Janus client.
 #[tokio::test]
@@ -129,8 +129,8 @@ async fn janus_helper() {
     let resp = client.get(collect_uri).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let decrypter: daphne::hpke::HpkeSecretKey =
-        serde_json::from_str(COLLECTOR_HPKE_SECRET_KEY).unwrap();
+    let decrypter: daphne::hpke::HpkeReceiverConfig =
+        serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
     let collect_resp =
         daphne::messages::CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t

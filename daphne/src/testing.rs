@@ -5,7 +5,7 @@
 
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
-    hpke::{HpkeDecrypter, HpkeReceiverConfig, HpkeSecretKey},
+    hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
         ReportShare, TransitionFailure,
@@ -32,8 +32,6 @@ pub const TASK_LIST: &str = r#"{
     }
 }"#;
 
-// TODO(nakatsuka-y) Merge secret key into `HpkeReceiverConfig` and remove `HpkeSecretKey`.
-// This removes the redundant "id" field in both of these structs. See issue #12.
 pub const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
     {
         "config": {
@@ -43,10 +41,7 @@ pub const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
             "aead_id": "Aes128Gcm",
             "public_key": "5dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
         },
-        "secret_key": {
-            "id": 23,
-            "sk": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
-        }
+        "secret_key": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
     },
     {
         "config": {
@@ -56,10 +51,7 @@ pub const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
             "aead_id": "Aes128Gcm",
             "public_key": "b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
         },
-        "secret_key": {
-            "id": 14,
-            "sk": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
-        }
+        "secret_key": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
     }
 ]"#;
 
@@ -68,41 +60,31 @@ pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mY
 
 pub(crate) struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
-    hpke_config_list: Vec<HpkeConfig>,
-    hpke_secret_key_list: Vec<HpkeSecretKey>,
+    hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
 }
 
 #[allow(dead_code)]
 impl MockAggregator {
     pub fn new() -> Self {
         // Construct task list
-        let tasks = serde_json::from_str(TASK_LIST).expect("failed to parse task list");
+        let tasks: HashMap<Id, DapTaskConfig> =
+            serde_json::from_str(TASK_LIST).expect("failed to parse task list");
 
         // Construct HPKE receiver config List
         let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
             serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
                 .expect("failed to parse hpke_receiver_config_list");
 
-        let mut hpke_config_list: Vec<HpkeConfig> =
-            Vec::with_capacity(hpke_receiver_config_list.len());
-        let mut hpke_secret_key_list: Vec<HpkeSecretKey> =
-            Vec::with_capacity(hpke_receiver_config_list.len());
-        for receiver_config in hpke_receiver_config_list {
-            hpke_config_list.push(receiver_config.config);
-            hpke_secret_key_list.push(receiver_config.secret_key);
-        }
-
         Self {
             tasks,
-            hpke_config_list,
-            hpke_secret_key_list,
+            hpke_receiver_config_list,
         }
     }
 
-    pub fn get_hpke_secret_key_for(&self, hpke_config_id: u8) -> Option<&HpkeSecretKey> {
-        for hpke_secret_key in self.hpke_secret_key_list.iter() {
-            if hpke_config_id == hpke_secret_key.id {
-                return Some(hpke_secret_key);
+    pub fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
+        for hpke_receiver_config in self.hpke_receiver_config_list.iter() {
+            if hpke_config_id == hpke_receiver_config.config.id {
+                return Some(hpke_receiver_config);
             }
         }
         None
@@ -134,16 +116,16 @@ impl BearerTokenProvider for MockAggregator {
 
 impl HpkeDecrypter for MockAggregator {
     fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
-        if self.hpke_config_list.is_empty() {
+        if self.hpke_receiver_config_list.is_empty() {
             return None;
         }
 
-        // Advertise the first HPKE config in the list.
-        Some(&self.hpke_config_list[0])
+        // Always advertise the first HPKE config in the list.
+        Some(&self.hpke_receiver_config_list[0].config)
     }
 
     fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
-        self.get_hpke_secret_key_for(config_id).is_some()
+        self.get_hpke_receiver_config_for(config_id).is_some()
     }
 
     fn hpke_decrypt(
@@ -153,8 +135,9 @@ impl HpkeDecrypter for MockAggregator {
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        if let Some(hpke_secret_key) = self.get_hpke_secret_key_for(ciphertext.config_id) {
-            Ok(hpke_secret_key.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+        if let Some(hpke_receiver_config) = self.get_hpke_receiver_config_for(ciphertext.config_id)
+        {
+            Ok(hpke_receiver_config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }
