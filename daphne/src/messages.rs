@@ -474,7 +474,7 @@ impl Decode for AggregateShareResp {
 }
 
 /// Codepoint for KEM schemes compatible with HPKE.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq)]
 pub enum HpkeKemId {
     X25519HkdfSha256,
     NotImplemented(u16),
@@ -505,7 +505,7 @@ impl Decode for HpkeKemId {
 }
 
 /// Codepoint for KDF schemes compatible with HPKE.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq)]
 pub enum HpkeKdfId {
     HkdfSha256,
     NotImplemented(u16),
@@ -536,7 +536,7 @@ impl Decode for HpkeKdfId {
 }
 
 /// Codepoint for AEAD schemes compatible with HPKE.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq)]
 pub enum HpkeAeadId {
     Aes128Gcm,
     NotImplemented(u16),
@@ -567,7 +567,7 @@ impl Decode for HpkeAeadId {
 }
 
 /// The HPKE public key configuration of a Server.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct HpkeConfig {
     pub id: u8,
     pub kem_id: HpkeKemId,
@@ -577,6 +577,7 @@ pub struct HpkeConfig {
     // serialized key. We can't do this with rust-hpke because <X25519HkdfSha256 as Kem>::PublicKey
     // doesn't implement Debug. Eventually we'll replace rust-hpke with a more ergonomic
     // implementation that does. For now we'll eat the copy.
+    #[serde(with = "hex")]
     pub(crate) public_key: Vec<u8>,
 }
 
