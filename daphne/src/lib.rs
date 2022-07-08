@@ -526,4 +526,5 @@ mod messages_test;
 pub mod roles;
 #[cfg(test)]
 mod roles_test;
+pub mod testing;
 pub mod vdaf;
