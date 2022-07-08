@@ -429,10 +429,7 @@ async fn http_post_aggregate_invalid_ciphertext() {
     let transition = &agg_resp.transitions[0];
 
     // Expect failure due to invalid ciphertext.
-    assert_matches!(
-        transition.var,
-        TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
-    );
+    assert_matches!(transition.var, TransitionVar::Failed(_));
 }
 
 #[tokio::test]
