@@ -39,7 +39,8 @@ DAP_ENV=dev cargo test --features=test_e2e -- --test-threads 1
 ```
 
 The `daphne_worker` crate also has integration tests for
-[Janus](https://github.com/divviup/janus). To run these, do
+[Janus](https://github.com/divviup/janus). To run these, make sure that your
+Docker environment is running and then do
 
 ```
 DAP_ENV=dev cargo test --features=test_janus -- --test-threads 1
