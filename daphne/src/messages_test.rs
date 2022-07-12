@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::messages::{
-    AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeAeadId, HpkeCiphertext,
-    HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition, TransitionVar,
+    AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
+    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition,
+    TransitionVar,
 };
 use prio::codec::{Decode, Encode};
 
@@ -29,7 +30,10 @@ fn read_report() {
             time: 1637364244,
             rand: 10496152761178246059,
         },
-        ignored_extensions: b"some extension".to_vec(),
+        extensions: vec![Extension::Unhandled {
+            typ: 0xfff,
+            payload: b"some extension".to_vec(),
+        }],
         encrypted_input_shares: vec![
             HpkeCiphertext {
                 config_id: 23,
@@ -59,7 +63,7 @@ fn read_agg_init_req() {
                     time: 1637361337,
                     rand: 10496152761178246059,
                 },
-                ignored_extensions: b"these are extensions".to_vec(),
+                extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 23,
                     enc: b"encapsulated key".to_vec(),
@@ -71,7 +75,7 @@ fn read_agg_init_req() {
                     time: 163736423,
                     rand: 123897432897439,
                 },
-                ignored_extensions: vec![],
+                extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 0,
                     enc: vec![],
