@@ -135,7 +135,7 @@ async fn http_post_aggregate_invalid_ciphertext() {
                     time: 1637361337,
                     rand: 10496152761178246059,
                 },
-                ignored_extensions: b"these are extensions".to_vec(),
+                extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 23,
                     enc: b"invalid encapsulated key".to_vec(),
@@ -198,7 +198,7 @@ async fn http_post_aggregate_valid_ciphertext() {
             agg_param: b"this is an aggregation parameter".to_vec(),
             report_shares: vec![ReportShare {
                 nonce: report.nonce,
-                ignored_extensions: report.ignored_extensions,
+                extensions: report.extensions,
                 // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
                 encrypted_input_share: report.encrypted_input_shares[1].clone(),
             }],
@@ -241,7 +241,7 @@ fn hpke_decrypter() {
             time: 1637364244,
             rand: 10496152761178246059,
         },
-        ignored_extensions: b"some extension".to_vec(),
+        extensions: Vec::default(),
         encrypted_input_shares: vec![HpkeCiphertext {
             config_id: 23,
             enc: enc,

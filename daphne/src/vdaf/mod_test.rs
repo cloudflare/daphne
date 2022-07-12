@@ -83,7 +83,7 @@ fn roundtrip_report() {
             &t.vdaf_verify_key,
             &t.task_id,
             &report.nonce,
-            &report.ignored_extensions,
+            &report.extensions,
             &report.encrypted_input_shares[0],
         )
         .unwrap();
@@ -95,7 +95,7 @@ fn roundtrip_report() {
             &t.vdaf_verify_key,
             &t.task_id,
             &report.nonce,
-            &report.ignored_extensions,
+            &report.extensions,
             &report.encrypted_input_shares[1],
         )
         .unwrap();

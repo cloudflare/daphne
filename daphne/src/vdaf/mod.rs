@@ -7,9 +7,9 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        encode_u16_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report, ReportShare, Transition,
-        TransitionFailure, TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeCiphertext,
+        HpkeConfig, Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure,
+        TransitionVar,
     },
     vdaf::prio3::{
         prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
@@ -20,7 +20,7 @@ use crate::{
     VdafConfig,
 };
 use prio::{
-    codec::{CodecError, Encode},
+    codec::{encode_u16_items, CodecError, Encode},
     field::{Field128, Field64},
     vdaf::prio3::{Prio3PrepareShare, Prio3PrepareState},
 };
@@ -163,7 +163,7 @@ impl VdafConfig {
         Ok(Report {
             task_id: task_id.clone(),
             nonce,
-            ignored_extensions: vec![],
+            extensions: vec![],
             encrypted_input_shares,
         })
     }
@@ -190,7 +190,7 @@ impl VdafConfig {
         verify_key: &VdafVerifyKey,
         task_id: &Id,
         nonce: &Nonce,
-        extensions: &[u8],
+        extensions: &[Extension],
         encrypted_input_share: &HpkeCiphertext,
     ) -> Result<(VdafState, VdafMessage), DapError> {
         const N: usize = CTX_INPUT_SHARE.len();
@@ -208,7 +208,7 @@ impl VdafConfig {
         let nonce_start = aad.len();
         nonce.encode(&mut aad);
         let nonce_end = aad.len();
-        encode_u16_bytes(&mut aad, extensions);
+        encode_u16_items(&mut aad, &(), extensions);
 
         let input_share_data =
             decrypter.hpke_decrypt(task_id, &info, &aad, encrypted_input_share)?;
@@ -281,14 +281,14 @@ impl VdafConfig {
                 verify_key,
                 task_id,
                 &report.nonce,
-                &report.ignored_extensions,
+                &report.extensions,
                 &leader_share,
             ) {
                 Ok((step, message)) => {
                     states.push((step, message, report.nonce.clone()));
                     seq.push(ReportShare {
                         nonce: report.nonce,
-                        ignored_extensions: report.ignored_extensions,
+                        extensions: report.extensions,
                         encrypted_input_share: helper_share,
                     });
                 }
@@ -374,7 +374,7 @@ impl VdafConfig {
                 verify_key,
                 &agg_init_req.task_id,
                 &report_share.nonce,
-                &report_share.ignored_extensions,
+                &report_share.extensions,
                 &report_share.encrypted_input_share,
             ) {
                 Ok((step, message)) => {
