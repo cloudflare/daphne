@@ -41,6 +41,7 @@ use daphne::{
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig,
 };
+use prio::codec::{Decode, Encode};
 use std::collections::HashMap;
 use worker::*;
 
@@ -236,7 +237,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         let durable_name =
             self.durable_report_store_name(task_config, &report.task_id, &report.nonce);
         let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
-        let mut resp = durable_post!(stub, DURABLE_REPORT_STORE_PUT_PENDING, &report).await?;
+        let report_hex = hex::encode(report.get_encoded());
+        let mut resp = durable_post!(stub, DURABLE_REPORT_STORE_PUT_PENDING, &report_hex).await?;
         match resp.json().await? {
             ReportStoreResult::Ok => Ok(()),
             ReportStoreResult::Err(t) => return Err(DapError::Transition(t)),
@@ -276,7 +278,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             let num_reports_remaining = selector.agg_rate - reports.len() as u64;
             let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
             // TODO Don't block on DO request (issue multiple requests simultaneously).
-            let reports_from_durable: Vec<Report> = durable_post!(
+            let reports_from_durable: Vec<String> = durable_post!(
                 stub,
                 DURABLE_REPORT_STORE_GET_PENDING,
                 &ReportStoreGetPending {
@@ -287,7 +289,14 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .json()
             .await?;
 
-            reports.extend(reports_from_durable);
+            for report_hex in reports_from_durable {
+                let report =
+                    Report::get_decoded(&hex::decode(&report_hex).map_err(|_| {
+                        DapError::fatal("response from ReportStore is not valid hex")
+                    })?)?;
+                reports.push(report);
+            }
+
             if reports.len() as u64 > selector.agg_rate {
                 return Err(DapError::fatal(
                     "number of reports received from report store exceeds the number requested",
@@ -471,7 +480,7 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             let mut resp = durable_post!(
                 stub,
                 DURABLE_REPORT_STORE_PUT_PROCESSED,
-                &report_share.nonce
+                &hex::encode(&report_share.nonce.get_encoded())
             )
             .await?;
 

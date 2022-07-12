@@ -5,3 +5,5 @@ pub(crate) mod aggregate_store;
 pub(crate) mod helper_state_store;
 pub(crate) mod leader_state_store;
 pub(crate) mod report_store;
+#[cfg(test)]
+pub(crate) mod report_store_test;

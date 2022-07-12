@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::int_err;
-use daphne::messages::{Nonce, Report, TransitionFailure};
+use daphne::messages::TransitionFailure;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::TryInto};
+use std::convert::TryInto;
 use worker::*;
 
 pub(crate) fn durable_report_store_name(
@@ -25,23 +25,6 @@ pub(crate) const DURABLE_REPORT_STORE_PUT_PROCESSED: &str =
     "/internal/do/report_store/put_processed";
 pub(crate) const DURABLE_REPORT_STORE_MARK_COLLECTED: &str =
     "/internal/do/report_store/mark_collected";
-
-const INITIAL_CAPACITY: usize = 100;
-
-macro_rules! checked_process {
-    (
-        $store:expr,
-        $nonce:expr
-    ) => {{
-        let observed = $store.processed.contains($nonce);
-        if observed && !$store.collected {
-            return Response::from_json(&ReportStoreResult::Err(TransitionFailure::ReportReplayed));
-        } else if !observed && $store.collected {
-            return Response::from_json(&ReportStoreResult::Err(TransitionFailure::BatchCollected));
-        }
-        $store.processed.insert($nonce.clone());
-    }};
-}
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ReportStoreGetPending {
@@ -66,78 +49,92 @@ pub(crate) enum ReportStoreResult {
 /// report itself.
 #[durable_object]
 pub struct ReportStore {
-    // TODO Write this to persistent storage instead of keeping it in memory. (See
-    // https://developers.cloudflare.com/workers/learning/using-durable-objects#in-memory-state-in-a-durable-object.)
-    pending: Vec<Report>,
-    // TODO Back this up in persistent storage.
-    processed: HashSet<Nonce>,
-    // TODO Back this up in persistent storage.
-    collected: bool,
     #[allow(dead_code)]
     state: State,
+}
+
+impl ReportStore {
+    async fn get_or_default<T: Default + for<'a> Deserialize<'a>>(&self, key: &str) -> Result<T> {
+        self.state.storage().get(key).await.or_else(|e| {
+            if matches!(e, Error::JsError(ref s) if s == "No such value in storage.") {
+                Ok(T::default())
+            } else {
+                Err(e)
+            }
+        })
+    }
+
+    async fn checked_process(&self, nonce_hex: &str) -> Result<ReportStoreResult> {
+        let key = format!("processed/{}", nonce_hex);
+        let collected: bool = self.get_or_default("collected").await?;
+        let observed: bool = self.get_or_default(&key).await?;
+        if observed && !collected {
+            return Ok(ReportStoreResult::Err(TransitionFailure::ReportReplayed));
+        } else if !observed && collected {
+            return Ok(ReportStoreResult::Err(TransitionFailure::BatchCollected));
+        }
+        self.state.storage().put(&key, true).await?;
+        Ok(ReportStoreResult::Ok)
+    }
 }
 
 #[durable_object]
 impl DurableObject for ReportStore {
     fn new(state: State, _env: Env) -> Self {
-        Self {
-            pending: Vec::with_capacity(INITIAL_CAPACITY),
-            processed: HashSet::with_capacity(INITIAL_CAPACITY),
-            collected: false,
-            state,
-        }
+        Self { state }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             (DURABLE_REPORT_STORE_DELETE_ALL, Method::Post) => {
-                self.pending.clear();
-                self.processed.clear();
-                self.collected = false;
+                self.state.storage().delete_all().await?;
                 Response::from_json(&ReportStoreResult::Ok)
             }
 
             (DURABLE_REPORT_STORE_GET_PENDING, Method::Post) => {
                 let info: ReportStoreGetPending = req.json().await?;
+                let reports_requested = info.reports_requested.try_into().unwrap();
+                let opt = ListOptions::new()
+                    .prefix("pending/")
+                    .limit(reports_requested);
+                let iter = self.state.storage().list_with_options(opt).await?.entries();
+                let mut item = iter.next()?;
+                let mut reports = Vec::with_capacity(reports_requested);
+                let mut keys = Vec::with_capacity(reports_requested);
+                while !item.done() {
+                    let (key, report_hex): (String, String) = item.value().into_serde()?;
+                    reports.push(report_hex);
+                    keys.push(key);
+                    item = iter.next()?;
+                }
 
-                // TODO Keep reports for as long as they can be observed. I.e., instead of
-                // draining the reports, just advance an index into the `self.reports` vector
-                // pointing to the next report to output. This also prevents data loss if the
-                // caller encounters an internal error and has to drop the reports.
-                let reports_drained = std::cmp::min(
-                    info.reports_requested.try_into().unwrap(),
-                    self.pending.len(),
-                );
-                let reports: Vec<Report> = self.pending.drain(..reports_drained).collect();
-
+                // NOTE In order to support DAP tasks that require longer batch lifetimes, it will
+                // necessary to check if the lifetime has been reached before removing reports from
+                // storage.
+                self.state.storage().delete_multiple(keys).await?;
                 Response::from_json(&reports)
             }
 
             (DURABLE_REPORT_STORE_PUT_PENDING, Method::Post) => {
-                // BUG The following would be more idiomatic here:
-                //
-                //    let report: Report = req.json().await?;
-                //
-                // However there appears to be a bug somewhere (perhaps in wasm-bindgen?) that
-                // causes the last few bits of nonce.rand to get cleared.
-                let report: Report = match serde_json::from_str(&req.text().await?)? {
-                    Some(report) => report,
-                    None => return Err(int_err("Failed to parse report")),
-                };
+                let report_hex: String = req.json().await?;
+                let nonce_hex = nonce_hex_from_report(&report_hex)
+                    .ok_or_else(|| int_err("failed to parse nonce from report"))?;
 
-                checked_process!(self, &report.nonce);
-                self.pending.push(report);
-                Response::from_json(&ReportStoreResult::Ok)
+                let res = self.checked_process(nonce_hex).await?;
+                if matches!(res, ReportStoreResult::Ok) {
+                    let key = format!("pending/{}", nonce_hex);
+                    self.state.storage().put(&key, report_hex).await?;
+                }
+                Response::from_json(&res)
             }
 
             (DURABLE_REPORT_STORE_PUT_PROCESSED, Method::Post) => {
-                let nonce = req.json().await?;
-                checked_process!(self, &nonce);
-                Response::from_json(&ReportStoreResult::Ok)
+                let nonce_hex: String = req.json().await?;
+                Response::from_json(&self.checked_process(&nonce_hex).await?)
             }
 
             (DURABLE_REPORT_STORE_MARK_COLLECTED, Method::Post) => {
-                self.collected = true;
+                self.state.storage().put("collected", true).await?;
                 Response::from_json(&ReportStoreResult::Ok)
             }
 
@@ -148,4 +145,18 @@ impl DurableObject for ReportStore {
             ))),
         }
     }
+}
+
+pub(crate) fn nonce_hex_from_report(report_hex: &str) -> Option<&str> {
+    // task_id
+    if report_hex.len() < 64 {
+        return None;
+    }
+    let report_hex = &report_hex[64..];
+
+    // nonce
+    if report_hex.len() < 32 {
+        return None;
+    }
+    Some(&report_hex[..32])
 }
