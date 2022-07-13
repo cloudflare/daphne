@@ -11,8 +11,6 @@ use daphne::{
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
-use janus::time::Clock;
-use janus_server::datastore::{Crypter, Datastore};
 use prio::codec::Decode;
 use std::{
     collections::HashMap,
@@ -21,8 +19,6 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use url::Url;
-
-janus_test_util::define_ephemeral_datastore!();
 
 const JANUS_HELPER_PORT: u16 = 9788;
 
@@ -371,7 +367,7 @@ pub struct JanusServerHandle {
 
     // Once `db_handle` goes out of scope, the ephemeral postgres DB is torn down.
     #[allow(dead_code)]
-    db_handle: DbHandle,
+    db_handle: janus_server::datastore::test_util::DbHandle,
 }
 
 #[allow(dead_code)]
@@ -389,11 +385,11 @@ impl TestRunner {
         post_internal_test_reset(&t.http_client(), &t.leader_url, &t.task_id, &t.batch_info())
             .await;
 
-        let task_id = janus::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
+        let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
         let aggregator_endpoints = vec![t.leader_url.clone(), t.helper_url.clone()];
         let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
             assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
-                janus_server::task::VdafInstance::Real(janus::task::VdafInstance::Prio3Aes128Sum{ bits: *bits }
+                janus_server::task::VdafInstance::Real(janus_core::task::VdafInstance::Prio3Aes128Sum{ bits: *bits }
             ))
         });
 
@@ -401,7 +397,7 @@ impl TestRunner {
             serde_json::from_str(JANUS_HELPER_TASK_LIST).unwrap();
         let task_config_object = task_list_object.get(JANUS_HELPER_TASK).unwrap();
 
-        let collector_hpke_config = janus::message::HpkeConfig::get_decoded(
+        let collector_hpke_config = janus_core::message::HpkeConfig::get_decoded(
             &hex::decode(
                 task_config_object
                     .get("collector_hpke_config")
@@ -426,27 +422,30 @@ impl TestRunner {
             JANUS_HELPER_TASK_LEADER_BEARER_TOKEN.as_bytes().to_vec(),
         );
 
-        let (hpke_config, hpke_sk) = janus::hpke::test_util::generate_hpke_config_and_private_key();
+        let (hpke_config, hpke_sk) =
+            janus_core::hpke::test_util::generate_hpke_config_and_private_key();
 
         let task = janus_server::task::Task::new(
             task_id,
             aggregator_endpoints,
             vdaf,
-            janus::message::Role::Helper,
+            janus_core::message::Role::Helper,
             vec![vdaf_verify_key],
             1, // max_batch_lifetime
             t.min_batch_size,
-            janus::message::Duration::from_seconds(t.min_batch_duration),
-            janus::message::Duration::from_seconds(0), // clock skew tolerance
+            janus_core::message::Duration::from_seconds(t.min_batch_duration),
+            janus_core::message::Duration::from_seconds(0), // clock skew tolerance
             collector_hpke_config,
             vec![leader_bearer_token],
             [(hpke_config, hpke_sk)],
         )
         .unwrap();
 
-        let aggregator_clock =
-            janus_test_util::MockClock::new(janus::message::Time::from_seconds_since_epoch(t.now));
-        let (datastore, db_handle) = ephemeral_datastore(aggregator_clock.clone()).await;
+        let aggregator_clock = janus_core::time::test_util::MockClock::new(
+            janus_core::message::Time::from_seconds_since_epoch(t.now),
+        );
+        let (datastore, db_handle) =
+            janus_server::datastore::test_util::ephemeral_datastore(aggregator_clock.clone()).await;
         let datastore = Arc::new(datastore);
         datastore
             .run_tx(|tx| {

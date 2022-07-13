@@ -24,11 +24,11 @@ async fn janus_client() {
 
     let raw_leader_hpke_config = t.leader_get_raw_hpke_config(&client).await;
     let leader_hpke_config =
-        janus::message::HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap();
+        janus_core::message::HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap();
 
     let raw_helper_hpke_config = t.helper_get_raw_hpke_config(&client).await;
     let helper_hpke_config =
-        janus::message::HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap();
+        janus_core::message::HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap();
 
     let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
         assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
@@ -36,17 +36,19 @@ async fn janus_client() {
         )
     });
 
-    let task_id = janus::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
+    let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
 
-    let janus_client_parameters = janus_server::client::ClientParameters::new(
+    let janus_client_parameters = janus_client::ClientParameters::new(
         task_id,
         vec![t.leader_url.clone(), t.helper_url.clone()],
+        janus_core::message::Duration::from_seconds(t.min_batch_duration),
     );
 
-    let client_clock =
-        janus_test_util::MockClock::new(janus::message::Time::from_seconds_since_epoch(t.now));
+    let client_clock = janus_core::time::test_util::MockClock::new(
+        janus_core::message::Time::from_seconds_since_epoch(t.now),
+    );
 
-    let janus_client = janus_server::client::Client::new(
+    let janus_client = janus_client::Client::new(
         janus_client_parameters,
         vdaf,
         client_clock,
@@ -72,7 +74,7 @@ async fn janus_client() {
 #[tokio::test]
 #[cfg_attr(not(feature = "test_janus"), ignore)]
 async fn janus_helper() {
-    janus_server::trace::test_util::install_test_trace_subscriber();
+    janus_core::test_util::install_test_trace_subscriber();
     let (t, janus_helper) = TestRunner::janus_helper().await;
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
