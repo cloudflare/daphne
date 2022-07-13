@@ -11,12 +11,12 @@ use prio::codec::{Decode, Encode};
 #[test]
 fn read_nonce() {
     let data = [
-        0, 0, 0, 0, 97, 152, 50, 20, 145, 169, 211, 83, 70, 67, 203, 171,
+        0, 0, 0, 0, 97, 152, 50, 20, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
     ];
 
     let nonce = Nonce::get_decoded(&data).unwrap();
     assert_eq!(nonce.time, 1637364244);
-    assert_eq!(nonce.rand, 10496152761178246059);
+    assert_eq!(nonce.rand, [23; 16]);
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn read_report() {
         ]),
         nonce: Nonce {
             time: 1637364244,
-            rand: 10496152761178246059,
+            rand: [23; 16],
         },
         extensions: vec![Extension::Unhandled {
             typ: 0xfff,
@@ -61,7 +61,7 @@ fn read_agg_init_req() {
             ReportShare {
                 nonce: Nonce {
                     time: 1637361337,
-                    rand: 10496152761178246059,
+                    rand: [99; 16],
                 },
                 extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
@@ -73,7 +73,7 @@ fn read_agg_init_req() {
             ReportShare {
                 nonce: Nonce {
                     time: 163736423,
-                    rand: 123897432897439,
+                    rand: [17; 16],
                 },
                 extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
@@ -98,14 +98,14 @@ fn read_agg_cont_req() {
             Transition {
                 nonce: Nonce {
                     time: 1637361337,
-                    rand: 10496152761178246059,
+                    rand: [0; 16],
                 },
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
                 nonce: Nonce {
                     time: 163736423,
-                    rand: 123897432897439,
+                    rand: [1; 16],
                 },
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),
@@ -125,14 +125,14 @@ fn read_agg_resp() {
             Transition {
                 nonce: Nonce {
                     time: 1637361337,
-                    rand: 10496152761178246059,
+                    rand: [22; 16],
                 },
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
                 nonce: Nonce {
                     time: 163736423,
-                    rand: 123897432897439,
+                    rand: [255; 16],
                 },
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),

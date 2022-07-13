@@ -57,22 +57,22 @@ impl AsRef<[u8]> for Id {
 #[allow(missing_docs)]
 pub struct Nonce {
     pub time: u64,
-    pub rand: u64,
+    pub rand: [u8; 16],
 }
 
 impl Encode for Nonce {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.time.encode(bytes);
-        self.rand.encode(bytes);
+        bytes.extend_from_slice(&self.rand);
     }
 }
 
 impl Decode for Nonce {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        Ok(Nonce {
-            time: u64::decode(bytes)?,
-            rand: u64::decode(bytes)?,
-        })
+        let time = u64::decode(bytes)?;
+        let mut rand = [0; 16];
+        bytes.read_exact(&mut rand)?;
+        Ok(Nonce { time, rand })
     }
 }
 

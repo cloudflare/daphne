@@ -133,7 +133,7 @@ async fn http_post_aggregate_invalid_ciphertext() {
             report_shares: vec![ReportShare {
                 nonce: Nonce {
                     time: 1637361337,
-                    rand: 10496152761178246059,
+                    rand: [1; 16],
                 },
                 extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
@@ -239,7 +239,7 @@ fn hpke_decrypter() {
         task_id: Id([23; 32]),
         nonce: Nonce {
             time: 1637364244,
-            rand: 10496152761178246059,
+            rand: [2; 16],
         },
         extensions: Vec::default(),
         encrypted_input_shares: vec![HpkeCiphertext {
