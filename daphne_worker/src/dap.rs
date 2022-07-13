@@ -518,7 +518,7 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         &self,
         task_id: &Id,
         agg_job_id: &Id,
-    ) -> std::result::Result<DapHelperState, DapError> {
+    ) -> std::result::Result<Option<DapHelperState>, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
@@ -528,14 +528,19 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             .id_from_name(&durable_helper_state_name(task_id, agg_job_id))?
             .get_stub()?;
 
-        let helper_state_hex: String = durable_post!(stub, DURABLE_HELPER_STATE_GET, &())
+        let res: Option<String> = durable_post!(stub, DURABLE_HELPER_STATE_GET, &())
             .await?
             .json()
             .await?;
 
-        let data = hex::decode(&helper_state_hex).map_err(|e| DapError::Fatal(e.to_string()))?;
-        let helper_state = DapHelperState::get_decoded(&task_config.vdaf, &data)?;
-
-        Ok(helper_state)
+        match res {
+            Some(helper_state_hex) => {
+                let data =
+                    hex::decode(&helper_state_hex).map_err(|e| DapError::Fatal(e.to_string()))?;
+                let helper_state = DapHelperState::get_decoded(&task_config.vdaf, &data)?;
+                Ok(Some(helper_state))
+            }
+            None => Ok(None),
+        }
     }
 }

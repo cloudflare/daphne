@@ -39,6 +39,7 @@ impl DurableObject for HelperStateStore {
                 let mut helper_state: Option<String> =
                     state_get(&self.state, "helper_state").await?;
                 if helper_state.is_some() {
+                    // TODO spec: Handle this as an abort rather than an internal error.
                     return Err(int_err("tried to overwrite helper state"));
                 }
 
@@ -52,12 +53,10 @@ impl DurableObject for HelperStateStore {
 
             (DURABLE_HELPER_STATE_GET, Method::Post) => {
                 let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;
-                if let Some(helper_state) = helper_state {
+                if helper_state.is_some() {
                     self.state.storage().delete("helper_state").await?;
-                    return Response::from_json(&helper_state);
                 }
-
-                Err(int_err("tried to get helper state before it was put"))
+                Response::from_json(&helper_state)
             }
 
             _ => Err(int_err(format!(

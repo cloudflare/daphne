@@ -408,12 +408,13 @@ pub trait DapHelper<S>: DapAggregator<S> {
         helper_state: &DapHelperState,
     ) -> Result<(), DapError>;
 
-    /// Fetch the Helper's aggregation-flow state.
+    /// Fetch the Helper's aggregation-flow state. `None` is returned if the Helper has no state
+    /// associated with the given task and aggregation job.
     async fn get_helper_state(
         &self,
         task_id: &Id,
         agg_job_id: &Id,
-    ) -> Result<DapHelperState, DapError>;
+    ) -> Result<Option<DapHelperState>, DapError>;
 
     /// Handle an HTTP POST to `/aggregate`. The input is either an AggregateInitializeReq or
     /// AggregateContinueReq and the response is an AggregateResp.
@@ -471,7 +472,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
                 let state = self
                     .get_helper_state(&agg_cont_req.task_id, &agg_cont_req.agg_job_id)
-                    .await?;
+                    .await?
+                    .ok_or(DapAbort::UnrecognizedAggregationJob)?;
                 let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_cont_req)?;
 
                 let agg_resp = match transition {
