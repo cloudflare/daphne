@@ -104,11 +104,15 @@ impl VdafConfig {
     /// remainder belonging to the Helpers. Note that the current draft only supports one Helper,
     /// so this method will return an error if `hpke_config_list.len() != 2`.
     ///
-    /// * `now` is the number of seconds since the UNIX epoch.
+    /// * `now` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
+    /// ensure this value is truncated to the nearest `min_batch_duration`, as required by the
+    /// spec.
     ///
     /// * `task_id` is the DAP task for which this report is being generated.
     ///
     /// * `measurement` is the measurement.
+    //
+    // TODO spec: Decide if truncating the timestamp should be a MAY or SHOULD.
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],

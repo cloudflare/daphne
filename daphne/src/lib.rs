@@ -16,7 +16,10 @@
 //! * Daphne is not compatible with DAP tasks whose maximum batch lifetime is longer than one.
 //!
 //! * Daphne does handle aborts precisely as specified. In particular, some fields in the "Problem
-//! Details" document are missing.
+//! Details" document are omitted.
+//!
+//! * Daphne does not implement a complete DAP Client. However, a method is provided on
+//! [`VdafConfig`](crate::VdafConfig) for producing reports.
 
 use crate::{
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
