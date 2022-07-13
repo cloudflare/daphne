@@ -4,95 +4,72 @@
 use crate::{
     auth::BearerToken,
     constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
-    hpke::{HpkeDecrypter, HpkeReceiverConfig},
+    hpke::HpkeReceiverConfig,
     messages::{
         AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq, HpkeCiphertext, Id,
         Interval, Nonce, Report, ReportShare, TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
-    testing::{MockAggregator, HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN},
-    DapAbort, DapError, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
+    testing::{
+        BucketInfo, MockAggregator, ReportStore, HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
+    },
+    DapAbort, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use prio::codec::{Decode, Encode};
-use rand::prelude::*;
-use std::vec;
+use rand::{thread_rng, Rng};
+use std::{ops::DerefMut, vec};
 
-#[tokio::test]
-async fn http_post_aggregate_unauthorized_request() {
+fn gen_test_agg_init_req(
+    agg: &MockAggregator,
+    report_shares: Vec<ReportShare>,
+) -> DapRequest<BearerToken> {
     let mut rng = thread_rng();
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
+    let task_id = agg.nominal_task_id();
+    let task_config = agg.get_task_config_for(task_id).unwrap();
 
-    let mut req = DapRequest {
+    DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
         payload: AggregateInitializeReq {
             task_id: task_id.clone(),
             agg_job_id: Id(rng.gen()),
             agg_param: Vec::default(),
-            report_shares: Vec::default(),
+            report_shares,
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate").unwrap(),
         sender_auth: None,
-    };
-
-    // Expect failure due to missing bearer token.
-    assert_matches!(
-        helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
-
-    // Expect failure due to incorrect bearer token.
-    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-    assert_matches!(
-        helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
+    }
 }
 
-#[tokio::test]
-async fn http_post_aggregate_share_unauthorized_request() {
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
+fn gen_test_agg_share_req(
+    agg: &MockAggregator,
+    report_count: u64,
+    checksum: [u8; 32],
+) -> DapRequest<BearerToken> {
+    let task_id = agg.nominal_task_id();
+    let task_config = agg.get_task_config_for(task_id).unwrap();
 
-    let mut req = DapRequest {
+    DapRequest {
         media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
         payload: AggregateShareReq {
             task_id: task_id.clone(),
             batch_interval: Interval::default(),
             agg_param: Vec::default(),
-            report_count: 0,
-            checksum: [0; 32],
+            report_count,
+            checksum,
         }
         .get_encoded(),
         url: task_config.helper_url.join("/aggregate_share").unwrap(),
         sender_auth: None,
-    };
-
-    // Expect failure due to missing bearer token.
-    assert_matches!(
-        helper.http_post_aggregate_share(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
-
-    // Expect failure due to incorrect bearer token.
-    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-    assert_matches!(
-        helper.http_post_aggregate_share(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
+    }
 }
 
-#[tokio::test]
-async fn http_post_collect_unauthorized_request() {
-    let leader = MockAggregator::new();
-    let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+fn gen_test_collect_req(agg: &MockAggregator) -> DapRequest<BearerToken> {
+    let task_id = agg.nominal_task_id();
+    let task_config = agg.get_task_config_for(task_id).unwrap();
 
-    let mut req = DapRequest {
+    DapRequest {
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: CollectReq {
             task_id: task_id.clone(),
@@ -102,71 +79,10 @@ async fn http_post_collect_unauthorized_request() {
         .get_encoded(),
         url: task_config.leader_url.join("/collect").unwrap(),
         sender_auth: None,
-    };
-
-    // Expect failure due to missing bearer token.
-    assert_matches!(
-        leader.http_post_collect(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
-
-    // Expect failure due to incorrect bearer token.
-    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-    assert_matches!(
-        leader.http_post_collect(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
-    );
+    }
 }
 
-#[tokio::test]
-async fn http_post_aggregate_invalid_ciphertext() {
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
-
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: AggregateInitializeReq {
-            task_id: task_id.clone(),
-            agg_job_id: Id([1; 32]),
-            agg_param: b"this is an aggregation parameter".to_vec(),
-            report_shares: vec![ReportShare {
-                nonce: Nonce {
-                    time: 1637361337,
-                    rand: [1; 16],
-                },
-                extensions: Vec::default(),
-                encrypted_input_share: HpkeCiphertext {
-                    config_id: 23,
-                    enc: b"invalid encapsulated key".to_vec(),
-                    payload: b"invalid ciphertext".to_vec(),
-                },
-            }],
-        }
-        .get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
-
-    // Get AggregateResp and then extract the transition data from inside.
-    let agg_resp =
-        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
-            .unwrap();
-    let transition = &agg_resp.transitions[0];
-
-    // Expect failure due to invalid ciphertext.
-    assert_matches!(
-        transition.var,
-        TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
-    );
-}
-
-#[tokio::test]
-async fn http_post_aggregate_valid_ciphertext() {
-    let helper = MockAggregator::new();
-    let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
-
+fn gen_test_report(task_id: &Id) -> Report {
     // Construct HPKE receiver config List.
     let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
         serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
@@ -189,24 +105,114 @@ async fn http_post_aggregate_valid_ciphertext() {
         )
         .unwrap();
 
-    // Construct DapRequest.
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: AggregateInitializeReq {
-            task_id: task_id.clone(),
-            agg_job_id: Id([1; 32]),
-            agg_param: b"this is an aggregation parameter".to_vec(),
-            report_shares: vec![ReportShare {
-                nonce: report.nonce,
-                extensions: report.extensions,
-                // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-                encrypted_input_share: report.encrypted_input_shares[1].clone(),
-            }],
-        }
-        .get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
+    report
+}
+
+#[tokio::test]
+async fn http_post_aggregate_unauthorized_request() {
+    let helper = MockAggregator::new();
+    let mut req = gen_test_agg_init_req(&helper, Vec::default());
+
+    // Expect failure due to missing bearer token.
+    assert_matches!(
+        helper.http_post_aggregate(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+
+    // Expect failure due to incorrect bearer token.
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
+    assert_matches!(
+        helper.http_post_aggregate(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_post_aggregate_share_unauthorized_request() {
+    let helper = MockAggregator::new();
+    let mut req = gen_test_agg_share_req(&helper, 0, [0; 32]);
+
+    // Expect failure due to missing bearer token.
+    assert_matches!(
+        helper.http_post_aggregate_share(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+
+    // Expect failure due to incorrect bearer token.
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
+    assert_matches!(
+        helper.http_post_aggregate_share(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_post_collect_unauthorized_request() {
+    let leader = MockAggregator::new();
+    let mut req = gen_test_collect_req(&leader);
+
+    // Expect failure due to missing bearer token.
+    assert_matches!(
+        leader.http_post_collect(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+
+    // Expect failure due to incorrect bearer token.
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
+    assert_matches!(
+        leader.http_post_collect(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_post_aggregate_failure_hpke_decrypt_error() {
+    let helper = MockAggregator::new();
+    let report_shares = vec![ReportShare {
+        nonce: Nonce {
+            time: 1637361337,
+            rand: [1; 16],
+        },
+        extensions: Vec::default(),
+        encrypted_input_share: HpkeCiphertext {
+            config_id: 23,
+            enc: b"invalid encapsulated key".to_vec(),
+            payload: b"invalid ciphertext".to_vec(),
+        },
+    }];
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
+    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    req.sender_auth = sender_auth;
+
+    // Get AggregateResp and then extract the transition data from inside.
+    let agg_resp =
+        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
+            .unwrap();
+    let transition = &agg_resp.transitions[0];
+
+    // Expect failure due to invalid ciphertext.
+    assert_matches!(
+        transition.var,
+        TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
+    );
+}
+
+#[tokio::test]
+async fn http_post_aggregate_transition_continue() {
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+
+    let report = gen_test_report(task_id);
+    let report_shares = vec![ReportShare {
+        nonce: report.nonce,
+        extensions: report.extensions,
+        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
+        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    }];
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
+
+    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    req.sender_auth = sender_auth;
 
     // Get AggregateResp and then extract the transition data from inside.
     let agg_resp =
@@ -218,71 +224,78 @@ async fn http_post_aggregate_valid_ciphertext() {
     assert_matches!(transition.var, TransitionVar::Continued(_));
 }
 
-#[test]
-fn hpke_decrypter() {
-    // Construct mock aggregator.
-    let aggregator = MockAggregator::new();
-    let task_id = aggregator.nominal_task_id();
+#[tokio::test]
+async fn http_post_aggregate_failure_batch_collected() {
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+    let task_config = helper.get_task_config_for(task_id).unwrap();
 
-    // Initialize variables for mock report.
-    let info = b"info string";
-    let aad = b"associated data";
-    let plaintext = b"plaintext";
-    let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
-        serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
-            .expect("failed to parse hpke_receiver_config_list");
-    let config = &hpke_receiver_config_list[0].config;
-    let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
+    let report = gen_test_report(task_id);
+    let report_shares = vec![ReportShare {
+        nonce: report.nonce.clone(),
+        extensions: report.extensions,
+        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
+        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    }];
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
 
-    // Construct mock report.
-    let report = Report {
-        task_id: Id([23; 32]),
-        nonce: Nonce {
-            time: 1637364244,
-            rand: [2; 16],
-        },
-        extensions: Vec::default(),
-        encrypted_input_shares: vec![HpkeCiphertext {
-            config_id: 23,
-            enc: enc,
-            payload: ciphertext,
-        }],
-    };
+    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    req.sender_auth = sender_auth;
 
-    // Expect false due to non-existing config ID.
-    assert_eq!(aggregator.can_hpke_decrypt(&task_id, 0), false);
+    // This is to ensure that the lock is released before we call http_post_aggregate.
+    {
+        let mut report_store_mutex_guard = helper.report_store.lock().expect("lock() failed");
+        let report_store = report_store_mutex_guard.deref_mut();
 
-    // Expect true due to existing config ID.
-    assert_eq!(
-        aggregator.can_hpke_decrypt(&task_id, report.encrypted_input_shares[0].config_id),
-        true
-    );
+        // Create a new instance of report store associated to the bucket_info.
+        let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
+        report_store.insert(bucket_info.clone(), ReportStore::new());
 
-    // Expect decryption to fail.
+        // Intentionally mark report store as `collected`.
+        report_store
+            .get_mut(&bucket_info)
+            .expect("report_store not found")
+            .process_mark_collected();
+    }
+
+    // Get AggregateResp and then extract the transition data from inside.
+    let agg_resp =
+        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
+            .unwrap();
+    let transition = &agg_resp.transitions[0];
+
+    // Expect failure due to report store marked as collected.
     assert_matches!(
-        aggregator.hpke_decrypt(
-            &report.task_id,
-            info,
-            aad,
-            &HpkeCiphertext {
-                config_id: 0,
-                enc: vec![],
-                payload: b"ciphertext".to_vec(),
-            }
-        ),
-        Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
+        transition.var,
+        TransitionVar::Failed(TransitionFailure::BatchCollected)
     );
+}
 
-    // Expect decryption to succeed.
-    assert_eq!(
-        aggregator
-            .hpke_decrypt(
-                &report.task_id,
-                info,
-                aad,
-                &report.encrypted_input_shares[0]
-            )
-            .unwrap(),
-        plaintext
+#[tokio::test]
+async fn http_post_aggregate_abort_helper_state_overwritten() {
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+
+    let report = gen_test_report(task_id);
+    let report_shares = vec![ReportShare {
+        nonce: report.nonce.clone(),
+        extensions: report.extensions,
+        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
+        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    }];
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
+
+    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    req.sender_auth = sender_auth;
+
+    // Send aggregate request.
+    let _ = helper.http_post_aggregate(&req).await;
+
+    // Send another aggregate request.
+    let res = helper.http_post_aggregate(&req).await;
+
+    // Expect failure due to overwriting existing helper state.
+    assert_matches!(res.unwrap_err(), DapAbort::BadRequest(e) =>
+        assert_eq!(e, "unexpected message for aggregation job (already exists)")
     );
 }

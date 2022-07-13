@@ -15,7 +15,12 @@ use crate::{
     DapResponse, DapTaskConfig,
 };
 use async_trait::async_trait;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+};
 use url::Url;
 
 pub const TASK_LIST: &str = r#"{
@@ -61,27 +66,32 @@ pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mY
 pub(crate) struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
+    pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
+    helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
 }
 
 #[allow(dead_code)]
 impl MockAggregator {
-    pub fn new() -> Self {
-        // Construct task list
+    pub(crate) fn new() -> Self {
         let tasks: HashMap<Id, DapTaskConfig> =
             serde_json::from_str(TASK_LIST).expect("failed to parse task list");
 
-        // Construct HPKE receiver config List
         let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
             serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
                 .expect("failed to parse hpke_receiver_config_list");
 
+        let report_store = Arc::new(Mutex::new(HashMap::new()));
+        let helper_state_store = Arc::new(Mutex::new(HashMap::new()));
+
         Self {
             tasks,
             hpke_receiver_config_list,
+            report_store,
+            helper_state_store,
         }
     }
 
-    pub fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
+    fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
         for hpke_receiver_config in self.hpke_receiver_config_list.iter() {
             if hpke_config_id == hpke_receiver_config.config.id {
                 return Some(hpke_receiver_config);
@@ -91,7 +101,7 @@ impl MockAggregator {
     }
 
     /// Task to use for nominal tests.
-    pub fn nominal_task_id(&self) -> &Id {
+    pub(crate) fn nominal_task_id(&self) -> &Id {
         // Just use the first key in the hash map.
         self.tasks.keys().next().as_ref().unwrap()
     }
@@ -195,32 +205,103 @@ impl DapAggregator<BearerToken> for MockAggregator {
 impl DapHelper<BearerToken> for MockAggregator {
     async fn mark_aggregated(
         &self,
-        _task_id: &Id,
-        _report_shares: &[ReportShare],
+        task_id: &Id,
+        report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        // Return empty HashMap (for now).
-        // TODO(nakatsuka-y) Implement correct functionality.
-        let early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
-        return Ok(early_fails);
+        let mut early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
+
+        let mut report_store_mutex_guard = self
+            .report_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+
+        let report_store = report_store_mutex_guard.deref_mut();
+
+        for report_share in report_shares.iter() {
+            let bucket_info = BucketInfo::new(
+                self.tasks
+                    .get(task_id)
+                    .ok_or_else(|| DapError::fatal("no task found"))?,
+                task_id,
+                &report_share.nonce,
+            );
+
+            if !report_store.contains_key(&bucket_info) {
+                report_store.insert(bucket_info.clone(), ReportStore::new());
+            }
+
+            match report_store
+                .get_mut(&bucket_info)
+                .unwrap()
+                .process_put_processed(report_share.nonce.clone())
+            {
+                Ok(()) => (),
+                Err(failure_reason) => {
+                    early_fails.insert(report_share.nonce.clone(), failure_reason);
+                }
+            }
+        }
+
+        Ok(early_fails)
     }
 
     async fn put_helper_state(
         &self,
-        _task_id: &Id,
-        _agg_job_id: &Id,
-        _helper_state: &DapHelperState,
+        task_id: &Id,
+        agg_job_id: &Id,
+        helper_state: &DapHelperState,
     ) -> Result<(), DapError> {
-        // Return empty Ok (for now).
-        // TODO(nakatsuka-y) Implement correct functionality.
+        let helper_state_info = HelperStateInfo {
+            task_id: task_id.clone(),
+            agg_job_id: agg_job_id.clone(),
+        };
+
+        let mut helper_state_store_mutex_guard = self
+            .helper_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+
+        let helper_state_store = helper_state_store_mutex_guard.deref_mut();
+
+        if helper_state_store.contains_key(&helper_state_info) {
+            return Err(DapError::Fatal(
+                "overwriting existing helper state".to_string(),
+            ));
+        }
+
+        // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
+        // For VDAFs with more rounds, the helper state blob will need to be updated here.
+        helper_state_store.insert(helper_state_info, helper_state.clone());
+
         Ok(())
     }
 
     async fn get_helper_state(
         &self,
-        _task_id: &Id,
-        _agg_job_id: &Id,
+        task_id: &Id,
+        agg_job_id: &Id,
     ) -> Result<Option<DapHelperState>, DapError> {
-        unreachable!("not implemented");
+        let helper_state_info = HelperStateInfo {
+            task_id: task_id.clone(),
+            agg_job_id: agg_job_id.clone(),
+        };
+
+        let mut helper_state_store_mutex_guard = self
+            .helper_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+
+        let helper_state_store = helper_state_store_mutex_guard.deref_mut();
+
+        // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
+        // For VDAFs with more rounds, the helper state blob will need to be updated here.
+        if helper_state_store.contains_key(&helper_state_info) {
+            let helper_state = helper_state_store.remove(&helper_state_info);
+
+            return Ok(helper_state);
+        }
+
+        Ok(None)
     }
 }
 
@@ -270,5 +351,93 @@ impl DapLeader<BearerToken> for MockAggregator {
 
     async fn send_http_post(&self, _req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
         unreachable!("not implemented");
+    }
+}
+
+/// Information associated to a certain helper state for a given task ID and aggregate job ID.
+#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
+pub(crate) struct HelperStateInfo {
+    task_id: Id,
+    agg_job_id: Id,
+}
+
+/// Information associated to a certain report for a given task and nonce to decide which bucket it would be put into.
+#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
+pub(crate) struct BucketInfo {
+    task_id: Id,
+    window: u64,
+}
+
+impl BucketInfo {
+    pub(crate) fn new(task_config: &DapTaskConfig, task_id: &Id, nonce: &Nonce) -> Self {
+        let window = nonce.time - (nonce.time % task_config.min_batch_duration);
+
+        Self {
+            task_id: task_id.clone(),
+            window,
+        }
+    }
+}
+
+// TODO(nakatsuka-y) remove dead_code once all functions are used
+#[allow(dead_code)]
+pub(crate) struct ReportStore {
+    pending: Vec<Report>,
+    processed: HashSet<Nonce>,
+    collected: bool,
+}
+
+// TODO(nakatsuka-y) remove dead_code once all functions are used
+#[allow(dead_code)]
+impl ReportStore {
+    pub(crate) fn new() -> Self {
+        let pending: Vec<Report> = Vec::new();
+        let processed: HashSet<Nonce> = HashSet::new();
+        let collected = false;
+
+        Self {
+            pending,
+            processed,
+            collected,
+        }
+    }
+
+    fn checked_process(&mut self, nonce: &Nonce) -> Result<(), TransitionFailure> {
+        let observed = self.processed.contains(nonce);
+        if observed && !self.collected {
+            return Err(TransitionFailure::ReportReplayed);
+        } else if !observed && self.collected {
+            return Err(TransitionFailure::BatchCollected);
+        }
+        self.processed.insert(nonce.clone());
+        Ok(())
+    }
+
+    pub(crate) fn process_delete_all(&mut self) {
+        self.pending.clear();
+        self.processed.clear();
+        self.collected = false;
+    }
+
+    pub(crate) fn process_get_pending(&mut self, reports_requested: u64) -> Vec<Report> {
+        let reports_drained =
+            std::cmp::min(reports_requested.try_into().unwrap(), self.pending.len());
+        let reports: Vec<Report> = self.pending.drain(..reports_drained).collect();
+        reports
+    }
+
+    pub(crate) fn process_put_pending(&mut self, report: Report) -> Result<(), TransitionFailure> {
+        self.checked_process(&report.nonce)?;
+        self.pending.push(report);
+        Ok(())
+    }
+
+    pub(crate) fn process_put_processed(&mut self, nonce: Nonce) -> Result<(), TransitionFailure> {
+        self.checked_process(&nonce)?;
+        Ok(())
+    }
+
+    pub(crate) fn process_mark_collected(&mut self) {
+        self.collected = true;
     }
 }
