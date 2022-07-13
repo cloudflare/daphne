@@ -8,7 +8,7 @@ mod test_runner;
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{CollectReq, CollectResp, Id, Interval},
+    messages::{CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report},
     DapAggregateResult, DapMeasurement,
 };
 use daphne_worker::InternalAggregateInfo;
@@ -131,7 +131,29 @@ async fn e2e_leader_upload() {
     let url = t.leader_url.join("/upload").unwrap();
     let resp = client
         .post(url.as_str())
-        .body(hex::decode(TEST_DATA_REPORT_OK).unwrap())
+        .body(
+            Report {
+                task_id: t.task_id.clone(),
+                nonce: Nonce {
+                    time: t.now,
+                    rand: [1; 16],
+                },
+                extensions: Vec::default(),
+                encrypted_input_shares: vec![
+                    HpkeCiphertext {
+                        config_id: 23,
+                        enc: b"encapsulated key".to_vec(),
+                        payload: b"ciphertext".to_vec(),
+                    },
+                    HpkeCiphertext {
+                        config_id: 14,
+                        enc: b"encapsulated key".to_vec(),
+                        payload: b"ciphertext".to_vec(),
+                    },
+                ],
+            }
+            .get_encoded(),
+        )
         .send()
         .await
         .expect("request failed");
@@ -446,27 +468,3 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     )
     .await;
 }
-
-const TEST_DATA_REPORT_OK: &str = "\
-f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f0000000061981e6\
-0001b75158ac9febd00000326170020d4f619a75d39dcc87d40af0a7eab96a01d19e377c0d54b5a\
-eda4b5331a1a1806024cdb4d1495ab8eeeb6c2499840758feec6de23032a199080a597f91a31355\
-2cd835a592acbd28b428b2116c7fd80cce65d9e575aacde183fcb12046acf9bb515da9dc78ad326\
-71e563b680cac5284b2e75e24af487ac504a271cd4e2ea18c6255ea281dcf6031fdb27f84a4e283\
-2b210320919a97114c14c227d970fff6f36c3d9dc181a1ff36eacddb40f710c9c0f8502ebc64baf\
-6adc57cbeb14a94f85fc4248dfcd95896cbae9ab6db070225b53e88842d1907b85bcaf4af7060cb\
-4e13bf4debdf1fcfd9760e93e6b6edad650e64cf7ae42601e03aa9893ca5b0931b7f3fc70f8abc0\
-172e4c94ed55993b85eade6ccb6f24dd9721e662e0bec03c5f7af1d51ad59a56140eba86958a1b0\
-e57dcadc82a5680e22a9e8dc4fe5f3aac134dcdfe02d9dc4b35058497242bf3edf3226b50b71e26\
-f01895e0502e953edc32efce29fef41db9d84442f6df56ea37ef8978e48c8ec0b872c9498c99742\
-f48fbfada4302768851dcda982e9eb7a816b0ca58d2e58425c53f2a90cfb9c8bdecd12f090fcdc2\
-d76b9d4406839f0c65f4ce444445025ea064a5c233c18781f7e34b74d1c2e146f5f65c11d315a65\
-efc16f294196f13e4cd51e3a25e00f94ab944479ac4c04c17eaac1e516ea36b0962073257f9566b\
-9e2643cceeaff2bb6f7166d9513004ccacf278cdade65e5b8a6e7a929b8d614703b56e0928b950a\
-f129a9d515d9dd7437cf6d5d668fbfbd7b883fbd24dc7d366aa3ae765a239de56c24d9414486719\
-2ceb7a4b3f207c54ad6fb23972b5a31d6b6d10a3664238c3733f4396a00fdfc9038f0b4bb16dbaa\
-cfef07673d00e0020e677feeec22f2fb66fd3d32143e3b6e37fe0374ad5ec511d06fee65e42b478\
-2000909f7e0d4ff40b85c324531b7773646c0669ac05ee34da63a4ee843872b3da9a3ea241ef46d\
-0049439cc78bebde3c981066d81dcb853292daf37a665d09761679a89c83477889e6ffd919ca374\
-74ed43e66ac35354a51832027ea2c165c8f86c002fe9d02220cb89ffa35251eaca6fb26287a8e09\
-03501a3e7400787de9525161af8abe2eeb1eb59b1d1446c4c98102e89";

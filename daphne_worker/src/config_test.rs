@@ -64,11 +64,11 @@ fn daphne_param() {
     // Try computing a batch name.
     let nonce = Nonce {
         time: now,
-        rand: 10496152761178246059,
+        rand: [1; 16],
     };
     assert_eq!(
         config.durable_report_store_name(&task_config, &task_id, &nonce),
-        "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/3"
+        "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/1"
     );
 
     // Try enumerating a sequence of batch names.

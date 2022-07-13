@@ -145,8 +145,8 @@ pub(crate) fn nonce_hex_from_report(report_hex: &str) -> Option<&str> {
     let report_hex = &report_hex[64..];
 
     // nonce
-    if report_hex.len() < 32 {
+    if report_hex.len() < 48 {
         return None;
     }
-    Some(&report_hex[..32])
+    Some(&report_hex[..48])
 }
