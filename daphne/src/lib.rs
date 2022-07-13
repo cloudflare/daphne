@@ -313,7 +313,7 @@ pub struct DapLeaderUncommitted {
 }
 
 /// The Helper's state during the aggregation flow.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DapHelperState {
     pub(crate) seq: Vec<(VdafState, Nonce)>,
 }

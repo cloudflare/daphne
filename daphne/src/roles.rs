@@ -444,6 +444,18 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     &early_rejects,
                 )?;
 
+                // Check that helper state with task_id and agg_job_id does not exist.
+                if self
+                    .get_helper_state(&agg_init_req.task_id, &agg_init_req.agg_job_id)
+                    .await?
+                    .is_some()
+                {
+                    // TODO spec: Consider an explicit abort for this case.
+                    return Err(DapAbort::BadRequest(
+                        "unexpected message for aggregation job (already exists)".into(),
+                    ));
+                }
+
                 let agg_resp = match transition {
                     DapHelperTransition::Continue(state, agg_resp) => {
                         self.put_helper_state(
