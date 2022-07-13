@@ -127,6 +127,11 @@ pub enum DapAbort {
     #[error("unauthorizedRequest")]
     UnauthorizedRequest,
 
+    /// Unrecognized aggregation job. Sent in response to an AggregateContinueReq for which the
+    /// Helper does not recognize the indicated aggregation job.
+    #[error("unrecognizedAggregationJob")]
+    UnrecognizedAggregationJob,
+
     /// Unrecognized HPKE config. Sent in response to an upload request for which the leader share
     /// is encrypted using an unrecognized HPKE configuration.
     //
@@ -154,6 +159,7 @@ impl DapAbort {
             | Self::ReplayedReport
             | Self::StaleReport
             | Self::UnauthorizedRequest
+            | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
             | Self::UnrecognizedTask => (self.to_string(), None),

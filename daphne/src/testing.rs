@@ -219,7 +219,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         &self,
         _task_id: &Id,
         _agg_job_id: &Id,
-    ) -> Result<DapHelperState, DapError> {
+    ) -> Result<Option<DapHelperState>, DapError> {
         unreachable!("not implemented");
     }
 }
