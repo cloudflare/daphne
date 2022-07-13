@@ -13,9 +13,14 @@
 //!
 //! Daphne is not yet feature complete. Known issues include:
 //!
+//! * The collect sub-protocol has not yet been fully implemented. In particular, Daphne Aggreators
+//! do not check properly if batch intervals overlap across collect requests. Note that this
+//! feature is privacy-critical and implementation is planned. See
+//! https://github.com/cloudflare/daphne/issues/45 for details.
+//!
 //! * Daphne is not compatible with DAP tasks whose maximum batch lifetime is longer than one.
 //!
-//! * Daphne does handle aborts precisely as specified. In particular, some fields in the "Problem
+//! * Aborts are not handled precisely as specified. In particular, some fields in the "Problem
 //! Details" document are omitted.
 //!
 //! * Daphne does not implement a complete DAP Client. However, a method is provided on
