@@ -22,7 +22,7 @@ test_janus = []
 daphne_worker = { path = "../daphne_worker" }
 cfg-if = "0.1.2"
 worker = "0.0.10"
-serde_json = "1.0.67"
+serde_json = "1.0.82"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
@@ -41,9 +41,9 @@ daphne = { path = "../daphne" }
 hex = { version = "0.4.3", features = ["serde"] }
 lazy_static = "1.4.0"
 futures = "0.3.21"
-janus = { git = "https://github.com/divviup/janus", rev = "6bb0e992da50afc8a5eb602ad5ce559fe78cf2c4" }
-janus_server = { git = "https://github.com/divviup/janus", rev = "6bb0e992da50afc8a5eb602ad5ce559fe78cf2c4" }
-janus_test_util = { git = "https://github.com/divviup/janus", rev = "6bb0e992da50afc8a5eb602ad5ce559fe78cf2c4" }
+janus_core = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
+janus_client = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9"}
+janus_server = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
 prio = "0.8.0"
 rand = "0.8.5"
 reqwest = { version = "0.11.7", features = ["json"] }
