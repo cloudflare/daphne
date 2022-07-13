@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::int_err;
+use crate::{durable::state_get_or_default, int_err};
 use daphne::messages::TransitionFailure;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
@@ -54,20 +54,10 @@ pub struct ReportStore {
 }
 
 impl ReportStore {
-    async fn get_or_default<T: Default + for<'a> Deserialize<'a>>(&self, key: &str) -> Result<T> {
-        self.state.storage().get(key).await.or_else(|e| {
-            if matches!(e, Error::JsError(ref s) if s == "No such value in storage.") {
-                Ok(T::default())
-            } else {
-                Err(e)
-            }
-        })
-    }
-
     async fn checked_process(&self, nonce_hex: &str) -> Result<ReportStoreResult> {
         let key = format!("processed/{}", nonce_hex);
-        let collected: bool = self.get_or_default("collected").await?;
-        let observed: bool = self.get_or_default(&key).await?;
+        let collected: bool = state_get_or_default(&self.state, "collected").await?;
+        let observed: bool = state_get_or_default(&self.state, &key).await?;
         if observed && !collected {
             return Ok(ReportStoreResult::Err(TransitionFailure::ReportReplayed));
         } else if !observed && collected {

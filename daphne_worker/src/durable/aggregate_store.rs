@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::int_err;
+use crate::{durable::state_get_or_default, int_err};
 use daphne::DapAggregateShare;
 use worker::*;
 
@@ -14,8 +14,6 @@ pub(crate) const DURABLE_AGGREGATE_STORE_DELETE_ALL: &str =
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
 
-const OK: &str = "Ok";
-
 /// Durable Object (DO) for storing aggregate shares.
 ///
 /// The naming conventions for instances of the [`AggregateStore`] DO is as follows:
@@ -26,8 +24,6 @@ const OK: &str = "Ok";
 /// timestamp (in seconds) truncated by the minimum batch duration.
 #[durable_object]
 pub struct AggregateStore {
-    // TODO Write this to persistent storage instead of keeping it in memory.
-    agg_share: DapAggregateShare,
     #[allow(dead_code)]
     state: State,
 }
@@ -35,27 +31,30 @@ pub struct AggregateStore {
 #[durable_object]
 impl DurableObject for AggregateStore {
     fn new(state: State, _env: Env) -> Self {
-        Self {
-            agg_share: DapAggregateShare::default(),
-            state,
-        }
+        Self { state }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             (DURABLE_AGGREGATE_STORE_DELETE_ALL, Method::Post) => {
-                self.agg_share.reset();
-                Response::ok(OK)
+                self.state.storage().delete_all().await?;
+                Response::empty()
             }
 
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
+                let mut agg_share: DapAggregateShare =
+                    state_get_or_default(&self.state, "agg_share").await?;
                 let agg_share_delta = req.json().await?;
-                self.agg_share.merge(agg_share_delta).map_err(int_err)?;
-
-                Response::ok(OK)
+                agg_share.merge(agg_share_delta).map_err(int_err)?;
+                self.state.storage().put("agg_share", agg_share).await?;
+                Response::empty()
             }
 
-            (DURABLE_AGGREGATE_STORE_GET, Method::Post) => Response::from_json(&self.agg_share),
+            (DURABLE_AGGREGATE_STORE_GET, Method::Post) => {
+                let agg_share: DapAggregateShare =
+                    state_get_or_default(&self.state, "agg_share").await?;
+                Response::from_json(&agg_share)
+            }
 
             _ => Err(int_err(format!(
                 "AggregatesStore: unexpected request: method={:?}; path={:?}",
