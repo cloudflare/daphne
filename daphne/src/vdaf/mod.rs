@@ -11,9 +11,15 @@ use crate::{
         HpkeConfig, Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure,
         TransitionVar,
     },
-    vdaf::prio3::{
-        prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-        prio3_prepare_init, prio3_shard, prio3_unshard, Prio3Error,
+    vdaf::{
+        prio2::{
+            prio2_encode_prepare_message, prio2_helper_prepare_finish, prio2_leader_prepare_finish,
+            prio2_prepare_init, prio2_shard, prio2_unshard,
+        },
+        prio3::{
+            prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
+            prio3_prepare_init, prio3_shard, prio3_unshard,
+        },
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -21,8 +27,11 @@ use crate::{
 };
 use prio::{
     codec::{encode_u16_items, CodecError, Encode},
-    field::{Field128, Field64},
-    vdaf::prio3::{Prio3PrepareShare, Prio3PrepareState},
+    field::{Field128, Field64, FieldPrio2},
+    vdaf::{
+        prio2::{Prio2PrepareShare, Prio2PrepareState},
+        prio3::{Prio3PrepareShare, Prio3PrepareState},
+    },
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -38,19 +47,30 @@ const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
 const CTX_ROLE_HELPER: u8 = 3;
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum VdafError {
+    #[error("{0}")]
+    Codec(#[from] CodecError),
+    #[error("{0}")]
+    Vdaf(#[from] prio::vdaf::VdafError),
+}
+
 #[derive(Clone)]
 pub(crate) enum VdafVerifyKey {
     Prio3([u8; 16]),
+    Prio2([u8; 32]),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum VdafState {
+    Prio2(Prio2PrepareState),
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum VdafMessage {
+    Prio2Share(Prio2PrepareShare),
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
 }
@@ -59,6 +79,7 @@ pub(crate) enum VdafMessage {
 pub(crate) enum VdafAggregateShare {
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),
+    FieldPrio2(prio::vdaf::AggregateShare<FieldPrio2>),
 }
 
 impl Encode for VdafAggregateShare {
@@ -66,6 +87,7 @@ impl Encode for VdafAggregateShare {
         match self {
             VdafAggregateShare::Field64(agg_share) => bytes.append(&mut agg_share.into()),
             VdafAggregateShare::Field128(agg_share) => bytes.append(&mut agg_share.into()),
+            VdafAggregateShare::FieldPrio2(agg_share) => bytes.append(&mut agg_share.into()),
         }
     }
 }
@@ -76,6 +98,9 @@ impl VdafConfig {
             Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(
                 <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
+            Self::Prio2 { .. } => Ok(VdafVerifyKey::Prio2(
+                <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
         }
     }
 
@@ -83,7 +108,7 @@ impl VdafConfig {
     /// executed.
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
-            Self::Prio3(..) => agg_param.is_empty(),
+            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
         }
     }
 
@@ -93,6 +118,7 @@ impl VdafConfig {
         let mut rng = thread_rng();
         match self {
             Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
+            Self::Prio2 { .. } => VdafVerifyKey::Prio2(rng.gen()),
         }
     }
 
@@ -128,6 +154,7 @@ impl VdafConfig {
 
         let encoded_input_shares = match self {
             Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
+            Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
         };
 
         if hpke_config_list.len() != encoded_input_shares.len() {
@@ -229,6 +256,16 @@ impl VdafConfig {
                     &input_share_data,
                 )?)
             }
+            (Self::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
+                Ok(prio2_prepare_init(
+                    *dimension,
+                    verify_key,
+                    agg_id,
+                    nonce_data,
+                    &input_share_data,
+                )?)
+            }
+            _ => Err(DapError::fatal("VDAF verify key does not match config")),
         }
     }
 
@@ -382,7 +419,10 @@ impl VdafConfig {
                 &report_share.encrypted_input_share,
             ) {
                 Ok((step, message)) => {
-                    let message_data = prio3_encode_prepare_message(&message);
+                    let message_data = match self {
+                        Self::Prio3(..) => prio3_encode_prepare_message(&message),
+                        Self::Prio2 { .. } => prio2_encode_prepare_message(&message),
+                    };
                     states.push((step, report_share.nonce.clone()));
                     TransitionVar::Continued(message_data)
                 }
@@ -437,53 +477,57 @@ impl VdafConfig {
                 return Err(DapAbort::UnrecognizedMessage);
             }
 
-            match self {
-                Self::Prio3(prio3_config) => {
-                    let helper_message = match &helper.var {
-                        TransitionVar::Continued(message) => message,
+            let helper_message = match &helper.var {
+                TransitionVar::Continued(message) => message,
 
-                        // Skip report that can't be processed any further.
-                        //
-                        // TODO Log the reason the report was skipped.
-                        TransitionVar::Failed(..) => continue,
+                // Skip report that can't be processed any further.
+                //
+                // TODO Log the reason the report was skipped.
+                TransitionVar::Failed(..) => continue,
 
-                        // TODO Log the fact that the helper sent an unexpected message.
-                        TransitionVar::Finished => return Err(DapAbort::UnrecognizedMessage),
-                    };
+                // TODO Log the fact that the helper sent an unexpected message.
+                TransitionVar::Finished => return Err(DapAbort::UnrecognizedMessage),
+            };
 
-                    match prio3_leader_prepare_finish(
-                        prio3_config,
-                        leader_step,
-                        leader_message,
-                        helper_message,
-                    ) {
-                        Ok((data, message)) => {
-                            let checksum = ring::digest::digest(
-                                &ring::digest::SHA256,
-                                &leader_nonce.get_encoded(),
-                            );
+            let res = match self {
+                Self::Prio3(prio3_config) => prio3_leader_prepare_finish(
+                    prio3_config,
+                    leader_step,
+                    leader_message,
+                    helper_message,
+                ),
+                Self::Prio2 { dimension } => prio2_leader_prepare_finish(
+                    *dimension,
+                    leader_step,
+                    leader_message,
+                    helper_message,
+                ),
+            };
 
-                            states.push((
-                                DapOutputShare {
-                                    time: leader_nonce.time,
-                                    checksum: checksum.as_ref().try_into().unwrap(),
-                                    data,
-                                },
-                                leader_nonce.clone(),
-                            ));
+            match res {
+                Ok((data, message)) => {
+                    let checksum =
+                        ring::digest::digest(&ring::digest::SHA256, &leader_nonce.get_encoded());
 
-                            seq.push(Transition {
-                                nonce: leader_nonce,
-                                var: TransitionVar::Continued(message),
-                            });
-                        }
+                    states.push((
+                        DapOutputShare {
+                            time: leader_nonce.time,
+                            checksum: checksum.as_ref().try_into().unwrap(),
+                            data,
+                        },
+                        leader_nonce.clone(),
+                    ));
 
-                        // Skip report that can't be processed any further.
-                        //
-                        // TODO Log the reason the report was skipped.
-                        Err(Prio3Error::Codec(..)) | Err(Prio3Error::Vdaf(..)) => (),
-                    }
+                    seq.push(Transition {
+                        nonce: leader_nonce,
+                        var: TransitionVar::Continued(message),
+                    });
                 }
+
+                // Skip report that can't be processed any further.
+                //
+                // TODO Log the reason the report was skipped.
+                Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => (),
             };
         }
 
@@ -547,35 +591,39 @@ impl VdafConfig {
                     continue;
                 }
 
-                let var = match self {
+                let leader_message = match &leader.var {
+                    TransitionVar::Continued(message) => message,
+
+                    // TODO Log the fact that the helper sent an unexpected message.
+                    _ => return Err(DapAbort::UnrecognizedMessage),
+                };
+
+                let res = match self {
                     Self::Prio3(prio3_config) => {
-                        let leader_message = match &leader.var {
-                            TransitionVar::Continued(message) => message,
+                        prio3_helper_prepare_finish(prio3_config, helper_step, leader_message)
+                    }
+                    Self::Prio2 { dimension } => {
+                        prio2_helper_prepare_finish(*dimension, helper_step, leader_message)
+                    }
+                };
 
-                            // TODO Log the fact that the helper sent an unexpected message.
-                            _ => return Err(DapAbort::UnrecognizedMessage),
-                        };
+                let var = match res {
+                    Ok(data) => {
+                        let checksum = ring::digest::digest(
+                            &ring::digest::SHA256,
+                            &helper_nonce.get_encoded(),
+                        );
 
-                        match prio3_helper_prepare_finish(prio3_config, helper_step, leader_message)
-                        {
-                            Ok(data) => {
-                                let checksum = ring::digest::digest(
-                                    &ring::digest::SHA256,
-                                    &helper_nonce.get_encoded(),
-                                );
+                        out_shares.push(DapOutputShare {
+                            time: helper_nonce.time,
+                            checksum: checksum.as_ref().try_into().unwrap(),
+                            data,
+                        });
+                        TransitionVar::Finished
+                    }
 
-                                out_shares.push(DapOutputShare {
-                                    time: helper_nonce.time,
-                                    checksum: checksum.as_ref().try_into().unwrap(),
-                                    data,
-                                });
-                                TransitionVar::Finished
-                            }
-
-                            Err(Prio3Error::Codec(..)) | Err(Prio3Error::Vdaf(..)) => {
-                                TransitionVar::Failed(TransitionFailure::VdafPrepError)
-                            }
-                        }
+                    Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                        TransitionVar::Failed(TransitionFailure::VdafPrepError)
                     }
                 };
 
@@ -729,6 +777,7 @@ impl VdafConfig {
 
         match self {
             Self::Prio3(prio3_config) => Ok(prio3_unshard(prio3_config, agg_shares)?),
+            Self::Prio2 { dimension } => Ok(prio2_unshard(*dimension, agg_shares)?),
         }
     }
 }
@@ -773,6 +822,9 @@ fn produce_encrypted_agg_share(
 
 #[cfg(test)]
 mod mod_test;
+pub mod prio2;
+#[cfg(test)]
+mod prio2_test;
 pub mod prio3;
 #[cfg(test)]
 mod prio3_test;

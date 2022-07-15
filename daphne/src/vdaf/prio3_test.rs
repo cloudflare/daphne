@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    vdaf::prio3::{
-        prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-        prio3_prepare_init, prio3_shard, prio3_unshard, Prio3Error,
+    vdaf::{
+        prio3::{
+            prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
+            prio3_prepare_init, prio3_shard, prio3_unshard,
+        },
+        VdafError,
     },
     DapAggregateResult, DapMeasurement, Prio3Config,
 };
@@ -47,7 +50,7 @@ fn test_prepare(
     config: &Prio3Config,
     measurement: DapMeasurement,
     expected_result: DapAggregateResult,
-) -> Result<(), Prio3Error> {
+) -> Result<(), VdafError> {
     let mut rng = thread_rng();
     let verify_key = rng.gen();
     let nonce = b"this is a good nonce";

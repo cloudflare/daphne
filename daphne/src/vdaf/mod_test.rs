@@ -543,7 +543,7 @@ fn helper_state_serialization() {
     assert!(DapHelperState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())
 }
 
-struct Test<'a> {
+pub(crate) struct Test<'a> {
     now: u64,
     vdaf: &'a VdafConfig,
     task_id: Id,
@@ -558,7 +558,7 @@ struct Test<'a> {
 }
 
 impl<'a> Test<'a> {
-    fn new(vdaf: &'a VdafConfig) -> Test {
+    pub(crate) fn new(vdaf: &'a VdafConfig) -> Test {
         let mut rng = thread_rng();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -742,5 +742,57 @@ impl<'a> Test<'a> {
                 enc_agg_shares,
             )
             .unwrap()
+    }
+
+    pub(crate) fn roundtrip(&mut self, measurements: Vec<DapMeasurement>) -> DapAggregateResult {
+        let batch_interval = Interval {
+            start: self.now,
+            duration: 3600,
+        };
+
+        // Clients: Shard
+        let reports = self.produce_reports(measurements);
+
+        // Aggregators: Preparation
+        let (leader_state, agg_init) = self.produce_agg_init_req(reports).unwrap_continue();
+        let (helper_state, agg_resp) = self.handle_agg_init_req(agg_init).unwrap_continue();
+        let got = DapHelperState::get_decoded(
+            &self.vdaf,
+            &helper_state
+                .get_encoded(&self.vdaf)
+                .expect("failed to encode helper state"),
+        )
+        .expect("failed to decode helper state");
+        assert_eq!(got, helper_state);
+
+        let (uncommitted, agg_cont) = self
+            .handle_agg_resp(leader_state, agg_resp)
+            .unwrap_uncommitted();
+        let (helper_out_shares, agg_resp) = self
+            .handle_agg_cont_req(helper_state, &agg_cont)
+            .unwrap_finish();
+        let leader_out_shares = self.handle_final_agg_resp(uncommitted, agg_resp);
+
+        // Leader: Aggregation
+        let leader_agg_shares =
+            DapAggregateShare::batches_from_out_shares(leader_out_shares, 3600).unwrap();
+        assert_eq!(leader_agg_shares.len(), 1);
+        let (_batch_window, leader_agg_share) = leader_agg_shares.into_iter().next().unwrap();
+        let leader_encrypted_agg_share =
+            self.produce_leader_encrypted_agg_share(&batch_interval, &leader_agg_share);
+
+        // Helper: Aggregation
+        let helper_agg_shares =
+            DapAggregateShare::batches_from_out_shares(helper_out_shares, 3600).unwrap();
+        assert_eq!(helper_agg_shares.len(), 1);
+        let (_batch_window, helper_agg_share) = helper_agg_shares.into_iter().next().unwrap();
+        let helper_encrypted_agg_share =
+            self.produce_helper_encrypted_agg_share(&batch_interval, &helper_agg_share);
+
+        // Collector: Unshard
+        self.consume_encrypted_agg_shares(
+            &batch_interval,
+            vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
+        )
     }
 }
