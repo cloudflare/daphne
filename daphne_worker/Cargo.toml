@@ -20,7 +20,7 @@ base64 = "0.13.0"
 worker = "0.0.10"
 serde_json = "1.0.82"
 getrandom = { version = "0.2", features = ["js"] } # Required for prio
-prio = "0.8.0"
+prio = "0.8.2"
 hpke = { version = "0.8.0", features = ["std", "serde_impls"] }
 ring = "0.16.20"
 hex = { version = "0.4.3", features = ["serde"] }

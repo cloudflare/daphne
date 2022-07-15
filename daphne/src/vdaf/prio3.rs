@@ -62,9 +62,11 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_aes128_sum(2, *bits)?;
             Ok(shard!(vdaf, &(measurement as u128)))
         }
+        _ => panic!("XXX edge case"),
     }
 }
 
+// XXX Rename to prep_init
 macro_rules! prep_start {
     (
         $vdaf:ident,
@@ -236,7 +238,7 @@ pub(crate) fn prio3_helper_prepare_finish(
         _ => panic!("prio3_helper_prepare_finish: {}", ERR_FIELD_TYPE),
     };
 
-    Ok(data)
+    Ok(data) // XXX rename to agg_share
 }
 
 /// Interpret `step` as a prepare message for prio3 and append it to `bytes`. Returns an error if
@@ -292,6 +294,7 @@ pub(crate) fn prio3_encode_prepare_message(message: &VdafMessage) -> Vec<u8> {
     match message {
         VdafMessage::Prio3ShareField64(message) => message.get_encoded(),
         VdafMessage::Prio3ShareField128(message) => message.get_encoded(),
+        _ => panic!("XXX edge case"),
     }
 }
 

@@ -5,21 +5,49 @@ use crate::config::DaphneWorkerConfig;
 use daphne::messages::{Interval, Nonce};
 
 const DAP_TASK_LIST: &str = r#"{
-  "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-    "leader_url": "https://leader.biz/leadver/v1/",
-    "helper_url": "http://helper.com:8788",
-    "collector_hpke_config": "f40020000100010020a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f",
-    "min_batch_duration": 3600,
-    "min_batch_size": 100,
-    "vdaf": {
-      "prio3": {
-        "sum": {
-          "bits": 10
-        }
-      }
+    "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
+        "leader_url": "http://leader:8787",
+        "helper_url": "http://helper:8788",
+        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "min_batch_duration": 3600,
+        "min_batch_size": 10,
+        "vdaf": {
+            "prio3": {
+                "sum": {
+                    "bits": 10
+                }
+            }
+        },
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     },
-    "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-  }
+    "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
+        "leader_url": "http://leader:8787",
+        "helper_url": "http://127.0.0.1:9788",
+        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "min_batch_duration": 3600,
+        "min_batch_size": 10,
+        "vdaf": {
+            "prio3": {
+                "sum": {
+                    "bits": 10
+                }
+            }
+        },
+        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
+    },
+    "aaaabe3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
+        "leader_url": "http://leader:8787",
+        "helper_url": "http://helper:8788",
+        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "min_batch_duration": 3600,
+        "min_batch_size": 10,
+        "vdaf": {
+            "prio2": {
+                "input_len": 100
+            }
+        },
+        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d1fd8d30dc0e0b7ac81f0050fcab0782d"
+    }
 }"#;
 
 const DAP_HPKE_RECEIVER_CONFIG_LIST: &str = r#"[

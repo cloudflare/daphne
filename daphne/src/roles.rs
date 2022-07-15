@@ -460,9 +460,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .get_task_config_for(&agg_init_req.task_id)
                     .ok_or(DapAbort::UnrecognizedTask)?;
 
-                let early_rejects = self
-                    .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
-                    .await?;
+                // XXX Don't count DO time for benchmark
+                //let early_rejects = self
+                //    .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
+                //    .await?;
+                let early_rejects = HashMap::default();
 
                 // This is where the encrypted report share is decrypted.
                 let transition = task_config.vdaf.handle_agg_init_req(

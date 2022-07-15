@@ -543,6 +543,14 @@ fn helper_state_serialization() {
     assert!(DapHelperState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())
 }
 
+#[test]
+fn prio2_roundtrip() {
+    let t = Test::new(&VdafConfig::Prio2 { input_len: 5 });
+    let reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1, 0, 0, 0, 1])]);
+
+    // XXX Round trip test for a set of reports.
+}
+
 struct Test<'a> {
     now: u64,
     vdaf: &'a VdafConfig,

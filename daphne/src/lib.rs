@@ -29,6 +29,7 @@
 use crate::{
     messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
     vdaf::{
+        prio2::{prio2_append_prepare_state, prio2_decode_prepare_state, Prio2Error},
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, Prio3Error},
         VdafAggregateShare, VdafMessage, VdafState, VdafVerifyKey,
     },
@@ -83,6 +84,17 @@ impl From<Prio3Error> for DapError {
     fn from(e: Prio3Error) -> Self {
         match e {
             Prio3Error::Codec(..) | Prio3Error::Vdaf(..) => {
+                Self::Transition(TransitionFailure::VdafPrepError)
+            }
+        }
+    }
+}
+
+// XXX copy-pasta
+impl From<Prio2Error> for DapError {
+    fn from(e: Prio2Error) -> Self {
+        match e {
+            Prio2Error::Codec(..) | Prio2Error::Vdaf(..) => {
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
         }
@@ -292,12 +304,14 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
 #[serde(rename_all = "snake_case")]
 pub enum DapMeasurement {
     U64(u64),
+    U32Vec(Vec<u32>),
 }
 
 /// The aggregate result computed by the Collector.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapAggregateResult {
+    U32Vec(Vec<u32>),
     U64(u64),
     U128(u128),
     U128Vec(Vec<u128>),
@@ -332,11 +346,15 @@ impl DapHelperState {
     pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
         let mut bytes = vec![];
         for (state, nonce) in self.seq.iter() {
-            match vdaf_config {
-                VdafConfig::Prio3(prio3_config) => {
+            match (vdaf_config, state) {
+                (VdafConfig::Prio3(prio3_config), _) => {
                     prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
                 }
-            };
+                (VdafConfig::Prio2 { .. }, VdafState::Prio2(state)) => {
+                    state.encode(&mut bytes);
+                }
+                _ => return Err(DapError::fatal("VDAF config and prep state mismatch")),
+            }
             nonce.encode(&mut bytes);
         }
         Ok(bytes)
@@ -350,6 +368,9 @@ impl DapHelperState {
             let state = match vdaf_config {
                 VdafConfig::Prio3(ref prio3_config) => {
                     prio3_decode_prepare_state(prio3_config, 1, &mut r)?
+                }
+                VdafConfig::Prio2 { input_len } => {
+                    prio2_decode_prepare_state(*input_len, 1, &mut r)?
                 }
             };
             let nonce = Nonce::decode(&mut r)?;
@@ -398,6 +419,14 @@ impl DapAggregateShare {
                 left.merge(&right)
                     .map_err(|e| DapError::Fatal(e.to_string()))?;
             }
+            (
+                Some(VdafAggregateShare::FieldPrio2(left)),
+                Some(VdafAggregateShare::FieldPrio2(right)),
+            ) => {
+                left.merge(&right)
+                    .map_err(|e| DapError::Fatal(e.to_string()))?;
+            }
+
             _ => return Err(DapError::fatal("invalid aggregate share merge")),
         };
 
@@ -473,6 +502,7 @@ pub enum DapHelperTransition<M: Debug> {
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {
     Prio3(Prio3Config),
+    Prio2 { input_len: u32 },
 }
 
 impl std::str::FromStr for VdafConfig {
