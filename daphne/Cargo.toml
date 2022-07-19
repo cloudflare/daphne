@@ -13,7 +13,12 @@ license = "BSD-3-Clause"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "dapf"
+path = "src/bin/dapf.rs"
+
 [dependencies]
+assert_matches = "1.5.0"
 async-trait = "0.1.56"
 base64 = "0.13.0"
 getrandom = { version = "0.2", features = ["js"] } # Required for prio
@@ -27,7 +32,9 @@ serde = { version = "^1.0", features = ["derive"] }
 rand = "0.8.5"
 thiserror = "1.0"
 url = { version = "2.2.2", features = ["serde"] }
+clap = { version = "3.2.12", features = ["derive"] } # Required for daph CLI
+reqwest = { version = "0.11.11", features = ["blocking"] } # Required for daph CLI
+anyhow = "1.0.58" # Required for daph CLI
 
 [dev-dependencies]
-assert_matches = "1.5.0"
 tokio = { version = "^1.19", features = ["macros","rt"] }

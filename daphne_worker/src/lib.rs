@@ -148,6 +148,14 @@ pub async fn run_daphne_worker(req: Request, env: Env) -> Result<Response> {
                 .get_async(
                     "/collect/task/:task_id/req/:collect_id",
                     |_req, ctx| async move {
+                        // TODO(cjpatton) Decide if this request needs to be authorized using the
+                        // Collector's bearer token.
+                        //
+                        // Right now the spec does not require it. (It might not even allow it!)
+                        // This would be reasonable if this request doesn't change the Aggregator's
+                        // state, however in our case it does: The durable object deletes the
+                        // aggregate shares after they've been collected. Thus we'll have to either
+                        // modify this endpoint so that it is stateless or add authorization.
                         let task_id = parse_id!(ctx.param("task_id"));
                         let collect_id = parse_id!(ctx.param("collect_id"));
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
