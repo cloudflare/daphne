@@ -204,6 +204,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             return Err(DapAbort::UnrecognizedHpkeConfig);
         }
 
+        // NOTE spec: Currently it is up to the backend to reject or accept a report.
         Ok(self.put_report(&report).await?)
     }
 
