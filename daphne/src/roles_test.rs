@@ -3,7 +3,10 @@
 
 use crate::{
     auth::BearerToken,
-    constants::{MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ},
+    constants::{
+        MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
+        MEDIA_TYPE_REPORT,
+    },
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq, HpkeCiphertext, Id,
@@ -20,98 +23,109 @@ use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
 use std::{ops::DerefMut, vec};
 
-fn gen_test_agg_init_req(
-    agg: &MockAggregator,
-    report_shares: Vec<ReportShare>,
-) -> DapRequest<BearerToken> {
-    let mut rng = thread_rng();
-    let task_id = agg.nominal_task_id();
-    let task_config = agg.get_task_config_for(task_id).unwrap();
+impl MockAggregator {
+    fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
+        let task_id = self.nominal_task_id();
+        let task_config = self.get_task_config_for(task_id).unwrap();
 
-    DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: AggregateInitializeReq {
-            task_id: task_id.clone(),
-            agg_job_id: Id(rng.gen()),
-            agg_param: Vec::default(),
-            report_shares,
+        DapRequest {
+            media_type: Some(MEDIA_TYPE_REPORT),
+            payload: report.get_encoded(),
+            url: task_config.leader_url.join("/upload").unwrap(),
+            sender_auth: None,
         }
-        .get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: None,
     }
-}
 
-fn gen_test_agg_share_req(
-    agg: &MockAggregator,
-    report_count: u64,
-    checksum: [u8; 32],
-) -> DapRequest<BearerToken> {
-    let task_id = agg.nominal_task_id();
-    let task_config = agg.get_task_config_for(task_id).unwrap();
+    fn gen_test_agg_init_req(&self, report_shares: Vec<ReportShare>) -> DapRequest<BearerToken> {
+        let mut rng = thread_rng();
+        let task_id = self.nominal_task_id();
+        let task_config = self.get_task_config_for(task_id).unwrap();
 
-    DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
-        payload: AggregateShareReq {
-            task_id: task_id.clone(),
-            batch_interval: Interval::default(),
-            agg_param: Vec::default(),
-            report_count,
-            checksum,
+        DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
+            payload: AggregateInitializeReq {
+                task_id: task_id.clone(),
+                agg_job_id: Id(rng.gen()),
+                agg_param: Vec::default(),
+                report_shares,
+            }
+            .get_encoded(),
+            url: task_config.helper_url.join("/aggregate").unwrap(),
+            sender_auth: None,
         }
-        .get_encoded(),
-        url: task_config.helper_url.join("/aggregate_share").unwrap(),
-        sender_auth: None,
     }
-}
 
-fn gen_test_collect_req(agg: &MockAggregator) -> DapRequest<BearerToken> {
-    let task_id = agg.nominal_task_id();
-    let task_config = agg.get_task_config_for(task_id).unwrap();
+    fn gen_test_agg_share_req(
+        &self,
+        report_count: u64,
+        checksum: [u8; 32],
+    ) -> DapRequest<BearerToken> {
+        let task_id = self.nominal_task_id();
+        let task_config = self.get_task_config_for(task_id).unwrap();
 
-    DapRequest {
-        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
-        payload: CollectReq {
-            task_id: task_id.clone(),
-            batch_interval: Interval::default(),
-            agg_param: Vec::default(),
+        DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
+            payload: AggregateShareReq {
+                task_id: task_id.clone(),
+                batch_interval: Interval::default(),
+                agg_param: Vec::default(),
+                report_count,
+                checksum,
+            }
+            .get_encoded(),
+            url: task_config.helper_url.join("/aggregate_share").unwrap(),
+            sender_auth: None,
         }
-        .get_encoded(),
-        url: task_config.leader_url.join("/collect").unwrap(),
-        sender_auth: None,
-    }
-}
-
-fn gen_test_report(task_id: &Id) -> Report {
-    // Construct HPKE receiver config List.
-    let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
-        serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
-            .expect("failed to parse hpke_receiver_config_list");
-
-    // Construct HPKE config list.
-    let mut hpke_config_list = Vec::with_capacity(hpke_receiver_config_list.len());
-    for receiver_config in hpke_receiver_config_list {
-        hpke_config_list.push(receiver_config.config);
     }
 
-    // Construct report.
-    let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-    let report = vdaf_config
-        .produce_report(
-            &hpke_config_list,
-            1637361337,
-            task_id,
-            DapMeasurement::U64(1),
-        )
-        .unwrap();
+    fn gen_test_collect_req(&self) -> DapRequest<BearerToken> {
+        let task_id = self.nominal_task_id();
+        let task_config = self.get_task_config_for(task_id).unwrap();
 
-    report
+        DapRequest {
+            media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+            payload: CollectReq {
+                task_id: task_id.clone(),
+                batch_interval: Interval::default(),
+                agg_param: Vec::default(),
+            }
+            .get_encoded(),
+            url: task_config.leader_url.join("/collect").unwrap(),
+            sender_auth: None,
+        }
+    }
+
+    fn gen_test_report(&self, task_id: &Id) -> Report {
+        // Construct HPKE receiver config List.
+        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
+            serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
+                .expect("failed to parse hpke_receiver_config_list");
+
+        // Construct HPKE config list.
+        let mut hpke_config_list = Vec::with_capacity(hpke_receiver_config_list.len());
+        for receiver_config in hpke_receiver_config_list {
+            hpke_config_list.push(receiver_config.config);
+        }
+
+        // Construct report.
+        let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
+        let report = vdaf_config
+            .produce_report(
+                &hpke_config_list,
+                1637361337,
+                task_id,
+                DapMeasurement::U64(1),
+            )
+            .unwrap();
+
+        report
+    }
 }
 
 #[tokio::test]
 async fn http_post_aggregate_unauthorized_request() {
     let helper = MockAggregator::new();
-    let mut req = gen_test_agg_init_req(&helper, Vec::default());
+    let mut req = helper.gen_test_agg_init_req(Vec::default());
 
     // Expect failure due to missing bearer token.
     assert_matches!(
@@ -130,7 +144,7 @@ async fn http_post_aggregate_unauthorized_request() {
 #[tokio::test]
 async fn http_post_aggregate_share_unauthorized_request() {
     let helper = MockAggregator::new();
-    let mut req = gen_test_agg_share_req(&helper, 0, [0; 32]);
+    let mut req = helper.gen_test_agg_share_req(0, [0; 32]);
 
     // Expect failure due to missing bearer token.
     assert_matches!(
@@ -149,7 +163,7 @@ async fn http_post_aggregate_share_unauthorized_request() {
 #[tokio::test]
 async fn http_post_collect_unauthorized_request() {
     let leader = MockAggregator::new();
-    let mut req = gen_test_collect_req(&leader);
+    let mut req = leader.gen_test_collect_req();
 
     // Expect failure due to missing bearer token.
     assert_matches!(
@@ -181,7 +195,7 @@ async fn http_post_aggregate_failure_hpke_decrypt_error() {
         },
     }];
     let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
-    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    let mut req = helper.gen_test_agg_init_req(report_shares);
     req.sender_auth = sender_auth;
 
     // Get AggregateResp and then extract the transition data from inside.
@@ -202,7 +216,7 @@ async fn http_post_aggregate_transition_continue() {
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
 
-    let report = gen_test_report(task_id);
+    let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         nonce: report.nonce,
         extensions: report.extensions,
@@ -211,7 +225,7 @@ async fn http_post_aggregate_transition_continue() {
     }];
     let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
 
-    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    let mut req = helper.gen_test_agg_init_req(report_shares);
     req.sender_auth = sender_auth;
 
     // Get AggregateResp and then extract the transition data from inside.
@@ -230,7 +244,7 @@ async fn http_post_aggregate_failure_batch_collected() {
     let task_id = helper.nominal_task_id();
     let task_config = helper.get_task_config_for(task_id).unwrap();
 
-    let report = gen_test_report(task_id);
+    let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         nonce: report.nonce.clone(),
         extensions: report.extensions,
@@ -239,7 +253,7 @@ async fn http_post_aggregate_failure_batch_collected() {
     }];
     let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
 
-    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    let mut req = helper.gen_test_agg_init_req(report_shares);
     req.sender_auth = sender_auth;
 
     // This is to ensure that the lock is released before we call http_post_aggregate.
@@ -276,7 +290,7 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
 
-    let report = gen_test_report(task_id);
+    let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         nonce: report.nonce.clone(),
         extensions: report.extensions,
@@ -285,7 +299,7 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     }];
     let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
 
-    let mut req = gen_test_agg_init_req(&helper, report_shares);
+    let mut req = helper.gen_test_agg_init_req(report_shares);
     req.sender_auth = sender_auth;
 
     // Send aggregate request.
@@ -298,4 +312,83 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     assert_matches!(res.unwrap_err(), DapAbort::BadRequest(e) =>
         assert_eq!(e, "unexpected message for aggregation job (already exists)")
     );
+}
+
+#[tokio::test]
+async fn http_post_upload_fail_send_invalid_report() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+
+    // Construct a report payload with an invalid task ID.
+    let mut report_empty_task_id = leader.gen_test_report(task_id);
+    report_empty_task_id.task_id = Id([0; 32]);
+    let req = leader.gen_test_upload_req(report_empty_task_id);
+
+    // Expect failure due to invalid task ID in report.
+    assert_matches!(
+        leader.http_post_upload(&req).await,
+        Err(DapAbort::UnrecognizedTask)
+    );
+
+    // Construct an invalid report payload that only has one input share.
+    let mut report_one_input_share = leader.gen_test_report(task_id);
+    report_one_input_share.encrypted_input_shares =
+        vec![report_one_input_share.encrypted_input_shares[0].clone()];
+    let req = leader.gen_test_upload_req(report_one_input_share);
+
+    // Expect failure due to incorrect number of input shares
+    assert_matches!(
+        leader.http_post_upload(&req).await,
+        Err(DapAbort::UnrecognizedMessage)
+    );
+
+    // Construct an invalid report payload that has an incorrect order of input shares.
+    let mut report_incorrect_share_order = leader.gen_test_report(task_id);
+    report_incorrect_share_order.encrypted_input_shares = vec![
+        HpkeCiphertext {
+            config_id: 1,
+            enc: b"invalid encapsulated key".to_vec(),
+            payload: b"invalid ciphertext".to_vec(),
+        },
+        HpkeCiphertext {
+            config_id: 0,
+            enc: b"another invalid encapsulated key".to_vec(),
+            payload: b"another invalid ciphertext".to_vec(),
+        },
+    ];
+
+    let req = leader.gen_test_upload_req(report_incorrect_share_order);
+
+    // Expect failure due to incorrect number of input shares
+    assert_matches!(
+        leader.http_post_upload(&req).await,
+        Err(DapAbort::UnrecognizedHpkeConfig)
+    );
+}
+
+// Test the upload sub-protocol.
+#[tokio::test]
+async fn successful_http_post_upload() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+
+    let report = leader.gen_test_report(task_id);
+    let req = leader.gen_test_upload_req(report);
+
+    let res = &leader.http_post_upload(&req).await;
+    assert_matches!(res, Ok(()));
+}
+
+// Test the end-to-end protocol.
+// TODO(nakatsuka-y) Implement the rest of the e2e functionality.
+#[tokio::test]
+async fn e2e() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+
+    let report = leader.gen_test_report(task_id);
+    let req = leader.gen_test_upload_req(report);
+
+    let res = &leader.http_post_upload(&req).await;
+    assert_matches!(res, Ok(()));
 }

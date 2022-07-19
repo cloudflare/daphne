@@ -309,8 +309,34 @@ impl DapHelper<BearerToken> for MockAggregator {
 impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = ();
 
-    async fn put_report(&self, _report: &Report) -> Result<(), DapError> {
-        unreachable!("not implemented");
+    async fn put_report(&self, report: &Report) -> Result<(), DapError> {
+        let task_id = &report.task_id;
+        let bucket_info = BucketInfo::new(
+            self.tasks
+                .get(task_id)
+                .ok_or_else(|| DapError::fatal("no task found"))?,
+            task_id,
+            &report.nonce,
+        );
+
+        let mut report_store_mutex_guard = self
+            .report_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let report_store = report_store_mutex_guard.deref_mut();
+
+        if !report_store.contains_key(&bucket_info) {
+            report_store.insert(bucket_info.clone(), ReportStore::new());
+        }
+
+        match report_store
+            .get_mut(&bucket_info)
+            .unwrap()
+            .process_put_pending(report.clone())
+        {
+            Ok(()) => Ok(()),
+            Err(failure_reason) => Err(DapError::Transition(failure_reason)),
+        }
     }
 
     async fn get_reports(
