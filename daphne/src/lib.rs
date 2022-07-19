@@ -210,7 +210,7 @@ impl From<TransitionFailure> for DapAbort {
 }
 
 /// A problem details document compatible with RFC 7807.
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ProblemDetails {
     #[serde(rename = "type")]
     pub typ: String,
@@ -288,12 +288,15 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
 }
 
 /// A measurement from which a Client generates a report.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DapMeasurement {
     U64(u64),
 }
 
 /// The aggregate result computed by the Collector.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DapAggregateResult {
     U64(u64),
     U128(u128),
@@ -470,6 +473,14 @@ pub enum DapHelperTransition<M: Debug> {
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {
     Prio3(Prio3Config),
+}
+
+impl std::str::FromStr for VdafConfig {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 /// Supported data types for prio3.
