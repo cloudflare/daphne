@@ -20,6 +20,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
     sync::{Arc, Mutex},
+    time::SystemTime,
 };
 use url::Url;
 
@@ -62,6 +63,11 @@ pub const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
 
 pub const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
 pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mYqO9hk=";
+
+pub(crate) struct MockAggregateInfo {
+    pub(crate) batch_info: Option<Interval>,
+    pub(crate) agg_rate: u64,
+}
 
 pub(crate) struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
@@ -307,7 +313,7 @@ impl DapHelper<BearerToken> for MockAggregator {
 
 #[async_trait(?Send)]
 impl DapLeader<BearerToken> for MockAggregator {
-    type ReportSelector = ();
+    type ReportSelector = MockAggregateInfo;
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
         let task_id = &report.task_id;
@@ -341,10 +347,72 @@ impl DapLeader<BearerToken> for MockAggregator {
 
     async fn get_reports(
         &self,
-        _task_id: &Id,
-        _selector: &Self::ReportSelector,
+        task_id: &Id,
+        selector: &Self::ReportSelector,
     ) -> Result<Vec<Report>, DapError> {
-        unreachable!("not implemented");
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal("no task found"))?;
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Calculate batch interval.
+        let batch_interval = if let Some(ref interval) = selector.batch_info {
+            if !interval.is_valid_for(task_config) {
+                return Err(DapError::fatal("invalid batch interval"));
+            }
+            interval.clone()
+        } else {
+            task_config.current_batch_window(now)
+        };
+
+        // Lock report_store.
+        let agg_rate = selector
+            .agg_rate
+            .try_into()
+            .expect("agg_rate is larger than usize");
+        let mut reports = Vec::with_capacity(agg_rate);
+        let mut report_store_mutex_guard = self
+            .report_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let report_store = report_store_mutex_guard.deref_mut();
+
+        // Fetch reports.
+        let mut bucket_info = BucketInfo {
+            task_id: task_id.clone(),
+            window: batch_interval.start,
+        };
+        // TODO(nakatsuka-y) Should the batch window be inclusive?
+        while bucket_info.window < batch_interval.end() {
+            let num_reports_remaining = agg_rate - reports.len();
+
+            // If there are reports in this bucket, append into reports.
+            // If not, move on to the next bucket.
+            if let Some(ref mut store) = report_store.get_mut(&bucket_info) {
+                let num_reports_drained = std::cmp::min(num_reports_remaining, store.pending.len());
+                let mut reports_drained: Vec<Report> =
+                    store.pending.drain(..num_reports_drained).collect();
+                if reports_drained.len() + reports.len() > agg_rate {
+                    return Err(DapError::fatal(
+                        "number of reports received from report_store exceeds the number requested",
+                    ));
+                }
+
+                reports.append(&mut reports_drained);
+
+                if reports.len() == agg_rate {
+                    break;
+                }
+            }
+
+            bucket_info.window += task_config.min_batch_duration;
+        }
+
+        Ok(reports)
     }
 
     async fn init_collect_job(&self, _collect_req: &CollectReq) -> Result<Url, DapError> {
@@ -408,7 +476,7 @@ impl BucketInfo {
 // TODO(nakatsuka-y) remove dead_code once all functions are used
 #[allow(dead_code)]
 pub(crate) struct ReportStore {
-    pending: Vec<Report>,
+    pub(crate) pending: Vec<Report>,
     processed: HashSet<Nonce>,
     collected: bool,
 }

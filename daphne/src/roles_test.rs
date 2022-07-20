@@ -14,9 +14,10 @@ use crate::{
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
-        BucketInfo, MockAggregator, ReportStore, HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
+        BucketInfo, MockAggregateInfo, MockAggregator, ReportStore, HPKE_RECEIVER_CONFIG_LIST,
+        LEADER_BEARER_TOKEN,
     },
-    DapAbort, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
+    DapAbort, DapError, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use prio::codec::{Decode, Encode};
@@ -306,10 +307,10 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     let _ = helper.http_post_aggregate(&req).await;
 
     // Send another aggregate request.
-    let res = helper.http_post_aggregate(&req).await;
+    let err = helper.http_post_aggregate(&req).await.unwrap_err();
 
     // Expect failure due to overwriting existing helper state.
-    assert_matches!(res.unwrap_err(), DapAbort::BadRequest(e) =>
+    assert_matches!(err, DapAbort::BadRequest(e) =>
         assert_eq!(e, "unexpected message for aggregation job (already exists)")
     );
 }
@@ -366,6 +367,66 @@ async fn http_post_upload_fail_send_invalid_report() {
     );
 }
 
+#[tokio::test]
+async fn get_reports_fail_invalid_batch_interval() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+
+    // Attempt to get reports using an empty interval.
+    let empty_interval = Interval {
+        start: 0,
+        duration: 0,
+    };
+    let selector = &MockAggregateInfo {
+        batch_info: Some(empty_interval),
+        agg_rate: 1,
+    };
+    let err = leader.get_reports(task_id, selector).await.unwrap_err();
+
+    // Fails because a 0 second duration interval is not permitted.
+    assert_matches!(err, DapError::Fatal(e) =>
+        assert_eq!(e, "invalid batch interval")
+    );
+}
+
+#[tokio::test]
+async fn get_reports_empty_response() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+
+    let report = leader.gen_test_report(task_id);
+    let req = leader.gen_test_upload_req(report.clone());
+
+    // Upload report.
+    leader
+        .http_post_upload(&req)
+        .await
+        .expect("upload failed unexpectedly");
+
+    // Get report.
+    let now = report.nonce.time - 200000000;
+    let selector = &MockAggregateInfo {
+        batch_info: Some(task_config.current_batch_window(now)),
+        agg_rate: 1,
+    };
+    let reports = leader.get_reports(task_id, selector).await.unwrap();
+
+    // We get an empty response due to no reports existing within requested batch_window.
+    assert_eq!(reports.len(), 0);
+
+    // Attempt to get reports from the future.
+    let now = report.nonce.time + 200000000;
+    let selector = &MockAggregateInfo {
+        batch_info: Some(task_config.current_batch_window(now)),
+        agg_rate: 1,
+    };
+    let reports = leader.get_reports(task_id, selector).await.unwrap();
+
+    // We get an empty response due to no reports existing within requested batch_window.
+    assert_eq!(reports.len(), 0);
+}
+
 // Test the upload sub-protocol.
 #[tokio::test]
 async fn successful_http_post_upload() {
@@ -375,8 +436,10 @@ async fn successful_http_post_upload() {
     let report = leader.gen_test_report(task_id);
     let req = leader.gen_test_upload_req(report);
 
-    let res = &leader.http_post_upload(&req).await;
-    assert_matches!(res, Ok(()));
+    leader
+        .http_post_upload(&req)
+        .await
+        .expect("upload failed unexpectedly");
 }
 
 // Test the end-to-end protocol.
@@ -385,10 +448,25 @@ async fn successful_http_post_upload() {
 async fn e2e() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
 
+    // Client: Construct a report to send to Leader.
     let report = leader.gen_test_report(task_id);
-    let req = leader.gen_test_upload_req(report);
+    let req = leader.gen_test_upload_req(report.clone());
 
-    let res = &leader.http_post_upload(&req).await;
-    assert_matches!(res, Ok(()));
+    // Leader: Receive the report from Client.
+    leader
+        .http_post_upload(&req)
+        .await
+        .expect("upload failed unexpectedly");
+
+    // Leader: Get reports for a certain interval to send to Helper
+    let now = 1637361337;
+    let selector = &MockAggregateInfo {
+        batch_info: Some(task_config.current_batch_window(now)),
+        agg_rate: 1,
+    };
+    let res = leader.get_reports(task_id, selector).await;
+    let reports = res.unwrap();
+    assert_eq!(report, reports[0]);
 }
