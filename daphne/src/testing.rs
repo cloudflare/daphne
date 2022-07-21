@@ -30,7 +30,7 @@ pub const TASK_LIST: &str = r#"{
         "helper_url": "http://helper.com:8788",
         "collector_hpke_config": "f40020000100010020a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f",
         "min_batch_duration": 3600,
-        "min_batch_size": 100,
+        "min_batch_size": 1,
         "vdaf": {
             "prio3": "count"
         },
@@ -221,18 +221,51 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
     async fn get_agg_share(
         &self,
-        _task_id: &Id,
-        _batch_interval: &Interval,
+        task_id: &Id,
+        batch_interval: &Interval,
     ) -> Result<DapAggregateShare, DapError> {
-        unreachable!("not implemented");
+        // Lock agg_store.
+        let mut agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref_mut();
+
+        // Fetch aggregate shares.
+        let mut agg_share = DapAggregateShare::default();
+        for (inner_bucket_info, agg_share_delta) in agg_store.iter() {
+            if task_id == &inner_bucket_info.task_id
+                && batch_interval.start <= inner_bucket_info.window
+                && batch_interval.end() > inner_bucket_info.window
+            {
+                agg_share.merge(agg_share_delta.clone())?;
+            }
+        }
+
+        Ok(agg_share)
     }
 
     async fn mark_collected(
         &self,
-        _task_id: &Id,
-        _batch_interval: &Interval,
+        task_id: &Id,
+        batch_interval: &Interval,
     ) -> Result<(), DapError> {
-        unreachable!("not implemented");
+        let mut report_store_mutex_guard = self
+            .report_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let report_store = report_store_mutex_guard.deref_mut();
+
+        for (inner_bucket_info, store) in report_store.iter_mut() {
+            if task_id == &inner_bucket_info.task_id
+                && batch_interval.start <= inner_bucket_info.window
+                && batch_interval.end() > inner_bucket_info.window
+            {
+                store.collected = true;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -411,17 +444,12 @@ impl DapLeader<BearerToken> for MockAggregator {
         let report_store = report_store_mutex_guard.deref_mut();
 
         // Fetch reports.
-        let mut bucket_info = BucketInfo {
-            task_id: task_id.clone(),
-            window: batch_interval.start,
-        };
-        // TODO(nakatsuka-y) Should the batch window be inclusive?
-        while bucket_info.window < batch_interval.end() {
-            let num_reports_remaining = agg_rate - reports.len();
-
-            // If there are reports in this bucket, append into reports.
-            // If not, move on to the next bucket.
-            if let Some(ref mut store) = report_store.get_mut(&bucket_info) {
+        for (inner_bucket_info, store) in report_store.iter_mut() {
+            if task_id == &inner_bucket_info.task_id
+                && batch_interval.start <= inner_bucket_info.window
+                && batch_interval.end() > inner_bucket_info.window
+            {
+                let num_reports_remaining = agg_rate - reports.len();
                 let num_reports_drained = std::cmp::min(num_reports_remaining, store.pending.len());
                 let mut reports_drained: Vec<Report> =
                     store.pending.drain(..num_reports_drained).collect();
@@ -437,8 +465,6 @@ impl DapLeader<BearerToken> for MockAggregator {
                     break;
                 }
             }
-
-            bucket_info.window += task_config.min_batch_duration;
         }
 
         Ok(reports)
@@ -507,7 +533,7 @@ impl BucketInfo {
 pub(crate) struct ReportStore {
     pub(crate) pending: Vec<Report>,
     processed: HashSet<Nonce>,
-    collected: bool,
+    pub(crate) collected: bool,
 }
 
 // TODO(nakatsuka-y) remove dead_code once all functions are used

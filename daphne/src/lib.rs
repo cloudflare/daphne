@@ -366,7 +366,7 @@ pub struct DapOutputShare {
 }
 
 /// An aggregate share computed by combining a set of output shares.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DapAggregateShare {
     pub(crate) report_count: u64,
     pub(crate) checksum: [u8; 32],

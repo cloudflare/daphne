@@ -9,9 +9,9 @@ use crate::{
     },
     hpke::HpkeReceiverConfig,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq,
-        HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure,
-        TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
+        AggregateShareResp, CollectReq, HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare,
+        Transition, TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
@@ -577,4 +577,48 @@ async fn e2e() {
         .handle_final_agg_resp(leader_uncommitted, agg_resp)
         .unwrap();
     leader.put_out_shares(task_id, out_shares).await.unwrap();
+
+    // TODO(nakatsuka-y) Call http_post_collect to post a collect job.
+    //                   Assume for now that the leader has already picked a collect job.
+    let collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now),
+        agg_param: Vec::default(),
+    };
+
+    // Leader: Get Leader's encrypted aggregate share.
+    let leader_agg_share = leader
+        .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+        .await
+        .unwrap();
+
+    let _leader_enc_agg_share = task_config
+        .vdaf
+        .produce_leader_encrypted_agg_share(
+            &task_config.collector_hpke_config,
+            &collect_req.task_id,
+            &collect_req.batch_interval,
+            &leader_agg_share,
+        )
+        .unwrap();
+
+    // Leader: Prepare AggregateShareReq.
+    let agg_share_req = AggregateShareReq {
+        task_id: collect_req.task_id.clone(),
+        batch_interval: collect_req.batch_interval.clone(),
+        agg_param: collect_req.agg_param.clone(),
+        report_count: leader_agg_share.report_count,
+        checksum: leader_agg_share.checksum,
+    };
+
+    // Leader: Send AggregateShareReq to Helper and receive AggregateShareResp.
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
+        payload: agg_share_req.get_encoded(),
+        url: task_config.helper_url.join("/aggregate_share").unwrap(),
+        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+    };
+    let res = leader.http_post_aggregate_share(&req).await.unwrap();
+    let agg_share_resp = AggregateShareResp::get_decoded(&res.payload).unwrap();
+    let _helper_enc_agg_share = agg_share_resp.encrypted_agg_share;
 }
