@@ -55,7 +55,7 @@ pub(crate) enum VdafMessage {
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) enum VdafAggregateShare {
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),
