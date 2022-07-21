@@ -4,20 +4,21 @@
 use crate::{
     auth::BearerToken,
     constants::{
-        MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
-        MEDIA_TYPE_REPORT,
+        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ,
+        MEDIA_TYPE_COLLECT_REQ, MEDIA_TYPE_REPORT,
     },
     hpke::HpkeReceiverConfig,
     messages::{
-        AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq, HpkeCiphertext, Id,
-        Interval, Nonce, Report, ReportShare, TransitionFailure, TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq, CollectReq,
+        HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure,
+        TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
         BucketInfo, MockAggregateInfo, MockAggregator, ReportStore, HPKE_RECEIVER_CONFIG_LIST,
         LEADER_BEARER_TOKEN,
     },
-    DapAbort, DapError, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
+    DapAbort, DapError, DapLeaderTransition, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use prio::codec::{Decode, Encode};
@@ -49,6 +50,27 @@ impl MockAggregator {
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
                 report_shares,
+            }
+            .get_encoded(),
+            url: task_config.helper_url.join("/aggregate").unwrap(),
+            sender_auth: None,
+        }
+    }
+
+    fn gen_test_agg_cont_req(
+        &self,
+        agg_job_id: Id,
+        transitions: Vec<Transition>,
+    ) -> DapRequest<BearerToken> {
+        let task_id = self.nominal_task_id();
+        let task_config = self.get_task_config_for(task_id).unwrap();
+
+        DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
+            payload: AggregateContinueReq {
+                task_id: task_id.clone(),
+                agg_job_id,
+                transitions,
             }
             .get_encoded(),
             url: task_config.helper_url.join("/aggregate").unwrap(),
@@ -124,9 +146,29 @@ impl MockAggregator {
 }
 
 #[tokio::test]
-async fn http_post_aggregate_unauthorized_request() {
+async fn http_post_aggregate_init_unauthorized_request() {
     let helper = MockAggregator::new();
     let mut req = helper.gen_test_agg_init_req(Vec::default());
+
+    // Expect failure due to missing bearer token.
+    assert_matches!(
+        helper.http_post_aggregate(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+
+    // Expect failure due to incorrect bearer token.
+    req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
+    assert_matches!(
+        helper.http_post_aggregate(&req).await,
+        Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_post_aggregate_cont_unauthorized_request() {
+    let helper = MockAggregator::new();
+    let mut rng = thread_rng();
+    let mut req = helper.gen_test_agg_cont_req(Id(rng.gen()), Vec::default());
 
     // Expect failure due to missing bearer token.
     assert_matches!(
@@ -316,6 +358,23 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
 }
 
 #[tokio::test]
+async fn http_post_aggregate_fail_send_cont_req() {
+    let mut rng = thread_rng();
+    let helper = MockAggregator::new();
+    let leader = MockAggregator::new();
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
+
+    let mut req = leader.gen_test_agg_cont_req(Id(rng.gen()), Vec::default());
+    req.sender_auth = sender_auth;
+
+    // Send aggregate continue request to helper.
+    let err = helper.http_post_aggregate(&req).await.unwrap_err();
+
+    // Expect failure due to sending continue request before initialization request.
+    assert_matches!(err, DapAbort::UnrecognizedAggregationJob);
+}
+
+#[tokio::test]
 async fn http_post_upload_fail_send_invalid_report() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
@@ -450,17 +509,15 @@ async fn e2e() {
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
 
-    // Client: Construct a report to send to Leader.
+    let helper = MockAggregator::new();
+
     let report = leader.gen_test_report(task_id);
     let req = leader.gen_test_upload_req(report.clone());
 
-    // Leader: Receive the report from Client.
-    leader
-        .http_post_upload(&req)
-        .await
-        .expect("upload failed unexpectedly");
+    // Client: Send upload request to Leader.
+    leader.http_post_upload(&req).await.unwrap();
 
-    // Leader: Get reports for a certain interval to send to Helper
+    // Leader: Store received report to ReportStore.
     let now = 1637361337;
     let selector = &MockAggregateInfo {
         batch_info: Some(task_config.current_batch_window(now)),
@@ -469,4 +526,55 @@ async fn e2e() {
     let res = leader.get_reports(task_id, selector).await;
     let reports = res.unwrap();
     assert_eq!(report, reports[0]);
+
+    // Leader: Consume report share.
+    let mut rng = thread_rng();
+    let agg_job_id = Id(rng.gen());
+    let transition = task_config
+        .vdaf
+        .produce_agg_init_req(
+            &leader,
+            &task_config.vdaf_verify_key,
+            task_id,
+            &agg_job_id,
+            reports,
+        )
+        .unwrap();
+    assert_matches!(transition, DapLeaderTransition::Continue(..));
+    let (leader_state, agg_init_req) = transition.unwrap_continue();
+
+    // Leader: Send aggregate initialization request to Helper and receive response.
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
+        payload: agg_init_req.get_encoded(),
+        url: task_config.helper_url.join("/aggregate").unwrap(),
+        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+    };
+    let res = helper.http_post_aggregate(&req).await.unwrap();
+    let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
+
+    // Leader: Produce Leader output share and prepare aggregate continue request for Helper.
+    let transition = task_config
+        .vdaf
+        .handle_agg_resp(task_id, &agg_job_id, leader_state, agg_resp)
+        .unwrap();
+    assert_matches!(transition, DapLeaderTransition::Uncommitted(..));
+    let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
+
+    // Leader: Send aggregate continue request to Helper and receive response.
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
+        payload: agg_cont_req.get_encoded(),
+        url: task_config.helper_url.join("/aggregate").unwrap(),
+        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+    };
+    let res = helper.http_post_aggregate(&req).await.unwrap();
+    let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
+
+    // Leader: Commit output shares of Leader and Helper.
+    let out_shares = task_config
+        .vdaf
+        .handle_final_agg_resp(leader_uncommitted, agg_resp)
+        .unwrap();
+    leader.put_out_shares(task_id, out_shares).await.unwrap();
 }

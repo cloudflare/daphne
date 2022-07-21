@@ -74,6 +74,7 @@ pub(crate) struct MockAggregator {
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
+    agg_store: Arc<Mutex<HashMap<BucketInfo, DapAggregateShare>>>,
 }
 
 #[allow(dead_code)]
@@ -88,12 +89,14 @@ impl MockAggregator {
 
         let report_store = Arc::new(Mutex::new(HashMap::new()));
         let helper_state_store = Arc::new(Mutex::new(HashMap::new()));
+        let agg_store = Arc::new(Mutex::new(HashMap::new()));
 
         Self {
             tasks,
             hpke_receiver_config_list,
             report_store,
             helper_state_store,
+            agg_store,
         }
     }
 
@@ -184,10 +187,36 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
     async fn put_out_shares(
         &self,
-        _task_id: &Id,
-        _out_shares: Vec<DapOutputShare>,
+        task_id: &Id,
+        out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError> {
-        unreachable!("not implemented");
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal("no task found"))?;
+
+        let agg_shares =
+            DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
+
+        let mut agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref_mut();
+        let mut bucket_info = BucketInfo {
+            task_id: task_id.clone(),
+            window: 0,
+        };
+        for (window, agg_share_delta) in agg_shares.into_iter() {
+            bucket_info.window = window;
+
+            if let Some(agg_share) = agg_store.get_mut(&bucket_info) {
+                agg_share.merge(agg_share_delta)?;
+            } else {
+                agg_store.insert(bucket_info.clone(), agg_share_delta);
+            }
+        }
+
+        Ok(())
     }
 
     async fn get_agg_share(
