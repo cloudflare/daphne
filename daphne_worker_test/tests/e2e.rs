@@ -289,7 +289,7 @@ async fn e2e_leader_collect_ok() {
 
     // Poll the collect URI before the ColleectResp is ready.
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
-    assert_eq!(resp.status(), 202);
+    assert_eq!(resp.status(), 202, "response: {:?}", resp);
 
     // The reports are aggregated in the background.
     let agg_telem = t
@@ -318,15 +318,16 @@ async fn e2e_leader_collect_ok() {
             &decrypter,
             &t.task_id,
             &batch_interval,
-            collect_resp.encrypted_agg_shares,
+            collect_resp.encrypted_agg_shares.clone(),
         )
         .unwrap();
     assert_eq!(agg_res, DapAggregateResult::U128(t.min_batch_size as u128));
 
-    // Poll the collect URI once more. Expect failure because the request has already been
-    // processed.
+    // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
+    // GET semantics.
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
-    assert_eq!(resp.status(), 400);
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
 
     // Check that leader properly rejects late arriving reports.
     let now = rng.gen_range(batch_interval.start..batch_interval.end());

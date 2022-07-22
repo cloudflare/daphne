@@ -9,8 +9,10 @@ use daphne::{
     messages::{CollectReq, CollectResp, Id},
     DapCollectJob,
 };
-use prio::codec::Encode;
-use ring::digest::{digest, SHA256};
+use prio::{
+    codec::{Decode, Encode},
+    vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use worker::*;
@@ -45,16 +47,19 @@ struct OrderedCollectReq {
 ///
 /// An instance of the [`LeaderStateStore`] DO is named `/task/<task_id>`, where `<task_id>` is
 /// the task ID.
+//
+// TODO spec: Consider allowing completed aggregate results to be deleted after a period of time.
 #[durable_object]
 pub struct LeaderStateStore {
     #[allow(dead_code)]
     state: State,
+    env: Env,
 }
 
 #[durable_object]
 impl DurableObject for LeaderStateStore {
-    fn new(state: State, _env: Env) -> Self {
-        Self { state }
+    fn new(state: State, env: Env) -> Self {
+        Self { state, env }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
@@ -65,13 +70,31 @@ impl DurableObject for LeaderStateStore {
             }
 
             // Store a CollectReq issued by the collector.
+            //
+            // TODO Disallow overlapping collect requests, as required by
+            // draft-ietf-ppm-dap-01.
             (DURABLE_LEADER_STATE_PUT_COLLECT_REQ, Method::Post) => {
-                // TODO Disallow overlapping collect requests, as required by
-                // draft-ietf-ppm-dap-01.
                 let collect_req: CollectReq = req.json().await?;
-                let collect_req_digest = digest(&SHA256, &collect_req.get_encoded());
-                let collect_id = Id(collect_req_digest.as_ref().try_into().unwrap());
-                let collect_id_hex = hex::encode(collect_req_digest);
+
+                // Compute the collect job ID, used to derive the collect URI for this request.
+                // This value is computed by applying a pseudorandom function to the request. This
+                // has two desirable properties. First, it makes the collect URI unpredictable,
+                // which prevents clients from enumerating collect URIs. Second, it provides a
+                // stable map from requests to URIs, which prevents us from processing the same
+                // collect request more than once.
+                let collect_req_bytes = collect_req.get_encoded();
+                let collect_id_key = Seed::get_decoded(
+                    &hex::decode(self.env.secret("DAP_COLLECT_ID_KEY")?.to_string())
+                        .map_err(int_err)?,
+                )
+                .map_err(int_err)?;
+                let mut collect_id_bytes = [0; 32];
+                PrgAes128::seed_stream(&collect_id_key, &collect_req_bytes)
+                    .fill(&mut collect_id_bytes);
+                let collect_id = Id(collect_id_bytes);
+                let collect_id_hex = collect_id.to_hex();
+
+                // If the the request is new, then put it in the job queue.
                 let pending_key = format!("pending/{}", collect_id_hex);
                 let pending: Option<OrderedCollectReq> =
                     state_get(&self.state, &pending_key).await?;
@@ -141,8 +164,9 @@ impl DurableObject for LeaderStateStore {
                     ));
                 }
 
+                let pending_key = format!("pending/{}", collect_id_hex);
                 let pending: Option<OrderedCollectReq> =
-                    state_get(&self.state, &format!("pending/{}", collect_id_hex)).await?;
+                    state_get(&self.state, &pending_key).await?;
                 if pending.is_none() {
                     return Err(int_err("LeaderStateStore: missing collect request"));
                 }
@@ -161,20 +185,17 @@ impl DurableObject for LeaderStateStore {
                 let pending_key = format!("pending/{}", collect_id_hex);
                 let pending: Option<OrderedCollectReq> =
                     state_get(&self.state, &pending_key).await?;
-                if pending.is_none() {
-                    return Response::from_json(&DapCollectJob::Unknown);
-                }
-
                 let processed_key = format!("processed/{}", collect_id_hex);
                 let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
                 if let Some(collect_resp) = processed {
-                    self.state
-                        .storage()
-                        .delete_multiple(vec![pending_key, processed_key])
-                        .await?;
+                    if pending.is_some() {
+                        self.state.storage().delete(&pending_key).await?;
+                    }
                     Response::from_json(&DapCollectJob::Done(collect_resp))
-                } else {
+                } else if pending.is_some() {
                     Response::from_json(&DapCollectJob::Pending)
+                } else {
+                    Response::from_json(&DapCollectJob::Unknown)
                 }
             }
 
