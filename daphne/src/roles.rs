@@ -147,13 +147,12 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report) -> Result<(), DapError>;
 
-    /// Fetch a sequence of reports to aggregate. The reports returned are removed from persistent
-    /// storage.
+    /// Fetch a sequence of reports to aggregate, grouped by task ID. The reports returned are
+    /// removed from persistent storage.
     async fn get_reports(
         &self,
-        task_id: &Id,
         selector: &Self::ReportSelector,
-    ) -> Result<Vec<Report>, DapError>;
+    ) -> Result<HashMap<Id, Vec<Report>>, DapError>;
 
     /// Create a collect job.
     //
@@ -239,7 +238,142 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(self.init_collect_job(&collect_req).await?)
     }
 
-    /// Run an aggregation job if there are pending reports, then process all pending collect jobs.
+    /// Run the aggregation sub-protocol for the given set of reports. Return the number of reports
+    /// that were aggregated successfully.
+    async fn run_agg_job(
+        &self,
+        task_id: &Id,
+        task_config: &DapTaskConfig,
+        reports: Vec<Report>,
+    ) -> Result<u64, DapAbort> {
+        let mut rng = thread_rng();
+
+        // Prepare AggregateInitializeReq.
+        let agg_job_id = Id(rng.gen());
+        let transition = task_config.vdaf.produce_agg_init_req(
+            self,
+            &task_config.vdaf_verify_key,
+            task_id,
+            &agg_job_id,
+            reports,
+        )?;
+        let (state, agg_init_req) = match transition {
+            DapLeaderTransition::Continue(state, agg_init_req) => (state, agg_init_req),
+            DapLeaderTransition::Skip => return Ok(0),
+            DapLeaderTransition::Uncommitted(..) => {
+                return Err(DapError::fatal("unexpected state transition (uncommitted)").into())
+            }
+        };
+
+        // Send AggregateInitializeReq and receive AggregateResp.
+        let resp = leader_post!(
+            self,
+            task_id,
+            task_config,
+            "/aggregate",
+            MEDIA_TYPE_AGG_INIT_REQ,
+            agg_init_req.get_encoded()
+        );
+        let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
+
+        // Prepare AggreagteContinueReq.
+        let transition = task_config
+            .vdaf
+            .handle_agg_resp(task_id, &agg_job_id, state, agg_resp)?;
+        let (uncommited, agg_cont_req) = match transition {
+            DapLeaderTransition::Uncommitted(uncommited, agg_cont_req) => {
+                (uncommited, agg_cont_req)
+            }
+            DapLeaderTransition::Skip => return Ok(0),
+            DapLeaderTransition::Continue(..) => {
+                return Err(DapError::fatal("unexpected state transition (continue)").into())
+            }
+        };
+
+        // Send AggregateContinueReq and receive AggregateResp.
+        let resp = leader_post!(
+            self,
+            task_id,
+            task_config,
+            "/aggregate",
+            MEDIA_TYPE_AGG_CONT_REQ,
+            agg_cont_req.get_encoded()
+        );
+        let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
+
+        // Commit the output shares.
+        let out_shares = task_config
+            .vdaf
+            .handle_final_agg_resp(uncommited, agg_resp)?;
+        let out_shares_count = out_shares.len() as u64;
+        self.put_out_shares(task_id, out_shares).await?;
+        Ok(out_shares_count)
+    }
+
+    /// Handle a pending collect request. If the results are reasdy, then cokmpute the aggregate
+    /// results and store them to be retrieved by the Collector later. Returns the number of
+    /// reports in the batch.
+    async fn run_collect_job(
+        &self,
+        collect_id: &Id,
+        task_id: &Id,
+        task_config: &DapTaskConfig,
+        collect_req: CollectReq,
+    ) -> Result<u64, DapAbort> {
+        let leader_agg_share = self
+            .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+            .await?;
+
+        // Check that the minimum batch size is met.
+        if leader_agg_share.report_count < task_config.min_batch_size {
+            return Ok(0);
+        }
+
+        // Prepare the Leader's aggregate share.
+        let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
+            &task_config.collector_hpke_config,
+            &collect_req.task_id,
+            &collect_req.batch_interval,
+            &leader_agg_share,
+        )?;
+
+        // Prepare AggregateShareReq.
+        let agg_share_req = AggregateShareReq {
+            task_id: collect_req.task_id.clone(),
+            batch_interval: collect_req.batch_interval.clone(),
+            agg_param: collect_req.agg_param.clone(),
+            report_count: leader_agg_share.report_count,
+            checksum: leader_agg_share.checksum,
+        };
+
+        // Send AggregateShareReq and receive AggregateShareResp.
+        let resp = leader_post!(
+            self,
+            task_id,
+            task_config,
+            "/aggregate_share",
+            MEDIA_TYPE_AGG_SHARE_REQ,
+            agg_share_req.get_encoded()
+        );
+        let agg_share_resp = AggregateShareResp::get_decoded(&resp.payload)?;
+
+        // Complete the collect job.
+        let collect_resp = CollectResp {
+            encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
+        };
+        self.finish_collect_job(task_id, collect_id, &collect_resp)
+            .await?;
+
+        // Mark reports as collected.
+        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_interval)
+            .await?;
+
+        Ok(agg_share_req.report_count)
+    }
+
+    /// Fetch a set of reports grouped by task. For each task, first aggregate the reports, then
+    /// process the collect job queue. It is not safe to run multiple instances of this function in
+    /// parallel.
     ///
     /// This method is geared primarily towards testing. It also demonstrates how to properly
     /// synchronize collect and aggregation jobs. If used in a large DAP deployment, it is likely
@@ -247,140 +381,33 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// jobs in parallel.
     async fn process(
         &self,
-        task_id: &Id,
         selector: &Self::ReportSelector,
     ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
-        let mut rng = thread_rng();
         let mut telem = DapLeaderProcessTelemetry::default();
 
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or(DapAbort::UnrecognizedTask)?;
+        // TODO Handle tasks in parallel.
+        for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
+            let task_config = self
+                .get_task_config_for(&task_id)
+                .ok_or(DapAbort::UnrecognizedTask)?;
 
-        // Pick the set of candidate reports.
-        let reports = self.get_reports(task_id, selector).await?;
-        telem.reports_processed += reports.len() as u64;
-        if !reports.is_empty() {
-            // Prepare AggregateInitializeReq.
-            let agg_job_id = Id(rng.gen());
-            let transition = task_config.vdaf.produce_agg_init_req(
-                self,
-                &task_config.vdaf_verify_key,
-                task_id,
-                &agg_job_id,
-                reports,
-            )?;
-            let (state, agg_init_req) = match transition {
-                DapLeaderTransition::Continue(state, agg_init_req) => (state, agg_init_req),
-                DapLeaderTransition::Skip => return Ok(telem),
-                DapLeaderTransition::Uncommitted(..) => {
-                    return Err(DapError::fatal("unexpected state transition (uncommitted)").into())
-                }
-            };
-
-            // Send AggregateInitializeReq and receive AggregateResp.
-            let resp = leader_post!(
-                self,
-                task_id,
-                task_config,
-                "/aggregate",
-                MEDIA_TYPE_AGG_INIT_REQ,
-                agg_init_req.get_encoded()
-            );
-            let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
-
-            // Prepare AggreagteContinueReq.
-            let transition =
-                task_config
-                    .vdaf
-                    .handle_agg_resp(task_id, &agg_job_id, state, agg_resp)?;
-            let (uncommited, agg_cont_req) = match transition {
-                DapLeaderTransition::Uncommitted(uncommited, agg_cont_req) => {
-                    (uncommited, agg_cont_req)
-                }
-                DapLeaderTransition::Skip => return Ok(telem),
-                DapLeaderTransition::Continue(..) => {
-                    return Err(DapError::fatal("unexpected state transition (continue)").into())
-                }
-            };
-
-            // Send AggregateContinueReq and receive AggregateResp.
-            let resp = leader_post!(
-                self,
-                task_id,
-                task_config,
-                "/aggregate",
-                MEDIA_TYPE_AGG_CONT_REQ,
-                agg_cont_req.get_encoded()
-            );
-            let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
-
-            // Commit the output shares.
-            let out_shares = task_config
-                .vdaf
-                .handle_final_agg_resp(uncommited, agg_resp)?;
-            let out_shares_count = out_shares.len() as u64;
-            self.put_out_shares(task_id, out_shares).await?;
-            telem.reports_aggregated += out_shares_count;
-        }
-
-        // Process pending collect jobs. We wait until all aggregation jobs are finished before
-        // proceeding to this step. This is to prevent a race condition involving an aggregate
-        // share computed during a collect job and any output shares computed during an aggregation
-        // job.
-        let pending = self.get_pending_collect_jobs(task_id).await?;
-        for (collect_id, collect_req) in pending.into_iter() {
-            let leader_agg_share = self
-                .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
-                .await?;
-
-            // Check that the minimum batch size is met.
-            if leader_agg_share.report_count < task_config.min_batch_size {
-                continue;
+            // Aggregate the reports.
+            telem.reports_processed += reports.len() as u64;
+            if !reports.is_empty() {
+                telem.reports_aggregated +=
+                    self.run_agg_job(&task_id, task_config, reports).await?;
             }
 
-            // Prepare the Leader's aggregate share.
-            let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
-                &task_config.collector_hpke_config,
-                &collect_req.task_id,
-                &collect_req.batch_interval,
-                &leader_agg_share,
-            )?;
-
-            // Prepare AggregateShareReq.
-            let agg_share_req = AggregateShareReq {
-                task_id: collect_req.task_id.clone(),
-                batch_interval: collect_req.batch_interval.clone(),
-                agg_param: collect_req.agg_param.clone(),
-                report_count: leader_agg_share.report_count,
-                checksum: leader_agg_share.checksum,
-            };
-
-            // Send AggregateShareReq and receive AggregateShareResp.
-            let resp = leader_post!(
-                self,
-                task_id,
-                task_config,
-                "/aggregate_share",
-                MEDIA_TYPE_AGG_SHARE_REQ,
-                agg_share_req.get_encoded()
-            );
-            let agg_share_resp = AggregateShareResp::get_decoded(&resp.payload)?;
-
-            // Complete the collect job.
-            let collect_resp = CollectResp {
-                encrypted_agg_shares: vec![
-                    leader_enc_agg_share,
-                    agg_share_resp.encrypted_agg_share,
-                ],
-            };
-            self.finish_collect_job(task_id, &collect_id, &collect_resp)
-                .await?;
-
-            // Mark reports as collected.
-            self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_interval)
-                .await?;
-            telem.reports_collected += agg_share_req.report_count;
+            // Process pending collect jobs. We wait until all aggregation jobs are finished before
+            // proceeding to this step. This is to prevent a race condition involving an aggregate
+            // share computed during a collect job and any output shares computed during an aggregation
+            // job.
+            let pending = self.get_pending_collect_jobs(&task_id).await?;
+            for (collect_id, collect_req) in pending.into_iter() {
+                telem.reports_collected += self
+                    .run_collect_job(&collect_id, &task_id, task_config, collect_req)
+                    .await?;
+            }
         }
 
         Ok(telem)

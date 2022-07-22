@@ -65,6 +65,7 @@ pub const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4h
 pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mYqO9hk=";
 
 pub(crate) struct MockAggregateInfo {
+    pub(crate) task_id: Id,
     pub(crate) batch_info: Option<Interval>,
     pub(crate) agg_rate: u64,
 }
@@ -409,11 +410,10 @@ impl DapLeader<BearerToken> for MockAggregator {
 
     async fn get_reports(
         &self,
-        task_id: &Id,
-        selector: &Self::ReportSelector,
-    ) -> Result<Vec<Report>, DapError> {
+        selector: &MockAggregateInfo,
+    ) -> Result<HashMap<Id, Vec<Report>>, DapError> {
         let task_config = self
-            .get_task_config_for(task_id)
+            .get_task_config_for(&selector.task_id)
             .ok_or_else(|| DapError::fatal("no task found"))?;
 
         let now = SystemTime::now()
@@ -445,7 +445,7 @@ impl DapLeader<BearerToken> for MockAggregator {
 
         // Fetch reports.
         for (inner_bucket_info, store) in report_store.iter_mut() {
-            if task_id == &inner_bucket_info.task_id
+            if selector.task_id == inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window
                 && batch_interval.end() > inner_bucket_info.window
             {
@@ -467,7 +467,7 @@ impl DapLeader<BearerToken> for MockAggregator {
             }
         }
 
-        Ok(reports)
+        Ok(HashMap::from([(selector.task_id.clone(), reports)]))
     }
 
     async fn init_collect_job(&self, _collect_req: &CollectReq) -> Result<Url, DapError> {

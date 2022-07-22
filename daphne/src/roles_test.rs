@@ -25,6 +25,16 @@ use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
 use std::{ops::DerefMut, vec};
 
+// MockAggregator's implementation of DapLeader::get_report() always returns reports for a single
+// task. This macro is used to conveniently unwrap the task ID and reports for testing purposes.
+macro_rules! get_reports {
+    ($leader:expr, $selector:expr) => {{
+        let reports_per_task = $leader.get_reports($selector).await.unwrap();
+        assert_eq!(reports_per_task.len(), 1);
+        reports_per_task.into_iter().next().unwrap()
+    }};
+}
+
 impl MockAggregator {
     fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
@@ -437,10 +447,11 @@ async fn get_reports_fail_invalid_batch_interval() {
         duration: 0,
     };
     let selector = &MockAggregateInfo {
+        task_id: task_id.clone(),
         batch_info: Some(empty_interval),
         agg_rate: 1,
     };
-    let err = leader.get_reports(task_id, selector).await.unwrap_err();
+    let err = leader.get_reports(selector).await.unwrap_err();
 
     // Fails because a 0 second duration interval is not permitted.
     assert_matches!(err, DapError::Fatal(e) =>
@@ -466,10 +477,11 @@ async fn get_reports_empty_response() {
     // Get report.
     let now = report.nonce.time - 200000000;
     let selector = &MockAggregateInfo {
+        task_id: task_id.clone(),
         batch_info: Some(task_config.current_batch_window(now)),
         agg_rate: 1,
     };
-    let reports = leader.get_reports(task_id, selector).await.unwrap();
+    let (task_id, reports) = get_reports!(leader, selector);
 
     // We get an empty response due to no reports existing within requested batch_window.
     assert_eq!(reports.len(), 0);
@@ -477,10 +489,11 @@ async fn get_reports_empty_response() {
     // Attempt to get reports from the future.
     let now = report.nonce.time + 200000000;
     let selector = &MockAggregateInfo {
+        task_id: task_id.clone(),
         batch_info: Some(task_config.current_batch_window(now)),
         agg_rate: 1,
     };
-    let reports = leader.get_reports(task_id, selector).await.unwrap();
+    let (_task_id, reports) = get_reports!(leader, selector);
 
     // We get an empty response due to no reports existing within requested batch_window.
     assert_eq!(reports.len(), 0);
@@ -520,11 +533,11 @@ async fn e2e() {
     // Leader: Store received report to ReportStore.
     let now = 1637361337;
     let selector = &MockAggregateInfo {
+        task_id: task_id.clone(),
         batch_info: Some(task_config.current_batch_window(now)),
         agg_rate: 1,
     };
-    let res = leader.get_reports(task_id, selector).await;
-    let reports = res.unwrap();
+    let (task_id, reports) = get_reports!(leader, selector);
     assert_eq!(report, reports[0]);
 
     // Leader: Consume report share.
@@ -535,7 +548,7 @@ async fn e2e() {
         .produce_agg_init_req(
             &leader,
             &task_config.vdaf_verify_key,
-            task_id,
+            &task_id,
             &agg_job_id,
             reports,
         )
@@ -556,7 +569,7 @@ async fn e2e() {
     // Leader: Produce Leader output share and prepare aggregate continue request for Helper.
     let transition = task_config
         .vdaf
-        .handle_agg_resp(task_id, &agg_job_id, leader_state, agg_resp)
+        .handle_agg_resp(&task_id, &agg_job_id, leader_state, agg_resp)
         .unwrap();
     assert_matches!(transition, DapLeaderTransition::Uncommitted(..));
     let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
@@ -576,7 +589,7 @@ async fn e2e() {
         .vdaf
         .handle_final_agg_resp(leader_uncommitted, agg_resp)
         .unwrap();
-    leader.put_out_shares(task_id, out_shares).await.unwrap();
+    leader.put_out_shares(&task_id, out_shares).await.unwrap();
 
     // TODO(nakatsuka-y) Call http_post_collect to post a collect job.
     //                   Assume for now that the leader has already picked a collect job.
