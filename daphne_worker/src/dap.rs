@@ -359,12 +359,12 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
     async fn get_pending_collect_jobs(
         &self,
         task_id: &Id,
-    ) -> std::result::Result<Vec<(Id, CollectReq)>, DapError> {
+    ) -> std::result::Result<HashMap<Id, Vec<CollectReq>>, DapError> {
         let leader_state_namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
         let leader_state_stub = leader_state_namespace
             .id_from_name(&durable_leader_state_name(task_id))?
             .get_stub()?;
-        let res: Vec<(Id, CollectReq)> =
+        let res: HashMap<Id, Vec<CollectReq>> =
             durable_get!(leader_state_stub, DURABLE_LEADER_STATE_GET_COLLECT_REQS)
                 .await?
                 .json()

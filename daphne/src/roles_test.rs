@@ -10,17 +10,19 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
-        AggregateShareResp, CollectReq, HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare,
-        Transition, TransitionFailure, TransitionVar,
+        AggregateShareResp, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report,
+        ReportShare, Transition, TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
-        BucketInfo, MockAggregateInfo, MockAggregator, ReportStore, HPKE_RECEIVER_CONFIG_LIST,
-        LEADER_BEARER_TOKEN,
+        BucketInfo, MockAggregateInfo, MockAggregator, ReportStore, COLLECTOR_BEARER_TOKEN,
+        HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
-    DapAbort, DapError, DapLeaderTransition, DapMeasurement, DapRequest, Prio3Config, VdafConfig,
+    DapAbort, DapCollectJob, DapError, DapLeaderTransition, DapMeasurement, DapRequest,
+    Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
+use matchit::Router;
 use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
 use std::{ops::DerefMut, vec};
@@ -499,6 +501,112 @@ async fn get_reports_empty_response() {
     assert_eq!(reports.len(), 0);
 }
 
+#[tokio::test]
+async fn poll_collect_job_test_results() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let now = 1637361337;
+
+    // Collector: Create a CollectReq.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    leader.http_post_collect(&req).await.unwrap();
+
+    // Expect DapCollectJob::Unknown due to invalid collect ID.
+    assert_eq!(
+        leader
+            .poll_collect_job(task_id, &Id::default())
+            .await
+            .unwrap(),
+        DapCollectJob::Unknown
+    );
+
+    // Leader: Get pending collect job to obtain collect_id
+    let resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
+    let collect_id = resp.keys().collect::<Vec<&Id>>()[0];
+    let collect_resp = CollectResp {
+        encrypted_agg_shares: Vec::default(),
+    };
+
+    // Expect DapCollectJob::Pending due to pending collect job.
+    assert_eq!(
+        leader.poll_collect_job(task_id, &collect_id).await.unwrap(),
+        DapCollectJob::Pending
+    );
+
+    // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
+    leader
+        .finish_collect_job(&task_id, &collect_id, &collect_resp)
+        .await
+        .unwrap();
+
+    // Expect DapCollectJob::Done due to processed collect job.
+    assert_matches!(
+        leader.poll_collect_job(task_id, &collect_id).await.unwrap(),
+        DapCollectJob::Done(..)
+    );
+}
+
+// Test a successful collect request submission.
+// This checks that the Leader reponds with the collect ID with the ID associated to the request.
+//
+// TODO(nakatsuka-y) Implement a test case when a Leader rejects a collect request.
+#[tokio::test]
+async fn http_post_collect_success() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let now = 1637361337;
+
+    // Collector: Create a CollectReq.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let url = leader.http_post_collect(&req).await.unwrap();
+    let mut resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
+    let leader_collect_id = resp.keys().collect::<Vec<&Id>>()[0].clone();
+    let leader_collect_req = resp.remove(&leader_collect_id).unwrap();
+
+    // Check that the CollectReq sent by Collector is the same that is received by Leader.
+    assert_eq!(collector_collect_req, leader_collect_req[0]);
+
+    // Check that the collect_id included in the URI is the same with the one received
+    // by Leader.
+    let path = url.path().to_string();
+    let mut router = Router::new();
+    router
+        .insert("/collect/task/:task_id/req/:collect_id", true)
+        .unwrap();
+    let url_match = router.at(&path).unwrap();
+    let collector_collect_id = url_match.params.get("collect_id").unwrap();
+    assert_eq!(
+        collector_collect_id.to_string(),
+        leader_collect_id.to_base64url()
+    );
+}
+
 // Test the upload sub-protocol.
 #[tokio::test]
 async fn successful_http_post_upload() {
@@ -591,13 +699,24 @@ async fn e2e() {
         .unwrap();
     leader.put_out_shares(&task_id, out_shares).await.unwrap();
 
-    // TODO(nakatsuka-y) Call http_post_collect to post a collect job.
-    //                   Assume for now that the leader has already picked a collect job.
+    // Collector: Create a CollectReq.
     let collect_req = CollectReq {
         task_id: task_id.clone(),
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    leader.http_post_collect(&req).await.unwrap();
+    let mut resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
+    let collect_id = resp.keys().collect::<Vec<&Id>>()[0].clone();
+    let collect_req = resp.remove(&collect_id).unwrap()[0].clone();
 
     // Leader: Get Leader's encrypted aggregate share.
     let leader_agg_share = leader
@@ -605,7 +724,7 @@ async fn e2e() {
         .await
         .unwrap();
 
-    let _leader_enc_agg_share = task_config
+    let leader_enc_agg_share = task_config
         .vdaf
         .produce_leader_encrypted_agg_share(
             &task_config.collector_hpke_config,
@@ -617,9 +736,9 @@ async fn e2e() {
 
     // Leader: Prepare AggregateShareReq.
     let agg_share_req = AggregateShareReq {
-        task_id: collect_req.task_id.clone(),
-        batch_interval: collect_req.batch_interval.clone(),
-        agg_param: collect_req.agg_param.clone(),
+        task_id: collect_req.task_id,
+        batch_interval: collect_req.batch_interval,
+        agg_param: collect_req.agg_param,
         report_count: leader_agg_share.report_count,
         checksum: leader_agg_share.checksum,
     };
@@ -633,5 +752,28 @@ async fn e2e() {
     };
     let res = leader.http_post_aggregate_share(&req).await.unwrap();
     let agg_share_resp = AggregateShareResp::get_decoded(&res.payload).unwrap();
-    let _helper_enc_agg_share = agg_share_resp.encrypted_agg_share;
+    let helper_enc_agg_share = agg_share_resp.encrypted_agg_share;
+
+    // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
+    let collect_resp = CollectResp {
+        encrypted_agg_shares: vec![leader_enc_agg_share, helper_enc_agg_share],
+    };
+
+    leader
+        .finish_collect_job(&task_id, &collect_id, &collect_resp)
+        .await
+        .unwrap();
+
+    // Leader: Mark the reports as collected.
+    leader
+        .mark_collected(&task_id, &agg_share_req.batch_interval)
+        .await
+        .unwrap();
+
+    // Leader: Respond to poll request from Collector.
+    let collect_job = leader
+        .poll_collect_job(&task_id, &collect_id)
+        .await
+        .unwrap();
+    assert_matches!(collect_job, DapCollectJob::Done(..))
 }

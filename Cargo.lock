@@ -491,6 +491,7 @@ dependencies = [
  "getrandom",
  "hex",
  "hpke 0.8.0",
+ "matchit 0.6.0",
  "prio",
  "rand",
  "reqwest",
@@ -1427,6 +1428,12 @@ name = "matchit"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9376a4f0340565ad675d11fc1419227faf5f60cd7ac9cb2e7185a471f30af833"
+
+[[package]]
+name = "matchit"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3dfc802da7b1cf80aefffa0c7b2f77247c8b32206cc83c270b61264f5b360a80"
 
 [[package]]
 name = "md-5"
@@ -3318,7 +3325,7 @@ dependencies = [
  "futures-util",
  "http",
  "js-sys",
- "matchit",
+ "matchit 0.4.6",
  "pin-project",
  "serde",
  "serde_json",

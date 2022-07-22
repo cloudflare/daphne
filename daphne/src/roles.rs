@@ -170,7 +170,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     async fn get_pending_collect_jobs(
         &self,
         task_id: &Id,
-    ) -> Result<Vec<(Id, CollectReq)>, DapError>;
+    ) -> Result<HashMap<Id, Vec<CollectReq>>, DapError>;
 
     /// Complete a collect job by assigning it the completed [`CollectResp`](crate::messages::CollectResp).
     async fn finish_collect_job(
@@ -403,10 +403,12 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             // share computed during a collect job and any output shares computed during an aggregation
             // job.
             let pending = self.get_pending_collect_jobs(&task_id).await?;
-            for (collect_id, collect_req) in pending.into_iter() {
-                telem.reports_collected += self
-                    .run_collect_job(&collect_id, &task_id, task_config, collect_req)
-                    .await?;
+            for (collect_id, collect_reqs) in pending.into_iter() {
+                for collect_req in collect_reqs {
+                    telem.reports_collected += self
+                        .run_collect_job(&collect_id, &task_id, task_config, collect_req)
+                        .await?;
+                }
             }
         }
 

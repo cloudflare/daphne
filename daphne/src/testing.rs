@@ -15,9 +15,10 @@ use crate::{
     DapResponse, DapTaskConfig,
 };
 use async_trait::async_trait;
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ops::DerefMut,
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -74,6 +75,7 @@ pub(crate) struct MockAggregator {
     tasks: HashMap<Id, DapTaskConfig>,
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
+    leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     agg_store: Arc<Mutex<HashMap<BucketInfo, DapAggregateShare>>>,
 }
@@ -89,6 +91,7 @@ impl MockAggregator {
                 .expect("failed to parse hpke_receiver_config_list");
 
         let report_store = Arc::new(Mutex::new(HashMap::new()));
+        let leader_state_store = Arc::new(Mutex::new(HashMap::new()));
         let helper_state_store = Arc::new(Mutex::new(HashMap::new()));
         let agg_store = Arc::new(Mutex::new(HashMap::new()));
 
@@ -96,6 +99,7 @@ impl MockAggregator {
             tasks,
             hpke_receiver_config_list,
             report_store,
+            leader_state_store,
             helper_state_store,
             agg_store,
         }
@@ -193,7 +197,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
     ) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal("no task found"))?;
+            .ok_or_else(|| DapError::fatal("task not found"))?;
 
         let agg_shares =
             DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
@@ -290,7 +294,7 @@ impl DapHelper<BearerToken> for MockAggregator {
             let bucket_info = BucketInfo::new(
                 self.tasks
                     .get(task_id)
-                    .ok_or_else(|| DapError::fatal("no task found"))?,
+                    .ok_or_else(|| DapError::fatal("task not found"))?,
                 task_id,
                 &report_share.nonce,
             );
@@ -383,7 +387,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let bucket_info = BucketInfo::new(
             self.tasks
                 .get(task_id)
-                .ok_or_else(|| DapError::fatal("no task found"))?,
+                .ok_or_else(|| DapError::fatal("task not found"))?,
             task_id,
             &report.nonce,
         );
@@ -414,7 +418,7 @@ impl DapLeader<BearerToken> for MockAggregator {
     ) -> Result<HashMap<Id, Vec<Report>>, DapError> {
         let task_config = self
             .get_task_config_for(&selector.task_id)
-            .ok_or_else(|| DapError::fatal("no task found"))?;
+            .ok_or_else(|| DapError::fatal("task not found"))?;
 
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -470,32 +474,137 @@ impl DapLeader<BearerToken> for MockAggregator {
         Ok(HashMap::from([(selector.task_id.clone(), reports)]))
     }
 
-    async fn init_collect_job(&self, _collect_req: &CollectReq) -> Result<Url, DapError> {
-        unreachable!("not implemented");
+    // Called after receiving a CollectReq from Collector.
+    async fn init_collect_job(&self, collect_req: &CollectReq) -> Result<Url, DapError> {
+        let mut rng = thread_rng();
+        let task_config = self
+            .get_task_config_for(&collect_req.task_id)
+            .ok_or_else(|| DapError::fatal("task not found"))?;
+
+        let mut leader_state_store_mutex_guard = self
+            .leader_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
+
+        // Construct a new Collect URI for this CollectReq.
+        let collect_id = Id(rng.gen());
+        let collect_uri = task_config
+            .leader_url
+            .join(&format!(
+                "/collect/task/{}/req/{}",
+                collect_req.task_id.to_base64url(),
+                collect_id.to_base64url(),
+            ))
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+
+        // Store Collect ID and CollectReq into LeaderState.
+        let leader_state = leader_state_store
+            .entry(collect_req.task_id.clone())
+            .or_insert_with(LeaderState::new);
+        leader_state.collect_ids.push_back(collect_id.clone());
+        let collect_job_state = CollectJobState::Pending(collect_req.clone());
+        leader_state
+            .collect_jobs
+            .insert(collect_id, collect_job_state);
+
+        Ok(collect_uri)
     }
 
+    // Called to retrieve completed CollectResp at the request of Collector.
     async fn poll_collect_job(
         &self,
-        _task_id: &Id,
-        _collect_id: &Id,
+        task_id: &Id,
+        collect_id: &Id,
     ) -> Result<DapCollectJob, DapError> {
-        unreachable!("not implemented");
+        let mut leader_state_store_mutex_guard = self
+            .leader_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
+
+        let leader_state = leader_state_store
+            .get(task_id)
+            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
+        if let Some(collect_job_state) = leader_state.collect_jobs.get(collect_id) {
+            match collect_job_state {
+                CollectJobState::Pending(_) => Ok(DapCollectJob::Pending),
+                CollectJobState::Processed(resp) => Ok(DapCollectJob::Done(resp.clone())),
+            }
+        } else {
+            Ok(DapCollectJob::Unknown)
+        }
     }
 
+    // Called to retrieve pending CollectReq.
     async fn get_pending_collect_jobs(
         &self,
-        _task_id: &Id,
-    ) -> Result<Vec<(Id, CollectReq)>, DapError> {
-        unreachable!("not implemented");
+        task_id: &Id,
+    ) -> Result<HashMap<Id, Vec<CollectReq>>, DapError> {
+        let mut leader_state_store_mutex_guard = self
+            .leader_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
+
+        let leader_state = leader_state_store
+            .get_mut(task_id)
+            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
+        let mut res: HashMap<Id, Vec<CollectReq>> = HashMap::default();
+
+        // Iterate over collect IDs and copy them and their associated requests to the response.
+        for collect_id in leader_state.collect_ids.iter() {
+            if let CollectJobState::Pending(collect_req) =
+                leader_state.collect_jobs.get(collect_id).unwrap()
+            {
+                res.entry(collect_id.clone())
+                    .or_insert_with(Vec::default)
+                    .push(collect_req.clone());
+            }
+        }
+        Ok(res)
     }
 
+    // Called after finishing aggregation job to put resuts into LeaderState.
     async fn finish_collect_job(
         &self,
-        _task_id: &Id,
-        _collect_id: &Id,
-        _collect_resp: &CollectResp,
+        task_id: &Id,
+        collect_id: &Id,
+        collect_resp: &CollectResp,
     ) -> Result<(), DapError> {
-        unreachable!("not implemented");
+        let mut leader_state_store_mutex_guard = self
+            .leader_state_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
+
+        let leader_state = leader_state_store
+            .get_mut(task_id)
+            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
+        let collect_job = leader_state
+            .collect_jobs
+            .get_mut(collect_id)
+            .ok_or_else(|| DapError::fatal("collect job not found for collect_id"))?;
+
+        match collect_job {
+            CollectJobState::Pending(_) => {
+                // Mark collect job as Processed.
+                *collect_job = CollectJobState::Processed(collect_resp.clone());
+
+                // Remove collect ID from queue.
+                let index = leader_state
+                    .collect_ids
+                    .iter()
+                    .position(|r| r == collect_id)
+                    .unwrap();
+                leader_state.collect_ids.remove(index);
+
+                Ok(())
+            }
+            CollectJobState::Processed(_) => {
+                Err(DapError::fatal("tried to overwrite collect response"))
+            }
+        }
     }
 
     async fn send_http_post(&self, _req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
@@ -588,5 +697,27 @@ impl ReportStore {
 
     pub(crate) fn process_mark_collected(&mut self) {
         self.collected = true;
+    }
+}
+
+/// Stores the state of the collect job.
+pub(crate) enum CollectJobState {
+    Pending(CollectReq),
+    Processed(CollectResp),
+}
+
+/// LeaderState keeps track of Collect IDs in their order of arrival.
+/// It also holds the state of the collect job associated to the Collect ID.
+pub(crate) struct LeaderState {
+    collect_ids: VecDeque<Id>,
+    collect_jobs: HashMap<Id, CollectJobState>,
+}
+
+impl LeaderState {
+    pub(crate) fn new() -> LeaderState {
+        Self {
+            collect_ids: VecDeque::default(),
+            collect_jobs: HashMap::default(),
+        }
     }
 }
