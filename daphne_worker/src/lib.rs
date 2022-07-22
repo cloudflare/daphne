@@ -20,6 +20,8 @@ use worker::*;
 /// Parameters used by the Leader to select a set of reports for aggregation.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InternalAggregateInfo {
+    pub task_id: Id,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_info: Option<Interval>,
 
@@ -177,18 +179,14 @@ pub async fn run_daphne_worker(req: Request, env: Env) -> Result<Response> {
                         }
                     },
                 )
-                .post_async(
-                    "/internal/process/task/:task_id",
-                    |mut req, ctx| async move {
-                        let task_id = parse_id!(ctx.param("task_id"));
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        let agg_info: InternalAggregateInfo = req.json().await?;
-                        match config.process(&task_id, &agg_info).await {
-                            Ok(telem) => Response::from_json(&telem),
-                            Err(e) => abort(e),
-                        }
-                    },
-                )
+                .post_async("/internal/process", |mut req, ctx| async move {
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    let agg_info: InternalAggregateInfo = req.json().await?;
+                    match config.process(&agg_info).await {
+                        Ok(telem) => Response::from_json(&telem),
+                        Err(e) => abort(e),
+                    }
+                })
         }
 
         "helper" => router

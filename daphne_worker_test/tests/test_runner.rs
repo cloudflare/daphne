@@ -330,14 +330,7 @@ impl TestRunner {
         client: &reqwest::Client,
         agg_info: &InternalAggregateInfo,
     ) -> DapLeaderProcessTelemetry {
-        let url = self
-            .leader_url
-            .join(&format!(
-                "/internal/process/task/{}",
-                self.task_id.to_base64url()
-            ))
-            .unwrap();
-
+        let url = self.leader_url.join("/internal/process").unwrap();
         let resp = client
             .post(url.as_str())
             .body(serde_json::to_string(&agg_info).unwrap())

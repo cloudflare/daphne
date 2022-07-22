@@ -60,6 +60,7 @@ async fn janus_client() {
     janus_client.upload(&23).await.unwrap();
 
     let agg_info = InternalAggregateInfo {
+        task_id: t.task_id.clone(),
         batch_info: t.batch_info(),
         agg_rate: 1,
     };
@@ -79,6 +80,7 @@ async fn janus_helper() {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
     let agg_info = InternalAggregateInfo {
+        task_id: t.task_id.clone(),
         batch_info: t.batch_info(),
         agg_rate: t.min_batch_size,
     };

@@ -247,13 +247,12 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
     async fn get_reports(
         &self,
-        task_id: &Id,
-        selector: &Self::ReportSelector,
-    ) -> std::result::Result<Vec<Report>, DapError> {
+        selector: &InternalAggregateInfo,
+    ) -> std::result::Result<HashMap<Id, Vec<Report>>, DapError> {
         let durable_namespace = self.durable_object("DAP_REPORT_STORE")?;
 
         let task_config = self
-            .get_task_config_for(task_id)
+            .get_task_config_for(&selector.task_id)
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
 
         let batch_interval = if let Some(ref interval) = selector.batch_info {
@@ -274,7 +273,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         // the Helper could preprocess its input shares in the same way. See
         // https://github.com/abetterinternet/ppm-specification/pull/174.)
         let mut reports = Vec::with_capacity(selector.agg_rate.try_into().unwrap());
-        for durable_name in self.iter_report_store_names(task_id, &batch_interval)? {
+        for durable_name in self.iter_report_store_names(&selector.task_id, &batch_interval)? {
             let num_reports_remaining = selector.agg_rate - reports.len() as u64;
             let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
             // TODO Don't block on DO request (issue multiple requests simultaneously).
@@ -307,7 +306,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             }
         }
 
-        Ok(reports)
+        Ok(HashMap::from([(selector.task_id.clone(), reports)]))
     }
 
     async fn init_collect_job(

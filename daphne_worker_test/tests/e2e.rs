@@ -174,6 +174,7 @@ async fn e2e_internal_leader_process() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
     let agg_info = InternalAggregateInfo {
+        task_id: t.task_id.clone(),
         batch_info: t.batch_info(),
         agg_rate: t.min_batch_size,
     };
@@ -225,6 +226,7 @@ async fn e2e_internal_leader_process_current_batch_window() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
     let agg_info = InternalAggregateInfo {
+        task_id: t.task_id.clone(),
         batch_info: None,
         agg_rate: 1,
     };
@@ -296,6 +298,7 @@ async fn e2e_leader_collect_ok() {
         .internal_process(
             &client,
             &InternalAggregateInfo {
+                task_id: t.task_id.clone(),
                 batch_info: batch_info.clone(),
                 agg_rate: 100,
             },
@@ -388,6 +391,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         .internal_process(
             &client,
             &InternalAggregateInfo {
+                task_id: t.task_id.clone(),
                 batch_info,
                 agg_rate: 100,
             },
