@@ -517,7 +517,7 @@ pub struct DapResponse {
 }
 
 /// Status of a collect job.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapCollectJob {
     Done(CollectResp),

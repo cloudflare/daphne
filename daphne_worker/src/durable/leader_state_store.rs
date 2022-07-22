@@ -14,7 +14,10 @@ use prio::{
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
+use std::{
+    collections::{HashMap, VecDeque},
+    convert::TryInto,
+};
 use worker::*;
 
 pub(crate) fn durable_leader_state_name(task_id: &Id) -> String {
@@ -130,7 +133,7 @@ impl DurableObject for LeaderStateStore {
                 let opt = ListOptions::new().prefix("pending/");
                 let iter = self.state.storage().list_with_options(opt).await?.entries();
                 let mut item = iter.next()?;
-                let mut res = Vec::new();
+                let mut list = Vec::new();
                 while !item.done() {
                     let (pending_key, ordered_collect_req): (String, OrderedCollectReq) =
                         item.value().into_serde()?;
@@ -140,15 +143,21 @@ impl DurableObject for LeaderStateStore {
                             .map_err(int_err)?
                             .try_into()
                             .map_err(|_| int_err("malformed key for pending CollectReq"))?);
-                    res.push((collect_id, ordered_collect_req));
+                    list.push((collect_id, ordered_collect_req));
                     item = iter.next()?;
                 }
 
-                res.sort_unstable_by_key(|(_id, prioritized)| prioritized.priority);
-                let res: Vec<(Id, CollectReq)> = res
+                list.sort_unstable_by_key(|(_id, prioritized)| prioritized.priority);
+                let mut list: VecDeque<(Id, CollectReq)> = list
                     .into_iter()
-                    .map(|(id, prioritized)| (id, prioritized.collect_req))
+                    .map(|(id, ordered_collect_req)| (id, ordered_collect_req.collect_req))
                     .collect();
+                let mut res: HashMap<Id, Vec<CollectReq>> = HashMap::default();
+                while !list.is_empty() {
+                    let (id, collect_req) = list.pop_front().unwrap();
+                    let collect_reqs = res.entry(id).or_insert_with(Vec::default);
+                    collect_reqs.push(collect_req);
+                }
                 Response::from_json(&res)
             }
 

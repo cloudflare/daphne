@@ -397,7 +397,7 @@ impl Decode for Interval {
 /// A collect request.
 //
 // TODO Add serialization tests.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CollectReq {
     pub task_id: Id,
     pub batch_interval: Interval,
@@ -425,7 +425,7 @@ impl Decode for CollectReq {
 /// A collect response.
 //
 // TODO Add serialization tests.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CollectResp {
     pub encrypted_agg_shares: Vec<HpkeCiphertext>,
 }
