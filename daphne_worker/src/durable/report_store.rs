@@ -7,7 +7,7 @@ use crate::{
         leader_agg_job_queue::{
             AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        state_get, state_get_or_default,
+        state_get, state_get_or_default, DURABLE_DELETE_ALL,
     },
     int_err, now,
 };
@@ -27,7 +27,6 @@ pub(crate) fn durable_report_store_name(
     )
 }
 
-pub(crate) const DURABLE_REPORT_STORE_DELETE_ALL: &str = "/internal/do/report_store/delete_all";
 pub(crate) const DURABLE_REPORT_STORE_GET_PENDING: &str = "/internal/do/report_store/get_pending";
 pub(crate) const DURABLE_REPORT_STORE_PUT_PENDING: &str = "/internal/do/report_store/put_pending";
 pub(crate) const DURABLE_REPORT_STORE_PUT_PROCESSED: &str =
@@ -82,7 +81,7 @@ impl DurableObject for ReportStore {
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         let mut rng = thread_rng();
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_REPORT_STORE_DELETE_ALL, Method::Post) => {
+            (DURABLE_DELETE_ALL, Method::Post) => {
                 self.state.storage().delete_all().await?;
                 Response::from_json(&ReportStoreResult::Ok)
             }
@@ -103,8 +102,20 @@ impl DurableObject for ReportStore {
                     item = iter.next()?;
                 }
 
-                // If this bucket is empty, then remove it from the agg job queue.
-                if reports.is_empty() {
+                // NOTE In order to support DAP tasks that require longer batch lifetimes, it will
+                // necessary to check if the lifetime has been reached before removing reports from
+                // storage. We might consider putting reports in KV instead.
+                self.state.storage().delete_multiple(keys).await?;
+                let empty = self
+                    .state
+                    .storage()
+                    .list_with_options(ListOptions::new().prefix("pending/").limit(1))
+                    .await?
+                    .size()
+                    == 0;
+
+                // Check if this bucket is now empty, and if so, remove it from the agg job queue.
+                if empty {
                     let agg_job: Option<AggregationJob> = state_get(&self.state, "agg_job").await?;
                     if let Some(agg_job) = agg_job {
                         // NOTE There is only one agg job queue for now. In the future, work will
@@ -116,10 +127,6 @@ impl DurableObject for ReportStore {
                     }
                 }
 
-                // NOTE In order to support DAP tasks that require longer batch lifetimes, it will
-                // necessary to check if the lifetime has been reached before removing reports from
-                // storage. We might consider putting reports in KV instead.
-                self.state.storage().delete_multiple(keys).await?;
                 Response::from_json(&reports)
             }
 

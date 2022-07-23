@@ -1,18 +1,16 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::int_err;
+use crate::{durable::DURABLE_DELETE_ALL, int_err};
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_DELETE_ALL: &str =
-    "/internal/do/agg_job_queue/delete_all";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET: &str = "/internal/do/agg_job_queue/get";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_FINISH: &str = "/internal/do/agg_job_queue/finish";
 
 /// An aggregation job.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct AggregationJob {
     /// Durable object ID of the [`ReportStore`](crate::durable::ReportStore) instance with reports
     /// to be aggregated.
@@ -45,7 +43,7 @@ impl DurableObject for LeaderAggregationJobQueue {
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_LEADER_AGG_JOB_QUEUE_DELETE_ALL, Method::Post) => {
+            (DURABLE_DELETE_ALL, Method::Post) => {
                 self.state.storage().delete_all().await?;
                 Response::empty()
             }

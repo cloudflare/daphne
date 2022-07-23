@@ -8,10 +8,8 @@
 use crate::{
     dap,
     durable::{
-        aggregate_store::{durable_agg_store_name, DURABLE_AGGREGATE_STORE_DELETE_ALL},
-        durable_queue_name,
-        leader_col_job_queue::DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL,
-        report_store::{durable_report_store_name, DURABLE_REPORT_STORE_DELETE_ALL},
+        aggregate_store::durable_agg_store_name, durable_queue_name,
+        report_store::durable_report_store_name, DURABLE_DELETE_ALL,
     },
     int_err, now,
 };
@@ -291,7 +289,7 @@ impl<D> DaphneWorkerConfig<D> {
         for durable_name in self.iter_report_store_names(task_id, &batch_interval)? {
             let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_REPORT_STORE_DELETE_ALL, &()).await?;
+            durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
         }
 
         // Delete all aggregate data in the batch interval.
@@ -303,14 +301,18 @@ impl<D> DaphneWorkerConfig<D> {
             let agg_name = durable_agg_store_name(&task_id_base64url, window);
             let stub = namespace.id_from_name(&agg_name)?.get_stub()?;
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_AGGREGATE_STORE_DELETE_ALL, &()).await?;
+            durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
         }
 
-        // Clear the leader's state.
+        // Clear the leader's aggregationn job queue.
+        let namespace = self.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
+        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
+        durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
+
+        // Clear the leader's collection job queue.
         let namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        // TODO Don't block on DO requests (issue multiple requests simultaneously).
-        durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL, &()).await?;
+        durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
 
         Ok(())
     }

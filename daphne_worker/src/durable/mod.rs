@@ -4,6 +4,8 @@
 use serde::Deserialize;
 use worker::*;
 
+pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
+
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
 pub(crate) async fn state_get_or_default<T: Default + for<'a> Deserialize<'a>>(

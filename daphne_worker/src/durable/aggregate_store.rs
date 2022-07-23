@@ -1,7 +1,10 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{durable::state_get_or_default, int_err};
+use crate::{
+    durable::{state_get_or_default, DURABLE_DELETE_ALL},
+    int_err,
+};
 use daphne::DapAggregateShare;
 use worker::*;
 
@@ -9,8 +12,6 @@ pub(crate) fn durable_agg_store_name(task_id_base64url: &str, window: u64) -> St
     format!("/task/{}/window/{}", task_id_base64url, window)
 }
 
-pub(crate) const DURABLE_AGGREGATE_STORE_DELETE_ALL: &str =
-    "/internal/do/aggregate_store/delete_all";
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
 
@@ -36,7 +37,7 @@ impl DurableObject for AggregateStore {
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_AGGREGATE_STORE_DELETE_ALL, Method::Post) => {
+            (DURABLE_DELETE_ALL, Method::Post) => {
                 self.state.storage().delete_all().await?;
                 Response::empty()
             }

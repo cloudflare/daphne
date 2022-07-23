@@ -215,6 +215,47 @@ async fn e2e_internal_leader_process() {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
+// Test that all reports eventually get drained at minimum aggregation rate.
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_process_min_agg_rate() {
+    let t = TestRunner::default().await;
+    let client = t.http_client();
+    let batch_interval = t.batch_interval();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+
+    // The reports are uploaded in the background.
+    let mut rng = thread_rng();
+    for _ in 0..7 {
+        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        t.leader_post_expect_ok(
+            &client,
+            "/upload",
+            constants::MEDIA_TYPE_REPORT,
+            t.vdaf
+                .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    // One bucket and one report/bucket equal an aggregation rate of one report.
+    let agg_info = InternalAggregateInfo {
+        max_buckets: 1,
+        max_reports: 1,
+    };
+
+    for i in 0..7 {
+        // Each round should process exactly one report.
+        let agg_telem = t.internal_process(&client, &agg_info).await;
+        assert_eq!(agg_telem.reports_processed, 1, "round {} is empty", i);
+    }
+
+    let agg_telem = t.internal_process(&client, &agg_info).await;
+    assert_eq!(agg_telem.reports_processed, 0, "reports processed");
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_collect_ok() {
