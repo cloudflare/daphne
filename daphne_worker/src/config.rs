@@ -57,7 +57,7 @@ impl<D> DaphneWorkerConfig<D> {
     /// Fetch DAP parameters from environment variables.
     pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
         let mut tasks: HashMap<Id, DapTaskConfig> =
-            serde_json::from_str(ctx.var("DAP_TASK_LIST")?.to_string().as_ref())
+            serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
                 .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
 
         // When running in a local development environment, override the hostname of each
@@ -73,7 +73,7 @@ impl<D> DaphneWorkerConfig<D> {
         }
 
         let hpke_receiver_config_list: Vec<HpkeReceiverConfig> = serde_json::from_str(
-            ctx.var("DAP_HPKE_RECEIVER_CONFIG_LIST")?
+            ctx.secret("DAP_HPKE_RECEIVER_CONFIG_LIST")?
                 .to_string()
                 .as_ref(),
         )
@@ -89,7 +89,7 @@ impl<D> DaphneWorkerConfig<D> {
         }
 
         let bucket_key = Seed::get_decoded(
-            &hex::decode(ctx.var("DAP_BUCKET_KEY")?.to_string()).map_err(int_err)?,
+            &hex::decode(ctx.secret("DAP_BUCKET_KEY")?.to_string()).map_err(int_err)?,
         )
         .map_err(int_err)?;
 
@@ -102,7 +102,7 @@ impl<D> DaphneWorkerConfig<D> {
                 })?;
 
         let leader_bearer_tokens: HashMap<Id, BearerToken> = serde_json::from_str(
-            ctx.var("DAP_LEADER_BEARER_TOKEN_LIST")?
+            ctx.secret("DAP_LEADER_BEARER_TOKEN_LIST")?
                 .to_string()
                 .as_ref(),
         )
@@ -134,7 +134,7 @@ impl<D> DaphneWorkerConfig<D> {
 
         let collector_bearer_tokens = if is_leader {
             let tokens: HashMap<Id, BearerToken> = serde_json::from_str(
-                ctx.var("DAP_COLLECTOR_BEARER_TOKEN_LIST")?
+                ctx.secret("DAP_COLLECTOR_BEARER_TOKEN_LIST")?
                     .to_string()
                     .as_ref(),
             )
