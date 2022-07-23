@@ -80,24 +80,32 @@ macro_rules! parse_id {
 }
 
 /// HTTP request handler for Daphne-Worker.
-///
-/// This methoed is typically called from the
-/// [workers-rs](https://github.com/cloudflare/workers-rs) `main` function. For example:
-///
-/// ```ignore
-/// use daphne_worker::run_daphne_worker;
-/// use worker::*;
-///
-/// #[event(fetch)]
-/// pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
-///     run_daphne_worker(req, env).await
-/// }
-/// ```
-//
-// TODO Document endpoints that aren't defined in the DAP spec
-pub async fn run_daphne_worker(req: Request, env: Env) -> Result<Response> {
-    let router = Router::new()
-        .get_async("/hpke_config", |req, ctx| async move {
+#[derive(Default)]
+pub struct DaphneWorkerRouter {
+    /// If true, then enable internal test endpoints. These should not be enabled in production.
+    pub enable_internal_test: bool,
+}
+
+impl DaphneWorkerRouter {
+    /// HTTP request handler for Daphne-Worker.
+    ///
+    /// This methoed is typically called from the
+    /// [workers-rs](https://github.com/cloudflare/workers-rs) `main` function. For example:
+    ///
+    /// ```ignore
+    /// use daphne_worker::DaphneWorkerRouter;
+    /// use worker::*;
+    ///
+    /// #[event(fetch)]
+    /// pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
+    ///     let router = DaphneWorkerRouter::default();
+    ///     router.handle_request(req, env).await
+    /// }
+    /// ```
+    //
+    // TODO Document endpoints that aren't defined in the DAP spec
+    pub async fn handle_request(&self, req: Request, env: Env) -> Result<Response> {
+        let router = Router::new().get_async("/hpke_config", |req, ctx| async move {
             let req = worker_request_to_dap(req).await?;
             let config = DaphneWorkerConfig::from_worker_context(ctx)?;
             // TODO(cjpatton) Have this method return a DapResponse.
@@ -105,102 +113,108 @@ pub async fn run_daphne_worker(req: Request, env: Env) -> Result<Response> {
                 Ok(req) => dap_response_to_worker(req),
                 Err(e) => abort(e),
             }
-        })
-        .post_async(
-            "/internal/test/reset/task/:task_id",
-            |mut req, ctx| async move {
-                let task_id = parse_id!(ctx.param("task_id"));
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                let batch_info: Option<Interval> = req.json().await?;
-                match config.internal_reset(&task_id, &batch_info).await {
-                    Ok(()) => Response::empty(),
-                    Err(e) => abort(e.into()),
-                }
-            },
-        );
+        });
 
-    let router = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_ref() {
-        "leader" => {
-            router
-                .post_async("/upload", |req, ctx| async move {
-                    let req = worker_request_to_dap(req).await?;
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    match config.http_post_upload(&req).await {
-                        Ok(()) => Response::empty(),
-                        Err(e) => abort(e),
-                    }
-                })
-                .post_async("/collect", |req, ctx| async move {
-                    let req = worker_request_to_dap(req).await?;
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    match config.http_post_collect(&req).await {
-                        Ok(collect_uri) => {
-                            let mut headers = Headers::new();
-                            headers.set("Location", collect_uri.as_str())?;
-                            Ok(Response::empty()
-                                .unwrap()
-                                .with_status(303)
-                                .with_headers(headers))
-                        }
-                        Err(e) => abort(e),
-                    }
-                })
-                .get_async(
-                    "/collect/task/:task_id/req/:collect_id",
-                    |_req, ctx| async move {
-                        let task_id = parse_id!(ctx.param("task_id"));
-                        let collect_id = parse_id!(ctx.param("collect_id"));
+        let router = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_ref() {
+            "leader" => {
+                router
+                    .post_async("/upload", |req, ctx| async move {
+                        let req = worker_request_to_dap(req).await?;
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        match config.poll_collect_job(&task_id, &collect_id).await {
-                            Ok(DapCollectJob::Done(collect_resp)) => {
-                                dap_response_to_worker(DapResponse {
-                                    media_type: Some(constants::MEDIA_TYPE_COLLECT_RESP),
-                                    payload: collect_resp.get_encoded(),
-                                })
-                            }
-                            Ok(DapCollectJob::Pending) => {
-                                Ok(Response::empty().unwrap().with_status(202))
-                            }
-                            // TODO spec: Decide whether to define this behavior.
-                            Ok(DapCollectJob::Unknown) => {
-                                abort(DapAbort::BadRequest("unknown collect id".into()))
-                            }
-                            Err(e) => abort(e.into()),
+                        match config.http_post_upload(&req).await {
+                            Ok(()) => Response::empty(),
+                            Err(e) => abort(e),
                         }
-                    },
-                )
-                .post_async("/internal/process", |mut req, ctx| async move {
+                    })
+                    .post_async("/collect", |req, ctx| async move {
+                        let req = worker_request_to_dap(req).await?;
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        match config.http_post_collect(&req).await {
+                            Ok(collect_uri) => {
+                                let mut headers = Headers::new();
+                                headers.set("Location", collect_uri.as_str())?;
+                                Ok(Response::empty()
+                                    .unwrap()
+                                    .with_status(303)
+                                    .with_headers(headers))
+                            }
+                            Err(e) => abort(e),
+                        }
+                    })
+                    .get_async(
+                        "/collect/task/:task_id/req/:collect_id",
+                        |_req, ctx| async move {
+                            let task_id = parse_id!(ctx.param("task_id"));
+                            let collect_id = parse_id!(ctx.param("collect_id"));
+                            let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                            match config.poll_collect_job(&task_id, &collect_id).await {
+                                Ok(DapCollectJob::Done(collect_resp)) => {
+                                    dap_response_to_worker(DapResponse {
+                                        media_type: Some(constants::MEDIA_TYPE_COLLECT_RESP),
+                                        payload: collect_resp.get_encoded(),
+                                    })
+                                }
+                                Ok(DapCollectJob::Pending) => {
+                                    Ok(Response::empty().unwrap().with_status(202))
+                                }
+                                // TODO spec: Decide whether to define this behavior.
+                                Ok(DapCollectJob::Unknown) => {
+                                    abort(DapAbort::BadRequest("unknown collect id".into()))
+                                }
+                                Err(e) => abort(e.into()),
+                            }
+                        },
+                    )
+                    .post_async("/internal/process", |mut req, ctx| async move {
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let agg_info: InternalAggregateInfo = req.json().await?;
+                        match config.process(&agg_info).await {
+                            Ok(telem) => Response::from_json(&telem),
+                            Err(e) => abort(e),
+                        }
+                    })
+            }
+
+            "helper" => router
+                .post_async("/aggregate", |req, ctx| async move {
+                    let req = worker_request_to_dap(req).await?;
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    let agg_info: InternalAggregateInfo = req.json().await?;
-                    match config.process(&agg_info).await {
-                        Ok(telem) => Response::from_json(&telem),
+                    match config.http_post_aggregate(&req).await {
+                        Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
                 })
-        }
+                .post_async("/aggregate_share", |req, ctx| async move {
+                    let req = worker_request_to_dap(req).await?;
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    match config.http_post_aggregate_share(&req).await {
+                        Ok(resp) => dap_response_to_worker(resp),
+                        Err(e) => abort(e),
+                    }
+                }),
 
-        "helper" => router
-            .post_async("/aggregate", |req, ctx| async move {
-                let req = worker_request_to_dap(req).await?;
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                match config.http_post_aggregate(&req).await {
-                    Ok(resp) => dap_response_to_worker(resp),
-                    Err(e) => abort(e),
-                }
-            })
-            .post_async("/aggregate_share", |req, ctx| async move {
-                let req = worker_request_to_dap(req).await?;
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                match config.http_post_aggregate_share(&req).await {
-                    Ok(resp) => dap_response_to_worker(resp),
-                    Err(e) => abort(e),
-                }
-            }),
+            _ => return abort(DapError::fatal("unexpected role").into()),
+        };
 
-        role => return abort(DapError::Fatal(format!("unexpected role '{}'", role)).into()),
-    };
+        let router = if self.enable_internal_test {
+            router.post_async(
+                "/internal/test/reset/task/:task_id",
+                |mut req, ctx| async move {
+                    let task_id = parse_id!(ctx.param("task_id"));
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    let batch_info: Option<Interval> = req.json().await?;
+                    match config.internal_reset(&task_id, &batch_info).await {
+                        Ok(()) => Response::empty(),
+                        Err(e) => abort(e.into()),
+                    }
+                },
+            )
+        } else {
+            router
+        };
 
-    router.run(req, env).await
+        router.run(req, env).await
+    }
 }
 
 pub(crate) fn now() -> u64 {

@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne_worker::run_daphne_worker;
+use daphne_worker::DaphneWorkerRouter;
 use worker::*;
 
 mod utils;
@@ -23,5 +23,8 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     // Optionally, get more helpful error messages written to the console in the case of a panic.
     utils::set_panic_hook();
 
-    run_daphne_worker(req, env).await
+    let router = DaphneWorkerRouter {
+        enable_internal_test: true,
+    };
+    router.handle_request(req, env).await
 }
