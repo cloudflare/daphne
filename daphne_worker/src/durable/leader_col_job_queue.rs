@@ -17,18 +17,17 @@ use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, convert::TryInto};
 use worker::*;
 
-pub(crate) const DURABLE_LEADER_STATE_DELETE_ALL: &str = "/internal/do/leader_state/delete_all";
-pub(crate) const DURABLE_LEADER_STATE_PUT_COLLECT_REQ: &str =
-    "/internal/do/leader_state/put_collect_req";
-pub(crate) const DURABLE_LEADER_STATE_GET_COLLECT_REQS: &str =
-    "/internal/do/leader_state/get_collect_reqs";
-pub(crate) const DURABLE_LEADER_STATE_FINISH_COLLECT_REQ: &str =
-    "/internal/do/leader_state/finish_collect_req";
-pub(crate) const DURABLE_LEADER_STATE_GET_COLLECT_RESP: &str =
-    "/internal/do/leader_state/get_collect_resp";
+pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL: &str =
+    "/internal/do/leader_col_job_queue/delete_all";
+pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_PUT: &str = "/internal/do/leader_col_job_queue/put";
+pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET: &str = "/internal/do/leader_col_job_queue/get";
+pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_FINISH: &str =
+    "/internal/do/leader_col_job_queue/finish";
+pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT: &str =
+    "/internal/do/leader_col_job_queue/get_result";
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct LeaderStateStoreUpdateCollectReq {
+pub(crate) struct CollectionJobResult {
     pub(crate) collect_id: Id,
     pub(crate) collect_resp: CollectResp,
 }
@@ -41,26 +40,26 @@ struct OrderedCollectReq {
 
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
-/// An instance of the [`LeaderStateStore`] DO is named `/queue/<queue_num>`, where `<queue_num>`
+/// An instance of the [`LeaderCollectionJobQueue`] DO is named `/queue/<queue_num>`, where `<queue_num>`
 /// is an integer representing a specific queue.
 //
 // TODO spec: Consider allowing completed aggregate results to be deleted after a period of time.
 #[durable_object]
-pub struct LeaderStateStore {
+pub struct LeaderCollectionJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
 }
 
 #[durable_object]
-impl DurableObject for LeaderStateStore {
+impl DurableObject for LeaderCollectionJobQueue {
     fn new(state: State, env: Env) -> Self {
         Self { state, env }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_LEADER_STATE_DELETE_ALL, Method::Post) => {
+            (DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL, Method::Post) => {
                 self.state.storage().delete_all().await?;
                 Response::empty()
             }
@@ -69,7 +68,7 @@ impl DurableObject for LeaderStateStore {
             //
             // TODO Disallow overlapping collect requests, as required by
             // draft-ietf-ppm-dap-01.
-            (DURABLE_LEADER_STATE_PUT_COLLECT_REQ, Method::Post) => {
+            (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
                 let collect_req: CollectReq = req.json().await?;
 
                 // Compute the collect job ID, used to derive the collect URI for this request.
@@ -119,7 +118,7 @@ impl DurableObject for LeaderStateStore {
             }
 
             // Retrieve the list of pending CollectReqs.
-            (DURABLE_LEADER_STATE_GET_COLLECT_REQS, Method::Get) => {
+            (DURABLE_LEADER_COL_JOB_QUEUE_GET, Method::Get) => {
                 // Return the list of (Id, CollectReq) in order of arrival.
                 //
                 // TODO Consider limting the length of the response.
@@ -149,14 +148,14 @@ impl DurableObject for LeaderStateStore {
             }
 
             // Store a CollectResp corresponding to a pending CollectReq.
-            (DURABLE_LEADER_STATE_FINISH_COLLECT_REQ, Method::Post) => {
-                let update: LeaderStateStoreUpdateCollectReq = req.json().await?;
-                let collect_id_hex = update.collect_id.to_hex();
+            (DURABLE_LEADER_COL_JOB_QUEUE_FINISH, Method::Post) => {
+                let res: CollectionJobResult = req.json().await?;
+                let collect_id_hex = res.collect_id.to_hex();
                 let processed_key = format!("processed/{}", collect_id_hex);
                 let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
                 if processed.is_some() {
                     return Err(int_err(
-                        "LeaderStateStore: tried to overwrite collect response",
+                        "LeaderCollectionJobQueue: tried to overwrite collect response",
                     ));
                 }
 
@@ -164,18 +163,18 @@ impl DurableObject for LeaderStateStore {
                 let pending: Option<OrderedCollectReq> =
                     state_get(&self.state, &pending_key).await?;
                 if pending.is_none() {
-                    return Err(int_err("LeaderStateStore: missing collect request"));
+                    return Err(int_err("LeaderCollectionJobQueue: missing collect request"));
                 }
 
                 self.state
                     .storage()
-                    .put(&processed_key, update.collect_resp)
+                    .put(&processed_key, res.collect_resp)
                     .await?;
                 Response::empty()
             }
 
             // Retrieve a completed CollectResp.
-            (DURABLE_LEADER_STATE_GET_COLLECT_RESP, Method::Post) => {
+            (DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, Method::Post) => {
                 let collect_id: Id = req.json().await?;
                 let collect_id_hex = collect_id.to_hex();
                 let pending_key = format!("pending/{}", collect_id_hex);
@@ -196,7 +195,7 @@ impl DurableObject for LeaderStateStore {
             }
 
             _ => Err(int_err(format!(
-                "LeaderStateStore: unexpected request: method={:?}; path={:?}",
+                "LeaderCollectionJobQueue: unexpected request: method={:?}; path={:?}",
                 req.method(),
                 req.path()
             ))),
