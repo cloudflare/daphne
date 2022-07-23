@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable::{state_get, state_get_or_default},
+    durable::{state_get, state_get_or_default, DURABLE_DELETE_ALL},
     int_err,
 };
 use daphne::{
@@ -17,8 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, convert::TryInto};
 use worker::*;
 
-pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL: &str =
-    "/internal/do/leader_col_job_queue/delete_all";
 pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_PUT: &str = "/internal/do/leader_col_job_queue/put";
 pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET: &str = "/internal/do/leader_col_job_queue/get";
 pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_FINISH: &str =
@@ -59,7 +57,7 @@ impl DurableObject for LeaderCollectionJobQueue {
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_LEADER_COL_JOB_QUEUE_DELETE_ALL, Method::Post) => {
+            (DURABLE_DELETE_ALL, Method::Post) => {
                 self.state.storage().delete_all().await?;
                 Response::empty()
             }
