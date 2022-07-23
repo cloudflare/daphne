@@ -7,10 +7,8 @@ use worker::*;
 
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_DELETE_ALL: &str =
     "/internal/do/agg_job_queue/delete_all";
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT_PENDING: &str =
-    "/internal/do/agg_job_queue/put_pending";
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING: &str =
-    "/internal/do/agg_job_queue/get_pending";
+pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
+pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET: &str = "/internal/do/agg_job_queue/get";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_FINISH: &str = "/internal/do/agg_job_queue/finish";
 
 /// An aggregation job.
@@ -52,7 +50,7 @@ impl DurableObject for LeaderAggregationJobQueue {
                 Response::empty()
             }
 
-            (DURABLE_LEADER_AGG_JOB_QUEUE_PUT_PENDING, Method::Post) => {
+            (DURABLE_LEADER_AGG_JOB_QUEUE_PUT, Method::Post) => {
                 let agg_job: AggregationJob = req.json().await?;
                 self.state
                     .storage()
@@ -61,7 +59,7 @@ impl DurableObject for LeaderAggregationJobQueue {
                 Response::empty()
             }
 
-            (DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING, Method::Post) => {
+            (DURABLE_LEADER_AGG_JOB_QUEUE_GET, Method::Post) => {
                 let num_buckets: usize = req.json().await?;
                 let opt = ListOptions::new().prefix("bucket/").limit(num_buckets);
                 let iter = self.state.storage().list_with_options(opt).await?.entries();

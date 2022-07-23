@@ -16,11 +16,11 @@ use crate::{
         helper_state_store::{
             durable_helper_state_name, DURABLE_HELPER_STATE_GET, DURABLE_HELPER_STATE_PUT,
         },
-        leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING,
-        leader_state_store::{
-            LeaderStateStoreUpdateCollectReq, DURABLE_LEADER_STATE_FINISH_COLLECT_REQ,
-            DURABLE_LEADER_STATE_GET_COLLECT_REQS, DURABLE_LEADER_STATE_GET_COLLECT_RESP,
-            DURABLE_LEADER_STATE_PUT_COLLECT_REQ,
+        leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET,
+        leader_col_job_queue::{
+            CollectionJobResult, DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
+            DURABLE_LEADER_COL_JOB_QUEUE_GET, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
+            DURABLE_LEADER_COL_JOB_QUEUE_PUT,
         },
         report_store::{
             ReportStoreResult, DURABLE_REPORT_STORE_GET_PENDING,
@@ -260,7 +260,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
         let mut resp = durable_post!(
             stub,
-            DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING,
+            DURABLE_LEADER_AGG_JOB_QUEUE_GET,
             &selector.max_buckets
         )
         .await?;
@@ -307,13 +307,12 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
 
-        let namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
+        let namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        let collect_id: Id =
-            durable_post!(stub, DURABLE_LEADER_STATE_PUT_COLLECT_REQ, &collect_req)
-                .await?
-                .json()
-                .await?;
+        let collect_id: Id = durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_PUT, &collect_req)
+            .await?
+            .json()
+            .await?;
 
         let collect_uri = task_config
             .leader_url
@@ -332,10 +331,10 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         _task_id: &Id,
         collect_id: &Id,
     ) -> std::result::Result<DapCollectJob, DapError> {
-        let namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
+        let namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
         let res: DapCollectJob =
-            durable_post!(stub, DURABLE_LEADER_STATE_GET_COLLECT_RESP, &collect_id)
+            durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, &collect_id)
                 .await?
                 .json()
                 .await?;
@@ -345,12 +344,12 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
     async fn get_pending_collect_jobs(
         &self,
     ) -> std::result::Result<Vec<(Id, CollectReq)>, DapError> {
-        let leader_state_namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
+        let leader_state_namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let leader_state_stub = leader_state_namespace
             .id_from_name(&durable_queue_name(0))?
             .get_stub()?;
         let res: Vec<(Id, CollectReq)> =
-            durable_get!(leader_state_stub, DURABLE_LEADER_STATE_GET_COLLECT_REQS)
+            durable_get!(leader_state_stub, DURABLE_LEADER_COL_JOB_QUEUE_GET)
                 .await?
                 .json()
                 .await?;
@@ -363,14 +362,14 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         collect_id: &Id,
         collect_resp: &CollectResp,
     ) -> std::result::Result<(), DapError> {
-        let leader_state_namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
+        let leader_state_namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let leader_state_stub = leader_state_namespace
             .id_from_name(&durable_queue_name(0))?
             .get_stub()?;
         durable_post!(
             leader_state_stub,
-            DURABLE_LEADER_STATE_FINISH_COLLECT_REQ,
-            &LeaderStateStoreUpdateCollectReq {
+            DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
+            &CollectionJobResult {
                 collect_id: collect_id.clone(),
                 collect_resp: collect_resp.clone(),
             }

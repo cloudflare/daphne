@@ -5,8 +5,7 @@ use crate::{
     durable::{
         durable_queue_name,
         leader_agg_job_queue::{
-            AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH,
-            DURABLE_LEADER_AGG_JOB_QUEUE_PUT_PENDING,
+            AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
         state_get, state_get_or_default,
     },
@@ -149,7 +148,7 @@ impl DurableObject for ReportStore {
                     // TODO Shard the work across multiple job queues rather than just one. (See
                     // issue #25.) For now there is jsut one job queue.
                     let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-                    durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_PUT_PENDING, &agg_job).await?;
+                    durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_PUT, &agg_job).await?;
                     self.state.storage().put("agg_job", agg_job).await?;
                 }
 
