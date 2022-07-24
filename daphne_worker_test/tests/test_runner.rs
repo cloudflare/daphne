@@ -11,7 +11,7 @@ use daphne::{
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
-use prio::codec::Decode;
+use prio::codec::{Decode, Encode};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -33,7 +33,13 @@ const LEADER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
         "leader_url": "http://leader:8787",
         "helper_url": "http://helper:8788",
-        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
         "vdaf": {
@@ -48,7 +54,13 @@ const LEADER_TASK_LIST: &str = r#"{
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
         "leader_url": "http://leader:8787",
         "helper_url": "http://127.0.0.1:9788",
-        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
         "vdaf": {
@@ -69,7 +81,13 @@ const HELPER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
         "leader_url": "http://leader:8787",
         "helper_url": "http://helper:8788",
-        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+        "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
         "vdaf": {
@@ -87,7 +105,13 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
         "leader_url": "http://leader:8787",
         "helper_url": "http://127.0.0.1:9788",
-        "collector_hpke_config": "f400200001000100202ea6c9ba7ea64c3e9d09c73b057a009a80a1bf551ffca56c53fc0b8430ded350",
+         "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
         "vdaf": {
@@ -108,15 +132,15 @@ const JANUS_HELPER_TASK_LEADER_BEARER_TOKEN: &str =
 pub(crate) const COLLECTOR_BEARER_TOKEN: &str = "this is the bearer token of the Collector";
 
 #[allow(dead_code)]
-pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#"{
+pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#" {
     "config": {
-        "id": 244,
+        "id": 23,
         "kem_id": "X25519HkdfSha256",
         "kdf_id": "HkdfSha256",
         "aead_id": "Aes128Gcm",
-        "public_key": "a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f"
+        "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
     },
-    "secret_key": "68db815a534d3f92a6224c4cbbc2dd301be48ef32f112dbfb3709a4cbfe5f372"
+    "secret_key": "60890f1e438bf1f0e9ad2bd839acf1341137eee623bf7906972bf1cc80bb5d7b"
 }"#;
 
 #[allow(dead_code)]
@@ -395,17 +419,15 @@ impl TestRunner {
             serde_json::from_str(JANUS_HELPER_TASK_LIST).unwrap();
         let task_config_object = task_list_object.get(JANUS_HELPER_TASK).unwrap();
 
-        let collector_hpke_config = janus_core::message::HpkeConfig::get_decoded(
-            &hex::decode(
-                task_config_object
-                    .get("collector_hpke_config")
-                    .unwrap()
-                    .as_str()
-                    .unwrap(),
-            )
-            .unwrap(),
+        let config: daphne::messages::HpkeConfig = serde_json::from_value(
+            task_config_object
+                .get("collector_hpke_config")
+                .unwrap()
+                .clone(),
         )
         .unwrap();
+        let collector_hpke_config =
+            janus_core::message::HpkeConfig::get_decoded(&config.get_encoded()).unwrap();
 
         let vdaf_verify_key = hex::decode(
             task_config_object
