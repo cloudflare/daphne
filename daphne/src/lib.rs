@@ -236,7 +236,6 @@ pub struct DapTaskConfig {
     pub vdaf: VdafConfig,
     #[serde(skip_serializing)]
     pub(crate) vdaf_verify_key: VdafVerifyKey,
-    #[serde(skip_serializing)]
     pub(crate) collector_hpke_config: HpkeConfig,
 }
 
@@ -261,8 +260,7 @@ struct ShadowDapTaskConfig {
     vdaf: VdafConfig,
     #[serde(with = "hex")]
     vdaf_verify_key: Vec<u8>,
-    #[serde(with = "hex")]
-    collector_hpke_config: Vec<u8>,
+    collector_hpke_config: HpkeConfig,
 }
 
 impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
@@ -273,8 +271,6 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             .vdaf
             .get_decoded_verify_key(&shadow.vdaf_verify_key)?;
 
-        let collector_hpke_config = HpkeConfig::get_decoded(&shadow.collector_hpke_config)?;
-
         Ok(Self {
             leader_url: shadow.leader_url,
             helper_url: shadow.helper_url,
@@ -282,7 +278,7 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             min_batch_size: shadow.min_batch_size,
             vdaf: shadow.vdaf,
             vdaf_verify_key,
-            collector_hpke_config,
+            collector_hpke_config: shadow.collector_hpke_config,
         })
     }
 }

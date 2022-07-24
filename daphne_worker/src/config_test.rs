@@ -8,7 +8,13 @@ const DAP_TASK_LIST: &str = r#"{
   "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
     "leader_url": "https://leader.biz/leadver/v1/",
     "helper_url": "http://helper.com:8788",
-    "collector_hpke_config": "f40020000100010020a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f",
+    "collector_hpke_config": {
+        "id": 23,
+        "kem_id": "X25519HkdfSha256",
+        "kdf_id": "HkdfSha256",
+        "aead_id": "Aes128Gcm",
+        "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+    },
     "min_batch_duration": 3600,
     "min_batch_size": 100,
     "vdaf": {

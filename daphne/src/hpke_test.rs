@@ -9,6 +9,7 @@ fn encrypt_roundtrip() {
     let aad = b"associated data";
     let plaintext = b"plaintext";
     let config = HpkeReceiverConfig::gen(23);
+    println!("{}", serde_json::to_string(&config).unwrap());
     let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
     assert_eq!(
         config.decrypt(info, aad, &enc, &ciphertext).unwrap(),
