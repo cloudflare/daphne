@@ -21,6 +21,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
     ops::DerefMut,
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -502,19 +503,33 @@ impl DapLeader<BearerToken> for MockAggregator {
             .entry(collect_req.task_id.clone())
             .or_insert_with(LeaderState::new);
         let new_interval = &collect_req.batch_interval;
-        if let Some(boundary_check_tree) = leader_state
-            .boundary_check_trees
-            .get_mut(&collect_req.task_id)
+        let bearer_token = self
+            .get_collector_bearer_token_for(&collect_req.task_id)
+            .await
+            .expect("failed to get collector bearer token")
+            .expect("collector bearer token not found");
+        if let Some(collector_boundary_check_tree) =
+            leader_state.boundary_check_trees.get_mut(&bearer_token)
         {
-            match boundary_check_tree.insert(new_interval.clone()) {
-                Ok(()) => (),
-                // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
-                Err(()) => return Err(DapError::fatal("invalid batch interval")),
-            };
+            if let Some(task_boundary_check_tree) =
+                collector_boundary_check_tree.get_mut(&collect_req.task_id)
+            {
+                match task_boundary_check_tree.insert(new_interval.clone()) {
+                    Ok(()) => (),
+                    // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
+                    Err(()) => return Err(DapError::fatal("invalid batch interval")),
+                };
+            } else {
+                collector_boundary_check_tree
+                    .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
+            }
         } else {
+            let mut task_boundary_check_tree = HashMap::new();
+            task_boundary_check_tree
+                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
             leader_state
                 .boundary_check_trees
-                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
+                .insert(bearer_token, task_boundary_check_tree);
         }
 
         // Construct a new Collect URI for this CollectReq.
@@ -732,11 +747,11 @@ pub(crate) enum CollectJobState {
 /// LeaderState keeps track of the following:
 /// * Collect IDs in their order of arrival.
 /// * The state of the collect job associated to the Collect ID.
-/// * The root of binary trees used to check boundaries associated to task_id.
+/// * The root of binary trees used to check boundaries associated to task_id per Collector.
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
-    boundary_check_trees: HashMap<Id, Node>,
+    boundary_check_trees: HashMap<BearerToken, HashMap<Id, Node>>,
 }
 
 impl LeaderState {
