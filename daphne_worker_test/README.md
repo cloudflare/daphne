@@ -23,19 +23,19 @@ Prerequisites:
 To run the Leader, run
 
 ```
-miniflare --port=8787 --env=leader.env --binding=DAP_ENV=dev
+miniflare --port=8787 --env=leader.env --binding=DAP_DEPLOYMENT=dev
 ```
 
 To run the Helper, in a separate terminal do
 
 ```
-miniflare --port=8788 --env=helper.env --binding=DAP_ENV=dev
+miniflare --port=8788 --env=helper.env --binding=DAP_DEPLOYMENT=dev
 ```
 
 You can now `curl` the Leader or the Helper, or run the end-to-end tests via
 
 ```
-DAP_ENV=dev cargo test --features=test_e2e -- --test-threads 1
+DAP_DEPLOYMENT=dev cargo test --features=test_e2e -- --test-threads 1
 ```
 
 The `daphne_worker` crate also has integration tests for
@@ -43,6 +43,5 @@ The `daphne_worker` crate also has integration tests for
 Docker environment is running and then do
 
 ```
-DAP_ENV=dev cargo test --features=test_janus -- --test-threads 1
+DAP_DEPLOYMENT=dev cargo test --features=test_janus -- --test-threads 1
 ```
-

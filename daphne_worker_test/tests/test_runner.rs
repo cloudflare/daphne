@@ -181,11 +181,12 @@ impl TestRunner {
         // aggregator URL with 127.0.0.1.
         let mut leader_url = task_config.leader_url.clone();
         let mut helper_url = task_config.helper_url.clone();
-        if let Ok(env) = std::env::var("DAP_ENV") {
+        if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
-                println!("DAP_ENV: Hostname override applied");
                 leader_url.set_host(Some("127.0.0.1")).unwrap();
                 helper_url.set_host(Some("127.0.0.1")).unwrap();
+            } else {
+                panic!("unrecognized value for DAP_DEPLOYMENT: '{}'", env);
             }
         };
 
