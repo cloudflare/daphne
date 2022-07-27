@@ -19,7 +19,7 @@ use daphne::{
     hpke::HpkeReceiverConfig,
     messages::{Id, Interval, Nonce},
     roles::DapAggregator,
-    DapError, DapRequest, DapTaskConfig,
+    DapError, DapGlobalConfig, DapRequest, DapTaskConfig,
 };
 use prio::{
     codec::{Decode, Encode},
@@ -39,6 +39,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// configured as the DAP Helper.
     pub(crate) client: Option<reqwest_wasm::Client>,
 
+    pub(crate) global_config: DapGlobalConfig,
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
     pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
 
@@ -60,6 +61,10 @@ pub(crate) struct DaphneWorkerConfig<D> {
 impl<D> DaphneWorkerConfig<D> {
     /// Fetch DAP parameters from environment variables.
     pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
+        let global_config: DapGlobalConfig =
+            serde_json::from_str(ctx.secret("GLOBAL_CONFIG")?.to_string().as_ref())
+                .map_err(|e| Error::RustError(format!("Failed to parse GLOBAL_CONFIG: {}", e)))?;
+
         let tasks: HashMap<Id, DapTaskConfig> =
             serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
                 .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
@@ -162,6 +167,7 @@ impl<D> DaphneWorkerConfig<D> {
         Ok(Self {
             ctx: Arc::new(Mutex::new(Some(ctx))),
             client,
+            global_config,
             tasks,
             hpke_receiver_config_list,
             leader_bearer_tokens,
@@ -177,6 +183,7 @@ impl<D> DaphneWorkerConfig<D> {
     // for which this method is used.
     #[cfg(test)]
     pub(crate) fn from_test_config(
+        json_global_config: &str,
         json_task_list: &str,
         json_hpke_receiver_config_list: &str,
         json_bucket_key: &str,
@@ -185,14 +192,12 @@ impl<D> DaphneWorkerConfig<D> {
         let bucket_key =
             Seed::get_decoded(&hex::decode(json_bucket_key).map_err(int_err)?).map_err(int_err)?;
 
-        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
-            serde_json::from_str(json_hpke_receiver_config_list)?;
-
         Ok(DaphneWorkerConfig {
             ctx: Arc::new(Mutex::new(None)),
             client: None,
+            global_config: serde_json::from_str(json_global_config)?,
             tasks: serde_json::from_str(json_task_list)?,
-            hpke_receiver_config_list: hpke_receiver_config_list,
+            hpke_receiver_config_list: serde_json::from_str(json_hpke_receiver_config_list)?,
             leader_bearer_tokens: HashMap::default(),
             collector_bearer_tokens: None,
             deployment: DaphneWorkerDeployment::default(),

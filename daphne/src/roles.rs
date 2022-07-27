@@ -64,6 +64,14 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
     /// Look up the DAP task configuration for the given task ID.
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig>;
 
+    /// Check whether the given collect request interval does not overlap
+    /// with requests received in the past.
+    async fn is_batch_overlapping(
+        &self,
+        task_id: &Id,
+        batch_interval: &Interval,
+    ) -> Result<bool, DapError>;
+
     /// Store a set of output shares.
     async fn put_out_shares(
         &self,
@@ -222,6 +230,14 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             collect_req.batch_interval,
             collect_req.agg_param
         );
+
+        // Check that the batch interval does not overlap with past requests.
+        if self
+            .is_batch_overlapping(&collect_req.task_id, &collect_req.batch_interval)
+            .await?
+        {
+            return Err(DapAbort::BatchOverlap);
+        }
 
         if !collect_req.batch_interval.is_valid_for(task_config) {
             return Err(DapAbort::InvalidBatchInterval);
@@ -564,6 +580,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
             agg_share_req.batch_interval,
             agg_share_req.agg_param
         );
+
+        // Check that the batch interval does not overlap with past requests.
+        if self
+            .is_batch_overlapping(&agg_share_req.task_id, &agg_share_req.batch_interval)
+            .await?
+        {
+            return Err(DapAbort::BatchOverlap);
+        }
 
         let agg_share = self
             .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_interval)

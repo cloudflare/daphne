@@ -7,7 +7,7 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
-    DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
+    DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
@@ -16,6 +16,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
+    time::SystemTime,
 };
 use tokio::task::JoinHandle;
 use url::Url;
@@ -25,6 +26,12 @@ const JANUS_HELPER_PORT: u16 = 9788;
 const DEFAULT_TASK: &str = "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f";
 
 const JANUS_HELPER_TASK: &str = "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f";
+
+pub const GLOBAL_CONFIG: &str = r#"{
+    "max_batch_duration": 100,
+    "min_batch_interval_start": 432000,
+    "max_batch_interval_end": 18000
+}"#;
 
 // This value of this JSON string must match DAP_TASK_LIST in tests/backend/leader.env.
 //
@@ -149,6 +156,9 @@ pub struct TestRunner {
     pub now: u64,
     pub min_batch_duration: u64,
     pub min_batch_size: u64,
+    pub max_batch_duration: u64,
+    pub min_batch_interval_start: u64,
+    pub max_batch_interval_end: u64,
     pub vdaf: VdafConfig,
     pub leader_url: Url,
     pub helper_url: Url,
@@ -157,16 +167,25 @@ pub struct TestRunner {
 #[allow(dead_code)]
 impl TestRunner {
     pub async fn default() -> Self {
-        let t = Self::with(DEFAULT_TASK, LEADER_TASK_LIST, HELPER_TASK_LIST).await;
+        let t = Self::with(
+            GLOBAL_CONFIG,
+            DEFAULT_TASK,
+            LEADER_TASK_LIST,
+            HELPER_TASK_LIST,
+        )
+        .await;
         t.internal_reset(&t.batch_interval()).await;
         t
     }
 
     async fn with(
+        global_config_obj: &str,
         task_id_hex: &str,
         leader_task_list_obj: &str,
         helper_task_list_obj: &str,
     ) -> Self {
+        let global_config: DapGlobalConfig = serde_json::from_str(global_config_obj).unwrap();
+
         let task_id = Id::get_decoded(&hex::decode(task_id_hex).unwrap()).unwrap();
 
         let leader_task_list: HashMap<Id, DapTaskConfig> =
@@ -190,11 +209,19 @@ impl TestRunner {
             }
         };
 
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let t = Self {
             task_id: task_id.clone(),
-            now: 1637359200, // Fri 19 Nov 2021 02:00:00 PM PST
+            now,
             min_batch_duration: task_config.min_batch_duration,
             min_batch_size: task_config.min_batch_size,
+            max_batch_duration: global_config.max_batch_duration,
+            min_batch_interval_start: global_config.min_batch_interval_start,
+            max_batch_interval_end: global_config.max_batch_interval_end,
             vdaf: task_config.vdaf.clone(),
             leader_url,
             helper_url,
@@ -399,7 +426,13 @@ impl JanusServerHandle {
 #[allow(dead_code)]
 impl TestRunner {
     pub async fn janus_helper() -> (Self, JanusServerHandle) {
-        let t = Self::with(JANUS_HELPER_TASK, LEADER_TASK_LIST, JANUS_HELPER_TASK_LIST).await;
+        let t = Self::with(
+            GLOBAL_CONFIG,
+            JANUS_HELPER_TASK,
+            LEADER_TASK_LIST,
+            JANUS_HELPER_TASK_LIST,
+        )
+        .await;
         post_internal_test_reset(
             &t.http_client(),
             &t.leader_url,
