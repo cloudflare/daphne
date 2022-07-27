@@ -497,6 +497,34 @@ impl DapLeader<BearerToken> for MockAggregator {
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
+        // Check boundary of new CollectReq for this task.
+        let leader_state = leader_state_store
+            .entry(collect_req.task_id.clone())
+            .or_insert_with(LeaderState::new);
+        let new_interval = &collect_req.batch_interval;
+        if let Some(boundary_check_tree) = leader_state
+            .boundary_check_trees
+            .get_mut(&collect_req.task_id)
+        {
+            match boundary_check_tree.insert(new_interval.clone()) {
+                Ok(()) => (),
+                // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
+                Err(()) => return Err(DapError::fatal("invalid batch interval")),
+            };
+        } else {
+            leader_state
+                .boundary_check_trees
+                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
+        }
+
+        // Store Collect ID and CollectReq into LeaderState.
+        let collect_id = Id(rng.gen());
+        leader_state.collect_ids.push_back(collect_id.clone());
+        let collect_job_state = CollectJobState::Pending(collect_req.clone());
+        leader_state
+            .collect_jobs
+            .insert(collect_id.clone(), collect_job_state);
+
         // Construct a new Collect URI for this CollectReq.
         let collect_id = Id(rng.gen());
         let collect_uri = task_config
@@ -709,11 +737,14 @@ pub(crate) enum CollectJobState {
     Processed(CollectResp),
 }
 
-/// LeaderState keeps track of Collect IDs in their order of arrival.
-/// It also holds the state of the collect job associated to the Collect ID.
+/// LeaderState keeps track of the following:
+/// * Collect IDs in their order of arrival.
+/// * The state of the collect job associated to the Collect ID.
+/// * The root of binary trees used to check boundaries associated to task_id.
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
+    boundary_check_trees: HashMap<Id, Node>,
 }
 
 impl LeaderState {
@@ -721,19 +752,18 @@ impl LeaderState {
         Self {
             collect_ids: VecDeque::default(),
             collect_jobs: HashMap::default(),
+            boundary_check_trees: HashMap::default(),
         }
     }
 }
 
 /// Binary tree implementation used when checking boundary in CollectReq.
-#[cfg(test)]
 struct Node {
     val: Interval,
     l: Option<Box<Node>>,
     r: Option<Box<Node>>,
 }
 
-#[cfg(test)]
 impl Node {
     pub fn new(new_val: Interval) -> Node {
         Self {
@@ -743,13 +773,10 @@ impl Node {
         }
     }
     pub fn insert(&mut self, new_val: Interval) -> Result<(), ()> {
-        if new_val == self.val {
-            return Ok(());
-        }
         if new_val.start < self.val.end() && self.val.end() < new_val.end()
             || new_val.start < self.val.start && self.val.start < new_val.end()
-            || new_val.start < self.val.start && self.val.end() < new_val.end()
-            || self.val.start < new_val.start && new_val.end() < self.val.end()
+            || new_val.start <= self.val.start && self.val.end() <= new_val.end()
+            || self.val.start <= new_val.start && new_val.end() <= self.val.end()
         {
             return Err(());
         }
@@ -826,6 +853,12 @@ fn test_binary_tree() {
 
     let res = root.insert(Interval {
         start: 1,
+        duration: 5,
+    });
+    assert_matches!(res, Err(()));
+
+    let res = root.insert(Interval {
+        start: 20,
         duration: 5,
     });
     assert_matches!(res, Err(()));

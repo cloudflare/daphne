@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 /// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-01.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Serialize)]
 pub struct BearerToken(String);
 
 impl AsRef<str> for BearerToken {

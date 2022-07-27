@@ -559,10 +559,54 @@ async fn poll_collect_job_test_results() {
     );
 }
 
+// Send a collect request with an overlapping batch interval.
+#[tokio::test]
+async fn http_post_collect_fail_overlapping_batch_interval() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let now = 1637361337;
+
+    // Collector: Create first CollectReq.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let _url = leader.http_post_collect(&req).await.unwrap();
+
+    // Collector: Create second CollectReq.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let err = leader.http_post_collect(&req).await.unwrap_err();
+
+    // Fails due to batch interval overlapping.
+    //
+    // TODO(nakatsuka-y) Make the following error explicit (e.g., DapAbort::InvalidBatchInterval).
+    assert_matches!(err, DapAbort::Internal(_));
+}
+
 // Test a successful collect request submission.
 // This checks that the Leader reponds with the collect ID with the ID associated to the request.
-//
-// TODO(nakatsuka-y) Implement a test case when a Leader rejects a collect request.
 #[tokio::test]
 async fn http_post_collect_success() {
     let leader = MockAggregator::new();
