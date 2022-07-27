@@ -7,7 +7,7 @@
 //! draft-ietf-ppm-dap-01.
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::{DaphneWorkerConfig, DaphneWorkerDeployment},
     durable::{
         aggregate_store::{
             durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
@@ -51,23 +51,6 @@ pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval"
 pub(crate) const INT_ERR_UNRECOGNIZED_TASK: &str = "unrecognized task";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
-
-pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest<BearerToken>> {
-    let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
-    let content_type = req.headers().get("Content-Type")?;
-
-    let media_type = match content_type {
-        Some(s) => constants::media_type_for(&s),
-        None => None,
-    };
-
-    Ok(DapRequest {
-        payload: req.bytes().await?,
-        url: req.url()?,
-        media_type,
-        sender_auth,
-    })
-}
 
 pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     let mut headers = Headers::new();
@@ -321,8 +304,19 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .json()
             .await?;
 
-        let collect_uri = task_config
-            .leader_url
+        let mut url = task_config.leader_url.clone();
+        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
+            // When running in a local development environment, override the hostname of the Leader
+            // with localhost.
+            url.set_host(Some("127.0.0.1")).map_err(|e| {
+                DapError::Fatal(format!(
+                    "failed to overwrite hostname for request URL: {}",
+                    e
+                ))
+            })?;
+        }
+
+        let collect_uri = url
             .join(&format!(
                 "/collect/task/{}/req/{}",
                 collect_req.task_id.to_base64url(),
@@ -389,6 +383,19 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         &self,
         req: DapRequest<BearerToken>,
     ) -> std::result::Result<DapResponse, DapError> {
+        let (payload, mut url) = (req.payload, req.url);
+
+        // When running in a local development environment, override the hostname of the Helper
+        // with localhost.
+        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
+            url.set_host(Some("127.0.0.1")).map_err(|e| {
+                DapError::Fatal(format!(
+                    "failed to overwrite hostname for request URL: {}",
+                    e
+                ))
+            })?;
+        }
+
         let mut headers = reqwest_wasm::header::HeaderMap::new();
         if let Some(content_type) = req.media_type {
             headers.insert(
@@ -406,7 +413,6 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             );
         }
 
-        let (payload, url) = (req.payload, req.url);
         let reqwest_req = self
             .client
             .as_ref()

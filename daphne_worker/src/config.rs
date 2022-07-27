@@ -15,10 +15,11 @@ use crate::{
 };
 use daphne::{
     auth::BearerToken,
+    constants,
     hpke::HpkeReceiverConfig,
     messages::{Id, Interval, Nonce},
     roles::DapAggregator,
-    DapError, DapTaskConfig,
+    DapError, DapRequest, DapTaskConfig,
 };
 use prio::{
     codec::{Decode, Encode},
@@ -48,6 +49,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// configured as the DAP Leader, i.e., if `DAP_AGGREGATOR_ROLE == "leader"`.
     pub(crate) collector_bearer_tokens: Option<HashMap<Id, BearerToken>>,
 
+    /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
+    pub(crate) deployment: DaphneWorkerDeployment,
+
     // TODO(issue#12) Make `bucket_key` and `bucket_count` unique per task.
     bucket_key: Seed<16>,
     bucket_count: u64,
@@ -56,21 +60,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
 impl<D> DaphneWorkerConfig<D> {
     /// Fetch DAP parameters from environment variables.
     pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
-        let mut tasks: HashMap<Id, DapTaskConfig> =
+        let tasks: HashMap<Id, DapTaskConfig> =
             serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
                 .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
-
-        // When running in a local development environment, override the hostname of each
-        // aggregator URL with 127.0.0.1.
-        if let Ok(env) = ctx.var("DAP_ENV") {
-            if env.as_ref() == "dev" {
-                console_debug!("DAP_ENV: Hostname override applied");
-                for (_, task_config) in tasks.iter_mut() {
-                    task_config.leader_url.set_host(Some("127.0.0.1")).unwrap();
-                    task_config.helper_url.set_host(Some("127.0.0.1")).unwrap();
-                }
-            }
-        }
 
         let hpke_receiver_config_list: Vec<HpkeReceiverConfig> = serde_json::from_str(
             ctx.secret("DAP_HPKE_RECEIVER_CONFIG_LIST")?
@@ -124,9 +116,27 @@ impl<D> DaphneWorkerConfig<D> {
             }
         };
 
+        let deployment = if let Ok(deployment) = ctx.var("DAP_DEPLOYMENT") {
+            match deployment.to_string().as_str() {
+                "dev" => DaphneWorkerDeployment::Dev,
+                "prod" => DaphneWorkerDeployment::Prod,
+                s => {
+                    return Err(Error::RustError(format!(
+                        "Invalid value for DAP_DEPLOYMENT: {}",
+                        s
+                    )))
+                }
+            }
+        } else {
+            DaphneWorkerDeployment::default()
+        };
+        if !matches!(deployment, DaphneWorkerDeployment::Prod) {
+            console_debug!("DAP deployment override applied: {:?}", deployment);
+        }
+
         let client = if is_leader {
             // TODO Configure this client to use HTTPS only, excpet if running in a test
-            // environment (i.e., if DAP_ENV = true).
+            // environment.
             Some(reqwest_wasm::Client::new())
         } else {
             None
@@ -156,6 +166,7 @@ impl<D> DaphneWorkerConfig<D> {
             hpke_receiver_config_list,
             leader_bearer_tokens,
             collector_bearer_tokens,
+            deployment,
             bucket_key,
             bucket_count,
         })
@@ -184,6 +195,7 @@ impl<D> DaphneWorkerConfig<D> {
             hpke_receiver_config_list: hpke_receiver_config_list,
             leader_bearer_tokens: HashMap::default(),
             collector_bearer_tokens: None,
+            deployment: DaphneWorkerDeployment::default(),
             bucket_key,
             bucket_count,
         })
@@ -316,6 +328,40 @@ impl<D> DaphneWorkerConfig<D> {
 
         Ok(())
     }
+
+    pub(crate) async fn worker_request_to_dap(
+        &self,
+        mut req: Request,
+    ) -> Result<DapRequest<BearerToken>> {
+        let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
+        let content_type = req.headers().get("Content-Type")?;
+
+        let media_type = match content_type {
+            Some(s) => constants::media_type_for(&s),
+            None => None,
+        };
+
+        let payload = req.bytes().await?;
+        Ok(DapRequest {
+            payload,
+            url: req.url()?,
+            media_type,
+            sender_auth,
+        })
+    }
+}
+
+/// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator
+/// communication.
+#[derive(Debug, Default)]
+pub(crate) enum DaphneWorkerDeployment {
+    /// Daphne-Worker is running in a local development environment. In this setting, the hostname
+    /// of the Leader and Helper URLs are overwritten with localhost.
+    Dev,
+
+    /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
+    #[default]
+    Prod,
 }
 
 /// An iterator over a sequence of batch names for a given batch interval.
