@@ -14,6 +14,8 @@ use crate::{
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig,
 };
+#[cfg(test)]
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -721,4 +723,128 @@ impl LeaderState {
             collect_jobs: HashMap::default(),
         }
     }
+}
+
+/// Binary tree implementation used when checking boundary in CollectReq.
+#[cfg(test)]
+struct Node {
+    val: Interval,
+    l: Option<Box<Node>>,
+    r: Option<Box<Node>>,
+}
+
+#[cfg(test)]
+impl Node {
+    pub fn new(new_val: Interval) -> Node {
+        Self {
+            val: new_val,
+            l: None,
+            r: None,
+        }
+    }
+    pub fn insert(&mut self, new_val: Interval) -> Result<(), ()> {
+        if new_val == self.val {
+            return Ok(());
+        }
+        if new_val.start < self.val.end() && self.val.end() < new_val.end()
+            || new_val.start < self.val.start && self.val.start < new_val.end()
+            || new_val.start < self.val.start && self.val.end() < new_val.end()
+            || self.val.start < new_val.start && new_val.end() < self.val.end()
+        {
+            return Err(());
+        }
+        let target = if new_val.end() < self.val.start {
+            &mut self.l
+        } else {
+            &mut self.r
+        };
+        match target {
+            &mut Some(ref mut subnode) => subnode.insert(new_val),
+            &mut None => {
+                let new_node = Node::new(new_val);
+                let boxed_node = Some(Box::new(new_node));
+                *target = boxed_node;
+                Ok(())
+            }
+        }
+    }
+}
+
+#[test]
+fn test_binary_tree() {
+    // We should have the following tree:
+    //                 (13 - 15)
+    //                 /       \
+    //             (8 - 10) (20 - 25)
+    //            /       \         \
+    //        (1 - 2)  (11 - 12) (26 - 30)
+    //                                \
+    //                             (40 - 42)
+
+    let mut root = Node::new(Interval {
+        start: 13,
+        duration: 2,
+    });
+
+    root.insert(Interval {
+        start: 8,
+        duration: 2,
+    })
+    .unwrap();
+    root.insert(Interval {
+        start: 1,
+        duration: 1,
+    })
+    .unwrap();
+    root.insert(Interval {
+        start: 11,
+        duration: 1,
+    })
+    .unwrap();
+
+    root.insert(Interval {
+        start: 20,
+        duration: 5,
+    })
+    .unwrap();
+    root.insert(Interval {
+        start: 26,
+        duration: 4,
+    })
+    .unwrap();
+    root.insert(Interval {
+        start: 40,
+        duration: 2,
+    })
+    .unwrap();
+
+    let res = root.insert(Interval {
+        start: 50,
+        duration: 3,
+    });
+    assert_matches!(res, Ok(()));
+
+    let res = root.insert(Interval {
+        start: 1,
+        duration: 5,
+    });
+    assert_matches!(res, Err(()));
+
+    let res = root.insert(Interval {
+        start: 3,
+        duration: 8,
+    });
+    assert_matches!(res, Err(()));
+
+    let res = root.insert(Interval {
+        start: 16,
+        duration: 10,
+    });
+    assert_matches!(res, Err(()));
+
+    let res = root.insert(Interval {
+        start: 16,
+        duration: 19,
+    });
+    assert_matches!(res, Err(()));
 }
