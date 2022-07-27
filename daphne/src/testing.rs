@@ -517,14 +517,6 @@ impl DapLeader<BearerToken> for MockAggregator {
                 .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
         }
 
-        // Store Collect ID and CollectReq into LeaderState.
-        let collect_id = Id(rng.gen());
-        leader_state.collect_ids.push_back(collect_id.clone());
-        let collect_job_state = CollectJobState::Pending(collect_req.clone());
-        leader_state
-            .collect_jobs
-            .insert(collect_id.clone(), collect_job_state);
-
         // Construct a new Collect URI for this CollectReq.
         let collect_id = Id(rng.gen());
         let collect_uri = task_config
