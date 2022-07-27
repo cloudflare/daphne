@@ -491,6 +491,11 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
+        let bearer_token = self
+            .get_collector_bearer_token_for(&collect_req.task_id)
+            .await
+            .expect("failed to get collector bearer token")
+            .expect("collector bearer token not found");
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
@@ -503,11 +508,6 @@ impl DapLeader<BearerToken> for MockAggregator {
             .entry(collect_req.task_id.clone())
             .or_insert_with(LeaderState::new);
         let new_interval = &collect_req.batch_interval;
-        let bearer_token = self
-            .get_collector_bearer_token_for(&collect_req.task_id)
-            .await
-            .expect("failed to get collector bearer token")
-            .expect("collector bearer token not found");
         if let Some(collector_boundary_check_tree) =
             leader_state.boundary_check_trees.get_mut(&bearer_token)
         {
