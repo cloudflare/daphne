@@ -21,7 +21,7 @@ test_janus = []
 [dependencies]
 daphne_worker = { path = "../daphne_worker" }
 cfg-if = "0.1.2"
-worker = "0.0.10"
+worker = { path = "/Users/chris/github.com/cloudflare/workers-rs/worker" }
 serde_json = "1.0.82"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by

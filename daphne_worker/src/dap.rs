@@ -7,7 +7,7 @@
 //! draft-ietf-ppm-dap-01.
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::{DaphneWorkerConfig, DaphneWorkerDeployment},
     durable::{
         aggregate_store::{
             durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
@@ -45,29 +45,13 @@ use daphne::{
 };
 use prio::codec::{Decode, Encode};
 use std::collections::HashMap;
+use wasm_bindgen::JsValue;
 use worker::*;
 
 pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval";
 pub(crate) const INT_ERR_UNRECOGNIZED_TASK: &str = "unrecognized task";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
-
-pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest<BearerToken>> {
-    let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
-    let content_type = req.headers().get("Content-Type")?;
-
-    let media_type = match content_type {
-        Some(s) => constants::media_type_for(&s),
-        None => None,
-    };
-
-    Ok(DapRequest {
-        payload: req.bytes().await?,
-        url: req.url()?,
-        media_type,
-        sender_auth,
-    })
-}
 
 pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     let mut headers = Headers::new();
@@ -314,8 +298,19 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .json()
             .await?;
 
-        let collect_uri = task_config
-            .leader_url
+        let mut url = task_config.leader_url.clone();
+        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
+            // When running in a local development environment, override the hostname of the Leader
+            // with localhost.
+            url.set_host(Some("127.0.0.1")).map_err(|e| {
+                DapError::Fatal(format!(
+                    "failed to overwrite hostname for request URL: {}",
+                    e
+                ))
+            })?;
+        }
+
+        let collect_uri = url
             .join(&format!(
                 "/collect/task/{}/req/{}",
                 collect_req.task_id.to_base64url(),
@@ -382,6 +377,57 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         &self,
         req: DapRequest<BearerToken>,
     ) -> std::result::Result<DapResponse, DapError> {
+        let (payload, mut url) = (req.payload, req.url);
+
+        if matches!(self.deployment, DaphneWorkerDeployment::Demo) {
+            let mut init = RequestInit::new();
+            init.method = Method::Post;
+            if let Some(content_type) = req.media_type {
+                init.headers.set("Content-Type", content_type)?;
+            }
+            if let Some(ref bearer_token) = req.sender_auth {
+                init.headers.set("DAP-Auth-Token", bearer_token.as_ref())?;
+            }
+
+            // TODO(cjpatton) Send the payload in the proper wire format rather than encoding it as
+            // a hex string. This is a workaround for a limitation in the `worker` crate that
+            // requires a JSON object to construct the request body. Once this is fixed, this
+            // function can be refactored to remove the dependency on `reqwest_wasm`.
+            let payload_hex = hex::encode(&payload);
+            init.body = Some(JsValue::from_str(&payload_hex));
+            let req = Request::new_with_init(url.as_str(), &init)?;
+            let service = self.service("DAP_DEMO_HELPER")?;
+            let mut resp = service.fetch_with_request(req).await?;
+            if resp.status_code() == 200 {
+                let content_type = resp
+                    .headers()
+                    .get("Content-Type")?
+                    .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?;
+                let media_type = constants::media_type_for(&content_type);
+                return Ok(DapResponse {
+                    payload: resp.bytes().await?,
+                    media_type,
+                });
+            } else if resp.status_code() == 400 {
+                console_error!("request failed: {:?}", resp.text().await?);
+                return Err(DapError::fatal(INT_ERR_PEER_ABORT));
+            } else {
+                console_error!("unexpected response: {:?}", resp);
+                return Err(DapError::fatal(INT_ERR_PEER_ABORT)); // XXX Not the right error
+            }
+        }
+
+        // When running in a local development environment, override the hostname of the Helper
+        // with localhost.
+        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
+            url.set_host(Some("127.0.0.1")).map_err(|e| {
+                DapError::Fatal(format!(
+                    "failed to overwrite hostname for request URL: {}",
+                    e
+                ))
+            })?;
+        }
+
         let mut headers = reqwest_wasm::header::HeaderMap::new();
         if let Some(content_type) = req.media_type {
             headers.insert(
@@ -399,7 +445,6 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             );
         }
 
-        let (payload, url) = (req.payload, req.url);
         let reqwest_req = self
             .client
             .as_ref()

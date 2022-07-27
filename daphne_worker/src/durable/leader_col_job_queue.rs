@@ -76,11 +76,14 @@ impl DurableObject for LeaderCollectionJobQueue {
                 // stable map from requests to URIs, which prevents us from processing the same
                 // collect request more than once.
                 let collect_req_bytes = collect_req.get_encoded();
-                let collect_id_key = Seed::get_decoded(
-                    &hex::decode(self.env.secret("DAP_COLLECT_ID_KEY")?.to_string())
-                        .map_err(int_err)?,
-                )
-                .map_err(int_err)?;
+                let collect_id_key_hex = self
+                    .env
+                    .secret("DAP_COLLECT_ID_KEY")
+                    .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {}", e))?
+                    .to_string();
+                let collect_id_key =
+                    Seed::get_decoded(&hex::decode(&collect_id_key_hex).map_err(int_err)?)
+                        .map_err(int_err)?;
                 let mut collect_id_bytes = [0; 32];
                 PrgAes128::seed_stream(&collect_id_key, &collect_req_bytes)
                     .fill(&mut collect_id_bytes);
