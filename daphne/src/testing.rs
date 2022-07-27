@@ -777,9 +777,9 @@ impl Node {
         } else {
             &mut self.r
         };
-        match target {
-            &mut Some(ref mut subnode) => subnode.insert(new_val),
-            &mut None => {
+        match *target {
+            Some(ref mut subnode) => subnode.insert(new_val),
+            None => {
                 let new_node = Node::new(new_val);
                 let boxed_node = Some(Box::new(new_node));
                 *target = boxed_node;
