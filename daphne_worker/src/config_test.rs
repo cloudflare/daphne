@@ -4,6 +4,12 @@
 use crate::config::DaphneWorkerConfig;
 use daphne::messages::{Interval, Nonce};
 
+pub const GLOBAL_CONFIG: &str = r#"{
+    "max_batch_duration": 100,
+    "min_batch_interval_start": 432000,
+    "max_batch_interval_end": 18000
+}"#;
+
 const DAP_TASK_LIST: &str = r#"{
   "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
     "leader_url": "https://leader.biz/leadver/v1/",
@@ -58,6 +64,7 @@ fn daphne_param() {
     let now = 1637364244;
     let bucket_count = 5;
     let config: DaphneWorkerConfig<String> = DaphneWorkerConfig::from_test_config(
+        GLOBAL_CONFIG,
         DAP_TASK_LIST,
         DAP_HPKE_RECEIVER_CONFIG_LIST,
         DAP_BUCKET_KEY,

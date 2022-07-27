@@ -25,12 +25,6 @@ pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT: &str =
     "/internal/do/leader_col_job_queue/get_result";
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct CollectionJobResult {
-    pub(crate) collect_id: Id,
-    pub(crate) collect_resp: CollectResp,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct OrderedCollectReq {
     priority: usize,
     collect_req: CollectReq,
@@ -63,9 +57,6 @@ impl DurableObject for LeaderCollectionJobQueue {
             }
 
             // Store a CollectReq issued by the collector.
-            //
-            // TODO Disallow overlapping collect requests, as required by
-            // draft-ietf-ppm-dap-01.
             (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
                 let collect_req: CollectReq = req.json().await?;
 
@@ -96,7 +87,6 @@ impl DurableObject for LeaderCollectionJobQueue {
                     state_get(&self.state, &pending_key).await?;
                 let processed: Option<CollectResp> =
                     state_get(&self.state, &format!("processed/{}", collect_id_hex)).await?;
-                let resp = Response::from_json(&collect_id);
                 if processed.is_none() && pending.is_none() {
                     let next_priority: usize =
                         state_get_or_default(&self.state, "next_priority").await?;
@@ -115,7 +105,7 @@ impl DurableObject for LeaderCollectionJobQueue {
                         .put("next_priority", next_priority + 1)
                         .await?;
                 }
-                resp
+                Response::from_json(&collect_id)
             }
 
             // Retrieve the list of pending CollectReqs.
@@ -150,8 +140,8 @@ impl DurableObject for LeaderCollectionJobQueue {
 
             // Store a CollectResp corresponding to a pending CollectReq.
             (DURABLE_LEADER_COL_JOB_QUEUE_FINISH, Method::Post) => {
-                let res: CollectionJobResult = req.json().await?;
-                let collect_id_hex = res.collect_id.to_hex();
+                let (collect_id, collect_resp): (Id, CollectResp) = req.json().await?;
+                let collect_id_hex = collect_id.to_hex();
                 let processed_key = format!("processed/{}", collect_id_hex);
                 let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
                 if processed.is_some() {
@@ -165,7 +155,7 @@ impl DurableObject for LeaderCollectionJobQueue {
                 let delete_pending_future = storage.delete(&pending_key);
                 self.state
                     .storage()
-                    .put(&processed_key, res.collect_resp)
+                    .put(&processed_key, collect_resp)
                     .await?;
                 delete_pending_future.await?;
                 Response::empty()

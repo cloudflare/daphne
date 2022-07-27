@@ -48,6 +48,10 @@ pub enum DapError {
     #[error("fatal error: {0}")]
     Fatal(String),
 
+    /// Error triggered by peer, resulting in an abort.
+    #[error("abort: {0}")]
+    Abort(DapAbort),
+
     /// Transition failure. This error blocks processing of a paritcular report and may, under
     /// certain conditions, trigger an abort.
     #[error("transition error: {0}")]
@@ -108,6 +112,11 @@ pub enum DapAbort {
     #[error("batchMismatch")]
     BatchMismatch,
 
+    /// Batch overlap. Sent in response to an CollectReq for which the Leader detects the same
+    /// Collector requesting an aggregate share which it has collected in the past.
+    #[error("batchOverlap")]
+    BatchOverlap,
+
     /// Internal error.
     #[error("internalError: {0}")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
@@ -162,6 +171,7 @@ impl DapAbort {
     pub fn to_problem_details(&self) -> ProblemDetails {
         let (typ, detail) = match self {
             Self::BatchMismatch
+            | Self::BatchOverlap
             | Self::InvalidBatchInterval
             | Self::InsufficientBatchSize
             | Self::ReplayedReport
@@ -188,6 +198,7 @@ impl From<DapError> for DapAbort {
     fn from(e: DapError) -> Self {
         match e {
             e @ DapError::Fatal(..) => Self::Internal(Box::new(e)),
+            DapError::Abort(e) => e,
             DapError::Transition(t) => Self::from(t),
         }
     }
@@ -223,6 +234,27 @@ pub struct ProblemDetails {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+/// Global DAP parameters common across tasks.
+//
+// NOTE: Consider whether the following parameters should be included
+// in the spec.
+#[derive(Deserialize, Serialize)]
+pub struct DapGlobalConfig {
+    /// Maximum window size permitted in CollectReq.
+    /// Prevents Collectors from requesting wide range or reports.
+    pub max_batch_duration: u64,
+
+    /// Lower bound of an acceptable batch interval for collect requests.
+    /// Batch intervals cannot start more than `min_batch_interval_start`
+    /// apart from the current batch interval.
+    pub min_batch_interval_start: u64,
+
+    /// Higher bound of an acceptable batch interval for collect requests.
+    /// Batch intervals cannot end more than `max_batch_interval_end`
+    /// apart from the current batch interval.
+    pub max_batch_interval_end: u64,
 }
 
 /// Per-task DAP parameters.

@@ -10,7 +10,8 @@ use crate::{
     config::{DaphneWorkerConfig, DaphneWorkerDeployment},
     durable::{
         aggregate_store::{
-            durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
+            durable_agg_store_name, AggregateStoreResult, DURABLE_AGGREGATE_STORE_GET,
+            DURABLE_AGGREGATE_STORE_MARK_COLLECTED, DURABLE_AGGREGATE_STORE_MERGE,
         },
         durable_queue_name,
         helper_state_store::{
@@ -18,9 +19,8 @@ use crate::{
         },
         leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET,
         leader_col_job_queue::{
-            CollectionJobResult, DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
-            DURABLE_LEADER_COL_JOB_QUEUE_GET, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
-            DURABLE_LEADER_COL_JOB_QUEUE_PUT,
+            DURABLE_LEADER_COL_JOB_QUEUE_FINISH, DURABLE_LEADER_COL_JOB_QUEUE_GET,
+            DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, DURABLE_LEADER_COL_JOB_QUEUE_PUT,
         },
         report_store::{
             ReportStoreResult, DURABLE_REPORT_STORE_GET_PENDING,
@@ -28,7 +28,7 @@ use crate::{
             DURABLE_REPORT_STORE_PUT_PROCESSED,
         },
     },
-    InternalAggregateInfo,
+    now, InternalAggregateInfo,
 };
 use async_trait::async_trait;
 use daphne::{
@@ -40,8 +40,8 @@ use daphne::{
         ReportShare, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
-    DapResponse, DapTaskConfig,
+    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
+    DapRequest, DapResponse, DapTaskConfig,
 };
 use prio::codec::{Decode, Encode};
 use std::collections::HashMap;
@@ -136,6 +136,43 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         self.tasks.get(task_id)
     }
 
+    async fn is_batch_overlapping(
+        &self,
+        task_id: &Id,
+        batch_interval: &Interval,
+    ) -> std::result::Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+
+        // Check whether the request overlaps with previous requests. This is done by
+        // checking the AggregateStore and seeing whether it requests for aggregate
+        // shares that have already been marked collected.
+        let task_id_base64url = task_id.to_base64url();
+        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
+        for window in (batch_interval.start..batch_interval.end())
+            .step_by(task_config.min_batch_duration.try_into().unwrap())
+        {
+            let stub = namespace
+                .id_from_name(&durable_agg_store_name(&task_id_base64url, window))?
+                .get_stub()?;
+
+            // TODO Don't block on DO requests (issue multiple requests simultaneously).
+            let mut resp = durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &()).await?;
+
+            // If this agg share has been collected before, return BatchCollected error.
+            match resp.json().await? {
+                AggregateStoreResult::Ok(_) => {
+                    continue;
+                }
+                AggregateStoreResult::ErrBatchOverlap => {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     async fn put_out_shares(
         &self,
         task_id: &Id,
@@ -183,13 +220,16 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            let agg_share_delta: DapAggregateShare =
-                durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &())
-                    .await?
-                    .json()
-                    .await?;
+            let mut resp = durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &()).await?;
 
-            agg_share.merge(agg_share_delta)?;
+            // If AggregateStore returns with ErrBatchOverlap, return with Fatal error, as the batch overlap
+            // check logic in init_collect_job is not functioning properly.
+            match resp.json().await? {
+                AggregateStoreResult::Ok(agg_share_delta) => agg_share.merge(agg_share_delta)?,
+                AggregateStoreResult::ErrBatchOverlap => {
+                    return Err(DapError::fatal("batch collected"))
+                }
+            }
         }
 
         Ok(agg_share)
@@ -200,12 +240,30 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> std::result::Result<(), DapError> {
+        // Mark reports collected.
         let namespace = self.durable_object("DAP_REPORT_STORE")?;
         for durable_name in self.iter_report_store_names(task_id, batch_interval)? {
             // TODO Don't block on DO request (issue multiple requests simultaneously).
             let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
             durable_post!(stub, DURABLE_REPORT_STORE_MARK_COLLECTED, &()).await?;
         }
+
+        // Mark aggregate shares collected.
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
+        for window in (batch_interval.start..batch_interval.end())
+            .step_by(task_config.min_batch_duration.try_into().unwrap())
+        {
+            let stub = namespace
+                .id_from_name(&durable_agg_store_name(&task_id.to_base64url(), window))?
+                .get_stub()?;
+
+            // TODO Don't block on DO requests (issue multiple requests simultaneously).
+            durable_post!(stub, DURABLE_AGGREGATE_STORE_MARK_COLLECTED, &()).await?;
+        }
+
         Ok(())
     }
 }
@@ -296,7 +354,32 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let now = now();
 
+        if collect_req.batch_interval.duration / task_config.min_batch_duration
+            > self.global_config.max_batch_duration
+        {
+            return Err(DapError::Abort(DapAbort::BadRequest(
+                "batch interval too large".to_string(),
+            )));
+        }
+        if now.abs_diff(collect_req.batch_interval.start)
+            > self.global_config.min_batch_interval_start
+        {
+            return Err(DapError::Abort(DapAbort::BadRequest(
+                "batch interval too far into past".to_string(),
+            )));
+        }
+        if now.abs_diff(collect_req.batch_interval.end())
+            > self.global_config.max_batch_interval_end
+        {
+            return Err(DapError::Abort(DapAbort::BadRequest(
+                "batch interval too far into future".to_string(),
+            )));
+        }
+
+        // Try to put the request into collection job queue. If the request is overlapping
+        // with past requests, then abort.
         let namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
         let collect_id: Id = durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_PUT, &collect_req)
@@ -370,10 +453,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         durable_post!(
             leader_state_stub,
             DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
-            &CollectionJobResult {
-                collect_id: collect_id.clone(),
-                collect_resp: collect_resp.clone(),
-            }
+            &(collect_id.clone(), collect_resp.clone(),)
         )
         .await?;
         Ok(())
