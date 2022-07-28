@@ -25,6 +25,7 @@ bindings = [
   { name = "DAP_REPORT_STORE", class_name = "ReportStore" },
   { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
   { name = "DAP_LEADER_STATE_STORE", class_name = "LeaderStateStore" },
+  { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
   { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
 ]
 

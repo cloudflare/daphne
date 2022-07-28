@@ -134,7 +134,7 @@ pub struct TestRunner {
 impl TestRunner {
     pub async fn default() -> Self {
         let t = Self::with(DEFAULT_TASK, LEADER_TASK_LIST, HELPER_TASK_LIST).await;
-        t.internal_reset(&t.batch_info()).await;
+        t.internal_reset(&t.batch_interval()).await;
         t
     }
 
@@ -204,12 +204,12 @@ impl TestRunner {
             .unwrap()
     }
 
-    pub fn batch_info(&self) -> Option<Interval> {
+    pub fn batch_interval(&self) -> Interval {
         let start = self.now - (self.now % self.min_batch_duration);
-        Some(Interval {
+        Interval {
             start,
             duration: self.min_batch_duration * 2,
-        })
+        }
     }
 
     pub async fn get_hpke_configs(&self, client: &reqwest::Client) -> [HpkeConfig; 2] {
@@ -347,10 +347,10 @@ impl TestRunner {
     }
 
     #[allow(dead_code)]
-    pub async fn internal_reset(&self, batch_info: &Option<Interval>) {
+    pub async fn internal_reset(&self, batch_interval: &Interval) {
         let client = self.http_client();
-        post_internal_test_reset(&client, &self.leader_url, &self.task_id, batch_info).await;
-        post_internal_test_reset(&client, &self.helper_url, &self.task_id, batch_info).await;
+        post_internal_test_reset(&client, &self.leader_url, &self.task_id, batch_interval).await;
+        post_internal_test_reset(&client, &self.helper_url, &self.task_id, batch_interval).await;
     }
 }
 
@@ -375,8 +375,13 @@ impl JanusServerHandle {
 impl TestRunner {
     pub async fn janus_helper() -> (Self, JanusServerHandle) {
         let t = Self::with(JANUS_HELPER_TASK, LEADER_TASK_LIST, JANUS_HELPER_TASK_LIST).await;
-        post_internal_test_reset(&t.http_client(), &t.leader_url, &t.task_id, &t.batch_info())
-            .await;
+        post_internal_test_reset(
+            &t.http_client(),
+            &t.leader_url,
+            &t.task_id,
+            &t.batch_interval(),
+        )
+        .await;
 
         let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
         let aggregator_endpoints = vec![t.leader_url.clone(), t.helper_url.clone()];
@@ -517,7 +522,7 @@ async fn post_internal_test_reset(
     client: &reqwest::Client,
     base_url: &Url,
     task_id: &Id,
-    batch_info: &Option<Interval>,
+    batch_interval: &Interval,
 ) {
     let url = base_url
         .join(&format!(
@@ -528,7 +533,7 @@ async fn post_internal_test_reset(
 
     let req = client
         .post(url.as_str())
-        .body(serde_json::to_string(batch_info).unwrap());
+        .body(serde_json::to_string(batch_interval).unwrap());
     let resp = req.send().await.expect("request failed");
     assert_eq!(
         200,

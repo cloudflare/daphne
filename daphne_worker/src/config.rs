@@ -9,7 +9,8 @@ use crate::{
     dap,
     durable::{
         aggregate_store::{durable_agg_store_name, DURABLE_AGGREGATE_STORE_DELETE_ALL},
-        leader_state_store::{durable_leader_state_name, DURABLE_LEADER_STATE_DELETE_ALL},
+        durable_queue_name,
+        leader_state_store::DURABLE_LEADER_STATE_DELETE_ALL,
         report_store::{durable_report_store_name, DURABLE_REPORT_STORE_DELETE_ALL},
     },
     int_err, now,
@@ -307,13 +308,9 @@ impl<D> DaphneWorkerConfig<D> {
 
         // Clear the leader's state.
         let namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
-        for task_id in self.tasks.keys() {
-            let stub = namespace
-                .id_from_name(&durable_leader_state_name(task_id))?
-                .get_stub()?;
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_LEADER_STATE_DELETE_ALL, &()).await?;
-        }
+        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
+        // TODO Don't block on DO requests (issue multiple requests simultaneously).
+        durable_post!(stub, DURABLE_LEADER_STATE_DELETE_ALL, &()).await?;
 
         Ok(())
     }

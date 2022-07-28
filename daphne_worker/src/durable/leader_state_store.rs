@@ -14,15 +14,8 @@ use prio::{
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, VecDeque},
-    convert::TryInto,
-};
+use std::{collections::VecDeque, convert::TryInto};
 use worker::*;
-
-pub(crate) fn durable_leader_state_name(task_id: &Id) -> String {
-    format!("/task/{}", task_id.to_base64url())
-}
 
 pub(crate) const DURABLE_LEADER_STATE_DELETE_ALL: &str = "/internal/do/leader_state/delete_all";
 pub(crate) const DURABLE_LEADER_STATE_PUT_COLLECT_REQ: &str =
@@ -48,8 +41,8 @@ struct OrderedCollectReq {
 
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
-/// An instance of the [`LeaderStateStore`] DO is named `/task/<task_id>`, where `<task_id>` is
-/// the task ID.
+/// An instance of the [`LeaderStateStore`] DO is named `/queue/<queue_num>`, where `<queue_num>`
+/// is an integer representing a specific queue.
 //
 // TODO spec: Consider allowing completed aggregate results to be deleted after a period of time.
 #[durable_object]
@@ -148,17 +141,11 @@ impl DurableObject for LeaderStateStore {
                 }
 
                 list.sort_unstable_by_key(|(_id, prioritized)| prioritized.priority);
-                let mut list: VecDeque<(Id, CollectReq)> = list
+                let list: VecDeque<(Id, CollectReq)> = list
                     .into_iter()
                     .map(|(id, ordered_collect_req)| (id, ordered_collect_req.collect_req))
                     .collect();
-                let mut res: HashMap<Id, Vec<CollectReq>> = HashMap::default();
-                while !list.is_empty() {
-                    let (id, collect_req) = list.pop_front().unwrap();
-                    let collect_reqs = res.entry(id).or_insert_with(Vec::default);
-                    collect_reqs.push(collect_req);
-                }
-                Response::from_json(&res)
+                Response::from_json(&list)
             }
 
             // Store a CollectResp corresponding to a pending CollectReq.

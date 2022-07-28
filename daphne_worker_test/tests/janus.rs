@@ -60,9 +60,8 @@ async fn janus_client() {
     janus_client.upload(&23).await.unwrap();
 
     let agg_info = InternalAggregateInfo {
-        task_id: t.task_id.clone(),
-        batch_info: t.batch_info(),
-        agg_rate: 1,
+        max_buckets: 100, // Needs to be large enough to touch each bucket.
+        max_reports: 1,
     };
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(agg_telem.reports_processed, 1);
@@ -80,15 +79,14 @@ async fn janus_helper() {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
     let agg_info = InternalAggregateInfo {
-        task_id: t.task_id.clone(),
-        batch_info: t.batch_info(),
-        agg_rate: t.min_batch_size,
+        max_buckets: 100, // Needs to be large enough to touch each bucket.
+        max_reports: t.min_batch_size,
     };
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
-    let batch_interval = agg_info.batch_info.as_ref().unwrap();
-    for _ in 0..agg_info.agg_rate + 3 {
+    let batch_interval = t.batch_interval();
+    for _ in 0..agg_info.max_reports + 3 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -109,10 +107,7 @@ async fn janus_helper() {
 
     // Aggregate first.
     let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_processed, agg_info.agg_rate);
-    assert_eq!(agg_telem.reports_aggregated, agg_info.agg_rate);
-    let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_aggregated, 3);
+    assert_eq!(agg_telem.reports_processed, agg_info.max_reports + 3);
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(agg_telem.reports_aggregated, 0);
 
@@ -127,7 +122,7 @@ async fn janus_helper() {
         .await;
 
     let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_collected, 13);
+    assert_eq!(agg_telem.reports_collected, 13, "reports collected");
 
     // Poll the collect URI before the ColleectResp is ready.
     let resp = client.get(collect_uri).send().await.unwrap();
