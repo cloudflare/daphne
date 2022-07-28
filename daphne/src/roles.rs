@@ -166,11 +166,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         collect_id: &Id,
     ) -> Result<DapCollectJob, DapError>;
 
-    /// Return the sequence of pending collect jobs for a given task, in order of priority.
-    async fn get_pending_collect_jobs(
-        &self,
-        task_id: &Id,
-    ) -> Result<HashMap<Id, Vec<CollectReq>>, DapError>;
+    /// Fetch the current collect job queue. The result is the sequence of collect ID and request
+    /// pairs, in order of priority.
+    async fn get_pending_collect_jobs(&self) -> Result<Vec<(Id, CollectReq)>, DapError>;
 
     /// Complete a collect job by assigning it the completed [`CollectResp`](crate::messages::CollectResp).
     async fn finish_collect_job(
@@ -240,6 +238,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
     /// Run the aggregation sub-protocol for the given set of reports. Return the number of reports
     /// that were aggregated successfully.
+    //
+    // TODO Handle non-encodable messages gracefully. The length of `reports` may be too long to
+    // encode in `AggregateInitializeReq`, in which case this method will panic. We should increase
+    // the capacity of this message in the spec. In the meantime, we should at a minimum log this
+    // when it happens.
     async fn run_agg_job(
         &self,
         task_id: &Id,
@@ -316,7 +319,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     async fn run_collect_job(
         &self,
         collect_id: &Id,
-        task_id: &Id,
         task_config: &DapTaskConfig,
         collect_req: CollectReq,
     ) -> Result<u64, DapAbort> {
@@ -349,7 +351,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // Send AggregateShareReq and receive AggregateShareResp.
         let resp = leader_post!(
             self,
-            task_id,
+            &collect_req.task_id,
             task_config,
             "/aggregate_share",
             MEDIA_TYPE_AGG_SHARE_REQ,
@@ -361,7 +363,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let collect_resp = CollectResp {
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
-        self.finish_collect_job(task_id, collect_id, &collect_resp)
+        self.finish_collect_job(&collect_req.task_id, collect_id, &collect_resp)
             .await?;
 
         // Mark reports as collected.
@@ -371,9 +373,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(agg_share_req.report_count)
     }
 
-    /// Fetch a set of reports grouped by task. For each task, first aggregate the reports, then
-    /// process the collect job queue. It is not safe to run multiple instances of this function in
-    /// parallel.
+    /// Fetch a set of reports grouped by task, then run an aggregation job for each task. once all
+    /// jobs completed, process the collect job queue. It is not safe to run multiple instances of
+    /// this function in parallel.
     ///
     /// This method is geared primarily towards testing. It also demonstrates how to properly
     /// synchronize collect and aggregation jobs. If used in a large DAP deployment, it is likely
@@ -385,31 +387,33 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
         let mut telem = DapLeaderProcessTelemetry::default();
 
+        // Fetch reports and run an aggregation job for each task.
+        //
         // TODO Handle tasks in parallel.
         for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
             let task_config = self
                 .get_task_config_for(&task_id)
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
-            // Aggregate the reports.
             telem.reports_processed += reports.len() as u64;
             if !reports.is_empty() {
                 telem.reports_aggregated +=
                     self.run_agg_job(&task_id, task_config, reports).await?;
             }
+        }
 
-            // Process pending collect jobs. We wait until all aggregation jobs are finished before
-            // proceeding to this step. This is to prevent a race condition involving an aggregate
-            // share computed during a collect job and any output shares computed during an aggregation
-            // job.
-            let pending = self.get_pending_collect_jobs(&task_id).await?;
-            for (collect_id, collect_reqs) in pending.into_iter() {
-                for collect_req in collect_reqs {
-                    telem.reports_collected += self
-                        .run_collect_job(&collect_id, &task_id, task_config, collect_req)
-                        .await?;
-                }
-            }
+        // Process pending collect jobs. We wait until all aggregation jobs are finished before
+        // proceeding to this step. This is to prevent a race condition involving an aggregate
+        // share computed during a collect job and any output shares computed during an aggregation
+        // job.
+        for (collect_id, collect_req) in self.get_pending_collect_jobs().await? {
+            let task_config = self
+                .get_task_config_for(&collect_req.task_id)
+                .ok_or(DapAbort::UnrecognizedTask)?;
+
+            telem.reports_collected += self
+                .run_collect_job(&collect_id, task_config, collect_req)
+                .await?;
         }
 
         Ok(telem)

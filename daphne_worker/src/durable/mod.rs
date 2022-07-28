@@ -32,8 +32,13 @@ pub(crate) async fn state_get<T: for<'a> Deserialize<'a>>(
     })
 }
 
+pub(crate) fn durable_queue_name(queue_num: usize) -> String {
+    format!("/queue/{}", queue_num)
+}
+
 pub(crate) mod aggregate_store;
 pub(crate) mod helper_state_store;
+pub(crate) mod leader_agg_job_queue;
 pub(crate) mod leader_state_store;
 pub(crate) mod report_store;
 #[cfg(test)]

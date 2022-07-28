@@ -12,21 +12,23 @@ use crate::{
         aggregate_store::{
             durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
         },
+        durable_queue_name,
         helper_state_store::{
             durable_helper_state_name, DURABLE_HELPER_STATE_GET, DURABLE_HELPER_STATE_PUT,
         },
+        leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING,
         leader_state_store::{
-            durable_leader_state_name, LeaderStateStoreUpdateCollectReq,
-            DURABLE_LEADER_STATE_FINISH_COLLECT_REQ, DURABLE_LEADER_STATE_GET_COLLECT_REQS,
-            DURABLE_LEADER_STATE_GET_COLLECT_RESP, DURABLE_LEADER_STATE_PUT_COLLECT_REQ,
+            LeaderStateStoreUpdateCollectReq, DURABLE_LEADER_STATE_FINISH_COLLECT_REQ,
+            DURABLE_LEADER_STATE_GET_COLLECT_REQS, DURABLE_LEADER_STATE_GET_COLLECT_RESP,
+            DURABLE_LEADER_STATE_PUT_COLLECT_REQ,
         },
         report_store::{
-            ReportStoreGetPending, ReportStoreResult, DURABLE_REPORT_STORE_GET_PENDING,
+            ReportStoreResult, DURABLE_REPORT_STORE_GET_PENDING,
             DURABLE_REPORT_STORE_MARK_COLLECTED, DURABLE_REPORT_STORE_PUT_PENDING,
             DURABLE_REPORT_STORE_PUT_PROCESSED,
         },
     },
-    now, InternalAggregateInfo,
+    InternalAggregateInfo,
 };
 use async_trait::async_trait;
 use daphne::{
@@ -249,40 +251,32 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         &self,
         selector: &InternalAggregateInfo,
     ) -> std::result::Result<HashMap<Id, Vec<Report>>, DapError> {
-        let durable_namespace = self.durable_object("DAP_REPORT_STORE")?;
-
-        let task_config = self
-            .get_task_config_for(&selector.task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-
-        let batch_interval = if let Some(ref interval) = selector.batch_info {
-            if !interval.is_valid_for(task_config) {
-                return Err(DapError::fatal(INT_ERR_INVALID_BATCH_INTERVAL));
-            }
-            interval.clone()
-        } else {
-            task_config.current_batch_window(now())
-        };
-
-        // Fetch a candidate report set.
+        // Read at most `selector.max_buckets` buckets from the agg job queue. The result is ordered
+        // from oldest to newest.
         //
-        // TODO Start this loop at the previously visited bucket.
+        // NOTE There is only one agg job queue for now (`queue_num == 0`). In the future, work
+        // will be sharded across multiple queues.
+        let namespace = self.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
+        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
+        let mut resp = durable_post!(
+            stub,
+            DURABLE_LEADER_AGG_JOB_QUEUE_GET_PENDING,
+            &selector.max_buckets
+        )
+        .await?;
+        let res: Vec<String> = resp.json().await?;
+
+        // Drain at most `selector.max_reports` from each bucket.
         //
-        // TODO We can save latency here if the input shares were already decrypted. This would have
-        // the added benefit of reducing data loss caused by HPKE key rotation. (It would be nice if
-        // the Helper could preprocess its input shares in the same way. See
-        // https://github.com/abetterinternet/ppm-specification/pull/174.)
-        let mut reports = Vec::with_capacity(selector.agg_rate.try_into().unwrap());
-        for durable_name in self.iter_report_store_names(&selector.task_id, &batch_interval)? {
-            let num_reports_remaining = selector.agg_rate - reports.len() as u64;
-            let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
-            // TODO Don't block on DO request (issue multiple requests simultaneously).
+        // TODO Figure out if we can safely handle each bucket in parallel.
+        let namespace = self.durable_object("DAP_REPORT_STORE")?;
+        let mut reports_per_task: HashMap<Id, Vec<Report>> = HashMap::new();
+        for report_store_id_hex in res.into_iter() {
+            let stub = namespace.id_from_string(&report_store_id_hex)?.get_stub()?;
             let reports_from_durable: Vec<String> = durable_post!(
                 stub,
                 DURABLE_REPORT_STORE_GET_PENDING,
-                &ReportStoreGetPending {
-                    reports_requested: num_reports_remaining,
-                }
+                &selector.max_reports
             )
             .await?
             .json()
@@ -293,20 +287,16 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                     Report::get_decoded(&hex::decode(&report_hex).map_err(|_| {
                         DapError::fatal("response from ReportStore is not valid hex")
                     })?)?;
-                reports.push(report);
-            }
 
-            if reports.len() as u64 > selector.agg_rate {
-                return Err(DapError::fatal(
-                    "number of reports received from report store exceeds the number requested",
-                ));
-            }
-            if reports.len() as u64 == selector.agg_rate {
-                break;
+                if let Some(reports) = reports_per_task.get_mut(&report.task_id) {
+                    reports.push(report);
+                } else {
+                    reports_per_task.insert(report.task_id.clone(), vec![report]);
+                }
             }
         }
 
-        Ok(HashMap::from([(selector.task_id.clone(), reports)]))
+        Ok(reports_per_task)
     }
 
     async fn init_collect_job(
@@ -318,9 +308,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
 
         let namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
-        let stub = namespace
-            .id_from_name(&durable_leader_state_name(&collect_req.task_id))?
-            .get_stub()?;
+        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
         let collect_id: Id =
             durable_post!(stub, DURABLE_LEADER_STATE_PUT_COLLECT_REQ, &collect_req)
                 .await?
@@ -341,13 +329,11 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
     async fn poll_collect_job(
         &self,
-        task_id: &Id,
+        _task_id: &Id,
         collect_id: &Id,
     ) -> std::result::Result<DapCollectJob, DapError> {
         let namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
-        let stub = namespace
-            .id_from_name(&durable_leader_state_name(task_id))?
-            .get_stub()?;
+        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
         let res: DapCollectJob =
             durable_post!(stub, DURABLE_LEADER_STATE_GET_COLLECT_RESP, &collect_id)
                 .await?
@@ -358,13 +344,12 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
     async fn get_pending_collect_jobs(
         &self,
-        task_id: &Id,
-    ) -> std::result::Result<HashMap<Id, Vec<CollectReq>>, DapError> {
+    ) -> std::result::Result<Vec<(Id, CollectReq)>, DapError> {
         let leader_state_namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
         let leader_state_stub = leader_state_namespace
-            .id_from_name(&durable_leader_state_name(task_id))?
+            .id_from_name(&durable_queue_name(0))?
             .get_stub()?;
-        let res: HashMap<Id, Vec<CollectReq>> =
+        let res: Vec<(Id, CollectReq)> =
             durable_get!(leader_state_stub, DURABLE_LEADER_STATE_GET_COLLECT_REQS)
                 .await?
                 .json()
@@ -374,13 +359,13 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
     async fn finish_collect_job(
         &self,
-        task_id: &Id,
+        _task_id: &Id,
         collect_id: &Id,
         collect_resp: &CollectResp,
     ) -> std::result::Result<(), DapError> {
         let leader_state_namespace = self.durable_object("DAP_LEADER_STATE_STORE")?;
         let leader_state_stub = leader_state_namespace
-            .id_from_name(&durable_leader_state_name(task_id))?
+            .id_from_name(&durable_queue_name(0))?
             .get_stub()?;
         durable_post!(
             leader_state_stub,

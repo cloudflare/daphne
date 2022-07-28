@@ -14,7 +14,6 @@ use daphne::{
 use daphne_worker::InternalAggregateInfo;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
-use std::time::SystemTime;
 use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_RECEIVER_CONFIG};
 
 #[tokio::test]
@@ -174,16 +173,15 @@ async fn e2e_internal_leader_process() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
     let agg_info = InternalAggregateInfo {
-        task_id: t.task_id.clone(),
-        batch_info: t.batch_info(),
-        agg_rate: t.min_batch_size,
+        max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+        max_reports: t.min_batch_size,
     };
 
-    let batch_interval = agg_info.batch_info.as_ref().unwrap();
+    let batch_interval = t.batch_interval();
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
-    for _ in 0..agg_info.agg_rate + 3 {
+    for _ in 0..agg_info.max_reports + 3 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -197,67 +195,31 @@ async fn e2e_internal_leader_process() {
         .await;
     }
 
-    // Run an iteration of the processing loop. Expect the number of aggregated reports to match
-    // the aggregation rate.
     let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_aggregated, agg_info.agg_rate);
+    assert_eq!(
+        agg_telem.reports_processed,
+        agg_info.max_reports + 3,
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated,
+        agg_info.max_reports + 3,
+        "reports aggregated"
+    );
+    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
-    // Run a second iteration of the processing loop. Expect the number of aggregated reports to
-    // be less than the aggregation rate.
+    // There should be nothing left to aggregate.
     let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_aggregated, 3);
-
-    // Run a third iteration of the processing loop. By now the report store has been drained, so
-    // no reports should have been aggregated.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_aggregated, 0);
-}
-
-// Test leader processing loop for the current batch window.
-//
-// WARNING: flaky test: This test assumes the client and aggregators have synchronized clocks. It
-// may fail if the current time is close to the end of the current batch window, which is
-// determined by the minimum batch interval.
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_internal_leader_process_current_batch_window() {
-    let t = TestRunner::default().await;
-    let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
-
-    let agg_info = InternalAggregateInfo {
-        task_id: t.task_id.clone(),
-        batch_info: None,
-        agg_rate: 1,
-    };
-
-    // Upload a report using the current time.
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    t.leader_post_expect_ok(
-        &client,
-        "/upload",
-        constants::MEDIA_TYPE_REPORT,
-        t.vdaf
-            .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
-            .unwrap()
-            .get_encoded(),
-    )
-    .await;
-
-    let agg_telem = t.internal_process(&client, &agg_info).await;
-    t.internal_reset(&None).await;
-    assert_eq!(agg_telem.reports_aggregated, 1);
+    assert_eq!(agg_telem.reports_processed, 0, "reports processed");
+    assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
+    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_collect_ok() {
     let t = TestRunner::default().await;
-    let batch_info = t.batch_info();
-    let batch_interval = batch_info.as_ref().unwrap();
+    let batch_interval = t.batch_interval();
 
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
@@ -298,15 +260,23 @@ async fn e2e_leader_collect_ok() {
         .internal_process(
             &client,
             &InternalAggregateInfo {
-                task_id: t.task_id.clone(),
-                batch_info: batch_info.clone(),
-                agg_rate: 100,
+                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+                max_reports: 100,
             },
         )
         .await;
-    assert_eq!(agg_telem.reports_processed, t.min_batch_size);
-    assert_eq!(agg_telem.reports_aggregated, t.min_batch_size);
-    assert_eq!(agg_telem.reports_collected, t.min_batch_size);
+    assert_eq!(
+        agg_telem.reports_processed, t.min_batch_size,
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated, t.min_batch_size,
+        "reports aggregated"
+    );
+    assert_eq!(
+        agg_telem.reports_collected, t.min_batch_size,
+        "reports collected"
+    );
 
     // Poll the collect URI.
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
@@ -349,13 +319,67 @@ async fn e2e_leader_collect_ok() {
     .await;
 }
 
+// Test that collect jobs complete even if the request is issued after all reports for the task
+// have been processed.
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_ok_interleaved() {
+    let t = TestRunner::default().await;
+    let client = t.http_client();
+    let batch_interval = t.batch_interval();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+
+    // The reports are uploaded in the background.
+    let mut rng = thread_rng();
+    for _ in 0..t.min_batch_size {
+        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        t.leader_post_expect_ok(
+            &client,
+            "/upload",
+            constants::MEDIA_TYPE_REPORT,
+            t.vdaf
+                .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    let agg_info = InternalAggregateInfo {
+        max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+        max_reports: 100,
+    };
+
+    // All reports for the task get processed ...
+    let agg_telem = t.internal_process(&client, &agg_info).await;
+    assert_eq!(
+        agg_telem.reports_processed, t.min_batch_size,
+        "reports processed"
+    );
+
+    // ... then the collect request is issued ...
+    let collect_req = CollectReq {
+        task_id: t.task_id.clone(),
+        batch_interval: batch_interval.clone(),
+        agg_param: Vec::new(),
+    };
+    let _collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+
+    // ... then the collect job gets completed.
+    let agg_telem = t.internal_process(&client, &agg_info).await;
+    assert_eq!(
+        agg_telem.reports_collected, t.min_batch_size,
+        "reports collected"
+    );
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_collect_not_ready_min_batch_size() {
     let t = TestRunner::default().await;
-    let batch_info = t.batch_info();
-    let batch_interval = batch_info.as_ref().unwrap();
-
+    let batch_interval = t.batch_interval();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
@@ -391,9 +415,8 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         .internal_process(
             &client,
             &InternalAggregateInfo {
-                task_id: t.task_id.clone(),
-                batch_info,
-                agg_rate: 100,
+                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+                max_reports: 100,
             },
         )
         .await;
@@ -431,7 +454,7 @@ async fn e2e_leader_collect_abort_unknown_request() {
 async fn e2e_leader_collect_abort_invalid_batch_interval() {
     let t = TestRunner::default().await;
     let client = t.http_client();
-    let batch_interval = t.batch_info().unwrap();
+    let batch_interval = t.batch_interval();
 
     // Start of batch interval does not align with min_batch_duration.
     let collect_req = CollectReq {

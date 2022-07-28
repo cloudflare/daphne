@@ -534,8 +534,8 @@ async fn poll_collect_job_test_results() {
     );
 
     // Leader: Get pending collect job to obtain collect_id
-    let resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
-    let collect_id = resp.keys().collect::<Vec<&Id>>()[0];
+    let resp = leader.get_pending_collect_jobs().await.unwrap();
+    let (collect_id, _collect_req) = &resp[0];
     let collect_resp = CollectResp {
         encrypted_agg_shares: Vec::default(),
     };
@@ -585,12 +585,11 @@ async fn http_post_collect_success() {
 
     // Leader: Handle the CollectReq received from Collector.
     let url = leader.http_post_collect(&req).await.unwrap();
-    let mut resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
-    let leader_collect_id = resp.keys().collect::<Vec<&Id>>()[0].clone();
-    let leader_collect_req = resp.remove(&leader_collect_id).unwrap();
+    let resp = leader.get_pending_collect_jobs().await.unwrap();
+    let (leader_collect_id, leader_collect_req) = &resp[0];
 
     // Check that the CollectReq sent by Collector is the same that is received by Leader.
-    assert_eq!(collector_collect_req, leader_collect_req[0]);
+    assert_eq!(&collector_collect_req, leader_collect_req);
 
     // Check that the collect_id included in the URI is the same with the one received
     // by Leader.
@@ -714,9 +713,8 @@ async fn e2e() {
 
     // Leader: Handle the CollectReq received from Collector.
     leader.http_post_collect(&req).await.unwrap();
-    let mut resp = leader.get_pending_collect_jobs(&task_id).await.unwrap();
-    let collect_id = resp.keys().collect::<Vec<&Id>>()[0].clone();
-    let collect_req = resp.remove(&collect_id).unwrap()[0].clone();
+    let resp = leader.get_pending_collect_jobs().await.unwrap();
+    let (collect_id, collect_req) = &resp[0];
 
     // Leader: Get Leader's encrypted aggregate share.
     let leader_agg_share = leader
@@ -736,9 +734,9 @@ async fn e2e() {
 
     // Leader: Prepare AggregateShareReq.
     let agg_share_req = AggregateShareReq {
-        task_id: collect_req.task_id,
-        batch_interval: collect_req.batch_interval,
-        agg_param: collect_req.agg_param,
+        task_id: collect_req.task_id.clone(),
+        batch_interval: collect_req.batch_interval.clone(),
+        agg_param: collect_req.agg_param.clone(),
         report_count: leader_agg_share.report_count,
         checksum: leader_agg_share.checksum,
     };

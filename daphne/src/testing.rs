@@ -537,29 +537,22 @@ impl DapLeader<BearerToken> for MockAggregator {
     }
 
     // Called to retrieve pending CollectReq.
-    async fn get_pending_collect_jobs(
-        &self,
-        task_id: &Id,
-    ) -> Result<HashMap<Id, Vec<CollectReq>>, DapError> {
+    async fn get_pending_collect_jobs(&self) -> Result<Vec<(Id, CollectReq)>, DapError> {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
-        let leader_state = leader_state_store
-            .get_mut(task_id)
-            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
-        let mut res: HashMap<Id, Vec<CollectReq>> = HashMap::default();
-
-        // Iterate over collect IDs and copy them and their associated requests to the response.
-        for collect_id in leader_state.collect_ids.iter() {
-            if let CollectJobState::Pending(collect_req) =
-                leader_state.collect_jobs.get(collect_id).unwrap()
-            {
-                res.entry(collect_id.clone())
-                    .or_insert_with(Vec::default)
-                    .push(collect_req.clone());
+        let mut res = Vec::new();
+        for (_task_id, leader_state) in leader_state_store.iter() {
+            // Iterate over collect IDs and copy them and their associated requests to the response.
+            for collect_id in leader_state.collect_ids.iter() {
+                if let CollectJobState::Pending(collect_req) =
+                    leader_state.collect_jobs.get(collect_id).unwrap()
+                {
+                    res.push((collect_id.clone(), collect_req.clone()));
+                }
             }
         }
         Ok(res)
