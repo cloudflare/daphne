@@ -491,11 +491,6 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
-        let bearer_token = self
-            .get_collector_bearer_token_for(&collect_req.task_id)
-            .await
-            .expect("failed to get collector bearer token")
-            .expect("collector bearer token not found");
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
@@ -508,28 +503,19 @@ impl DapLeader<BearerToken> for MockAggregator {
             .entry(collect_req.task_id.clone())
             .or_insert_with(LeaderState::new);
         let new_interval = &collect_req.batch_interval;
-        if let Some(collector_boundary_check_tree) =
-            leader_state.boundary_check_trees.get_mut(&bearer_token)
+        if let Some(boundary_check_tree) = leader_state
+            .boundary_check_tree
+            .get_mut(&collect_req.task_id)
         {
-            if let Some(task_boundary_check_tree) =
-                collector_boundary_check_tree.get_mut(&collect_req.task_id)
-            {
-                match task_boundary_check_tree.insert(new_interval.clone()) {
-                    Ok(()) => (),
-                    // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
-                    Err(()) => return Err(DapError::fatal("invalid batch interval")),
-                };
-            } else {
-                collector_boundary_check_tree
-                    .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
-            }
+            match boundary_check_tree.insert(new_interval.clone()) {
+                Ok(()) => (),
+                // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
+                Err(()) => return Err(DapError::fatal("invalid batch interval")),
+            };
         } else {
-            let mut task_boundary_check_tree = HashMap::new();
-            task_boundary_check_tree
-                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
             leader_state
-                .boundary_check_trees
-                .insert(bearer_token, task_boundary_check_tree);
+                .boundary_check_tree
+                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
         }
 
         // Construct a new Collect URI for this CollectReq.
@@ -751,7 +737,7 @@ pub(crate) enum CollectJobState {
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
-    boundary_check_trees: HashMap<BearerToken, HashMap<Id, Node>>,
+    boundary_check_tree: HashMap<Id, Node>,
 }
 
 impl LeaderState {
@@ -759,7 +745,7 @@ impl LeaderState {
         Self {
             collect_ids: VecDeque::default(),
             collect_jobs: HashMap::default(),
-            boundary_check_trees: HashMap::default(),
+            boundary_check_tree: HashMap::default(),
         }
     }
 }
