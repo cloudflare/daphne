@@ -5,11 +5,12 @@
 
 mod test_runner;
 
+use assert_matches::assert_matches;
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
     messages::{CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report},
-    DapAggregateResult, DapMeasurement,
+    DapAbort, DapAggregateResult, DapMeasurement,
 };
 use daphne_worker::InternalAggregateInfo;
 use prio::codec::{Decode, Encode};
@@ -195,7 +196,7 @@ async fn e2e_internal_leader_process() {
         .await;
     }
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(
         agg_telem.reports_processed,
         agg_info.max_reports + 3,
@@ -209,7 +210,7 @@ async fn e2e_internal_leader_process() {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
     // There should be nothing left to aggregate.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
     assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
@@ -248,11 +249,11 @@ async fn e2e_leader_process_min_agg_rate() {
 
     for i in 0..7 {
         // Each round should process exactly one report.
-        let agg_telem = t.internal_process(&client, &agg_info).await;
+        let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
         assert_eq!(agg_telem.reports_processed, 1, "round {} is empty", i);
     }
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
 }
 
@@ -305,7 +306,8 @@ async fn e2e_leader_collect_ok() {
                 max_reports: 100,
             },
         )
-        .await;
+        .await
+        .unwrap();
     assert_eq!(
         agg_telem.reports_processed, t.min_batch_size,
         "reports processed"
@@ -392,7 +394,7 @@ async fn e2e_leader_collect_ok_interleaved() {
     };
 
     // All reports for the task get processed ...
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(
         agg_telem.reports_processed, t.min_batch_size,
         "reports processed"
@@ -409,7 +411,7 @@ async fn e2e_leader_collect_ok_interleaved() {
         .await;
 
     // ... then the collect job gets completed.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(
         agg_telem.reports_collected, t.min_batch_size,
         "reports collected"
@@ -460,7 +462,8 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
                 max_reports: 100,
             },
         )
-        .await;
+        .await
+        .unwrap();
     assert_eq!(agg_telem.reports_processed, t.min_batch_size - 1);
     assert_eq!(agg_telem.reports_aggregated, t.min_batch_size - 1);
     assert_eq!(agg_telem.reports_collected, 0);
@@ -536,4 +539,88 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
         "invalidBatchInterval",
     )
     .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_abort_overlapping_batch_interval() {
+    let t = TestRunner::default().await;
+    let batch_interval = t.batch_interval();
+
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+
+    // The reports are uploaded in the background.
+    let mut rng = thread_rng();
+    for _ in 0..t.min_batch_size {
+        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        t.leader_post_expect_ok(
+            &client,
+            "/upload",
+            constants::MEDIA_TYPE_REPORT,
+            t.vdaf
+                .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    // Get the collect URI.
+    let collect_req = CollectReq {
+        task_id: t.task_id.clone(),
+        batch_interval: batch_interval.clone(),
+        agg_param: Vec::new(),
+    };
+    let _collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+
+    // The reports are aggregated in the background.
+    let agg_telem = t
+        .internal_process(
+            &client,
+            &InternalAggregateInfo {
+                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+                max_reports: 100,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        agg_telem.reports_processed, t.min_batch_size,
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated, t.min_batch_size,
+        "reports aggregated"
+    );
+    assert_eq!(
+        agg_telem.reports_collected, t.min_batch_size,
+        "reports collected"
+    );
+
+    // Send a collect request that requests results from batches that overlaps with
+    // the previous request.
+    let collect_req = CollectReq {
+        task_id: t.task_id.clone(),
+        batch_interval: batch_interval.clone(),
+        agg_param: Vec::new(),
+    };
+    let _collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+
+    // The reports are aggregated in the background.
+    let err = t
+        .internal_process(
+            &client,
+            &InternalAggregateInfo {
+                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+                max_reports: 100,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_matches!(err, DapAbort::InvalidBatchInterval);
 }

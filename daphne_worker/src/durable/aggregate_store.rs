@@ -5,7 +5,8 @@ use crate::{
     durable::{state_get_or_default, DURABLE_DELETE_ALL},
     int_err,
 };
-use daphne::DapAggregateShare;
+use daphne::{messages::TransitionFailure, DapAggregateShare};
+use serde::{Deserialize, Serialize};
 use worker::*;
 
 pub(crate) fn durable_agg_store_name(task_id_base64url: &str, window: u64) -> String {
@@ -14,6 +15,14 @@ pub(crate) fn durable_agg_store_name(task_id_base64url: &str, window: u64) -> St
 
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
+pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
+    "/internal/do/aggregate_store/mark_collected";
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum AggregateStoreResult {
+    Ok(DapAggregateShare),
+    Err(TransitionFailure),
+}
 
 /// Durable Object (DO) for storing aggregate shares.
 ///
@@ -52,9 +61,21 @@ impl DurableObject for AggregateStore {
             }
 
             (DURABLE_AGGREGATE_STORE_GET, Method::Post) => {
-                let agg_share: DapAggregateShare =
-                    state_get_or_default(&self.state, "agg_share").await?;
-                Response::from_json(&agg_share)
+                let collected: bool = state_get_or_default(&self.state, "collected").await?;
+                if !collected {
+                    let agg_share: DapAggregateShare =
+                        state_get_or_default(&self.state, "agg_share").await?;
+                    Response::from_json(&AggregateStoreResult::Ok(agg_share))
+                } else {
+                    Response::from_json(&AggregateStoreResult::Err(
+                        TransitionFailure::InvalidBatchInterval,
+                    ))
+                }
+            }
+
+            (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
+                self.state.storage().put("collected", true).await?;
+                Response::empty()
             }
 
             _ => Err(int_err(format!(

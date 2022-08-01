@@ -10,7 +10,8 @@ use crate::{
     config::DaphneWorkerConfig,
     durable::{
         aggregate_store::{
-            durable_agg_store_name, DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MERGE,
+            durable_agg_store_name, AggregateStoreResult, DURABLE_AGGREGATE_STORE_GET,
+            DURABLE_AGGREGATE_STORE_MARK_COLLECTED, DURABLE_AGGREGATE_STORE_MERGE,
         },
         durable_queue_name,
         helper_state_store::{
@@ -192,6 +193,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
         let task_id_base64url = task_id.to_base64url();
         let mut agg_share = DapAggregateShare::default();
+        // TODO(nakatsuka-y) Restrict the batch_interval or the following iteration will be expensive.
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
@@ -200,13 +202,13 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            let agg_share_delta: DapAggregateShare =
-                durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &())
-                    .await?
-                    .json()
-                    .await?;
+            let mut resp = durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &()).await?;
 
-            agg_share.merge(agg_share_delta)?;
+            // If this agg share has been collected before, return BatchCollected error.
+            match resp.json().await? {
+                AggregateStoreResult::Ok(agg_share_delta) => agg_share.merge(agg_share_delta)?,
+                AggregateStoreResult::Err(t) => return Err(DapError::Transition(t)),
+            }
         }
 
         Ok(agg_share)
@@ -217,12 +219,30 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> std::result::Result<(), DapError> {
+        // Mark reports collected.
         let namespace = self.durable_object("DAP_REPORT_STORE")?;
         for durable_name in self.iter_report_store_names(task_id, batch_interval)? {
             // TODO Don't block on DO request (issue multiple requests simultaneously).
             let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
             durable_post!(stub, DURABLE_REPORT_STORE_MARK_COLLECTED, &()).await?;
         }
+
+        // Mark aggregate shares collected.
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
+        for window in (batch_interval.start..batch_interval.end())
+            .step_by(task_config.min_batch_duration.try_into().unwrap())
+        {
+            let stub = namespace
+                .id_from_name(&durable_agg_store_name(&task_id.to_base64url(), window))?
+                .get_stub()?;
+
+            // TODO Don't block on DO requests (issue multiple requests simultaneously).
+            durable_post!(stub, DURABLE_AGGREGATE_STORE_MARK_COLLECTED, &()).await?;
+        }
+
         Ok(())
     }
 }

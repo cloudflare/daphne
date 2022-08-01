@@ -7,11 +7,12 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
-    DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
+    DapAbort, DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
 use prio::codec::{Decode, Encode};
+use reqwest::StatusCode;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -353,7 +354,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         agg_info: &InternalAggregateInfo,
-    ) -> DapLeaderProcessTelemetry {
+    ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
         let url = self.leader_url.join("/internal/process").unwrap();
         let resp = client
             .post(url.as_str())
@@ -361,13 +362,17 @@ impl TestRunner {
             .send()
             .await
             .expect("request failed");
-        assert_eq!(
-            200,
-            resp.status(),
-            "unexpected response status: {:?}",
-            resp.text().await.unwrap()
-        );
-        resp.json().await.unwrap()
+
+        match resp.status() {
+            StatusCode::OK => return Ok(resp.json().await.unwrap()),
+            StatusCode::BAD_REQUEST => {
+                let problem_details: serde_json::Value = resp.json().await.unwrap();
+                let got = problem_details.as_object().unwrap().get("type").unwrap();
+                assert_eq!("invalidBatchInterval", got);
+                return Err(DapAbort::InvalidBatchInterval);
+            }
+            _ => panic!("unexpected response status: {:?}", resp.status()),
+        }
     }
 
     #[allow(dead_code)]
