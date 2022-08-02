@@ -195,9 +195,9 @@ impl From<DapError> for DapAbort {
             DapError::PeerError(msg) => {
                 // TODO(nakatsuka-y) Remove hard-coded code.
                 if msg == "overlapping batch" {
-                    return Self::InvalidBatchInterval;
+                    Self::InvalidBatchInterval
                 } else {
-                    return Self::BadRequest(msg);
+                    Self::BadRequest(msg)
                 }
             }
             DapError::Transition(t) => Self::from(t),
