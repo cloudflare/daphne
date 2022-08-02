@@ -8,7 +8,7 @@ use crate::{
         media_type_from_leader, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ,
         MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
     },
-    messages::Id,
+    messages::{constant_time_eq, Id},
     DapError, DapRequest,
 };
 use async_trait::async_trait;
@@ -17,12 +17,18 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 /// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-01.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Serialize)]
 pub struct BearerToken(String);
 
 impl AsRef<str> for BearerToken {
     fn as_ref(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+impl PartialEq for BearerToken {
+    fn eq(&self, other: &Self) -> bool {
+        constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
     }
 }
 
