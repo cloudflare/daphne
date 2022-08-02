@@ -48,6 +48,10 @@ pub enum DapError {
     #[error("fatal error: {0}")]
     Fatal(String),
 
+    /// Error caused due to messages from a peer.
+    #[error("peer error: {0}")]
+    PeerError(String),
+
     /// Transition failure. This error blocks processing of a paritcular report and may, under
     /// certain conditions, trigger an abort.
     #[error("transition error: {0}")]
@@ -188,6 +192,14 @@ impl From<DapError> for DapAbort {
     fn from(e: DapError) -> Self {
         match e {
             e @ DapError::Fatal(..) => Self::Internal(Box::new(e)),
+            DapError::PeerError(msg) => {
+                // TODO(nakatsuka-y) Remove hard-coded code.
+                if msg == "overlapping batch" {
+                    return Self::InvalidBatchInterval;
+                } else {
+                    return Self::BadRequest(msg);
+                }
+            }
             DapError::Transition(t) => Self::from(t),
         }
     }

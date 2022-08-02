@@ -52,6 +52,7 @@ pub(crate) const INT_ERR_INVALID_BATCH_INTERVAL: &str = "invalid batch interval"
 pub(crate) const INT_ERR_UNRECOGNIZED_TASK: &str = "unrecognized task";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
+pub(crate) const PEER_ERR_BATCH_OVERLAP: &str = "overlapping batch";
 
 pub(crate) async fn worker_request_to_dap(mut req: Request) -> Result<DapRequest<BearerToken>> {
     let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
@@ -207,7 +208,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             // If this agg share has been collected before, return BatchCollected error.
             match resp.json().await? {
                 AggregateStoreResult::Ok(agg_share_delta) => agg_share.merge(agg_share_delta)?,
-                AggregateStoreResult::Err(t) => return Err(DapError::Transition(t)),
+                AggregateStoreResult::Err(s) => return Err(DapError::PeerError(s)),
             }
         }
 

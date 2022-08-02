@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    dap::PEER_ERR_BATCH_OVERLAP,
     durable::{state_get_or_default, DURABLE_DELETE_ALL},
     int_err,
 };
-use daphne::{messages::TransitionFailure, DapAggregateShare};
+use daphne::DapAggregateShare;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -21,7 +22,7 @@ pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
 #[derive(Deserialize, Serialize)]
 pub(crate) enum AggregateStoreResult {
     Ok(DapAggregateShare),
-    Err(TransitionFailure),
+    Err(String),
 }
 
 /// Durable Object (DO) for storing aggregate shares.
@@ -68,7 +69,7 @@ impl DurableObject for AggregateStore {
                     Response::from_json(&AggregateStoreResult::Ok(agg_share))
                 } else {
                     Response::from_json(&AggregateStoreResult::Err(
-                        TransitionFailure::InvalidBatchInterval,
+                        PEER_ERR_BATCH_OVERLAP.to_string(),
                     ))
                 }
             }
