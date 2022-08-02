@@ -19,7 +19,7 @@ use crate::{
         HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
     DapAbort, DapCollectJob, DapError, DapLeaderTransition, DapMeasurement, DapRequest,
-    Prio3Config, VdafConfig,
+    DapTaskConfig, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use matchit::Router;
@@ -154,6 +154,131 @@ impl MockAggregator {
             .unwrap();
 
         report
+    }
+
+    async fn run_test_agg_job(
+        &self,
+        helper: &MockAggregator,
+        now: u64,
+        task_id: &Id,
+        task_config: &DapTaskConfig,
+    ) {
+        // Leader: Store received report to ReportStore.
+        let selector = &MockAggregateInfo {
+            task_id: task_id.clone(),
+            batch_info: Some(task_config.current_batch_window(now)),
+            agg_rate: 1,
+        };
+        let (task_id, reports) = get_reports!(self, selector);
+
+        // Leader: Consume report share.
+        let mut rng = thread_rng();
+        let agg_job_id = Id(rng.gen());
+        let transition = task_config
+            .vdaf
+            .produce_agg_init_req(
+                self,
+                &task_config.vdaf_verify_key,
+                &task_id,
+                &agg_job_id,
+                reports,
+            )
+            .unwrap();
+        assert_matches!(transition, DapLeaderTransition::Continue(..));
+        let (leader_state, agg_init_req) = transition.unwrap_continue();
+
+        // Leader: Send aggregate initialization request to Helper and receive response.
+        let req = DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
+            payload: agg_init_req.get_encoded(),
+            url: task_config.helper_url.join("/aggregate").unwrap(),
+            sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+        };
+        let res = helper.http_post_aggregate(&req).await.unwrap();
+        let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
+
+        // Leader: Produce Leader output share and prepare aggregate continue request for Helper.
+        let transition = task_config
+            .vdaf
+            .handle_agg_resp(&task_id, &agg_job_id, leader_state, agg_resp)
+            .unwrap();
+        assert_matches!(transition, DapLeaderTransition::Uncommitted(..));
+        let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
+
+        // Leader: Send aggregate continue request to Helper and receive response.
+        let req = DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
+            payload: agg_cont_req.get_encoded(),
+            url: task_config.helper_url.join("/aggregate").unwrap(),
+            sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+        };
+        let res = helper.http_post_aggregate(&req).await.unwrap();
+        let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
+
+        // Leader: Commit output shares of Leader and Helper.
+        let out_shares = task_config
+            .vdaf
+            .handle_final_agg_resp(leader_uncommitted, agg_resp)
+            .unwrap();
+        self.put_out_shares(&task_id, out_shares).await.unwrap();
+    }
+
+    async fn run_test_col_job(
+        &self,
+        task_id: &Id,
+        collect_id: &Id,
+        collect_req: &CollectReq,
+        task_config: &DapTaskConfig,
+    ) {
+        // Leader: Get Leader's encrypted aggregate share.
+        let leader_agg_share = self
+            .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+            .await
+            .unwrap();
+
+        let leader_enc_agg_share = task_config
+            .vdaf
+            .produce_leader_encrypted_agg_share(
+                &task_config.collector_hpke_config,
+                &collect_req.task_id,
+                &collect_req.batch_interval,
+                &leader_agg_share,
+            )
+            .unwrap();
+
+        // Leader: Prepare AggregateShareReq.
+        let agg_share_req = AggregateShareReq {
+            task_id: collect_req.task_id.clone(),
+            batch_interval: collect_req.batch_interval.clone(),
+            agg_param: collect_req.agg_param.clone(),
+            report_count: leader_agg_share.report_count,
+            checksum: leader_agg_share.checksum,
+        };
+
+        // Leader: Send AggregateShareReq to Helper and receive AggregateShareResp.
+        let req = DapRequest {
+            media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
+            payload: agg_share_req.get_encoded(),
+            url: task_config.helper_url.join("/aggregate_share").unwrap(),
+            sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
+        };
+        let res = self.http_post_aggregate_share(&req).await.unwrap();
+        let agg_share_resp = AggregateShareResp::get_decoded(&res.payload).unwrap();
+        let helper_enc_agg_share = agg_share_resp.encrypted_agg_share;
+
+        // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
+        let collect_resp = CollectResp {
+            encrypted_agg_shares: vec![leader_enc_agg_share, helper_enc_agg_share],
+        };
+
+        self.finish_collect_job(task_id, collect_id, &collect_resp)
+            .await
+            .unwrap();
+
+        // Leader: Mark the reports as collected.
+        self.mark_collected(task_id, &agg_share_req.batch_interval)
+            .await
+            .unwrap();
     }
 }
 
@@ -565,7 +690,20 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
+    let helper = MockAggregator::new();
     let now = 1637361337;
+
+    // Create a report.
+    let report = leader.gen_test_report(task_id);
+    let req = leader.gen_test_upload_req(report.clone());
+
+    // Client: Send upload request to Leader.
+    leader.http_post_upload(&req).await.unwrap();
+
+    // Leader: Run aggregation job.
+    leader
+        .run_test_agg_job(&helper, now, task_id, task_config)
+        .await;
 
     // Collector: Create first CollectReq.
     let collector_collect_req = CollectReq {
@@ -582,6 +720,13 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
 
     // Leader: Handle the CollectReq received from Collector.
     let _url = leader.http_post_collect(&req).await.unwrap();
+    let resp = leader.get_pending_collect_jobs().await.unwrap();
+    let (collect_id, collect_req) = &resp[0];
+
+    // Leader: Run collect job.
+    leader
+        .run_test_col_job(task_id, collect_id, collect_req, task_config)
+        .await;
 
     // Collector: Create second CollectReq.
     let collector_collect_req = CollectReq {
@@ -597,12 +742,21 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     };
 
     // Leader: Handle the CollectReq received from Collector.
-    let err = leader.http_post_collect(&req).await.unwrap_err();
+    let _url = leader.http_post_collect(&req).await.unwrap();
+    let resp = leader.get_pending_collect_jobs().await.unwrap();
+    let (_collect_id, collect_req) = &resp[0];
+
+    // Leader: Get Leader's encrypted aggregate share.
+    let err = leader
+        .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+        .await
+        .unwrap_err();
 
     // Fails due to batch interval overlapping.
-    //
-    // TODO(nakatsuka-y) Make the following error explicit (e.g., DapAbort::InvalidBatchInterval).
-    assert_matches!(err, DapAbort::Internal(_));
+    assert_matches!(
+        err,
+        DapError::Transition(TransitionFailure::InvalidBatchInterval)
+    );
 }
 
 // Test a successful collect request submission.
@@ -672,6 +826,7 @@ async fn e2e() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
+    let now = 1637361337;
 
     let helper = MockAggregator::new();
 
@@ -681,66 +836,10 @@ async fn e2e() {
     // Client: Send upload request to Leader.
     leader.http_post_upload(&req).await.unwrap();
 
-    // Leader: Store received report to ReportStore.
-    let now = 1637361337;
-    let selector = &MockAggregateInfo {
-        task_id: task_id.clone(),
-        batch_info: Some(task_config.current_batch_window(now)),
-        agg_rate: 1,
-    };
-    let (task_id, reports) = get_reports!(leader, selector);
-    assert_eq!(report, reports[0]);
-
-    // Leader: Consume report share.
-    let mut rng = thread_rng();
-    let agg_job_id = Id(rng.gen());
-    let transition = task_config
-        .vdaf
-        .produce_agg_init_req(
-            &leader,
-            &task_config.vdaf_verify_key,
-            &task_id,
-            &agg_job_id,
-            reports,
-        )
-        .unwrap();
-    assert_matches!(transition, DapLeaderTransition::Continue(..));
-    let (leader_state, agg_init_req) = transition.unwrap_continue();
-
-    // Leader: Send aggregate initialization request to Helper and receive response.
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
-        payload: agg_init_req.get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
-    let res = helper.http_post_aggregate(&req).await.unwrap();
-    let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
-
-    // Leader: Produce Leader output share and prepare aggregate continue request for Helper.
-    let transition = task_config
-        .vdaf
-        .handle_agg_resp(&task_id, &agg_job_id, leader_state, agg_resp)
-        .unwrap();
-    assert_matches!(transition, DapLeaderTransition::Uncommitted(..));
-    let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
-
-    // Leader: Send aggregate continue request to Helper and receive response.
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
-        payload: agg_cont_req.get_encoded(),
-        url: task_config.helper_url.join("/aggregate").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
-    let res = helper.http_post_aggregate(&req).await.unwrap();
-    let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
-
-    // Leader: Commit output shares of Leader and Helper.
-    let out_shares = task_config
-        .vdaf
-        .handle_final_agg_resp(leader_uncommitted, agg_resp)
-        .unwrap();
-    leader.put_out_shares(&task_id, out_shares).await.unwrap();
+    // Leader: Run aggregation job.
+    leader
+        .run_test_agg_job(&helper, now, task_id, task_config)
+        .await;
 
     // Collector: Create a CollectReq.
     let collect_req = CollectReq {
@@ -760,57 +859,10 @@ async fn e2e() {
     let resp = leader.get_pending_collect_jobs().await.unwrap();
     let (collect_id, collect_req) = &resp[0];
 
-    // Leader: Get Leader's encrypted aggregate share.
-    let leader_agg_share = leader
-        .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
-        .await
-        .unwrap();
-
-    let leader_enc_agg_share = task_config
-        .vdaf
-        .produce_leader_encrypted_agg_share(
-            &task_config.collector_hpke_config,
-            &collect_req.task_id,
-            &collect_req.batch_interval,
-            &leader_agg_share,
-        )
-        .unwrap();
-
-    // Leader: Prepare AggregateShareReq.
-    let agg_share_req = AggregateShareReq {
-        task_id: collect_req.task_id.clone(),
-        batch_interval: collect_req.batch_interval.clone(),
-        agg_param: collect_req.agg_param.clone(),
-        report_count: leader_agg_share.report_count,
-        checksum: leader_agg_share.checksum,
-    };
-
-    // Leader: Send AggregateShareReq to Helper and receive AggregateShareResp.
-    let req = DapRequest {
-        media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
-        payload: agg_share_req.get_encoded(),
-        url: task_config.helper_url.join("/aggregate_share").unwrap(),
-        sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
-    };
-    let res = leader.http_post_aggregate_share(&req).await.unwrap();
-    let agg_share_resp = AggregateShareResp::get_decoded(&res.payload).unwrap();
-    let helper_enc_agg_share = agg_share_resp.encrypted_agg_share;
-
-    // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
-    let collect_resp = CollectResp {
-        encrypted_agg_shares: vec![leader_enc_agg_share, helper_enc_agg_share],
-    };
-
+    // Leader: Run collect job.
     leader
-        .finish_collect_job(&task_id, &collect_id, &collect_resp)
-        .await
-        .unwrap();
-
-    // Leader: Mark the reports as collected.
-    leader
-        .mark_collected(&task_id, &agg_share_req.batch_interval)
-        .await
-        .unwrap();
+        .run_test_col_job(task_id, collect_id, collect_req, task_config)
+        .await;
 
     // Leader: Respond to poll request from Collector.
     let collect_job = leader

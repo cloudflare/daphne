@@ -14,8 +14,6 @@ use crate::{
     DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare, DapRequest,
     DapResponse, DapTaskConfig,
 };
-#[cfg(test)]
-use assert_matches::assert_matches;
 use async_trait::async_trait;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -88,7 +86,7 @@ pub(crate) struct MockAggregator {
     pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
     leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    agg_store: Arc<Mutex<HashMap<BucketInfo, DapAggregateShare>>>,
+    agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
 }
 
 #[allow(dead_code)]
@@ -225,10 +223,16 @@ impl DapAggregator<BearerToken> for MockAggregator {
         for (window, agg_share_delta) in agg_shares.into_iter() {
             bucket_info.window = window;
 
-            if let Some(agg_share) = agg_store.get_mut(&bucket_info) {
-                agg_share.merge(agg_share_delta)?;
+            if let Some(agg_store_state) = agg_store.get_mut(&bucket_info) {
+                agg_store_state.agg_share.merge(agg_share_delta)?;
             } else {
-                agg_store.insert(bucket_info.clone(), agg_share_delta);
+                agg_store.insert(
+                    bucket_info.clone(),
+                    AggStoreState {
+                        agg_share: agg_share_delta,
+                        collected: false,
+                    },
+                );
             }
         }
 
@@ -249,12 +253,18 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
-        for (inner_bucket_info, agg_share_delta) in agg_store.iter() {
+        for (inner_bucket_info, agg_store_state) in agg_store.iter() {
             if task_id == &inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window
                 && batch_interval.end() > inner_bucket_info.window
             {
-                agg_share.merge(agg_share_delta.clone())?;
+                if agg_store_state.collected {
+                    return Err(DapError::Transition(
+                        TransitionFailure::InvalidBatchInterval,
+                    ));
+                } else {
+                    agg_share.merge(agg_store_state.agg_share.clone())?;
+                }
             }
         }
 
@@ -266,6 +276,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> Result<(), DapError> {
+        // Mark reports as collected.
         let mut report_store_mutex_guard = self
             .report_store
             .lock()
@@ -278,6 +289,21 @@ impl DapAggregator<BearerToken> for MockAggregator {
                 && batch_interval.end() > inner_bucket_info.window
             {
                 store.collected = true;
+            }
+        }
+
+        // Mark aggregate shares as collected.
+        let mut agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref_mut();
+        for (inner_bucket_info, agg_store_state) in agg_store.iter_mut() {
+            if task_id == &inner_bucket_info.task_id
+                && batch_interval.start <= inner_bucket_info.window
+                && batch_interval.end() > inner_bucket_info.window
+            {
+                agg_store_state.collected = true;
             }
         }
 
@@ -498,26 +524,6 @@ impl DapLeader<BearerToken> for MockAggregator {
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
-        // Check boundary of new CollectReq for this task.
-        let leader_state = leader_state_store
-            .entry(collect_req.task_id.clone())
-            .or_insert_with(LeaderState::new);
-        let new_interval = &collect_req.batch_interval;
-        if let Some(boundary_check_tree) = leader_state
-            .boundary_check_tree
-            .get_mut(&collect_req.task_id)
-        {
-            match boundary_check_tree.insert(new_interval.clone()) {
-                Ok(()) => (),
-                // TODO(nakatsuka-y) This is not an internal error. Can we change this to DapAbort::InvalidBatchInterval?
-                Err(()) => return Err(DapError::fatal("invalid batch interval")),
-            };
-        } else {
-            leader_state
-                .boundary_check_tree
-                .insert(collect_req.task_id.clone(), Node::new(new_interval.clone()));
-        }
-
         // Construct a new Collect URI for this CollectReq.
         let collect_id = Id(rng.gen());
         let collect_uri = task_config
@@ -733,11 +739,9 @@ pub(crate) enum CollectJobState {
 /// LeaderState keeps track of the following:
 /// * Collect IDs in their order of arrival.
 /// * The state of the collect job associated to the Collect ID.
-/// * The root of binary trees used to check boundaries associated to task_id per Collector.
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
-    boundary_check_tree: HashMap<Id, Node>,
 }
 
 impl LeaderState {
@@ -745,132 +749,14 @@ impl LeaderState {
         Self {
             collect_ids: VecDeque::default(),
             collect_jobs: HashMap::default(),
-            boundary_check_tree: HashMap::default(),
         }
     }
 }
 
-/// Binary tree implementation used when checking boundary in CollectReq.
-struct Node {
-    val: Interval,
-    l: Option<Box<Node>>,
-    r: Option<Box<Node>>,
-}
-
-impl Node {
-    pub fn new(new_val: Interval) -> Node {
-        Self {
-            val: new_val,
-            l: None,
-            r: None,
-        }
-    }
-    pub fn insert(&mut self, new_val: Interval) -> Result<(), ()> {
-        if new_val.start < self.val.end() && self.val.end() < new_val.end()
-            || new_val.start < self.val.start && self.val.start < new_val.end()
-            || new_val.start <= self.val.start && self.val.end() <= new_val.end()
-            || self.val.start <= new_val.start && new_val.end() <= self.val.end()
-        {
-            return Err(());
-        }
-        let target = if new_val.end() < self.val.start {
-            &mut self.l
-        } else {
-            &mut self.r
-        };
-        match *target {
-            Some(ref mut subnode) => subnode.insert(new_val),
-            None => {
-                let new_node = Node::new(new_val);
-                let boxed_node = Some(Box::new(new_node));
-                *target = boxed_node;
-                Ok(())
-            }
-        }
-    }
-}
-
-#[test]
-fn test_binary_tree() {
-    // We should have the following tree:
-    //                 (13 - 15)
-    //                 /       \
-    //             (8 - 10) (20 - 25)
-    //            /       \         \
-    //        (1 - 2)  (11 - 12) (26 - 30)
-    //                                \
-    //                             (40 - 42)
-
-    let mut root = Node::new(Interval {
-        start: 13,
-        duration: 2,
-    });
-
-    root.insert(Interval {
-        start: 8,
-        duration: 2,
-    })
-    .unwrap();
-    root.insert(Interval {
-        start: 1,
-        duration: 1,
-    })
-    .unwrap();
-    root.insert(Interval {
-        start: 11,
-        duration: 1,
-    })
-    .unwrap();
-
-    root.insert(Interval {
-        start: 20,
-        duration: 5,
-    })
-    .unwrap();
-    root.insert(Interval {
-        start: 26,
-        duration: 4,
-    })
-    .unwrap();
-    root.insert(Interval {
-        start: 40,
-        duration: 2,
-    })
-    .unwrap();
-
-    let res = root.insert(Interval {
-        start: 50,
-        duration: 3,
-    });
-    assert_matches!(res, Ok(()));
-
-    let res = root.insert(Interval {
-        start: 1,
-        duration: 5,
-    });
-    assert_matches!(res, Err(()));
-
-    let res = root.insert(Interval {
-        start: 20,
-        duration: 5,
-    });
-    assert_matches!(res, Err(()));
-
-    let res = root.insert(Interval {
-        start: 3,
-        duration: 8,
-    });
-    assert_matches!(res, Err(()));
-
-    let res = root.insert(Interval {
-        start: 16,
-        duration: 10,
-    });
-    assert_matches!(res, Err(()));
-
-    let res = root.insert(Interval {
-        start: 16,
-        duration: 19,
-    });
-    assert_matches!(res, Err(()));
+/// AggStoreState keeps track of the following:
+/// * Aggregate share
+/// * Whether this aggregate share has been collected
+pub(crate) struct AggStoreState {
+    agg_share: DapAggregateShare,
+    collected: bool,
 }
