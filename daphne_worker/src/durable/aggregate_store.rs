@@ -62,6 +62,8 @@ impl DurableObject for AggregateStore {
             }
 
             (DURABLE_AGGREGATE_STORE_GET, Method::Post) => {
+                // NOTE: The following logic is correct for `max_batch_lifetime = 1`, but
+                // requires changes when we allow batch lifetime longer than 1.
                 let collected: bool = state_get_or_default(&self.state, "collected").await?;
                 if !collected {
                     let agg_share: DapAggregateShare =
