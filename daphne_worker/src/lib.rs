@@ -169,7 +169,10 @@ impl DaphneWorkerRouter {
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let agg_info: InternalAggregateInfo = req.json().await?;
                         match config.process(&agg_info).await {
-                            Ok(telem) => Response::from_json(&telem),
+                            Ok(telem) => {
+                                console_debug!("{:?}", telem);
+                                Response::from_json(&telem)
+                            }
                             Err(e) => abort(e),
                         }
                     })

@@ -10,7 +10,7 @@ pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET: &str = "/internal/do/agg_job_
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_FINISH: &str = "/internal/do/agg_job_queue/finish";
 
 /// An aggregation job.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct AggregationJob {
     /// Durable object ID of the [`ReportStore`](crate::durable::ReportStore) instance with reports
     /// to be aggregated.
@@ -70,6 +70,7 @@ impl DurableObject for LeaderAggregationJobQueue {
                     item = iter.next()?;
                 }
 
+                console_debug!("agg job queue: {:?}", res);
                 // Results are in order of the oldest bucket first.
                 Response::from_json(&res)
             }

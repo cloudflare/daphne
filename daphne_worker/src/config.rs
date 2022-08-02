@@ -64,7 +64,7 @@ impl<D> DaphneWorkerConfig<D> {
         // aggregator URL with 127.0.0.1.
         if let Ok(env) = ctx.var("DAP_ENV") {
             if env.as_ref() == "dev" {
-                console_log!("DAP_ENV: Hostname override applied");
+                console_debug!("DAP_ENV: Hostname override applied");
                 for (_, task_config) in tasks.iter_mut() {
                     task_config.leader_url.set_host(Some("127.0.0.1")).unwrap();
                     task_config.helper_url.set_host(Some("127.0.0.1")).unwrap();
