@@ -163,6 +163,8 @@ impl DurableObject for LeaderCollectionJobQueue {
                 if pending.is_none() {
                     return Err(int_err("LeaderCollectionJobQueue: missing collect request"));
                 }
+                // XXX Refactor to reduce the number of I/O ops.
+                self.state.storage().delete(&pending_key).await?;
 
                 self.state
                     .storage()
