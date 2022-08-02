@@ -296,6 +296,13 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             }
         }
 
+        for (task_id, reports) in reports_per_task.iter() {
+            console_debug!(
+                "got {} reports for task {}",
+                reports.len(),
+                task_id.to_base64url()
+            );
+        }
         Ok(reports_per_task)
     }
 

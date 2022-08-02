@@ -127,6 +127,11 @@ impl DurableObject for ReportStore {
                     }
                 }
 
+                console_debug!(
+                    "drained {} reports from bucket {}",
+                    reports.len(),
+                    self.state.id().to_string()
+                );
                 Response::from_json(&reports)
             }
 
@@ -151,6 +156,10 @@ impl DurableObject for ReportStore {
                         rand: rng.gen(),
                     };
 
+                    console_debug!(
+                        "agg job for bucket {} has been scheduled",
+                        agg_job.report_store_id_hex
+                    );
                     let namespace = self.env.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
                     // TODO Shard the work across multiple job queues rather than just one. (See
                     // issue #25.) For now there is jsut one job queue.

@@ -157,17 +157,14 @@ impl DurableObject for LeaderCollectionJobQueue {
                     ));
                 }
 
+                let mut storage = self.state.storage();
                 let pending_key = format!("pending/{}", collect_id_hex);
-                let pending: Option<OrderedCollectReq> =
-                    state_get(&self.state, &pending_key).await?;
-                if pending.is_none() {
-                    return Err(int_err("LeaderCollectionJobQueue: missing collect request"));
-                }
-
+                let delete_pending_future = storage.delete(&pending_key);
                 self.state
                     .storage()
                     .put(&processed_key, res.collect_resp)
                     .await?;
+                delete_pending_future.await?;
                 Response::empty()
             }
 
