@@ -239,6 +239,9 @@ pub struct ProblemDetails {
 }
 
 /// Per-task DAP parameters.
+//
+// TODO spec: `max_window_size`, `min_duration_start`, and `max_duration_end`
+//            should be reflected to the DAP spec.
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
@@ -246,6 +249,9 @@ pub struct DapTaskConfig {
     pub helper_url: Url,
     pub min_batch_duration: u64, // seconds
     pub min_batch_size: u64,     // number of reports
+    pub max_window_size: u64,    // number of acceptable batches of reports
+    pub min_duration_start: u64, // start of acceptable batch window
+    pub max_duration_end: u64,   // end of acceptable batch window
     pub vdaf: VdafConfig,
     #[serde(skip_serializing)]
     pub(crate) vdaf_verify_key: VdafVerifyKey,
@@ -270,6 +276,9 @@ struct ShadowDapTaskConfig {
     helper_url: Url,
     min_batch_duration: u64,
     min_batch_size: u64,
+    max_window_size: u64,
+    min_duration_start: u64,
+    max_duration_end: u64,
     vdaf: VdafConfig,
     #[serde(with = "hex")]
     vdaf_verify_key: Vec<u8>,
@@ -289,6 +298,9 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             helper_url: shadow.helper_url,
             min_batch_duration: shadow.min_batch_duration,
             min_batch_size: shadow.min_batch_size,
+            max_window_size: shadow.max_window_size,
+            min_duration_start: shadow.min_duration_start,
+            max_duration_end: shadow.max_duration_end,
             vdaf: shadow.vdaf,
             vdaf_verify_key,
             collector_hpke_config: shadow.collector_hpke_config,

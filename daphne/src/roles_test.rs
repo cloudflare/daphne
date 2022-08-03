@@ -25,7 +25,7 @@ use assert_matches::assert_matches;
 use matchit::Router;
 use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
-use std::{ops::DerefMut, vec};
+use std::{ops::DerefMut, time::SystemTime, vec};
 
 // MockAggregator's implementation of DapLeader::get_report() always returns reports for a single
 // task. This macro is used to conveniently unwrap the task ID and reports for testing purposes.
@@ -144,13 +144,12 @@ impl MockAggregator {
 
         // Construct report.
         let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let report = vdaf_config
-            .produce_report(
-                &hpke_config_list,
-                1637361337,
-                task_id,
-                DapMeasurement::U64(1),
-            )
+            .produce_report(&hpke_config_list, now, task_id, DapMeasurement::U64(1))
             .unwrap();
 
         report
@@ -362,9 +361,13 @@ async fn http_post_collect_unauthorized_request() {
 #[tokio::test]
 async fn http_post_aggregate_failure_hpke_decrypt_error() {
     let helper = MockAggregator::new();
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let report_shares = vec![ReportShare {
         nonce: Nonce {
-            time: 1637361337,
+            time: now,
             rand: [1; 16],
         },
         extensions: Vec::default(),
@@ -631,7 +634,10 @@ async fn poll_collect_job_test_results() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = 1637361337;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
@@ -684,6 +690,83 @@ async fn poll_collect_job_test_results() {
     );
 }
 
+#[tokio::test]
+async fn http_post_collect_fail_invalid_batch_interval() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Collector: Create a CollectReq with a very large batch interval.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: Interval {
+            start: now - (now % task_config.min_batch_duration),
+            duration: task_config.min_batch_duration * (task_config.max_window_size + 1),
+        },
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let err = leader.http_post_collect(&req).await.unwrap_err();
+
+    // Fails because the requested batch interval is too large.
+    assert_matches!(err, DapAbort::BadRequest(e) =>
+        assert_eq!(e, "batch interval too large")
+    );
+
+    // Collector: Create a CollectReq with a batch interval in the past.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now - task_config.min_duration_start),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let err = leader.http_post_collect(&req).await.unwrap_err();
+
+    // Fails because the requested batch interval is too far into the past.
+    assert_matches!(err, DapAbort::BadRequest(e) =>
+        assert_eq!(e, "batch interval too far into past")
+    );
+
+    // Collector: Create a CollectReq with a batch interval in the future.
+    let collector_collect_req = CollectReq {
+        task_id: task_id.clone(),
+        batch_interval: task_config.current_batch_window(now + task_config.max_duration_end),
+        agg_param: Vec::default(),
+    };
+    let req = DapRequest {
+        media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        payload: collector_collect_req.get_encoded(),
+        url: task_config.helper_url.join("/collect").unwrap(),
+        sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
+    };
+
+    // Leader: Handle the CollectReq received from Collector.
+    let err = leader.http_post_collect(&req).await.unwrap_err();
+
+    // Fails because the requested batch interval is too far into the future.
+    assert_matches!(err, DapAbort::BadRequest(e) =>
+        assert_eq!(e, "batch interval too far into future")
+    );
+}
+
 // Send a collect request with an overlapping batch interval.
 #[tokio::test]
 async fn http_post_collect_fail_overlapping_batch_interval() {
@@ -691,7 +774,10 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
     let helper = MockAggregator::new();
-    let now = 1637361337;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     // Create a report.
     let report = leader.gen_test_report(task_id);
@@ -766,7 +852,10 @@ async fn http_post_collect_success() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = 1637361337;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
@@ -826,7 +915,10 @@ async fn e2e() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = 1637361337;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     let helper = MockAggregator::new();
 

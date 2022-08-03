@@ -41,6 +41,9 @@ pub const TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 1,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": "count"
         },
@@ -517,6 +520,28 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Check CollectReq whether it is valid.
+        if collect_req.batch_interval.duration / task_config.min_batch_duration
+            > task_config.max_window_size
+        {
+            return Err(DapError::PeerError("batch interval too large".to_string()));
+        }
+        if now.abs_diff(collect_req.batch_interval.start) > task_config.min_duration_start {
+            return Err(DapError::PeerError(
+                "batch interval too far into past".to_string(),
+            ));
+        }
+        if now.abs_diff(collect_req.batch_interval.end()) > task_config.max_duration_end {
+            return Err(DapError::PeerError(
+                "batch interval too far into future".to_string(),
+            ));
+        }
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
