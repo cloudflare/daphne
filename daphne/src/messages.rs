@@ -288,7 +288,6 @@ pub enum TransitionFailure {
     HpkeUnknownConfigId = 3,
     HpkeDecryptError = 4,
     VdafPrepError = 5,
-    InvalidBatchInterval = 6,
 }
 
 impl TryFrom<u8> for TransitionFailure {
@@ -302,7 +301,6 @@ impl TryFrom<u8> for TransitionFailure {
             b if b == Self::HpkeUnknownConfigId as u8 => Ok(Self::HpkeUnknownConfigId),
             b if b == Self::HpkeDecryptError as u8 => Ok(Self::HpkeDecryptError),
             b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
-            b if b == Self::InvalidBatchInterval as u8 => Ok(Self::InvalidBatchInterval),
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -329,7 +327,6 @@ impl std::fmt::Display for TransitionFailure {
             Self::HpkeUnknownConfigId => write!(f, "hpke-unknown-config-id({})", *self as u8),
             Self::HpkeDecryptError => write!(f, "hpke-decrypt-error({})", *self as u8),
             Self::VdafPrepError => write!(f, "vdaf-prep-error({})", *self as u8),
-            Self::InvalidBatchInterval => write!(f, "invalid-batch-interval({})", *self as u8),
         }
     }
 }

@@ -841,7 +841,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     // Fails due to batch interval overlapping.
     assert_matches!(
         err,
-        DapError::Transition(TransitionFailure::InvalidBatchInterval)
+        DapError::PeerError(e) => assert_eq!(e, "overlapping batch interval".to_string())
     );
 }
 

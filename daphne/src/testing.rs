@@ -262,8 +262,8 @@ impl DapAggregator<BearerToken> for MockAggregator {
                 && batch_interval.end() > inner_bucket_info.window
             {
                 if agg_store_state.collected {
-                    return Err(DapError::Transition(
-                        TransitionFailure::InvalidBatchInterval,
+                    return Err(DapError::PeerError(
+                        "overlapping batch interval".to_string(),
                     ));
                 } else {
                     agg_share.merge(agg_store_state.agg_share.clone())?;

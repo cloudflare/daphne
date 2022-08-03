@@ -216,7 +216,6 @@ impl From<TransitionFailure> for DapAbort {
         match failure_reason {
             TransitionFailure::BatchCollected => Self::StaleReport,
             TransitionFailure::ReportReplayed => Self::ReplayedReport,
-            TransitionFailure::InvalidBatchInterval => Self::InvalidBatchInterval,
             _ => DapError::fatal("unhandled transition failure").into(),
         }
     }
