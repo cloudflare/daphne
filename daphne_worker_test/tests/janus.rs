@@ -63,7 +63,7 @@ async fn janus_client() {
         max_buckets: 100, // Needs to be large enough to touch each bucket.
         max_reports: 1,
     };
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_processed, 1);
     assert_eq!(agg_telem.reports_aggregated, 1);
 }
@@ -106,9 +106,9 @@ async fn janus_helper() {
     }
 
     // Aggregate first.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_processed, agg_info.max_reports + 3);
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_aggregated, 0);
 
     // Get the collect URI.
@@ -121,7 +121,7 @@ async fn janus_helper() {
         .leader_post_collect(&client, collect_req.get_encoded())
         .await;
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &agg_info).await.unwrap();
     assert_eq!(agg_telem.reports_collected, 13, "reports collected");
 
     // Poll the collect URI before the ColleectResp is ready.

@@ -7,11 +7,12 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
-    DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
+    DapAbort, DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
 use prio::codec::{Decode, Encode};
+use reqwest::StatusCode;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -42,6 +43,9 @@ const LEADER_TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -63,6 +67,9 @@ const LEADER_TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -90,6 +97,9 @@ const HELPER_TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -114,6 +124,9 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 10,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -149,6 +162,9 @@ pub struct TestRunner {
     pub now: u64,
     pub min_batch_duration: u64,
     pub min_batch_size: u64,
+    pub max_window_size: u64,
+    pub min_duration_start: u64,
+    pub max_duration_end: u64,
     pub vdaf: VdafConfig,
     pub leader_url: Url,
     pub helper_url: Url,
@@ -194,6 +210,9 @@ impl TestRunner {
             now: 1637359200, // Fri 19 Nov 2021 02:00:00 PM PST
             min_batch_duration: task_config.min_batch_duration,
             min_batch_size: task_config.min_batch_size,
+            max_window_size: task_config.max_window_size,
+            min_duration_start: task_config.min_duration_start,
+            max_duration_end: task_config.max_duration_end,
             vdaf: task_config.vdaf.clone(),
             leader_url,
             helper_url,
@@ -353,7 +372,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         agg_info: &InternalAggregateInfo,
-    ) -> DapLeaderProcessTelemetry {
+    ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
         let url = self.leader_url.join("/internal/process").unwrap();
         let resp = client
             .post(url.as_str())
@@ -361,13 +380,17 @@ impl TestRunner {
             .send()
             .await
             .expect("request failed");
-        assert_eq!(
-            200,
-            resp.status(),
-            "unexpected response status: {:?}",
-            resp.text().await.unwrap()
-        );
-        resp.json().await.unwrap()
+
+        match resp.status() {
+            StatusCode::OK => return Ok(resp.json().await.unwrap()),
+            StatusCode::BAD_REQUEST => {
+                let problem_details: serde_json::Value = resp.json().await.unwrap();
+                let got = problem_details.as_object().unwrap().get("type").unwrap();
+                assert_eq!("invalidBatchInterval", got);
+                return Err(DapAbort::InvalidBatchInterval);
+            }
+            _ => panic!("unexpected response status: {:?}", resp.status()),
+        }
     }
 
     #[allow(dead_code)]

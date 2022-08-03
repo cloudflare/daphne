@@ -17,6 +17,9 @@ const DAP_TASK_LIST: &str = r#"{
     },
     "min_batch_duration": 3600,
     "min_batch_size": 100,
+    "max_window_size": 100,
+    "min_duration_start": 432000,
+    "max_duration_end": 18000,
     "vdaf": {
       "prio3": {
         "sum": {

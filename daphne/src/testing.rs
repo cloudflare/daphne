@@ -19,6 +19,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
     ops::DerefMut,
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -40,6 +41,9 @@ pub const TASK_LIST: &str = r#"{
         },
         "min_batch_duration": 3600,
         "min_batch_size": 1,
+        "max_window_size": 100,
+        "min_duration_start": 432000,
+        "max_duration_end": 18000,
         "vdaf": {
             "prio3": "count"
         },
@@ -85,7 +89,7 @@ pub(crate) struct MockAggregator {
     pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
     leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    agg_store: Arc<Mutex<HashMap<BucketInfo, DapAggregateShare>>>,
+    agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
 }
 
 #[allow(dead_code)]
@@ -222,10 +226,16 @@ impl DapAggregator<BearerToken> for MockAggregator {
         for (window, agg_share_delta) in agg_shares.into_iter() {
             bucket_info.window = window;
 
-            if let Some(agg_share) = agg_store.get_mut(&bucket_info) {
-                agg_share.merge(agg_share_delta)?;
+            if let Some(agg_store_state) = agg_store.get_mut(&bucket_info) {
+                agg_store_state.agg_share.merge(agg_share_delta)?;
             } else {
-                agg_store.insert(bucket_info.clone(), agg_share_delta);
+                agg_store.insert(
+                    bucket_info.clone(),
+                    AggStoreState {
+                        agg_share: agg_share_delta,
+                        collected: false,
+                    },
+                );
             }
         }
 
@@ -246,12 +256,18 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
-        for (inner_bucket_info, agg_share_delta) in agg_store.iter() {
+        for (inner_bucket_info, agg_store_state) in agg_store.iter() {
             if task_id == &inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window
                 && batch_interval.end() > inner_bucket_info.window
             {
-                agg_share.merge(agg_share_delta.clone())?;
+                if agg_store_state.collected {
+                    return Err(DapError::PeerError(
+                        "overlapping batch interval".to_string(),
+                    ));
+                } else {
+                    agg_share.merge(agg_store_state.agg_share.clone())?;
+                }
             }
         }
 
@@ -263,6 +279,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> Result<(), DapError> {
+        // Mark reports as collected.
         let mut report_store_mutex_guard = self
             .report_store
             .lock()
@@ -275,6 +292,21 @@ impl DapAggregator<BearerToken> for MockAggregator {
                 && batch_interval.end() > inner_bucket_info.window
             {
                 store.collected = true;
+            }
+        }
+
+        // Mark aggregate shares as collected.
+        let mut agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref_mut();
+        for (inner_bucket_info, agg_store_state) in agg_store.iter_mut() {
+            if task_id == &inner_bucket_info.task_id
+                && batch_interval.start <= inner_bucket_info.window
+                && batch_interval.end() > inner_bucket_info.window
+            {
+                agg_store_state.collected = true;
             }
         }
 
@@ -488,6 +520,28 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Check CollectReq whether it is valid.
+        if collect_req.batch_interval.duration / task_config.min_batch_duration
+            > task_config.max_window_size
+        {
+            return Err(DapError::PeerError("batch interval too large".to_string()));
+        }
+        if now.abs_diff(collect_req.batch_interval.start) > task_config.min_duration_start {
+            return Err(DapError::PeerError(
+                "batch interval too far into past".to_string(),
+            ));
+        }
+        if now.abs_diff(collect_req.batch_interval.end()) > task_config.max_duration_end {
+            return Err(DapError::PeerError(
+                "batch interval too far into future".to_string(),
+            ));
+        }
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
@@ -707,8 +761,9 @@ pub(crate) enum CollectJobState {
     Processed(CollectResp),
 }
 
-/// LeaderState keeps track of Collect IDs in their order of arrival.
-/// It also holds the state of the collect job associated to the Collect ID.
+/// LeaderState keeps track of the following:
+/// * Collect IDs in their order of arrival.
+/// * The state of the collect job associated to the Collect ID.
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
@@ -721,4 +776,12 @@ impl LeaderState {
             collect_jobs: HashMap::default(),
         }
     }
+}
+
+/// AggStoreState keeps track of the following:
+/// * Aggregate share
+/// * Whether this aggregate share has been collected
+pub(crate) struct AggStoreState {
+    agg_share: DapAggregateShare,
+    collected: bool,
 }
