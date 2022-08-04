@@ -91,7 +91,7 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 }
 
 pub(crate) fn durable_queue_name(queue_num: usize) -> String {
-    format!("/queue/{}", queue_num)
+    format!("queue/{}", queue_num)
 }
 
 /// Reference to a DO instance, used by the garbage collector.

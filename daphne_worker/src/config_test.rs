@@ -81,7 +81,7 @@ fn daphne_param() {
     };
     assert_eq!(
         config.durable_report_store_name(&task_config, &task_id, &nonce),
-        "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/1"
+        "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1"
     );
 
     // Try enumerating a sequence of batch names.
@@ -96,16 +96,16 @@ fn daphne_param() {
     assert_eq!(
         batch_names,
         vec![
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/0",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/0",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/1",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/1",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/2",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/2",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/3",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/3",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637362800/bucket/4",
-            "/task/8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8/window/1637366400/bucket/4",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/0",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/0",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/1",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/2",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/2",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/3",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/3",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/4",
+            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/4",
         ]
     );
 }

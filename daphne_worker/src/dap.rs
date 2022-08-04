@@ -150,13 +150,12 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
         // shares that have already been marked collected.
-        let task_id_base64url = task_id.to_base64url();
         let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id_base64url, window))?
+                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -185,14 +184,13 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
 
         let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
-        let task_id_base64url = task_id.to_base64url();
 
         let agg_shares =
             DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
 
         for (window, agg_share) in agg_shares.into_iter() {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id_base64url, window))?
+                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -212,13 +210,12 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
 
         let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
-        let task_id_base64url = task_id.to_base64url();
         let mut agg_share = DapAggregateShare::default();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id_base64url, window))?
+                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -259,7 +256,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id.to_base64url(), window))?
+                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).

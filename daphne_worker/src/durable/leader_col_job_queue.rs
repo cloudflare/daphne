@@ -32,7 +32,7 @@ struct OrderedCollectReq {
 
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
-/// An instance of the [`LeaderCollectionJobQueue`] DO is named `/queue/<queue_num>`, where `<queue_num>`
+/// An instance of the [`LeaderCollectionJobQueue`] DO is named `queue/<queue_num>`, where `<queue_num>`
 /// is an integer representing a specific queue.
 //
 // TODO spec: Consider allowing completed aggregate results to be deleted after a period of time.
