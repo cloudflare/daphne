@@ -6,19 +6,16 @@
 //! Daphne-Worker configuration.
 
 use crate::{
-    dap,
     durable::{
-        aggregate_store::durable_agg_store_name, durable_queue_name,
-        report_store::durable_report_store_name, DURABLE_DELETE_ALL,
+        report_store::durable_report_store_name, BINDING_DAP_GARBAGE_COLLECTOR, DURABLE_DELETE_ALL,
     },
-    int_err, now,
+    int_err,
 };
 use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
     messages::{Id, Interval, Nonce},
-    roles::DapAggregator,
     DapError, DapGlobalConfig, DapRequest, DapTaskConfig,
 };
 use prio::{
@@ -283,54 +280,13 @@ impl<D> DaphneWorkerConfig<D> {
         None
     }
 
-    pub(crate) async fn internal_reset(
-        &self,
-        task_id: &Id,
-        batch_info: &Option<Interval>,
-    ) -> std::result::Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(dap::INT_ERR_UNRECOGNIZED_TASK))?;
-
-        let batch_interval = if let Some(batch_interval) = batch_info {
-            if !batch_interval.is_valid_for(task_config) {
-                return Err(DapError::fatal(dap::INT_ERR_INVALID_BATCH_INTERVAL));
-            }
-            batch_interval.clone()
-        } else {
-            task_config.current_batch_window(now())
-        };
-
-        // Delete all report data in the batch interval.
-        let namespace = self.durable_object("DAP_REPORT_STORE")?;
-        for durable_name in self.iter_report_store_names(task_id, &batch_interval)? {
-            let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
-        }
-
-        // Delete all aggregate data in the batch interval.
-        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
-        let task_id_base64url = task_id.to_base64url();
-        for window in (batch_interval.start..batch_interval.end())
-            .step_by(task_config.min_batch_duration.try_into().unwrap())
-        {
-            let agg_name = durable_agg_store_name(&task_id_base64url, window);
-            let stub = namespace.id_from_name(&agg_name)?.get_stub()?;
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
-        }
-
-        // Clear the leader's aggregationn job queue.
-        let namespace = self.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
-        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
+    /// Clear all persistant durable objects storage.
+    ///
+    /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
+    pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
+        let namespace = self.durable_object(BINDING_DAP_GARBAGE_COLLECTOR)?;
+        let stub = namespace.id_from_name("garbage_collector")?.get_stub()?;
         durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
-
-        // Clear the leader's collection job queue.
-        let namespace = self.durable_object("DAP_LEADER_COL_JOB_QUEUE")?;
-        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
-
         Ok(())
     }
 

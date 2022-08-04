@@ -27,6 +27,7 @@ bindings = [
   { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
   { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
   { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+  { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
 ]
 
 

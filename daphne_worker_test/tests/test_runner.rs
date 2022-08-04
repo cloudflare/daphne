@@ -174,7 +174,7 @@ impl TestRunner {
             HELPER_TASK_LIST,
         )
         .await;
-        t.internal_reset(&t.batch_interval()).await;
+        t.internal_delete_all(&t.batch_interval()).await;
         t
     }
 
@@ -399,10 +399,10 @@ impl TestRunner {
     }
 
     #[allow(dead_code)]
-    pub async fn internal_reset(&self, batch_interval: &Interval) {
+    pub async fn internal_delete_all(&self, batch_interval: &Interval) {
         let client = self.http_client();
-        post_internal_test_reset(&client, &self.leader_url, &self.task_id, batch_interval).await;
-        post_internal_test_reset(&client, &self.helper_url, &self.task_id, batch_interval).await;
+        post_internal_delete_all(&client, &self.leader_url, batch_interval).await;
+        post_internal_delete_all(&client, &self.helper_url, batch_interval).await;
     }
 }
 
@@ -433,13 +433,7 @@ impl TestRunner {
             JANUS_HELPER_TASK_LIST,
         )
         .await;
-        post_internal_test_reset(
-            &t.http_client(),
-            &t.leader_url,
-            &t.task_id,
-            &t.batch_interval(),
-        )
-        .await;
+        post_internal_delete_all(&t.http_client(), &t.leader_url, &t.batch_interval()).await;
 
         let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
         let aggregator_endpoints = vec![t.leader_url.clone(), t.helper_url.clone()];
@@ -574,19 +568,12 @@ async fn get_raw_hpke_config(
 }
 
 #[allow(dead_code)]
-async fn post_internal_test_reset(
+async fn post_internal_delete_all(
     client: &reqwest::Client,
     base_url: &Url,
-    task_id: &Id,
     batch_interval: &Interval,
 ) {
-    let url = base_url
-        .join(&format!(
-            "/internal/test/reset/task/{}",
-            task_id.to_base64url()
-        ))
-        .unwrap();
-
+    let url = base_url.join("/internal/delete_all").unwrap();
     let req = client
         .post(url.as_str())
         .body(serde_json::to_string(batch_interval).unwrap());

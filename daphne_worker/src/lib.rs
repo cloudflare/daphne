@@ -6,7 +6,7 @@
 use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
 use daphne::{
     constants,
-    messages::{Id, Interval},
+    messages::Id,
     roles::{DapAggregator, DapHelper, DapLeader},
     DapAbort, DapCollectJob, DapError, DapResponse,
 };
@@ -163,6 +163,7 @@ impl DaphneWorkerRouter {
                         },
                     )
                     .post_async("/internal/process", |mut req, ctx| async move {
+                        // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let agg_info: InternalAggregateInfo = req.json().await?;
                         match config.process(&agg_info).await {
@@ -197,18 +198,13 @@ impl DaphneWorkerRouter {
         };
 
         let router = if self.enable_internal_test {
-            router.post_async(
-                "/internal/test/reset/task/:task_id",
-                |mut req, ctx| async move {
-                    let task_id = parse_id!(ctx.param("task_id"));
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    let batch_info: Option<Interval> = req.json().await?;
-                    match config.internal_reset(&task_id, &batch_info).await {
-                        Ok(()) => Response::empty(),
-                        Err(e) => abort(e.into()),
-                    }
-                },
-            )
+            router.post_async("/internal/delete_all", |_req, ctx| async move {
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                match config.internal_delete_all().await {
+                    Ok(()) => Response::empty(),
+                    Err(e) => abort(e.into()),
+                }
+            })
         } else {
             router
         };

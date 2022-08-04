@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{durable::DURABLE_DELETE_ALL, int_err};
+use crate::{durable::BINDING_DAP_LEADER_AGG_JOB_QUEUE, int_err};
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -22,7 +22,19 @@ pub(crate) struct AggregationJob {
     pub(crate) time: u64,
 
     /// A random value used to break ties between jobs with the same time stamp.
-    pub(crate) rand: u64,
+    pub(crate) rand: [u8; 16],
+}
+
+impl AggregationJob {
+    fn bucket_key(&self) -> String {
+        // Format the bucket so that they are processed in order of arrival (oldest first). The
+        // timestamp is used for this purpose; the randomm value is used for breaking ties.
+        format!(
+            "bucket/time/{:020}/rand/{}",
+            self.time,
+            hex::encode(self.rand)
+        )
+    }
 }
 
 /// Durable Object (DO) representing an aggregation job queue.
@@ -33,27 +45,35 @@ pub(crate) struct AggregationJob {
 pub struct LeaderAggregationJobQueue {
     #[allow(dead_code)]
     state: State,
+    env: Env,
+    touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for LeaderAggregationJobQueue {
-    fn new(state: State, _env: Env) -> Self {
-        Self { state }
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            state,
+            env,
+            touched: false,
+        }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        match (req.path().as_ref(), req.method()) {
-            (DURABLE_DELETE_ALL, Method::Post) => {
-                self.state.storage().delete_all().await?;
-                Response::empty()
-            }
+        let id_hex = self.state.id().to_string();
+        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_LEADER_AGG_JOB_QUEUE);
 
+        match (req.path().as_ref(), req.method()) {
             (DURABLE_LEADER_AGG_JOB_QUEUE_PUT, Method::Post) => {
                 let agg_job: AggregationJob = req.json().await?;
                 self.state
                     .storage()
-                    .put(&bucket_key_for(&agg_job), agg_job.report_store_id_hex)
+                    .put(&agg_job.bucket_key(), agg_job.report_store_id_hex.clone())
                     .await?;
+                console_debug!(
+                    "LeaderAggregationJobQueue: bucket {} has been scheduled",
+                    agg_job.report_store_id_hex
+                );
                 Response::empty()
             }
 
@@ -77,10 +97,7 @@ impl DurableObject for LeaderAggregationJobQueue {
 
             (DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, Method::Post) => {
                 let agg_job: AggregationJob = req.json().await?;
-                self.state
-                    .storage()
-                    .delete(&bucket_key_for(&agg_job))
-                    .await?;
+                self.state.storage().delete(&agg_job.bucket_key()).await?;
                 Response::empty()
             }
 
@@ -91,10 +108,4 @@ impl DurableObject for LeaderAggregationJobQueue {
             ))),
         }
     }
-}
-
-fn bucket_key_for(agg_job: &AggregationJob) -> String {
-    // Format the bucket so that they are processed in order of arrival (oldest first). The
-    // timestamp is used for this purpose; the randomm value is used for breaking ties.
-    format!("bucket/time/{:020}/rand/{:020}", agg_job.time, agg_job.rand)
 }
