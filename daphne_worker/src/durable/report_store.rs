@@ -17,15 +17,8 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-pub(crate) fn durable_report_store_name(
-    task_id_base64url: &str,
-    window: u64,
-    bucket: u64,
-) -> String {
-    format!(
-        "/task/{}/window/{}/bucket/{}",
-        task_id_base64url, window, bucket
-    )
+pub(crate) fn durable_report_store_name(task_id_hex: &str, window: u64, bucket: u64) -> String {
+    format!("task/{}/window/{}/bucket/{}", task_id_hex, window, bucket)
 }
 
 pub(crate) const DURABLE_REPORT_STORE_GET_PENDING: &str = "/internal/do/report_store/get_pending";

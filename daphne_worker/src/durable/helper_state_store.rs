@@ -9,11 +9,7 @@ use daphne::messages::Id;
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(task_id: &Id, agg_job_id: &Id) -> String {
-    format!(
-        "/task/{}/agg_job/{}",
-        task_id.to_base64url(),
-        agg_job_id.to_base64url()
-    )
+    format!("task/{}/agg_job/{}", task_id.to_hex(), agg_job_id.to_hex())
 }
 
 pub(crate) const DURABLE_HELPER_STATE_PUT: &str = "/internal/do/helper_state/put";
@@ -21,7 +17,7 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 
 /// Durable Object (DO) for storing the Helper's state for a given aggregation job.
 ///
-/// An instance of the [`LeaderStateStore`] DO is named `/task/<task_id>/agg_job/<agg_job_id>`,
+/// An instance of the [`LeaderStateStore`] DO is named `task/<task_id>/agg_job/<agg_job_id>`,
 /// where `<task_id>` is the task ID and `<agg_job_id>` is the aggregation job ID.
 #[durable_object]
 pub struct HelperStateStore {
