@@ -1,7 +1,10 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{durable::state_get, int_err};
+use crate::{
+    durable::{state_get, BINDING_DAP_HELPER_STATE_STORE},
+    int_err,
+};
 use daphne::messages::Id;
 use worker::*;
 
@@ -24,15 +27,24 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 pub struct HelperStateStore {
     #[allow(dead_code)]
     state: State,
+    env: Env,
+    touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for HelperStateStore {
-    fn new(state: State, _env: Env) -> Self {
-        Self { state }
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            state,
+            env,
+            touched: false,
+        }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+        let id_hex = self.state.id().to_string();
+        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_HELPER_STATE_STORE);
+
         match (req.path().as_ref(), req.method()) {
             (DURABLE_HELPER_STATE_PUT, Method::Post) => {
                 // The state is handled as an opaque hex string.

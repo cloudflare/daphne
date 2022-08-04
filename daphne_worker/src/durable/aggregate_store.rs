@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable::{state_get_or_default, DURABLE_DELETE_ALL},
+    durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     int_err,
 };
 use daphne::DapAggregateShare;
@@ -36,21 +36,25 @@ pub(crate) enum AggregateStoreResult {
 pub struct AggregateStore {
     #[allow(dead_code)]
     state: State,
+    env: Env,
+    touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for AggregateStore {
-    fn new(state: State, _env: Env) -> Self {
-        Self { state }
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            state,
+            env,
+            touched: false,
+        }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        match (req.path().as_ref(), req.method()) {
-            (DURABLE_DELETE_ALL, Method::Post) => {
-                self.state.storage().delete_all().await?;
-                Response::empty()
-            }
+        let id_hex = self.state.id().to_string();
+        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_AGGREGATE_STORE);
 
+        match (req.path().as_ref(), req.method()) {
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
                 let mut agg_share: DapAggregateShare =
                     state_get_or_default(&self.state, "agg_share").await?;

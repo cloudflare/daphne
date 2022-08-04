@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable::{state_get, state_get_or_default, DURABLE_DELETE_ALL},
+    durable::{state_get, state_get_or_default, BINDING_DAP_LEADER_COL_JOB_QUEUE},
     int_err,
 };
 use daphne::{
@@ -41,21 +41,24 @@ pub struct LeaderCollectionJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for LeaderCollectionJobQueue {
     fn new(state: State, env: Env) -> Self {
-        Self { state, env }
+        Self {
+            state,
+            env,
+            touched: false,
+        }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        match (req.path().as_ref(), req.method()) {
-            (DURABLE_DELETE_ALL, Method::Post) => {
-                self.state.storage().delete_all().await?;
-                Response::empty()
-            }
+        let id_hex = self.state.id().to_string();
+        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_LEADER_COL_JOB_QUEUE);
 
+        match (req.path().as_ref(), req.method()) {
             // Store a CollectReq issued by the collector.
             (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
                 let collect_req: CollectReq = req.json().await?;

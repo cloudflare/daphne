@@ -7,7 +7,8 @@ use crate::{
         leader_agg_job_queue::{
             AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        state_get, state_get_or_default, DURABLE_DELETE_ALL,
+        state_get, state_get_or_default, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+        BINDING_DAP_REPORT_STORE,
     },
     int_err, now,
 };
@@ -55,6 +56,7 @@ pub struct ReportStore {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    touched: bool,
 }
 
 impl ReportStore {
@@ -75,17 +77,19 @@ impl ReportStore {
 #[durable_object]
 impl DurableObject for ReportStore {
     fn new(state: State, env: Env) -> Self {
-        Self { state, env }
+        Self {
+            state,
+            env,
+            touched: false,
+        }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         let mut rng = thread_rng();
-        match (req.path().as_ref(), req.method()) {
-            (DURABLE_DELETE_ALL, Method::Post) => {
-                self.state.storage().delete_all().await?;
-                Response::from_json(&ReportStoreResult::Ok)
-            }
+        let id_hex = self.state.id().to_string();
+        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORT_STORE);
 
+        match (req.path().as_ref(), req.method()) {
             (DURABLE_REPORT_STORE_GET_PENDING, Method::Post) => {
                 let reports_requested: usize = req.json().await?;
                 let opt = ListOptions::new()
@@ -120,7 +124,8 @@ impl DurableObject for ReportStore {
                     if let Some(agg_job) = agg_job {
                         // NOTE There is only one agg job queue for now. In the future, work will
                         // be sharded across multiple queues.
-                        let namespace = self.env.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
+                        let namespace =
+                            self.env.durable_object(BINDING_DAP_LEADER_AGG_JOB_QUEUE)?;
                         let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
                         durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, &agg_job).await?;
                         self.state.storage().delete("agg_job").await?;
@@ -151,23 +156,18 @@ impl DurableObject for ReportStore {
                 let agg_job: Option<AggregationJob> = state_get(&self.state, "agg_job").await?;
                 if agg_job.is_none() {
                     let agg_job = AggregationJob {
-                        report_store_id_hex: self.state.id().to_string(),
+                        report_store_id_hex: id_hex,
                         time: now(),
                         rand: rng.gen(),
                     };
 
-                    console_debug!(
-                        "agg job for bucket {} has been scheduled",
-                        agg_job.report_store_id_hex
-                    );
-                    let namespace = self.env.durable_object("DAP_LEADER_AGG_JOB_QUEUE")?;
+                    let namespace = self.env.durable_object(BINDING_DAP_LEADER_AGG_JOB_QUEUE)?;
                     // TODO Shard the work across multiple job queues rather than just one. (See
                     // issue #25.) For now there is jsut one job queue.
                     let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
                     durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_PUT, &agg_job).await?;
                     self.state.storage().put("agg_job", agg_job).await?;
                 }
-
                 Response::from_json(&res)
             }
 
