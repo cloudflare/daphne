@@ -7,7 +7,7 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
-    DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, VdafConfig,
+    DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, DapVersion, VdafConfig,
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
@@ -36,10 +36,14 @@ pub const GLOBAL_CONFIG: &str = r#"{
 // This value of this JSON string must match DAP_TASK_LIST in tests/backend/leader.env.
 //
 // TODO De-duplicate this config.
+//
+// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
+// When adding paths, they must not start with a "/".
 const LEADER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "leader_url": "http://leader:8787",
-        "helper_url": "http://helper:8788",
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://helper:8788/v01/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -59,8 +63,9 @@ const LEADER_TASK_LIST: &str = r#"{
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     },
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "leader_url": "http://leader:8787",
-        "helper_url": "http://127.0.0.1:9788",
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://127.0.0.1:9788/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -84,10 +89,14 @@ const LEADER_TASK_LIST: &str = r#"{
 // This value of this JSON string must match DAP_TASK_LIST in tests/backend/helper.env.
 //
 // TODO De-duplicate this config.
+//
+// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
+// When adding paths, they must not start with a "/".
 const HELPER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "leader_url": "http://leader:8787",
-        "helper_url": "http://helper:8788",
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://helper:8788/v01/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -110,8 +119,9 @@ const HELPER_TASK_LIST: &str = r#"{
 
 pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "leader_url": "http://leader:8787",
-        "helper_url": "http://127.0.0.1:9788",
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://127.0.0.1:9788/",
          "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -152,6 +162,7 @@ pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#" {
 
 #[allow(dead_code)]
 pub struct TestRunner {
+    pub version: DapVersion,
     pub task_id: Id,
     pub now: u64,
     pub min_batch_duration: u64,
@@ -215,6 +226,7 @@ impl TestRunner {
             .as_secs();
 
         let t = Self {
+            version: task_config.version.clone(),
             task_id: task_id.clone(),
             now,
             min_batch_duration: task_config.min_batch_duration,
@@ -353,7 +365,7 @@ impl TestRunner {
     }
 
     pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
-        let url = self.leader_url.join("/collect").unwrap();
+        let url = self.leader_url.join("collect").unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -382,6 +394,11 @@ impl TestRunner {
         client: &reqwest::Client,
         agg_info: &InternalAggregateInfo,
     ) -> DapLeaderProcessTelemetry {
+        // TODO(nakatsuka-y) Make the following explicit and clear.
+        // The URL below is made sort of a hack-y way where we use url::Url
+        // deleting the path from the base URL when calling "join()" to our
+        // advantage to prevent us from having "version" in this URL.
+        // Ref: https://github.com/cloudflare/daphne/issues/80
         let url = self.leader_url.join("/internal/process").unwrap();
         let resp = client
             .post(url.as_str())
@@ -534,7 +551,7 @@ async fn get_raw_hpke_config(
     let time_to_wait = std::time::Duration::from_secs(15);
     let max_time_to_wait = std::time::Duration::from_secs(60 * 3);
     let mut elapsed_time = std::time::Duration::default();
-    let url = base_url.join("/hpke_config").unwrap();
+    let url = base_url.join("hpke_config").unwrap();
     let query = [(
         "task_id",
         base64::encode_config(task_id, base64::URL_SAFE_NO_PAD),
@@ -573,6 +590,11 @@ async fn post_internal_delete_all(
     base_url: &Url,
     batch_interval: &Interval,
 ) {
+    // TODO(nakatsuka-y) Make the following explicit and clear.
+    // The URL below is made sort of a hack-y way where we use url::Url
+    // deleting the path from the base URL when calling "join()" to our
+    // advantage to prevent us from having "version" in this URL.
+    // Ref: https://github.com/cloudflare/daphne/issues/80
     let url = base_url.join("/internal/delete_all").unwrap();
     let req = client
         .post(url.as_str())
