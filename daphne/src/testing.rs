@@ -34,10 +34,14 @@ pub const GLOBAL_CONFIG: &str = r#"{
 
 // Secret key of "collector_hpke_config":
 // 60890f1e438bf1f0e9ad2bd839acf1341137eee623bf7906972bf1cc80bb5d7b
+//
+// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
+// When adding paths, they must not start with a "/".
 pub const TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "leader_url": "https://leader.biz/leadver/v1/",
-        "helper_url": "http://helper.com:8788",
+        "version": "v01",
+        "leader_url": "https://leader.biz/v01/",
+        "helper_url": "http://helper.com:8788/v01/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -568,7 +572,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let collect_uri = task_config
             .leader_url
             .join(&format!(
-                "/collect/task/{}/req/{}",
+                "collect/task/{}/req/{}",
                 collect_req.task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))

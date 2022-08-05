@@ -385,7 +385,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
         let collect_uri = url
             .join(&format!(
-                "/collect/task/{}/req/{}",
+                "collect/task/{}/req/{}",
                 collect_req.task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))

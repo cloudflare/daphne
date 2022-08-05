@@ -12,8 +12,9 @@ pub const GLOBAL_CONFIG: &str = r#"{
 
 const DAP_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "leader_url": "https://leader.biz/leadver/v1/",
-        "helper_url": "http://helper.com:8788",
+        "version": "v01",
+        "leader_url": "https://leader.biz/v01/",
+        "helper_url": "http://helper.com:8788/v01/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -31,10 +32,11 @@ const DAP_TASK_LIST: &str = r#"{
             }
         },
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-    },
+},
     "aaaabe3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "leader_url": "http://leader:8787",
-        "helper_url": "http://helper:8788",
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://helper:8788/v01/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",

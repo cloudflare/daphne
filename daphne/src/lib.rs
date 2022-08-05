@@ -126,6 +126,10 @@ pub enum DapAbort {
     #[error("invalidBatchInterval")]
     InvalidBatchInterval,
 
+    /// Invalid DAP version. Sent in response to requests for an unsupported (or unknown) DAP version.
+    #[error("invalidProtocolVersion")]
+    InvalidProtocolVersion,
+
     /// Insufficient batch size. Sent in response to a CollectReq or AggregateShareReq.
     #[error("insufficientBatchSize")]
     InsufficientBatchSize,
@@ -174,6 +178,7 @@ impl DapAbort {
             Self::BatchMismatch
             | Self::BatchOverlap
             | Self::InvalidBatchInterval
+            | Self::InvalidProtocolVersion
             | Self::InsufficientBatchSize
             | Self::ReplayedReport
             | Self::StaleReport
@@ -237,6 +242,25 @@ pub struct ProblemDetails {
     pub detail: Option<String>,
 }
 
+/// DAP version used for a task.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DapVersion {
+    #[serde(rename = "v01")]
+    Draft01,
+
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<&str> for DapVersion {
+    fn from(version: &str) -> Self {
+        match version {
+            "v01" => DapVersion::Draft01,
+            _ => DapVersion::Unknown,
+        }
+    }
+}
+
 /// Global DAP parameters common across tasks.
 //
 // NOTE: Consider whether the following parameters should be included
@@ -262,6 +286,7 @@ pub struct DapGlobalConfig {
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
+    pub version: DapVersion,
     pub leader_url: Url,
     pub helper_url: Url,
     pub min_batch_duration: u64, // seconds
@@ -286,6 +311,7 @@ impl DapTaskConfig {
 
 #[derive(Deserialize, Serialize)]
 struct ShadowDapTaskConfig {
+    version: DapVersion,
     leader_url: Url,
     helper_url: Url,
     min_batch_duration: u64,
@@ -305,6 +331,7 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             .get_decoded_verify_key(&shadow.vdaf_verify_key)?;
 
         Ok(Self {
+            version: shadow.version,
             leader_url: shadow.leader_url,
             helper_url: shadow.helper_url,
             min_batch_duration: shadow.min_batch_duration,
@@ -548,6 +575,7 @@ pub enum Prio3Config {
 /// DAP request.
 #[derive(Debug)]
 pub struct DapRequest<S> {
+    pub version: DapVersion,
     pub media_type: Option<&'static str>,
     pub payload: Vec<u8>,
     pub url: Url,

@@ -544,6 +544,7 @@ dependencies = [
  "getrandom",
  "hex",
  "hpke 0.8.0",
+ "matchit 0.6.0",
  "prio",
  "rand",
  "reqwest-wasm",

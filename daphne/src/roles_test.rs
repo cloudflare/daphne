@@ -19,7 +19,7 @@ use crate::{
         HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
     DapAbort, DapCollectJob, DapError, DapLeaderTransition, DapMeasurement, DapRequest,
-    DapTaskConfig, Prio3Config, VdafConfig,
+    DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use matchit::Router;
@@ -41,11 +41,13 @@ impl MockAggregator {
     fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
         let task_config = self.get_task_config_for(task_id).unwrap();
+        let version = task_config.version.clone();
 
         DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_REPORT),
             payload: report.get_encoded(),
-            url: task_config.leader_url.join("/upload").unwrap(),
+            url: task_config.leader_url.join("upload").unwrap(),
             sender_auth: None,
         }
     }
@@ -54,8 +56,10 @@ impl MockAggregator {
         let mut rng = thread_rng();
         let task_id = self.nominal_task_id();
         let task_config = self.get_task_config_for(task_id).unwrap();
+        let version = task_config.version.clone();
 
         DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
             payload: AggregateInitializeReq {
                 task_id: task_id.clone(),
@@ -64,7 +68,7 @@ impl MockAggregator {
                 report_shares,
             }
             .get_encoded(),
-            url: task_config.helper_url.join("/aggregate").unwrap(),
+            url: task_config.helper_url.join("aggregate").unwrap(),
             sender_auth: None,
         }
     }
@@ -76,8 +80,10 @@ impl MockAggregator {
     ) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
         let task_config = self.get_task_config_for(task_id).unwrap();
+        let version = task_config.version.clone();
 
         DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
             payload: AggregateContinueReq {
                 task_id: task_id.clone(),
@@ -85,7 +91,7 @@ impl MockAggregator {
                 transitions,
             }
             .get_encoded(),
-            url: task_config.helper_url.join("/aggregate").unwrap(),
+            url: task_config.helper_url.join("aggregate").unwrap(),
             sender_auth: None,
         }
     }
@@ -97,8 +103,10 @@ impl MockAggregator {
     ) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
         let task_config = self.get_task_config_for(task_id).unwrap();
+        let version = task_config.version.clone();
 
         DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
             payload: AggregateShareReq {
                 task_id: task_id.clone(),
@@ -108,7 +116,7 @@ impl MockAggregator {
                 checksum,
             }
             .get_encoded(),
-            url: task_config.helper_url.join("/aggregate_share").unwrap(),
+            url: task_config.helper_url.join("aggregate_share").unwrap(),
             sender_auth: None,
         }
     }
@@ -116,8 +124,10 @@ impl MockAggregator {
     fn gen_test_collect_req(&self) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
         let task_config = self.get_task_config_for(task_id).unwrap();
+        let version = task_config.version.clone();
 
         DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_COLLECT_REQ),
             payload: CollectReq {
                 task_id: task_id.clone(),
@@ -125,7 +135,7 @@ impl MockAggregator {
                 agg_param: Vec::default(),
             }
             .get_encoded(),
-            url: task_config.leader_url.join("/collect").unwrap(),
+            url: task_config.leader_url.join("collect").unwrap(),
             sender_auth: None,
         }
     }
@@ -184,10 +194,12 @@ impl MockAggregator {
         let (leader_state, agg_init_req) = transition.unwrap_continue();
 
         // Leader: Send aggregate initialization request to Helper and receive response.
+        let version = task_config.version.clone();
         let req = DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_INIT_REQ),
             payload: agg_init_req.get_encoded(),
-            url: task_config.helper_url.join("/aggregate").unwrap(),
+            url: task_config.helper_url.join("aggregate").unwrap(),
             sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
         };
         let res = helper.http_post_aggregate(&req).await.unwrap();
@@ -202,10 +214,12 @@ impl MockAggregator {
         let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
 
         // Leader: Send aggregate continue request to Helper and receive response.
+        let version = task_config.version.clone();
         let req = DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_CONT_REQ),
             payload: agg_cont_req.get_encoded(),
-            url: task_config.helper_url.join("/aggregate").unwrap(),
+            url: task_config.helper_url.join("aggregate").unwrap(),
             sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
         };
         let res = helper.http_post_aggregate(&req).await.unwrap();
@@ -252,10 +266,12 @@ impl MockAggregator {
         };
 
         // Leader: Send AggregateShareReq to Helper and receive AggregateShareResp.
+        let version = task_config.version.clone();
         let req = DapRequest {
+            version,
             media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
             payload: agg_share_req.get_encoded(),
-            url: task_config.helper_url.join("/aggregate_share").unwrap(),
+            url: task_config.helper_url.join("aggregate_share").unwrap(),
             sender_auth: Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())),
         };
         let res = self.http_post_aggregate_share(&req).await.unwrap();
@@ -636,10 +652,12 @@ async fn poll_collect_job_test_results() {
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -697,10 +715,12 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         },
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -722,10 +742,12 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         },
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -746,10 +768,12 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         },
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -778,10 +802,12 @@ async fn http_post_collect_succeed_max_batch_interval() {
         },
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -816,10 +842,12 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -839,10 +867,12 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -867,10 +897,12 @@ async fn http_post_collect_success() {
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collector_collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.leader_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 
@@ -887,7 +919,7 @@ async fn http_post_collect_success() {
     let path = url.path().to_string();
     let mut router = Router::new();
     router
-        .insert("/collect/task/:task_id/req/:collect_id", true)
+        .insert("/:version/collect/task/:task_id/req/:collect_id", true)
         .unwrap();
     let url_match = router.at(&path).unwrap();
     let collector_collect_id = url_match.params.get("collect_id").unwrap();
@@ -895,6 +927,23 @@ async fn http_post_collect_success() {
         collector_collect_id.to_string(),
         leader_collect_id.to_base64url()
     );
+}
+
+// Test HTTP POST requests with a wrong DAP version.
+#[tokio::test]
+async fn http_post_fail_wrong_dap_version() {
+    let leader = MockAggregator::new();
+    let task_id = leader.nominal_task_id();
+    let task_config = leader.get_task_config_for(task_id).unwrap();
+
+    // Send a request with the wrong DAP version.
+    let report = leader.gen_test_report(task_id);
+    let mut req = leader.gen_test_upload_req(report);
+    req.version = DapVersion::Unknown;
+    req.url = task_config.leader_url.join("upload").unwrap();
+
+    let err = leader.http_post_upload(&req).await.unwrap_err();
+    assert_matches!(err, DapAbort::InvalidProtocolVersion);
 }
 
 // Test the upload sub-protocol.
@@ -940,10 +989,12 @@ async fn e2e() {
         batch_interval: task_config.current_batch_window(now),
         agg_param: Vec::default(),
     };
+    let version = task_config.version.clone();
     let req = DapRequest {
+        version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
         payload: collect_req.get_encoded(),
-        url: task_config.helper_url.join("/collect").unwrap(),
+        url: task_config.helper_url.join("collect").unwrap(),
         sender_auth: Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())),
     };
 

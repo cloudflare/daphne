@@ -39,6 +39,7 @@ async fn e2e_leader_upload() {
     let mut rng = thread_rng();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
+    let path = "upload";
 
     // Generate and upload a report.
     let report = t
@@ -52,7 +53,7 @@ async fn e2e_leader_upload() {
         .unwrap();
     t.leader_post_expect_ok(
         &client,
-        "/upload",
+        path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded(),
     )
@@ -62,7 +63,7 @@ async fn e2e_leader_upload() {
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
-        "/upload",
+        path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded(),
         400,
@@ -74,7 +75,7 @@ async fn e2e_leader_upload() {
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
-        "/upload",
+        path,
         constants::MEDIA_TYPE_REPORT,
         t.vdaf
             .produce_report(
@@ -104,7 +105,7 @@ async fn e2e_leader_upload() {
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
-        "/upload",
+        path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded(),
         400,
@@ -116,7 +117,7 @@ async fn e2e_leader_upload() {
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
-        "/upload",
+        path,
         constants::MEDIA_TYPE_REPORT,
         b"junk data".to_vec(),
         400,
@@ -127,7 +128,7 @@ async fn e2e_leader_upload() {
     // Upload a fixed report. This is a sanity check to make sure that the test resets the Leader's
     // state each time the test is run. If it didn't, this would result in an error due to the
     // nonce being repeated.
-    let url = t.leader_url.join("/upload").unwrap();
+    let url = t.leader_url.join(path).unwrap();
     let resp = client
         .post(url.as_str())
         .body(
@@ -185,7 +186,7 @@ async fn e2e_internal_leader_process() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -230,7 +231,7 @@ async fn e2e_leader_process_min_agg_rate() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -271,7 +272,7 @@ async fn e2e_leader_collect_ok() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -348,7 +349,7 @@ async fn e2e_leader_collect_ok() {
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
-        "/upload",
+        "upload",
         constants::MEDIA_TYPE_REPORT,
         t.vdaf
             .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -376,7 +377,7 @@ async fn e2e_leader_collect_ok_interleaved() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -430,7 +431,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -481,7 +482,7 @@ async fn e2e_leader_collect_abort_unknown_request() {
     let collect_uri = t
         .leader_url
         .join(&format!(
-            "/collect/task/{}/req/{}",
+            "collect/task/{}/req/{}",
             fake_id.to_base64url(),
             fake_id.to_base64url()
         ))
@@ -517,6 +518,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     let t = TestRunner::default().await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
+    let path = "collect";
 
     // Start of batch interval does not align with min_batch_duration.
     let collect_req = CollectReq {
@@ -530,7 +532,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     t.leader_post_expect_abort(
         &client,
         Some(COLLECTOR_BEARER_TOKEN),
-        "/collect",
+        path,
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
         400,
@@ -550,7 +552,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     t.leader_post_expect_abort(
         &client,
         Some(COLLECTOR_BEARER_TOKEN),
-        "/collect",
+        path,
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
         400,
@@ -573,7 +575,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
@@ -632,7 +634,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
     t.leader_post_expect_abort(
         &client,
         Some(COLLECTOR_BEARER_TOKEN),
-        "/collect",
+        "collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
         400,

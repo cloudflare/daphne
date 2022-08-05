@@ -17,7 +17,7 @@ use crate::{
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
-    DapRequest, DapResponse, DapTaskConfig,
+    DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode};
@@ -120,6 +120,11 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
     async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+        // Check whether the DAP version indicated by the sender is supported.
+        if req.version == DapVersion::Unknown {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
+
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;
         for (k, v) in req.url.query_pairs() {
@@ -138,6 +143,15 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
         }
 
         if let Some(ref task_id) = id {
+            let task_config = self
+                .get_task_config_for(task_id)
+                .ok_or(DapAbort::UnrecognizedTask)?;
+
+            // Check whether the DAP version in the request matches the task config.
+            if task_config.version != req.version {
+                return Err(DapAbort::InvalidProtocolVersion);
+            }
+
             let hpke_config = self
                 .get_hpke_config_for(task_id)
                 .ok_or(DapAbort::UnrecognizedTask)?;
@@ -165,6 +179,7 @@ macro_rules! leader_post {
             .join($path)
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let req = DapRequest {
+            version: $task_config.version.clone(),
             media_type: Some($media_type),
             payload: $req_data,
             url,
@@ -220,9 +235,19 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
     async fn http_post_upload(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
+        // Check whether the DAP version indicated by the sender is supported.
+        if req.version == DapVersion::Unknown {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
+
         let report = Report::get_decoded(req.payload.as_ref())?;
-        if self.get_task_config_for(&report.task_id).is_none() {
-            return Err(DapAbort::UnrecognizedTask);
+        let task_config = self
+            .get_task_config_for(&report.task_id)
+            .ok_or(DapAbort::UnrecognizedTask)?;
+
+        // Check whether the DAP version in the request matches the task config.
+        if task_config.version != req.version {
+            return Err(DapAbort::InvalidProtocolVersion);
         }
 
         if report.encrypted_input_shares.len() != 2 {
@@ -245,6 +270,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
     async fn http_post_collect(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
+        // Check whether the DAP version indicated by the sender is supported.
+        if req.version == DapVersion::Unknown {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
+
         if !self.authorized(req).await? {
             return Err(DapAbort::UnauthorizedRequest);
         }
@@ -258,6 +288,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             collect_req.batch_interval,
             collect_req.agg_param
         );
+
+        // Check whether the DAP version in the request matches the task config.
+        if task_config.version != req.version {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
 
         // Check that the batch interval is not too wide or too far into the past/future.
         let global_config = self.get_global_config();
@@ -322,7 +357,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             self,
             task_id,
             task_config,
-            "/aggregate",
+            "aggregate",
             MEDIA_TYPE_AGG_INIT_REQ,
             agg_init_req.get_encoded()
         );
@@ -347,7 +382,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             self,
             task_id,
             task_config,
-            "/aggregate",
+            "aggregate",
             MEDIA_TYPE_AGG_CONT_REQ,
             agg_cont_req.get_encoded()
         );
@@ -402,7 +437,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             self,
             &collect_req.task_id,
             task_config,
-            "/aggregate_share",
+            "aggregate_share",
             MEDIA_TYPE_AGG_SHARE_REQ,
             agg_share_req.get_encoded()
         );
@@ -504,6 +539,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
     ///
     /// This is called during the Initialization and Continuation phases.
     async fn http_post_aggregate(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+        // Check whether the DAP version indicated by the sender is supported.
+        if req.version == DapVersion::Unknown {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
+
         if !self.authorized(req).await? {
             return Err(DapAbort::UnauthorizedRequest);
         }
@@ -514,6 +554,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 let task_config = self
                     .get_task_config_for(&agg_init_req.task_id)
                     .ok_or(DapAbort::UnrecognizedTask)?;
+
+                // Check whether the DAP version in the request matches the task config.
+                if task_config.version != req.version {
+                    return Err(DapAbort::InvalidProtocolVersion);
+                }
 
                 let early_rejects = self
                     .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
@@ -565,6 +610,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .get_task_config_for(&agg_cont_req.task_id)
                     .ok_or(DapAbort::UnrecognizedTask)?;
 
+                // Check whether the DAP version in the request matches the task config.
+                if task_config.version != req.version {
+                    return Err(DapAbort::InvalidProtocolVersion);
+                }
+
                 let state = self
                     .get_helper_state(&agg_cont_req.task_id, &agg_cont_req.agg_job_id)
                     .await?
@@ -600,6 +650,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
         &self,
         req: &DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
+        // Check whether the DAP version indicated by the sender is supported.
+        if req.version == DapVersion::Unknown {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
+
         if !self.authorized(req).await? {
             return Err(DapAbort::UnauthorizedRequest);
         }
@@ -613,6 +668,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
             agg_share_req.batch_interval,
             agg_share_req.agg_param
         );
+
+        // Check whether the DAP version in the request matches the task config.
+        if task_config.version != req.version {
+            return Err(DapAbort::InvalidProtocolVersion);
+        }
 
         // Check that the batch interval is not too wide or too far into the past/future.
         let global_config = self.get_global_config();

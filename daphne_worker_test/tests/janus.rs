@@ -90,7 +90,7 @@ async fn janus_helper() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
-            "/upload",
+            "upload",
             constants::MEDIA_TYPE_REPORT,
             t.vdaf
                 .produce_report(

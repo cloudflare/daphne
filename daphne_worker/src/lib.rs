@@ -102,9 +102,10 @@ impl DaphneWorkerRouter {
     //
     // TODO Document endpoints that aren't defined in the DAP spec
     pub async fn handle_request(&self, req: Request, env: Env) -> Result<Response> {
-        let router = Router::new().get_async("/hpke_config", |req, ctx| async move {
+        let router = Router::new().get_async("/:version/hpke_config", |req, ctx| async move {
             let config = DaphneWorkerConfig::from_worker_context(ctx)?;
             let req = config.worker_request_to_dap(req).await?;
+
             // TODO(cjpatton) Have this method return a DapResponse.
             match config.http_get_hpke_config(&req).await {
                 Ok(req) => dap_response_to_worker(req),
@@ -115,17 +116,19 @@ impl DaphneWorkerRouter {
         let router = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_ref() {
             "leader" => {
                 router
-                    .post_async("/upload", |req, ctx| async move {
+                    .post_async("/:version/upload", |req, ctx| async move {
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let req = config.worker_request_to_dap(req).await?;
+
                         match config.http_post_upload(&req).await {
                             Ok(()) => Response::empty(),
                             Err(e) => abort(e),
                         }
                     })
-                    .post_async("/collect", |req, ctx| async move {
+                    .post_async("/:version/collect", |req, ctx| async move {
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let req = config.worker_request_to_dap(req).await?;
+
                         match config.http_post_collect(&req).await {
                             Ok(collect_uri) => {
                                 let mut headers = Headers::new();
@@ -139,7 +142,7 @@ impl DaphneWorkerRouter {
                         }
                     })
                     .get_async(
-                        "/collect/task/:task_id/req/:collect_id",
+                        "/:version/collect/task/:task_id/req/:collect_id",
                         |_req, ctx| async move {
                             let task_id = parse_id!(ctx.param("task_id"));
                             let collect_id = parse_id!(ctx.param("collect_id"));
@@ -177,17 +180,19 @@ impl DaphneWorkerRouter {
             }
 
             "helper" => router
-                .post_async("/aggregate", |req, ctx| async move {
+                .post_async("/:version/aggregate", |req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let req = config.worker_request_to_dap(req).await?;
+
                     match config.http_post_aggregate(&req).await {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
                 })
-                .post_async("/aggregate_share", |req, ctx| async move {
+                .post_async("/:version/aggregate_share", |req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let req = config.worker_request_to_dap(req).await?;
+
                     match config.http_post_aggregate_share(&req).await {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),

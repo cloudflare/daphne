@@ -16,8 +16,9 @@ use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
     messages::{Id, Interval, Nonce},
-    DapError, DapGlobalConfig, DapRequest, DapTaskConfig,
+    DapError, DapGlobalConfig, DapRequest, DapTaskConfig, DapVersion,
 };
+use matchit::Router;
 use prio::{
     codec::{Decode, Encode},
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
@@ -300,8 +301,19 @@ impl<D> DaphneWorkerConfig<D> {
             None => None,
         };
 
+        let url = req.url()?;
+        let path = url.path();
+        let mut router: Router<bool> = Router::new();
+        router.insert("/:version/*remaining", true).unwrap();
+        let url_match = router.at(path).unwrap();
+        let version = url_match
+            .params
+            .get("version")
+            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {}", path)))?;
+
         let payload = req.bytes().await?;
         Ok(DapRequest {
+            version: DapVersion::from(version),
             payload,
             url: req.url()?,
             media_type,
