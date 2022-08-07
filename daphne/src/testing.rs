@@ -27,9 +27,9 @@ use std::{
 use url::Url;
 
 pub const GLOBAL_CONFIG: &str = r#"{
-    "max_batch_duration": 100,
-    "min_batch_interval_start": 432000,
-    "max_batch_interval_end": 18000
+    "max_batch_duration": 360000,
+    "min_batch_interval_start": 259200,
+    "max_batch_interval_end": 259200
 }"#;
 
 // Secret key of "collector_hpke_config":
@@ -206,8 +206,19 @@ impl DapAggregator<BearerToken> for MockAggregator {
         self.bearer_token_authorized(req).await
     }
 
+    fn get_global_config(&self) -> &DapGlobalConfig {
+        &self.global_config
+    }
+
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
         self.tasks.get(task_id)
+    }
+
+    fn get_current_time(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     async fn is_batch_overlapping(
@@ -488,10 +499,7 @@ impl DapLeader<BearerToken> for MockAggregator {
             .get_task_config_for(&selector.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = self.get_current_time();
 
         // Calculate batch interval.
         let batch_interval = if let Some(ref interval) = selector.batch_info {
@@ -548,33 +556,6 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal("task not found"))?;
-
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        if collect_req.batch_interval.duration / task_config.min_batch_duration
-            > self.global_config.max_batch_duration
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too large".to_string(),
-            )));
-        }
-        if now.abs_diff(collect_req.batch_interval.start)
-            > self.global_config.min_batch_interval_start
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too far into past".to_string(),
-            )));
-        }
-        if now.abs_diff(collect_req.batch_interval.end())
-            > self.global_config.max_batch_interval_end
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too far into future".to_string(),
-            )));
-        }
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store

@@ -28,9 +28,9 @@ const DEFAULT_TASK: &str = "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee43
 const JANUS_HELPER_TASK: &str = "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f";
 
 pub const GLOBAL_CONFIG: &str = r#"{
-    "max_batch_duration": 100,
-    "min_batch_interval_start": 432000,
-    "max_batch_interval_end": 18000
+    "max_batch_duration": 360000,
+    "min_batch_interval_start": 259200,
+    "max_batch_interval_end": 259200
 }"#;
 
 // This value of this JSON string must match DAP_TASK_LIST in tests/backend/leader.env.

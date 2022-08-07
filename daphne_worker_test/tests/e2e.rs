@@ -492,6 +492,27 @@ async fn e2e_leader_collect_abort_unknown_request() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_accept_max_batch_duration() {
+    let t = TestRunner::default().await;
+    let client = t.http_client();
+    let batch_interval = Interval {
+        start: t.now - (t.now % t.min_batch_duration) - t.max_batch_duration / 2,
+        duration: t.max_batch_duration,
+    };
+
+    // Maximum allowed batch duration.
+    let collect_req = CollectReq {
+        task_id: t.task_id.clone(),
+        batch_interval,
+        agg_param: Vec::new(),
+    };
+    let _collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_collect_abort_invalid_batch_interval() {
     let t = TestRunner::default().await;
     let client = t.http_client();
