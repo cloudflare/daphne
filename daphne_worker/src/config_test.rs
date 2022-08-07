@@ -5,9 +5,9 @@ use crate::config::DaphneWorkerConfig;
 use daphne::messages::{Id, Interval, Nonce};
 
 pub const GLOBAL_CONFIG: &str = r#"{
-    "max_batch_duration": 100,
-    "min_batch_interval_start": 432000,
-    "max_batch_interval_end": 18000
+    "max_batch_duration": 360000,
+    "min_batch_interval_start": 259200,
+    "max_batch_interval_end": 259200
 }"#;
 
 const DAP_TASK_LIST: &str = r#"{

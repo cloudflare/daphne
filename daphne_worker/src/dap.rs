@@ -43,7 +43,7 @@ use daphne::{
         ReportShare, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapOutputShare,
+    DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapOutputShare,
     DapRequest, DapResponse, DapTaskConfig,
 };
 use prio::codec::{Decode, Encode};
@@ -134,8 +134,16 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         self.bearer_token_authorized(req).await
     }
 
+    fn get_global_config(&self) -> &DapGlobalConfig {
+        &self.global_config
+    }
+
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
         self.tasks.get(task_id)
+    }
+
+    fn get_current_time(&self) -> u64 {
+        now()
     }
 
     async fn is_batch_overlapping(
@@ -353,29 +361,6 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
             .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-        let now = now();
-
-        if collect_req.batch_interval.duration / task_config.min_batch_duration
-            > self.global_config.max_batch_duration
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too large".to_string(),
-            )));
-        }
-        if now.abs_diff(collect_req.batch_interval.start)
-            > self.global_config.min_batch_interval_start
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too far into past".to_string(),
-            )));
-        }
-        if now.abs_diff(collect_req.batch_interval.end())
-            > self.global_config.max_batch_interval_end
-        {
-            return Err(DapError::Abort(DapAbort::BadRequest(
-                "batch interval too far into future".to_string(),
-            )));
-        }
 
         // Try to put the request into collection job queue. If the request is overlapping
         // with past requests, then abort.

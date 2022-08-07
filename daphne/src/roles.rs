@@ -15,9 +15,9 @@ use crate::{
         AggregateShareReq, AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce,
         Report, ReportShare, TransitionFailure,
     },
-    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapHelperState, DapHelperTransition,
-    DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare, DapRequest, DapResponse,
-    DapTaskConfig,
+    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
+    DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
+    DapRequest, DapResponse, DapTaskConfig,
 };
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode};
@@ -43,6 +43,28 @@ macro_rules! check_batch_param {
     }};
 }
 
+macro_rules! check_batch_interval_boundary {
+    (
+        $global_config:expr,
+        $now:expr,
+        $batch_interval:expr
+    ) => {{
+        if $batch_interval.duration > $global_config.max_batch_duration {
+            return Err(DapAbort::BadRequest("batch interval too large".to_string()));
+        }
+        if $now.abs_diff($batch_interval.start) > $global_config.min_batch_interval_start {
+            return Err(DapAbort::BadRequest(
+                "batch interval too far into past".to_string(),
+            ));
+        }
+        if $now.abs_diff($batch_interval.end()) > $global_config.max_batch_interval_end {
+            return Err(DapAbort::BadRequest(
+                "batch interval too far into future".to_string(),
+            ));
+        }
+    }};
+}
+
 /// A party in the DAP protocol who is authorized to send requests to another party.
 #[async_trait(?Send)]
 pub trait DapAuthorizedSender<S> {
@@ -61,8 +83,14 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
     /// Decide whether the given DAP request is authorized.
     async fn authorized(&self, req: &DapRequest<S>) -> Result<bool, DapError>;
 
+    /// Look up the DAP global configuration.
+    fn get_global_config(&self) -> &DapGlobalConfig;
+
     /// Look up the DAP task configuration for the given task ID.
     fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig>;
+
+    /// Get the current time (number of seconds since the beginning of UNIX time).
+    fn get_current_time(&self) -> u64;
 
     /// Check whether the given collect request interval does not overlap
     /// with requests received in the past.
@@ -230,6 +258,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             collect_req.batch_interval,
             collect_req.agg_param
         );
+
+        // Check that the batch interval is not too wide or too far into the past/future.
+        let global_config = self.get_global_config();
+        let now = self.get_current_time();
+        check_batch_interval_boundary!(global_config, now, collect_req.batch_interval);
 
         // Check that the batch interval does not overlap with past requests.
         if self
@@ -580,6 +613,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
             agg_share_req.batch_interval,
             agg_share_req.agg_param
         );
+
+        // Check that the batch interval is not too wide or too far into the past/future.
+        let global_config = self.get_global_config();
+        let now = self.get_current_time();
+        check_batch_interval_boundary!(global_config, now, agg_share_req.batch_interval);
 
         // Check that the batch interval does not overlap with past requests.
         if self

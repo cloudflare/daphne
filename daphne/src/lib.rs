@@ -243,7 +243,7 @@ pub struct ProblemDetails {
 // in the spec.
 #[derive(Deserialize, Serialize)]
 pub struct DapGlobalConfig {
-    /// Maximum window size permitted in CollectReq.
+    /// Maximum interval duration permitted in CollectReq.
     /// Prevents Collectors from requesting wide range or reports.
     pub max_batch_duration: u64,
 
