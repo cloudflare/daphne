@@ -59,9 +59,10 @@ pub(crate) struct DaphneWorkerConfig<D> {
 impl<D> DaphneWorkerConfig<D> {
     /// Fetch DAP parameters from environment variables.
     pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
-        let global_config: DapGlobalConfig =
-            serde_json::from_str(ctx.secret("GLOBAL_CONFIG")?.to_string().as_ref())
-                .map_err(|e| Error::RustError(format!("Failed to parse GLOBAL_CONFIG: {}", e)))?;
+        let global_config: DapGlobalConfig = serde_json::from_str(
+            ctx.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
+        )
+        .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
 
         let tasks: HashMap<Id, DapTaskConfig> =
             serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
