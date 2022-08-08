@@ -13,6 +13,7 @@ use std::{
 };
 
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
+const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
 const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
 
@@ -507,6 +508,7 @@ impl Decode for AggregateShareResp {
 /// Codepoint for KEM schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq)]
 pub enum HpkeKemId {
+    P256HkdfSha256,
     X25519HkdfSha256,
     NotImplemented(u16),
 }
@@ -514,6 +516,7 @@ pub enum HpkeKemId {
 impl From<HpkeKemId> for u16 {
     fn from(kem_id: HpkeKemId) -> Self {
         match kem_id {
+            HpkeKemId::P256HkdfSha256 => KEM_ID_P256_HKDF_SHA256,
             HpkeKemId::X25519HkdfSha256 => KEM_ID_X25519_HKDF_SHA256,
             HpkeKemId::NotImplemented(x) => x,
         }
@@ -529,6 +532,7 @@ impl Encode for HpkeKemId {
 impl Decode for HpkeKemId {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u16::decode(bytes)? {
+            x if x == KEM_ID_P256_HKDF_SHA256 => Ok(Self::P256HkdfSha256),
             x if x == KEM_ID_X25519_HKDF_SHA256 => Ok(Self::X25519HkdfSha256),
             x => Ok(Self::NotImplemented(x)),
         }
