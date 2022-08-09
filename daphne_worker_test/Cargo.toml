@@ -40,7 +40,7 @@ futures = "0.3.21"
 janus_core = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
 janus_client = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9"}
 janus_server = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
-prio = "0.8.0"
+prio = "=0.8.2"
 rand = "0.8.5"
 reqwest = { version = "0.11.7", features = ["json"] }
 ring = "0.16.20"
