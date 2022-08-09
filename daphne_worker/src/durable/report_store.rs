@@ -12,13 +12,24 @@ use crate::{
     },
     int_err, now,
 };
-use daphne::messages::TransitionFailure;
+use daphne::{messages::TransitionFailure, DapVersion};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-pub(crate) fn durable_report_store_name(task_id_hex: &str, window: u64, bucket: u64) -> String {
-    format!("task/{}/window/{}/bucket/{}", task_id_hex, window, bucket)
+pub(crate) fn durable_report_store_name(
+    version: &DapVersion,
+    task_id_hex: &str,
+    window: u64,
+    bucket: u64,
+) -> String {
+    format!(
+        "{}/task/{}/window/{}/bucket/{}",
+        version.as_ref(),
+        task_id_hex,
+        window,
+        bucket
+    )
 }
 
 pub(crate) const DURABLE_REPORT_STORE_GET_PENDING: &str = "/internal/do/report_store/get_pending";
@@ -38,12 +49,12 @@ pub(crate) enum ReportStoreResult {
 ///
 /// The naming convention for instances of the [`ReportStore`] DO is as follows:
 ///
-/// > /task/<task_id>/window/<window>/bucket/<bucket>
+/// > <version>/task/<task_id>/window/<window>/bucket/<bucket>
 ///
-/// where `<task_id>` is a task ID, `<window>` is a batch window, and `<bucket>` is a non-negative
-/// integer. A batch window is a UNIX timestamp (in seconds) truncated by the minimum batch
-/// duration. The instance in which a report is stored is derived from the task ID and nonce of the
-/// report itself.
+/// where `<version>` is the DAP version, `<task_id>` is a task ID, `<window>` is a batch window,
+/// and `<bucket>` is a non-negative integer. A batch window is a UNIX timestamp (in seconds)
+/// truncated by the minimum batch duration. The instance in which a report is stored is derived
+/// from the task ID and nonce of the report itself.
 #[durable_object]
 pub struct ReportStore {
     #[allow(dead_code)]

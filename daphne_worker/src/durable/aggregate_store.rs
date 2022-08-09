@@ -5,12 +5,21 @@ use crate::{
     durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     int_err,
 };
-use daphne::DapAggregateShare;
+use daphne::{DapAggregateShare, DapVersion};
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-pub(crate) fn durable_agg_store_name(task_id_hex: &str, window: u64) -> String {
-    format!("task/{}/window/{}", task_id_hex, window)
+pub(crate) fn durable_agg_store_name(
+    version: &DapVersion,
+    task_id_hex: &str,
+    window: u64,
+) -> String {
+    format!(
+        "{}/task/{}/window/{}",
+        version.as_ref(),
+        task_id_hex,
+        window
+    )
 }
 
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
@@ -28,10 +37,11 @@ pub(crate) enum AggregateStoreResult {
 ///
 /// The naming conventions for instances of the [`AggregateStore`] DO is as follows:
 ///
-/// > task/<task_id>/window/<window>
+/// > <version>/task/<task_id>/window/<window>
 ///
-/// where `<task_id>` is a task ID, `<window>` is a batch window. A batch window is a UNIX
-/// timestamp (in seconds) truncated by the minimum batch duration.
+/// where <version> is the DAP version (e.g., "v01"), `<task_id>` is a task ID, `<window>` is a
+/// batch window. A batch window is a UNIX timestamp (in seconds) truncated by the minimum batch
+/// duration.
 #[durable_object]
 pub struct AggregateStore {
     #[allow(dead_code)]

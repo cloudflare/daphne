@@ -216,7 +216,7 @@ impl<D> DaphneWorkerConfig<D> {
         PrgAes128::seed_stream(&self.bucket_key, &nonce.get_encoded()).fill(&mut bucket_seed);
         let bucket = u64::from_be_bytes(bucket_seed) % self.bucket_count;
         let time = nonce.time - (nonce.time % task_config.min_batch_duration);
-        durable_report_store_name(&task_id.to_hex(), time, bucket)
+        durable_report_store_name(&task_config.version, &task_id.to_hex(), time, bucket)
     }
 
     /// Enumerate the sequence of batch names for a given task ID and batch interval. This method
@@ -224,6 +224,7 @@ impl<D> DaphneWorkerConfig<D> {
     /// the start and end times doen't align with the minimum batch duration.
     pub(crate) fn iter_report_store_names(
         &self,
+        version: &DapVersion,
         task_id: &Id,
         interval: &Interval,
     ) -> Result<DurableNameIterator> {
@@ -249,6 +250,7 @@ impl<D> DaphneWorkerConfig<D> {
         }
 
         Ok(DurableNameIterator {
+            version: version.clone(),
             task_id_hex,
             time_start: interval.start,
             time_mod: interval.end() - interval.start,
@@ -321,6 +323,15 @@ impl<D> DaphneWorkerConfig<D> {
             sender_auth,
         })
     }
+
+    pub(crate) fn try_get_task_config_for(
+        &self,
+        task_id: &Id,
+    ) -> std::result::Result<&DapTaskConfig, DapError> {
+        self.tasks
+            .get(task_id)
+            .ok_or_else(|| DapError::fatal("unrecognized task"))
+    }
 }
 
 /// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator
@@ -338,6 +349,7 @@ pub(crate) enum DaphneWorkerDeployment {
 
 /// An iterator over a sequence of batch names for a given batch interval.
 pub(crate) struct DurableNameIterator {
+    version: DapVersion,
     task_id_hex: String,
     time_start: u64,
     time_mod: u64,
@@ -356,7 +368,8 @@ impl Iterator for DurableNameIterator {
         }
 
         let window = self.time_start + self.time_offset;
-        let durable_name = durable_report_store_name(&self.task_id_hex, window, self.bucket);
+        let durable_name =
+            durable_report_store_name(&self.version, &self.task_id_hex, window, self.bucket);
 
         self.time_offset = (self.time_offset + self.time_step) % self.time_mod;
         if self.time_offset == 0 {

@@ -261,6 +261,15 @@ impl From<&str> for DapVersion {
     }
 }
 
+impl AsRef<str> for DapVersion {
+    fn as_ref(&self) -> &str {
+        match self {
+            DapVersion::Draft01 => "v01",
+            _ => panic!("tried to construct string from unknown DAP version"),
+        }
+    }
+}
+
 /// Global DAP parameters common across tasks.
 //
 // NOTE: Consider whether the following parameters should be included

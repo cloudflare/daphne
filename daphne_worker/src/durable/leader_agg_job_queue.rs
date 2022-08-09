@@ -39,7 +39,7 @@ impl AggregationJob {
 
 /// Durable Object (DO) representing an aggregation job queue.
 ///
-/// An instance of the [`LeaderAggregationJobQueue`] DO is named `/queue/<queue_num>` where
+/// An instance of the [`LeaderAggregationJobQueue`] DO is named `queue/<queue_num>` where
 /// `<queue_num>` is an integer idnentifying a specific queue.
 #[durable_object]
 pub struct LeaderAggregationJobQueue {
