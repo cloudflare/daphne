@@ -50,7 +50,6 @@ use prio::codec::{Decode, Encode};
 use std::collections::HashMap;
 use worker::*;
 
-pub(crate) const INT_ERR_UNRECOGNIZED_TASK: &str = "unrecognized task";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
@@ -151,9 +150,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> std::result::Result<bool, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let task_config = self.try_get_task_config_for(task_id)?;
 
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
@@ -163,7 +160,11 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
+                .id_from_name(&durable_agg_store_name(
+                    &task_config.version,
+                    &task_id.to_hex(),
+                    window,
+                ))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -187,10 +188,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         out_shares: Vec<DapOutputShare>,
     ) -> std::result::Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-
+        let task_config = self.try_get_task_config_for(task_id)?;
         let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
 
         let agg_shares =
@@ -198,7 +196,11 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
 
         for (window, agg_share) in agg_shares.into_iter() {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
+                .id_from_name(&durable_agg_store_name(
+                    &task_config.version,
+                    &task_id.to_hex(),
+                    window,
+                ))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -213,17 +215,18 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> std::result::Result<DapAggregateShare, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-
+        let task_config = self.try_get_task_config_for(task_id)?;
         let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
         let mut agg_share = DapAggregateShare::default();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
+                .id_from_name(&durable_agg_store_name(
+                    &task_config.version,
+                    &task_id.to_hex(),
+                    window,
+                ))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -247,24 +250,30 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> std::result::Result<(), DapError> {
+        let task_config = self.try_get_task_config_for(task_id)?;
+
         // Mark reports collected.
         let namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
-        for durable_name in self.iter_report_store_names(task_id, batch_interval)? {
+        for durable_name in
+            self.iter_report_store_names(&task_config.version, task_id, batch_interval)?
+        {
             // TODO Don't block on DO request (issue multiple requests simultaneously).
             let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
             durable_post!(stub, DURABLE_REPORT_STORE_MARK_COLLECTED, &()).await?;
         }
 
         // Mark aggregate shares collected.
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let task_config = self.try_get_task_config_for(task_id)?;
         let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let stub = namespace
-                .id_from_name(&durable_agg_store_name(&task_id.to_hex(), window))?
+                .id_from_name(&durable_agg_store_name(
+                    &task_config.version,
+                    &task_id.to_hex(),
+                    window,
+                ))?
                 .get_stub()?;
 
             // TODO Don't block on DO requests (issue multiple requests simultaneously).
@@ -280,10 +289,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
     type ReportSelector = InternalAggregateInfo;
 
     async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
+        let task_config = self.try_get_task_config_for(&report.task_id)?;
         let durable_namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
-        let task_config = self
-            .get_task_config_for(&report.task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
         let durable_name =
             self.durable_report_store_name(task_config, &report.task_id, &report.nonce);
         let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
@@ -358,9 +365,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         &self,
         collect_req: &CollectReq,
     ) -> std::result::Result<Url, DapError> {
-        let task_config = self
-            .get_task_config_for(&collect_req.task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let task_config = self.try_get_task_config_for(&collect_req.task_id)?;
 
         // Try to put the request into collection job queue. If the request is overlapping
         // with past requests, then abort.
@@ -524,9 +529,7 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         report_shares: &[ReportShare],
     ) -> std::result::Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
+        let task_config = self.try_get_task_config_for(task_id)?;
 
         // TODO Coalesce nonces with the same batch name into a single DO request.
         let mut early_fails = HashMap::new();
@@ -560,13 +563,14 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         agg_job_id: &Id,
         helper_state: &DapHelperState,
     ) -> std::result::Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-
+        let task_config = self.try_get_task_config_for(task_id)?;
         let namespace = self.durable_object(BINDING_DAP_HELPER_STATE_STORE)?;
         let stub = namespace
-            .id_from_name(&durable_helper_state_name(task_id, agg_job_id))?
+            .id_from_name(&durable_helper_state_name(
+                &task_config.version,
+                task_id,
+                agg_job_id,
+            ))?
             .get_stub()?;
 
         let helper_state_hex = hex::encode(helper_state.get_encoded(&task_config.vdaf)?);
@@ -579,13 +583,14 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         agg_job_id: &Id,
     ) -> std::result::Result<Option<DapHelperState>, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .ok_or_else(|| DapError::fatal(INT_ERR_UNRECOGNIZED_TASK))?;
-
+        let task_config = self.try_get_task_config_for(task_id)?;
         let namespace = self.durable_object(BINDING_DAP_HELPER_STATE_STORE)?;
         let stub = namespace
-            .id_from_name(&durable_helper_state_name(task_id, agg_job_id))?
+            .id_from_name(&durable_helper_state_name(
+                &task_config.version,
+                task_id,
+                agg_job_id,
+            ))?
             .get_stub()?;
 
         let res: Option<String> = durable_post!(stub, DURABLE_HELPER_STATE_GET, &())

@@ -104,7 +104,7 @@ fn daphne_param() {
     };
     assert_eq!(
         config.durable_report_store_name(&task_config, &task_id, &nonce),
-        "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1"
+        "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1"
     );
 
     // Try enumerating a sequence of batch names.
@@ -113,22 +113,22 @@ fn daphne_param() {
         duration: 2 * 3600,
     };
     let batch_names: Vec<String> = config
-        .iter_report_store_names(&task_id, &interval)
+        .iter_report_store_names(&task_config.version, &task_id, &interval)
         .unwrap()
         .collect();
     assert_eq!(
         batch_names,
         vec![
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/0",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/0",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/1",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/2",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/2",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/3",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/3",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/4",
-            "task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/4",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/0",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/0",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/1",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/2",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/2",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/3",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/3",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/4",
+            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/4",
         ]
     );
 }
