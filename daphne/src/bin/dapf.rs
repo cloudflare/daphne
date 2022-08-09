@@ -125,7 +125,7 @@ fn main() -> Result<()> {
                 reqwest::header::HeaderValue::from_static(constants::MEDIA_TYPE_REPORT),
             );
             let resp = http_client
-                .post(Url::parse(leader_url)?.join("/upload")?)
+                .post(Url::parse(leader_url)?.join("upload")?)
                 .body(report.get_encoded())
                 .headers(headers)
                 .send()?;
@@ -171,7 +171,7 @@ fn main() -> Result<()> {
             }
 
             let resp = http_client
-                .post(Url::parse(leader_url)?.join("/collect")?)
+                .post(Url::parse(leader_url)?.join("collect")?)
                 .body(collect_req.get_encoded())
                 .headers(headers)
                 .send()?;
@@ -240,7 +240,7 @@ fn parse_id(id_str: &str) -> Result<Id> {
 fn get_hpke_config(http_client: &Client, task_id: &Id, base_url: &str) -> Result<HpkeConfig> {
     let url = Url::parse(base_url)
         .with_context(|| "failed to parse base URL")?
-        .join("/hpke_config")?;
+        .join("hpke_config")?;
 
     let resp = http_client
         .get(url.as_str())

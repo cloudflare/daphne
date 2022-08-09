@@ -10,8 +10,8 @@ set -e
 
 # Task configuration
 TASK_ID="8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8=" # URL-safe, base64
-LEADER_URL=http://127.0.0.1:8787
-HELPER_URL=http://127.0.0.1:8788
+LEADER_BASE_URL="http://127.0.0.1:8787"
+HELPER_BASE_URL="http://127.0.0.1:8788"
 MIN_BATCH_DURATION=3600 # seconds
 VDAF_CONFIG=$(cat << EOF
 {
@@ -34,13 +34,13 @@ COLLECTOR_BEARER_TOKEN="this is the bearer token of the Collector"
 COLLECTOR_HPKE_RECEIVER_CONFIG=$(cat << EOF
 {
     "config": {
-        "id": 244,
+        "id": 23,
         "kem_id": "X25519HkdfSha256",
         "kdf_id": "HkdfSha256",
         "aead_id": "Aes128Gcm",
-        "public_key": "a761d90c8c76d3d76349a3794a439a1572ab1fb8f13531d69744c92ea7757d7f"
+        "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
     },
-    "secret_key": "68db815a534d3f92a6224c4cbbc2dd301be48ef32f112dbfb3709a4cbfe5f372"
+    "secret_key": "60890f1e438bf1f0e9ad2bd839acf1341137eee623bf7906972bf1cc80bb5d7b"
 }
 EOF
 )
@@ -57,6 +57,11 @@ batch_interval=$(cat << EOF
 EOF
 )
 
+echo "Resetting the Aggregators..."
+curl -f -X POST "$LEADER_BASE_URL/internal/delete_all"
+curl -f -X POST "$HELPER_BASE_URL/internal/delete_all"
+
+
 # Upload "13" a number of times.
 MEASUREMENT=13
 for i in {1..10}; do
@@ -65,8 +70,8 @@ for i in {1..10}; do
         dapf \
             --task-id "$TASK_ID" \
             upload \
-                --leader-url "$LEADER_URL" \
-                --helper-url "$HELPER_URL" \
+                --leader-url "$LEADER_BASE_URL/v01/" \
+                --helper-url "$HELPER_BASE_URL/v01/" \
                 --vdaf "$VDAF_CONFIG"
 done
 
@@ -76,13 +81,17 @@ collect_uri=$(echo $batch_interval | \
         --task-id "$TASK_ID" \
         --bearer-token "$COLLECTOR_BEARER_TOKEN" \
         collect \
-            --leader-url "$LEADER_URL"
-)
+            --leader-url "$LEADER_BASE_URL/v01/"
+:)
 
 # TODO(cjpatton) Remove this once aggregation jobs are scheduled automatically
 # by the Leader. (See issue #25.)
-curl -f -s -X POST $LEADER_URL/internal/process/task/$TASK_ID \
-    -d '{"agg_rate":10}' > /dev/null
+echo "Processing reports...."
+curl -f -X POST $LEADER_BASE_URL/internal/process \
+    -d '{"max_buckets":10,"max_reports":10}'
+echo
+
+
 
 echo "Collecting result..."
 result=$(echo $batch_interval | \
