@@ -534,7 +534,6 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
     ) -> std::result::Result<HashMap<Nonce, TransitionFailure>, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
-        let namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
         let mut durable_requests: HashMap<String, Vec<String>> = HashMap::new();
         for report_share in report_shares.iter() {
             let durable_name =
@@ -547,14 +546,19 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             }
         }
 
-        // TODO Run requests in parallel.
-        let mut early_fails = HashMap::new();
+        let mut futures = Vec::new();
         for (durable_name, nonce_hex_set) in durable_requests.into_iter() {
-            let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-            let mut resp =
-                durable_post!(stub, DURABLE_REPORT_STORE_PUT_PROCESSED, &nonce_hex_set).await?;
+            futures.push(self.durable_post(
+                BINDING_DAP_REPORT_STORE,
+                DURABLE_REPORT_STORE_PUT_PROCESSED,
+                durable_name,
+                nonce_hex_set,
+            ));
+        }
 
-            let res: Vec<(String, TransitionFailure)> = resp.json().await?;
+        let mut early_fails = HashMap::new();
+        for future in futures.into_iter() {
+            let res: Vec<(String, TransitionFailure)> = future.await?;
             for (nonce_hex, failure_reason) in res.into_iter() {
                 let nonce = Nonce::get_decoded(&hex::decode(&nonce_hex)?)?;
                 early_fails.insert(nonce, failure_reason);
