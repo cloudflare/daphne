@@ -13,6 +13,7 @@ use crate::{
     int_err, now,
 };
 use daphne::{messages::TransitionFailure, DapVersion};
+use futures::future::try_join_all;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -75,6 +76,14 @@ impl ReportStore {
         }
         self.state.storage().put(&key, true).await?;
         Ok(ReportStoreResult::Ok)
+    }
+
+    async fn to_checked(&self, nonce_hex: String) -> Result<Option<(String, TransitionFailure)>> {
+        if let ReportStoreResult::Err(failure_reason) = self.checked_process(&nonce_hex).await? {
+            Ok(Some((nonce_hex, failure_reason)))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -216,16 +225,15 @@ impl DurableObject for ReportStore {
 
             (DURABLE_REPORT_STORE_PUT_PROCESSED, Method::Post) => {
                 let nonce_hex_set: Vec<String> = req.json().await?;
-                let mut futures = Vec::new();
-                for nonce_hex in nonce_hex_set.iter() {
-                    futures.push((nonce_hex.clone(), self.checked_process(nonce_hex)));
+                let mut requests = Vec::new();
+                for nonce_hex in nonce_hex_set.into_iter() {
+                    requests.push(self.to_checked(nonce_hex));
                 }
-                let mut res = Vec::with_capacity(futures.len());
-                for (nonce_hex, future) in futures.into_iter() {
-                    if let ReportStoreResult::Err(failure_reason) = future.await? {
-                        res.push((nonce_hex, failure_reason));
-                    }
-                }
+
+                let responses: Vec<Option<(String, TransitionFailure)>> =
+                    try_join_all(requests).await?;
+                let res: Vec<(String, TransitionFailure)> =
+                    responses.into_iter().flatten().collect();
                 Response::from_json(&res)
             }
 

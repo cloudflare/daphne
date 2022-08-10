@@ -550,6 +550,7 @@ dependencies = [
  "async-trait",
  "base64",
  "daphne",
+ "futures",
  "getrandom",
  "hex",
  "hpke 0.8.0",
