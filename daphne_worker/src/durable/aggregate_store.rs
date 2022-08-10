@@ -44,7 +44,6 @@ pub(crate) enum AggregateStoreResult {
 /// duration.
 #[durable_object]
 pub struct AggregateStore {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,

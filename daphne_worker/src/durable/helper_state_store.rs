@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable::{state_get, BINDING_DAP_HELPER_STATE_STORE},
+    durable::{state_get, DURABLE_DELETE_ALL},
     int_err,
 };
 use daphne::{messages::Id, DapVersion};
@@ -32,51 +32,52 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 ///
 /// where `<version>` is the DAP version, `<task_id>` is the task ID and `<agg_job_id>` is the
 /// aggregation job ID.
+//
+// TODO Consider adding garbage collection for this DO. We are foregoing garbage collection for
+// performance reasons. This DO is "self-cleaning" under normal operation, but if the Leader
+// abandons an aggregation job before the last request, then the state would remain in storage
+// indefinitely.
 #[durable_object]
 pub struct HelperStateStore {
-    #[allow(dead_code)]
     state: State,
-    env: Env,
-    touched: bool,
+    helper_state: Option<String>,
 }
 
 #[durable_object]
 impl DurableObject for HelperStateStore {
-    fn new(state: State, env: Env) -> Self {
+    fn new(state: State, _env: Env) -> Self {
         Self {
             state,
-            env,
-            touched: false,
+            helper_state: None,
         }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_HELPER_STATE_STORE);
-
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_HELPER_STATE_PUT, Method::Post) => {
-                // The state is handled as an opaque hex string.
-                let mut helper_state: Option<String> =
-                    state_get(&self.state, "helper_state").await?;
-                if helper_state.is_some() {
-                    // TODO spec: Handle this as an abort rather than an internal error.
-                    return Err(int_err("tried to overwrite helper state"));
-                }
-
-                helper_state = req.json().await?;
-                self.state
-                    .storage()
-                    .put("helper_state", helper_state)
-                    .await?;
+            (DURABLE_DELETE_ALL, Method::Post) => {
+                self.state.storage().delete_all().await?;
+                self.helper_state = None;
                 Response::empty()
             }
 
+            // Store the given state blob, overwriting the current state blob if it exists.
+            (DURABLE_HELPER_STATE_PUT, Method::Post) => {
+                let helper_state = req.json().await?;
+                self.state
+                    .storage()
+                    .put("helper_state", &helper_state)
+                    .await?;
+                self.helper_state = Some(helper_state);
+                Response::empty()
+            }
+
+            // Fetch the current state blob and delete it from storage.
             (DURABLE_HELPER_STATE_GET, Method::Post) => {
-                let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;
-                if helper_state.is_some() {
-                    self.state.storage().delete("helper_state").await?;
+                if self.helper_state.is_none() {
+                    self.helper_state = state_get(&self.state, "helper_state").await?;
                 }
+                self.state.storage().delete_all().await?;
+                let helper_state = std::mem::replace(&mut self.helper_state, None);
                 Response::from_json(&helper_state)
             }
 

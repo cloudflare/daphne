@@ -39,7 +39,6 @@ struct OrderedCollectReq {
 // TODO spec: Consider allowing completed aggregate results to be deleted after a period of time.
 #[durable_object]
 pub struct LeaderCollectionJobQueue {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,

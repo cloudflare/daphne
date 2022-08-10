@@ -43,7 +43,6 @@ impl AggregationJob {
 /// `<queue_num>` is an integer idnentifying a specific queue.
 #[durable_object]
 pub struct LeaderAggregationJobQueue {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,

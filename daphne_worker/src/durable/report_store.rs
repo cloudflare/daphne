@@ -58,7 +58,6 @@ pub(crate) enum ReportStoreResult {
 /// from the task ID and nonce of the report itself.
 #[durable_object]
 pub struct ReportStore {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,

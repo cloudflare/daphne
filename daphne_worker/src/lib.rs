@@ -238,6 +238,7 @@ fn abort(e: DapAbort) -> Result<Response> {
             Err(Error::RustError("internalError".to_string()))
         }
         _ => {
+            console_warn!("request aborted: {}", e.to_string());
             let mut headers = Headers::new();
             headers.set("Content-Type", "application/problem+json")?;
             Ok(Response::from_json(&e.to_problem_details())?
