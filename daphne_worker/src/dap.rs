@@ -46,6 +46,7 @@ use daphne::{
     DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapOutputShare,
     DapRequest, DapResponse, DapTaskConfig,
 };
+use futures::future::try_join_all;
 use prio::codec::{Decode, Encode};
 use std::collections::HashMap;
 use worker::*;
@@ -546,9 +547,9 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             }
         }
 
-        let mut futures = Vec::new();
+        let mut requests = Vec::new();
         for (durable_name, nonce_hex_set) in durable_requests.into_iter() {
-            futures.push(self.durable_post(
+            requests.push(self.durable_post(
                 BINDING_DAP_REPORT_STORE,
                 DURABLE_REPORT_STORE_PUT_PROCESSED,
                 durable_name,
@@ -556,10 +557,10 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             ));
         }
 
+        let responses: Vec<Vec<(String, TransitionFailure)>> = try_join_all(requests).await?;
         let mut early_fails = HashMap::new();
-        for future in futures.into_iter() {
-            let res: Vec<(String, TransitionFailure)> = future.await?;
-            for (nonce_hex, failure_reason) in res.into_iter() {
+        for response in responses.into_iter() {
+            for (nonce_hex, failure_reason) in response.into_iter() {
                 let nonce = Nonce::get_decoded(&hex::decode(&nonce_hex)?)?;
                 early_fails.insert(nonce, failure_reason);
             }

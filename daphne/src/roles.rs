@@ -554,6 +554,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 let task_config = self
                     .get_task_config_for(&agg_init_req.task_id)
                     .ok_or(DapAbort::UnrecognizedTask)?;
+                let helper_state =
+                    self.get_helper_state(&agg_init_req.task_id, &agg_init_req.agg_job_id);
 
                 // Check whether the DAP version in the request matches the task config.
                 if task_config.version != req.version {
@@ -573,11 +575,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 )?;
 
                 // Check that helper state with task_id and agg_job_id does not exist.
-                if self
-                    .get_helper_state(&agg_init_req.task_id, &agg_init_req.agg_job_id)
-                    .await?
-                    .is_some()
-                {
+                if helper_state.await?.is_some() {
                     // TODO spec: Consider an explicit abort for this case.
                     return Err(DapAbort::BadRequest(
                         "unexpected message for aggregation job (already exists)".into(),
