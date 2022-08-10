@@ -23,15 +23,13 @@ use prio::{
     codec::{Decode, Encode},
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use worker::*;
 
 /// Long-lived parameters used a daphne across DAP tasks.
 pub(crate) struct DaphneWorkerConfig<D> {
-    ctx: Arc<Mutex<Option<RouteContext<D>>>>,
+    ctx: Option<RouteContext<D>>,
 
     /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
     /// configured as the DAP Helper.
@@ -164,7 +162,7 @@ impl<D> DaphneWorkerConfig<D> {
         };
 
         Ok(Self {
-            ctx: Arc::new(Mutex::new(Some(ctx))),
+            ctx: Some(ctx),
             client,
             global_config,
             tasks,
@@ -192,7 +190,7 @@ impl<D> DaphneWorkerConfig<D> {
             Seed::get_decoded(&hex::decode(json_bucket_key).map_err(int_err)?).map_err(int_err)?;
 
         Ok(DaphneWorkerConfig {
-            ctx: Arc::new(Mutex::new(None)),
+            ctx: None,
             client: None,
             global_config: serde_json::from_str(json_global_config)?,
             tasks: serde_json::from_str(json_task_list)?,
@@ -263,8 +261,6 @@ impl<D> DaphneWorkerConfig<D> {
 
     pub(crate) fn durable_object(&self, binding: &str) -> Result<ObjectNamespace> {
         self.ctx
-            .lock()
-            .map_err(int_err)?
             .as_ref()
             .expect("no route context configured")
             .durable_object(binding)
@@ -331,6 +327,19 @@ impl<D> DaphneWorkerConfig<D> {
         self.tasks
             .get(task_id)
             .ok_or_else(|| DapError::fatal("unrecognized task"))
+    }
+
+    pub(crate) async fn durable_post<I: Serialize, O: for<'a> Deserialize<'a>>(
+        &self,
+        durable_binding: &'static str,
+        durable_path: &'static str,
+        durable_name: String,
+        data: I,
+    ) -> Result<O> {
+        let namespace = self.durable_object(durable_binding)?;
+        let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
+        let mut resp = durable_post!(stub, &durable_path, &data).await?;
+        resp.json().await
     }
 }
 
