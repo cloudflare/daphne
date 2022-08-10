@@ -78,6 +78,12 @@ impl From<worker::Error> for DapError {
     }
 }
 
+impl From<hex::FromHexError> for DapError {
+    fn from(e: hex::FromHexError) -> Self {
+        Self::Fatal(format!("from hex: {}", e))
+    }
+}
+
 impl From<CodecError> for DapError {
     fn from(e: CodecError) -> Self {
         Self::Fatal(format!("codec: {}", e))

@@ -215,8 +215,18 @@ impl DurableObject for ReportStore {
             }
 
             (DURABLE_REPORT_STORE_PUT_PROCESSED, Method::Post) => {
-                let nonce_hex: String = req.json().await?;
-                Response::from_json(&self.checked_process(&nonce_hex).await?)
+                let nonce_hex_set: Vec<String> = req.json().await?;
+                let mut futures = Vec::new();
+                for nonce_hex in nonce_hex_set.iter() {
+                    futures.push((nonce_hex.clone(), self.checked_process(nonce_hex)));
+                }
+                let mut res = Vec::with_capacity(futures.len());
+                for (nonce_hex, future) in futures.into_iter() {
+                    if let ReportStoreResult::Err(failure_reason) = future.await? {
+                        res.push((nonce_hex, failure_reason));
+                    }
+                }
+                Response::from_json(&res)
             }
 
             (DURABLE_REPORT_STORE_MARK_COLLECTED, Method::Post) => {

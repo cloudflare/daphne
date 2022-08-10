@@ -214,7 +214,11 @@ impl DaphneWorkerRouter {
             router
         };
 
-        router.run(req, env).await
+        let start = Date::now().as_millis();
+        let resp = router.run(req, env).await?;
+        let end = Date::now().as_millis();
+        console_log!("request completed in {}ms", end - start);
+        Ok(resp)
     }
 }
 
