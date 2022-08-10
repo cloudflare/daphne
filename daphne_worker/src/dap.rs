@@ -490,10 +490,13 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
             .body(payload)
             .headers(headers);
 
+        let start = Date::now().as_millis();
         let reqwest_resp = reqwest_req
             .send()
             .await
             .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let end = Date::now().as_millis();
+        console_log!("request to {} completed in {}ms", url, end - start);
         let status = reqwest_resp.status();
         if status == 200 {
             // Translate the reqwest response into a Worker response.
@@ -531,28 +534,31 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
     ) -> std::result::Result<HashMap<Nonce, TransitionFailure>, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
-        // TODO Coalesce nonces with the same batch name into a single DO request.
-        let mut early_fails = HashMap::new();
         let namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
+        let mut durable_requests: HashMap<String, Vec<String>> = HashMap::new();
         for report_share in report_shares.iter() {
             let durable_name =
                 self.durable_report_store_name(task_config, task_id, &report_share.nonce);
+            let nonce_hex = hex::encode(report_share.nonce.get_encoded());
+            if let Some(nonce_hex_set) = durable_requests.get_mut(&durable_name) {
+                nonce_hex_set.push(nonce_hex);
+            } else {
+                durable_requests.insert(durable_name, vec![nonce_hex]);
+            }
+        }
 
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
+        // TODO Run requests in parallel.
+        let mut early_fails = HashMap::new();
+        for (durable_name, nonce_hex_set) in durable_requests.into_iter() {
             let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-            let mut resp = durable_post!(
-                stub,
-                DURABLE_REPORT_STORE_PUT_PROCESSED,
-                &hex::encode(&report_share.nonce.get_encoded())
-            )
-            .await?;
+            let mut resp =
+                durable_post!(stub, DURABLE_REPORT_STORE_PUT_PROCESSED, &nonce_hex_set).await?;
 
-            match resp.json().await? {
-                ReportStoreResult::Ok => (),
-                ReportStoreResult::Err(failure_reason) => {
-                    early_fails.insert(report_share.nonce.clone(), failure_reason);
-                }
-            };
+            let res: Vec<(String, TransitionFailure)> = resp.json().await?;
+            for (nonce_hex, failure_reason) in res.into_iter() {
+                let nonce = Nonce::get_decoded(&hex::decode(&nonce_hex)?)?;
+                early_fails.insert(nonce, failure_reason);
+            }
         }
         Ok(early_fails)
     }
