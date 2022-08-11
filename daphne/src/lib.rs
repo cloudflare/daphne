@@ -367,7 +367,7 @@ pub enum DapMeasurement {
 }
 
 /// The aggregate result computed by the Collector.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapAggregateResult {
     U32Vec(Vec<u32>),
@@ -605,7 +605,7 @@ pub struct DapResponse {
 }
 
 /// Status of a collect job.
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapCollectJob {
     Done(CollectResp),
