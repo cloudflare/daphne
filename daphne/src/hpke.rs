@@ -97,7 +97,7 @@ pub trait HpkeDecrypter {
 }
 
 /// Struct that combines HpkeConfig and HpkeSecretKey
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
     #[serde(with = "hex")]
