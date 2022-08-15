@@ -394,12 +394,10 @@ impl TestRunner {
         client: &reqwest::Client,
         agg_info: &InternalAggregateInfo,
     ) -> DapLeaderProcessTelemetry {
-        // TODO(nakatsuka-y) Make the following explicit and clear.
-        // The URL below is made sort of a hack-y way where we use url::Url
-        // deleting the path from the base URL when calling "join()" to our
-        // advantage to prevent us from having "version" in this URL.
-        // Ref: https://github.com/cloudflare/daphne/issues/80
-        let url = self.leader_url.join("/internal/process").unwrap();
+        // Replace path "/v01" with "/internal/process".
+        let mut url = self.leader_url.clone();
+        url.set_path("internal/process");
+
         let resp = client
             .post(url.as_str())
             .body(serde_json::to_string(&agg_info).unwrap())
@@ -590,12 +588,10 @@ async fn post_internal_delete_all(
     base_url: &Url,
     batch_interval: &Interval,
 ) {
-    // TODO(nakatsuka-y) Make the following explicit and clear.
-    // The URL below is made sort of a hack-y way where we use url::Url
-    // deleting the path from the base URL when calling "join()" to our
-    // advantage to prevent us from having "version" in this URL.
-    // Ref: https://github.com/cloudflare/daphne/issues/80
-    let url = base_url.join("/internal/delete_all").unwrap();
+    // Replace path "/v01" with "/internal/delete_all".
+    let mut url = base_url.clone();
+    url.set_path("internal/delete_all");
+
     let req = client
         .post(url.as_str())
         .body(serde_json::to_string(batch_interval).unwrap());
