@@ -15,10 +15,10 @@ use crate::{
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
-        BucketInfo, MockAggregateInfo, MockAggregator, ReportStore, COLLECTOR_BEARER_TOKEN,
+        AggStoreState, BucketInfo, MockAggregateInfo, MockAggregator, COLLECTOR_BEARER_TOKEN,
         HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
-    DapAbort, DapCollectJob, DapError, DapLeaderTransition, DapMeasurement, DapRequest,
+    DapAbort, DapAggregateShare, DapCollectJob, DapLeaderTransition, DapMeasurement, DapRequest,
     DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
@@ -154,9 +154,8 @@ impl MockAggregator {
 
         // Construct report.
         let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-        let now = self.get_current_time();
         let report = vdaf_config
-            .produce_report(&hpke_config_list, now, task_id, DapMeasurement::U64(1))
+            .produce_report(&hpke_config_list, self.now, task_id, DapMeasurement::U64(1))
             .unwrap();
 
         report
@@ -165,14 +164,12 @@ impl MockAggregator {
     async fn run_test_agg_job(
         &self,
         helper: &MockAggregator,
-        now: u64,
         task_id: &Id,
         task_config: &DapTaskConfig,
     ) {
         // Leader: Store received report to ReportStore.
         let selector = &MockAggregateInfo {
             task_id: task_id.clone(),
-            batch_info: Some(task_config.current_batch_window(now)),
             agg_rate: 1,
         };
         let (task_id, reports) = get_reports!(self, selector);
@@ -374,10 +371,9 @@ async fn http_post_collect_unauthorized_request() {
 #[tokio::test]
 async fn http_post_aggregate_failure_hpke_decrypt_error() {
     let helper = MockAggregator::new();
-    let now = helper.get_current_time();
     let report_shares = vec![ReportShare {
         nonce: Nonce {
-            time: now,
+            time: helper.now,
             rand: [1; 16],
         },
         extensions: Vec::default(),
@@ -451,18 +447,14 @@ async fn http_post_aggregate_failure_batch_collected() {
 
     // This is to ensure that the lock is released before we call http_post_aggregate.
     {
-        let mut report_store_mutex_guard = helper.report_store.lock().expect("lock() failed");
-        let report_store = report_store_mutex_guard.deref_mut();
-
-        // Create a new instance of report store associated to the bucket_info.
+        let mut agg_store_mutex_guard = helper.agg_store.lock().expect("lock() failed");
+        let agg_store = agg_store_mutex_guard.deref_mut();
         let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
-        report_store.insert(bucket_info.clone(), ReportStore::new());
-
-        // Intentionally mark report store as `collected`.
-        report_store
-            .get_mut(&bucket_info)
-            .expect("report_store not found")
-            .process_mark_collected();
+        let agg_store_state = AggStoreState {
+            agg_share: DapAggregateShare::default(),
+            collected: true,
+        };
+        agg_store.insert(bucket_info, agg_store_state);
     }
 
     // Get AggregateResp and then extract the transition data from inside.
@@ -577,33 +569,9 @@ async fn http_post_upload_fail_send_invalid_report() {
 }
 
 #[tokio::test]
-async fn get_reports_fail_invalid_batch_interval() {
-    let leader = MockAggregator::new();
-    let task_id = leader.nominal_task_id();
-
-    // Attempt to get reports using an empty interval.
-    let empty_interval = Interval {
-        start: 0,
-        duration: 0,
-    };
-    let selector = &MockAggregateInfo {
-        task_id: task_id.clone(),
-        batch_info: Some(empty_interval),
-        agg_rate: 1,
-    };
-    let err = leader.get_reports(selector).await.unwrap_err();
-
-    // Fails because a 0 second duration interval is not permitted.
-    assert_matches!(err, DapError::Fatal(e) =>
-        assert_eq!(e, "invalid batch interval")
-    );
-}
-
-#[tokio::test]
 async fn get_reports_empty_response() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
 
     let report = leader.gen_test_report(task_id);
     let req = leader.gen_test_upload_req(report.clone());
@@ -614,29 +582,23 @@ async fn get_reports_empty_response() {
         .await
         .expect("upload failed unexpectedly");
 
-    // Get report.
-    let now = report.nonce.time - task_config.min_batch_duration - 1;
+    // Get one report. This should return with the report that was uploaded earlier.
+    // We also check that the task ID associated to the report is the same one we
+    // requested.
     let selector = &MockAggregateInfo {
         task_id: task_id.clone(),
-        batch_info: Some(task_config.current_batch_window(now)),
         agg_rate: 1,
     };
-    let (task_id, reports) = get_reports!(leader, selector);
+    let (returned_task_id, reports) = get_reports!(leader, selector);
+    assert_eq!(reports.len(), 1);
+    assert_eq!(&returned_task_id, task_id);
 
-    // We get an empty response due to no reports existing within requested batch_window.
+    // Try to get another report. This should not return an error, but simply
+    // an empty vector, as we drained the ReportStore above. The task ID
+    // associated to the report should be the same one we requested.
+    let (returned_task_id, reports) = get_reports!(leader, selector);
     assert_eq!(reports.len(), 0);
-
-    // Attempt to get reports from the future.
-    let now = report.nonce.time + task_config.min_batch_duration + 1;
-    let selector = &MockAggregateInfo {
-        task_id: task_id.clone(),
-        batch_info: Some(task_config.current_batch_window(now)),
-        agg_rate: 1,
-    };
-    let (_task_id, reports) = get_reports!(leader, selector);
-
-    // We get an empty response due to no reports existing within requested batch_window.
-    assert_eq!(reports.len(), 0);
+    assert_eq!(&returned_task_id, task_id);
 }
 
 #[tokio::test]
@@ -644,12 +606,11 @@ async fn poll_collect_job_test_results() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = leader.get_current_time();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(now),
+        batch_interval: task_config.current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -704,7 +665,7 @@ async fn http_post_collect_fail_invalid_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = leader.get_current_time();
+    let now = leader.now;
 
     // Collector: Create a CollectReq with a very large batch interval.
     let collector_collect_req = CollectReq {
@@ -789,7 +750,7 @@ async fn http_post_collect_succeed_max_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = leader.get_current_time();
+    let now = leader.now;
 
     // Collector: Create a CollectReq with a very large batch interval.
     let collector_collect_req = CollectReq {
@@ -822,7 +783,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
     let helper = MockAggregator::new();
-    let now = leader.get_current_time();
+    let now = leader.now;
 
     // Create a report.
     let report = leader.gen_test_report(task_id);
@@ -832,9 +793,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     leader.http_post_upload(&req).await.unwrap();
 
     // Leader: Run aggregation job.
-    leader
-        .run_test_agg_job(&helper, now, task_id, task_config)
-        .await;
+    leader.run_test_agg_job(&helper, task_id, task_config).await;
 
     // Collector: Create first CollectReq.
     let collector_collect_req = CollectReq {
@@ -889,12 +848,11 @@ async fn http_post_collect_success() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = leader.get_current_time();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(now),
+        batch_interval: task_config.current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -968,7 +926,6 @@ async fn e2e() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
     let task_config = leader.get_task_config_for(task_id).unwrap();
-    let now = leader.get_current_time();
 
     let helper = MockAggregator::new();
 
@@ -979,14 +936,12 @@ async fn e2e() {
     leader.http_post_upload(&req).await.unwrap();
 
     // Leader: Run aggregation job.
-    leader
-        .run_test_agg_job(&helper, now, task_id, task_config)
-        .await;
+    leader.run_test_agg_job(&helper, task_id, task_config).await;
 
     // Collector: Create a CollectReq.
     let collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(now),
+        batch_interval: task_config.current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();

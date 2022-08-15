@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
     time::SystemTime,
 };
@@ -86,23 +86,29 @@ pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mY
 
 pub(crate) struct MockAggregateInfo {
     pub(crate) task_id: Id,
-    pub(crate) batch_info: Option<Interval>,
     pub(crate) agg_rate: u64,
 }
 
+#[allow(dead_code)]
 pub(crate) struct MockAggregator {
+    pub(crate) now: u64,
     pub(crate) global_config: DapGlobalConfig,
     tasks: HashMap<Id, DapTaskConfig>,
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
-    pub(crate) report_store: Arc<Mutex<HashMap<BucketInfo, ReportStore>>>,
+    report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
     leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
+    pub(crate) agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
 }
 
 #[allow(dead_code)]
 impl MockAggregator {
     pub(crate) fn new() -> Self {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let global_config: DapGlobalConfig =
             serde_json::from_str(GLOBAL_CONFIG).expect("failed to parse global config");
 
@@ -119,6 +125,7 @@ impl MockAggregator {
         let agg_store = Arc::new(Mutex::new(HashMap::new()));
 
         Self {
+            now,
             global_config,
             tasks,
             hpke_receiver_config_list,
@@ -127,6 +134,31 @@ impl MockAggregator {
             helper_state_store,
             agg_store,
         }
+    }
+
+    /// Conducts checks on a received report to see whether:
+    /// 1) the report falls into a batch that has been already collected, or
+    /// 2) the report has been submitted by the client in the past.
+    fn check_report(
+        &self,
+        bucket_info: &BucketInfo,
+        nonce: &Nonce,
+        report_store: &ReportStore,
+        agg_store: &HashMap<BucketInfo, AggStoreState>,
+    ) -> Result<(), TransitionFailure> {
+        // Check AggStateStore to see whether the report is part of a batch that has already
+        // been collected.
+        if matches!(agg_store.get(bucket_info), Some(agg_store_state) if agg_store_state.collected)
+        {
+            return Err(TransitionFailure::BatchCollected);
+        }
+
+        // Check whether the same report has been submitted in the past.
+        if report_store.processed.contains(nonce) {
+            return Err(TransitionFailure::ReportReplayed);
+        }
+
+        Ok(())
     }
 
     fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
@@ -322,22 +354,6 @@ impl DapAggregator<BearerToken> for MockAggregator {
         task_id: &Id,
         batch_interval: &Interval,
     ) -> Result<(), DapError> {
-        // Mark reports as collected.
-        let mut report_store_mutex_guard = self
-            .report_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let report_store = report_store_mutex_guard.deref_mut();
-
-        for (inner_bucket_info, store) in report_store.iter_mut() {
-            if task_id == &inner_bucket_info.task_id
-                && batch_interval.start <= inner_bucket_info.window
-                && batch_interval.end() > inner_bucket_info.window
-            {
-                store.collected = true;
-            }
-        }
-
         // Mark aggregate shares as collected.
         let mut agg_store_mutex_guard = self
             .agg_store
@@ -364,38 +380,40 @@ impl DapHelper<BearerToken> for MockAggregator {
         task_id: &Id,
         report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal("task not found"))?;
         let mut early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
 
+        // Lock AggStateStore.
+        let agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref();
+
+        // Lock ReportStore.
         let mut report_store_mutex_guard = self
             .report_store
             .lock()
             .map_err(|e| DapError::Fatal(e.to_string()))?;
-
         let report_store = report_store_mutex_guard.deref_mut();
+        let report_store = report_store
+            .entry(task_id.clone())
+            .or_insert_with(ReportStore::new);
 
         for report_share in report_shares.iter() {
-            let bucket_info = BucketInfo::new(
-                self.tasks
-                    .get(task_id)
-                    .ok_or_else(|| DapError::fatal("task not found"))?,
-                task_id,
-                &report_share.nonce,
-            );
+            let bucket_info = BucketInfo::new(task_config, task_id, &report_share.nonce);
 
-            if !report_store.contains_key(&bucket_info) {
-                report_store.insert(bucket_info.clone(), ReportStore::new());
-            }
-
-            match report_store
-                .get_mut(&bucket_info)
-                .unwrap()
-                .process_put_processed(report_share.nonce.clone())
+            // Check whether Report has been collected or replayed.
+            if let Err(transition_failure) =
+                self.check_report(&bucket_info, &report_share.nonce, report_store, agg_store)
             {
-                Ok(()) => (),
-                Err(failure_reason) => {
-                    early_fails.insert(report_share.nonce.clone(), failure_reason);
-                }
-            }
+                early_fails.insert(report_share.nonce.clone(), transition_failure);
+            };
+
+            // Mark Report processed.
+            report_store.processed.insert(report_share.nonce.clone());
         }
 
         Ok(early_fails)
@@ -467,54 +485,44 @@ impl DapLeader<BearerToken> for MockAggregator {
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
         let task_id = &report.task_id;
-        let bucket_info = BucketInfo::new(
-            self.tasks
-                .get(task_id)
-                .ok_or_else(|| DapError::fatal("task not found"))?,
-            task_id,
-            &report.nonce,
-        );
+        let task_config = self
+            .get_task_config_for(task_id)
+            .ok_or_else(|| DapError::fatal("task not found"))?;
+        let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
 
+        // Lock AggStateStore.
+        let agg_store_mutex_guard = self
+            .agg_store
+            .lock()
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let agg_store = agg_store_mutex_guard.deref();
+
+        // Lock ReportStore.
         let mut report_store_mutex_guard = self
             .report_store
             .lock()
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let report_store = report_store_mutex_guard.deref_mut();
+        let report_store = report_store
+            .entry(task_id.clone())
+            .or_insert_with(ReportStore::new);
 
-        if !report_store.contains_key(&bucket_info) {
-            report_store.insert(bucket_info.clone(), ReportStore::new());
-        }
-
-        match report_store
-            .get_mut(&bucket_info)
-            .unwrap()
-            .process_put_pending(report.clone())
+        // Check whether Report has been collected or replayed.
+        if let Err(transition_failure) =
+            self.check_report(&bucket_info, &report.nonce, report_store, agg_store)
         {
-            Ok(()) => Ok(()),
-            Err(failure_reason) => Err(DapError::Transition(failure_reason)),
-        }
+            return Err(DapError::Transition(transition_failure));
+        };
+
+        // Store Report for future processing.
+        report_store.pending.push_back(report.clone());
+        Ok(())
     }
 
     async fn get_reports(
         &self,
         selector: &MockAggregateInfo,
     ) -> Result<HashMap<Id, Vec<Report>>, DapError> {
-        let task_config = self
-            .get_task_config_for(&selector.task_id)
-            .ok_or_else(|| DapError::fatal("task not found"))?;
-
-        let now = self.get_current_time();
-
-        // Calculate batch interval.
-        let batch_interval = if let Some(ref interval) = selector.batch_info {
-            if !interval.is_valid_for(task_config) {
-                return Err(DapError::fatal("invalid batch interval"));
-            }
-            interval.clone()
-        } else {
-            task_config.current_batch_window(now)
-        };
-
         // Lock report_store.
         let agg_rate = selector
             .agg_rate
@@ -528,11 +536,8 @@ impl DapLeader<BearerToken> for MockAggregator {
         let report_store = report_store_mutex_guard.deref_mut();
 
         // Fetch reports.
-        for (inner_bucket_info, store) in report_store.iter_mut() {
-            if selector.task_id == inner_bucket_info.task_id
-                && batch_interval.start <= inner_bucket_info.window
-                && batch_interval.end() > inner_bucket_info.window
-            {
+        for (inner_task_id, store) in report_store.iter_mut() {
+            if &selector.task_id == inner_task_id {
                 let num_reports_remaining = agg_rate - reports.len();
                 let num_reports_drained = std::cmp::min(num_reports_remaining, store.pending.len());
                 let mut reports_drained: Vec<Report> =
@@ -710,66 +715,18 @@ impl BucketInfo {
     }
 }
 
-// TODO(nakatsuka-y) remove dead_code once all functions are used
-#[allow(dead_code)]
+/// Stores the reports received from Clients.
 pub(crate) struct ReportStore {
-    pub(crate) pending: Vec<Report>,
+    pub(crate) pending: VecDeque<Report>,
     processed: HashSet<Nonce>,
-    pub(crate) collected: bool,
 }
 
-// TODO(nakatsuka-y) remove dead_code once all functions are used
-#[allow(dead_code)]
 impl ReportStore {
     pub(crate) fn new() -> Self {
-        let pending: Vec<Report> = Vec::new();
+        let pending: VecDeque<Report> = VecDeque::new();
         let processed: HashSet<Nonce> = HashSet::new();
-        let collected = false;
 
-        Self {
-            pending,
-            processed,
-            collected,
-        }
-    }
-
-    fn checked_process(&mut self, nonce: &Nonce) -> Result<(), TransitionFailure> {
-        let observed = self.processed.contains(nonce);
-        if observed && !self.collected {
-            return Err(TransitionFailure::ReportReplayed);
-        } else if !observed && self.collected {
-            return Err(TransitionFailure::BatchCollected);
-        }
-        self.processed.insert(nonce.clone());
-        Ok(())
-    }
-
-    pub(crate) fn process_delete_all(&mut self) {
-        self.pending.clear();
-        self.processed.clear();
-        self.collected = false;
-    }
-
-    pub(crate) fn process_get_pending(&mut self, reports_requested: u64) -> Vec<Report> {
-        let reports_drained =
-            std::cmp::min(reports_requested.try_into().unwrap(), self.pending.len());
-        let reports: Vec<Report> = self.pending.drain(..reports_drained).collect();
-        reports
-    }
-
-    pub(crate) fn process_put_pending(&mut self, report: Report) -> Result<(), TransitionFailure> {
-        self.checked_process(&report.nonce)?;
-        self.pending.push(report);
-        Ok(())
-    }
-
-    pub(crate) fn process_put_processed(&mut self, nonce: Nonce) -> Result<(), TransitionFailure> {
-        self.checked_process(&nonce)?;
-        Ok(())
-    }
-
-    pub(crate) fn process_mark_collected(&mut self) {
-        self.collected = true;
+        Self { pending, processed }
     }
 }
 
@@ -800,6 +757,6 @@ impl LeaderState {
 /// * Aggregate share
 /// * Whether this aggregate share has been collected
 pub(crate) struct AggStoreState {
-    agg_share: DapAggregateShare,
-    collected: bool,
+    pub(crate) agg_share: DapAggregateShare,
+    pub(crate) collected: bool,
 }
