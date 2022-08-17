@@ -95,7 +95,7 @@ pub(crate) struct MockAggregator {
     pub(crate) global_config: DapGlobalConfig,
     tasks: HashMap<Id, DapTaskConfig>,
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
-    report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
+    pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
     leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
@@ -718,7 +718,7 @@ impl BucketInfo {
 /// Stores the reports received from Clients.
 pub(crate) struct ReportStore {
     pub(crate) pending: VecDeque<Report>,
-    processed: HashSet<Nonce>,
+    pub(crate) processed: HashSet<Nonce>,
 }
 
 impl ReportStore {

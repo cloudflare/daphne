@@ -217,45 +217,6 @@ fn agg_resp_fail_hpke_decrypt_err() {
 }
 
 #[test]
-fn agg_resp_fail_report_replayed() {
-    let mut t = Test::new(TEST_VDAF);
-    let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
-
-    // Simulate the leader replaying a report.
-    t.early_rejects
-        .insert(reports[0].nonce.clone(), TransitionFailure::ReportReplayed);
-
-    let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
-
-    assert_eq!(agg_resp.transitions.len(), 1);
-    assert_matches!(
-        agg_resp.transitions[0].var,
-        TransitionVar::Failed(TransitionFailure::ReportReplayed)
-    );
-}
-
-#[test]
-fn agg_resp_fail_batch_collected() {
-    let mut t = Test::new(TEST_VDAF);
-    let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
-
-    // Simulate the leader requesting aggregation of a report for a batch that has already been
-    // collected.
-    t.early_rejects
-        .insert(reports[0].nonce.clone(), TransitionFailure::BatchCollected);
-
-    let (_, agg_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
-
-    assert_eq!(agg_resp.transitions.len(), 1);
-    assert_matches!(
-        agg_resp.transitions[0].var,
-        TransitionVar::Failed(TransitionFailure::BatchCollected)
-    );
-}
-
-#[test]
 fn agg_resp_abort_transition_out_of_order() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
@@ -635,7 +596,6 @@ impl<'a> Test<'a> {
                 &self.helper_hpke_receiver_config,
                 &self.vdaf_verify_key,
                 &agg_init_req,
-                &self.early_rejects,
             )
             .unwrap();
 

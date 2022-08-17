@@ -13,7 +13,7 @@ use crate::{
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
         AggregateShareReq, AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce,
-        Report, ReportShare, TransitionFailure,
+        Report, ReportShare, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -562,16 +562,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     return Err(DapAbort::InvalidProtocolVersion);
                 }
 
-                let early_rejects = self
-                    .mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares)
-                    .await?;
+                // Run mark_aggregated and handle_agg_init_req concurrently.
+                let early_rejects_future =
+                    self.mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares);
 
-                // This is where the encrypted report share is decrypted.
                 let transition = task_config.vdaf.handle_agg_init_req(
                     self,
                     &task_config.vdaf_verify_key,
                     &agg_init_req,
-                    &early_rejects,
                 )?;
 
                 // Check that helper state with task_id and agg_job_id does not exist.
@@ -582,8 +580,30 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     ));
                 }
 
+                // Remove reports that are rejected early.
+                let early_rejects = early_rejects_future.await?;
                 let agg_resp = match transition {
-                    DapHelperTransition::Continue(state, agg_resp) => {
+                    DapHelperTransition::Continue(mut state, mut agg_resp) => {
+                        let mut i = 0;
+                        while i < state.seq.len() {
+                            if let Some(failure) = early_rejects.get(&agg_resp.transitions[i].nonce)
+                            {
+                                // Mark reports that were rejected early as TransitionVar::Failed.
+                                agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
+
+                                // Remove VDAF preparation state of reports that were rejected early.
+                                if state.seq[i].1 == agg_resp.transitions[i].nonce {
+                                    let _val = state.seq.remove(i);
+                                } else {
+                                    // The nonce in the Helper state and Aggregate response must be aligned.
+                                    // Abort with an internal error if this is not the case.
+                                    return Err(DapError::fatal("nonces not aligned").into());
+                                }
+                            } else {
+                                i += 1;
+                            }
+                        }
+
                         self.put_helper_state(
                             &agg_init_req.task_id,
                             &agg_init_req.agg_job_id,

@@ -15,8 +15,8 @@ use crate::{
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
-        AggStoreState, BucketInfo, MockAggregateInfo, MockAggregator, COLLECTOR_BEARER_TOKEN,
-        HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
+        AggStoreState, BucketInfo, MockAggregateInfo, MockAggregator, ReportStore,
+        COLLECTOR_BEARER_TOKEN, HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapLeaderTransition, DapMeasurement, DapRequest,
     DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
@@ -25,7 +25,11 @@ use assert_matches::assert_matches;
 use matchit::Router;
 use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
-use std::{ops::DerefMut, vec};
+use std::{
+    collections::{HashSet, VecDeque},
+    ops::DerefMut,
+    vec,
+};
 
 // MockAggregator's implementation of DapLeader::get_report() always returns reports for a single
 // task. This macro is used to conveniently unwrap the task ID and reports for testing purposes.
@@ -425,6 +429,51 @@ async fn http_post_aggregate_transition_continue() {
 
     // Expect success due to valid ciphertext.
     assert_matches!(transition.var, TransitionVar::Continued(_));
+}
+
+#[tokio::test]
+async fn http_post_aggregate_failure_report_replayed() {
+    let helper = MockAggregator::new();
+    let task_id = helper.nominal_task_id();
+
+    let report = helper.gen_test_report(task_id);
+    let report_shares = vec![ReportShare {
+        nonce: report.nonce.clone(),
+        extensions: report.extensions,
+        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
+        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    }];
+    let sender_auth = Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string()));
+
+    let mut req = helper.gen_test_agg_init_req(report_shares);
+    req.sender_auth = sender_auth;
+
+    // The following scope is to ensure that the report_store lock is released before http_post_aggregate is called.
+    {
+        let mut report_store_mutex_guard = helper.report_store.lock().expect("lock() failed");
+        let report_store = report_store_mutex_guard.deref_mut();
+        let mut processed = HashSet::new();
+        processed.insert(report.nonce.clone());
+        report_store.insert(
+            task_id.clone(),
+            ReportStore {
+                pending: VecDeque::new(),
+                processed,
+            },
+        );
+    }
+
+    // Get AggregateResp and then extract the transition data from inside.
+    let agg_resp =
+        AggregateResp::get_decoded(&helper.http_post_aggregate(&req).await.unwrap().payload)
+            .unwrap();
+    let transition = &agg_resp.transitions[0];
+
+    // Expect failure due to report store marked as collected.
+    assert_matches!(
+        transition.var,
+        TransitionVar::Failed(TransitionFailure::ReportReplayed)
+    );
 }
 
 #[tokio::test]
