@@ -35,10 +35,7 @@ use prio::{
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    convert::TryInto,
-};
+use std::{collections::HashSet, convert::TryInto};
 
 const CTX_INPUT_SHARE: &[u8] = b"dap-01 input share";
 const CTX_AGG_SHARE: &[u8] = b"dap-01 aggregate share";
@@ -386,7 +383,6 @@ impl VdafConfig {
         decrypter: &D,
         verify_key: &VdafVerifyKey,
         agg_init_req: &AggregateInitializeReq,
-        early_rejects: &HashMap<Nonce, TransitionFailure>,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort>
     where
         D: HpkeDecrypter,
@@ -400,14 +396,6 @@ impl VdafConfig {
                 return Err(DapAbort::UnrecognizedMessage);
             }
             processed.insert(report_share.nonce.clone());
-
-            if let Some(failure) = early_rejects.get(&report_share.nonce) {
-                transitions.push(Transition {
-                    nonce: report_share.nonce.clone(),
-                    var: TransitionVar::Failed(*failure),
-                });
-                continue;
-            }
 
             let var = match self.consume_report_share(
                 decrypter,
