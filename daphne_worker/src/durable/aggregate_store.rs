@@ -71,7 +71,7 @@ impl DurableObject for AggregateStore {
                 let agg_share_delta = req.json().await?;
                 agg_share.merge(agg_share_delta).map_err(int_err)?;
                 self.state.storage().put("agg_share", agg_share).await?;
-                Response::empty()
+                Response::from_json(&String::new())
             }
 
             (DURABLE_AGGREGATE_STORE_GET, Method::Post) => {
@@ -89,7 +89,7 @@ impl DurableObject for AggregateStore {
 
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
                 self.state.storage().put("collected", true).await?;
-                Response::empty()
+                Response::from_json(&String::new())
             }
 
             _ => Err(int_err(format!(

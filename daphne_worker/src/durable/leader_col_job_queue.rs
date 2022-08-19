@@ -162,7 +162,7 @@ impl DurableObject for LeaderCollectionJobQueue {
                     .put(&processed_key, collect_resp)
                     .await?;
                 delete_pending_future.await?;
-                Response::empty()
+                Response::from_json(&String::new())
             }
 
             // Retrieve a completed CollectResp.
