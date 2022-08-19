@@ -156,23 +156,25 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
         // shares that have already been marked collected.
-        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
+        let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
-            let stub = namespace
-                .id_from_name(&durable_agg_store_name(
-                    &task_config.version,
-                    &task_id.to_hex(),
-                    window,
-                ))?
-                .get_stub()?;
+            let durable_name =
+                durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
+            requests.push(self.durable_post(
+                BINDING_DAP_AGGREGATE_STORE,
+                DURABLE_AGGREGATE_STORE_GET,
+                durable_name,
+                &(),
+            ));
+        }
 
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            let mut resp = durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &()).await?;
+        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await?;
 
+        for resp in responses {
             // If this agg share has been collected before, return BatchCollected error.
-            match resp.json().await? {
+            match resp {
                 AggregateStoreResult::Ok(_) => {
                     continue;
                 }
@@ -181,6 +183,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 }
             }
         }
+
         Ok(false)
     }
 
@@ -190,22 +193,26 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         out_shares: Vec<DapOutputShare>,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
 
         let agg_shares =
             DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
 
+        let mut requests = Vec::new();
         for (window, agg_share) in agg_shares.into_iter() {
-            let stub = namespace
-                .id_from_name(&durable_agg_store_name(
-                    &task_config.version,
-                    &task_id.to_hex(),
-                    window,
-                ))?
-                .get_stub()?;
-
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_AGGREGATE_STORE_MERGE, &agg_share).await?;
+            let durable_name =
+                durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
+            requests.push(self.durable_post(
+                BINDING_DAP_AGGREGATE_STORE,
+                DURABLE_AGGREGATE_STORE_MERGE,
+                durable_name,
+                agg_share,
+            ));
+        }
+        let responses: Vec<String> = try_join_all(requests).await?;
+        for result in responses {
+            if !result.is_empty() {
+                return Err(DapError::fatal("unexpected response"));
+            }
         }
 
         Ok(())
@@ -217,25 +224,25 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         batch_interval: &Interval,
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let namespace = self.durable_object(BINDING_DAP_AGGREGATE_STORE)?;
-        let mut agg_share = DapAggregateShare::default();
+
+        let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
-            let stub = namespace
-                .id_from_name(&durable_agg_store_name(
-                    &task_config.version,
-                    &task_id.to_hex(),
-                    window,
-                ))?
-                .get_stub()?;
+            let durable_name =
+                durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
+            requests.push(self.durable_post(
+                BINDING_DAP_AGGREGATE_STORE,
+                DURABLE_AGGREGATE_STORE_GET,
+                durable_name,
+                &(),
+            ));
+        }
+        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await?;
 
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            let mut resp = durable_post!(stub, DURABLE_AGGREGATE_STORE_GET, &()).await?;
-
-            // If AggregateStore returns with ErrBatchOverlap, return with Fatal error, as the batch overlap
-            // check logic in init_collect_job is not functioning properly.
-            match resp.json().await? {
+        let mut agg_share = DapAggregateShare::default();
+        for resp in responses {
+            match resp {
                 AggregateStoreResult::Ok(agg_share_delta) => agg_share.merge(agg_share_delta)?,
                 AggregateStoreResult::ErrBatchOverlap => {
                     return Err(DapError::fatal("batch collected"))
@@ -254,31 +261,43 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
         // Mark reports collected.
-        let namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
+        let mut requests = Vec::new();
         for durable_name in
             self.iter_report_store_names(&task_config.version, task_id, batch_interval)?
         {
-            // TODO Don't block on DO request (issue multiple requests simultaneously).
-            let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-            durable_post!(stub, DURABLE_REPORT_STORE_MARK_COLLECTED, &()).await?;
+            requests.push(self.durable_post(
+                BINDING_DAP_REPORT_STORE,
+                DURABLE_REPORT_STORE_MARK_COLLECTED,
+                durable_name,
+                &(),
+            ));
+        }
+        let responses: Vec<ReportStoreResult> = try_join_all(requests).await?;
+        for result in responses {
+            if let ReportStoreResult::Err(_) = result {
+                return Err(DapError::fatal("unexpected response"));
+            }
         }
 
         // Mark aggregate shares collected.
-        let task_config = self.try_get_task_config_for(task_id)?;
-        let namespace = self.durable_object("DAP_AGGREGATE_STORE")?;
+        let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
-            let stub = namespace
-                .id_from_name(&durable_agg_store_name(
-                    &task_config.version,
-                    &task_id.to_hex(),
-                    window,
-                ))?
-                .get_stub()?;
-
-            // TODO Don't block on DO requests (issue multiple requests simultaneously).
-            durable_post!(stub, DURABLE_AGGREGATE_STORE_MARK_COLLECTED, &()).await?;
+            let durable_name =
+                durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
+            requests.push(self.durable_post(
+                BINDING_DAP_AGGREGATE_STORE,
+                DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
+                durable_name,
+                &(),
+            ));
+        }
+        let responses: Vec<String> = try_join_all(requests).await?;
+        for result in responses {
+            if !result.is_empty() {
+                return Err(DapError::fatal("unexpected response"));
+            }
         }
 
         Ok(())
@@ -556,11 +575,12 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
                 nonce_hex_set,
             ));
         }
-
         let responses: Vec<Vec<(String, TransitionFailure)>> = try_join_all(requests).await?;
+
         let mut early_fails = HashMap::new();
         for response in responses.into_iter() {
             for (nonce_hex, failure_reason) in response.into_iter() {
+                let nonce_hex: String = nonce_hex;
                 let nonce = Nonce::get_decoded(&hex::decode(&nonce_hex)?)?;
                 early_fails.insert(nonce, failure_reason);
             }
