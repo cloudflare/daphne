@@ -19,6 +19,8 @@ RUN apk add --update npm bash
 RUN npm install -g n && \
     n 18.4.0
 RUN npm install -g miniflare@2.5.1
+COPY daphne_worker_test/leader.env /leader.env
+COPY daphne_worker_test/helper.env /helper.env
 COPY --from=builder /tmp/dap_test/daphne_worker_test/wrangler.toml /wrangler.toml
 COPY --from=builder /tmp/dap_test/daphne_worker_test/build/worker/* /build/worker/
 # `-B ""` to skip build command.
