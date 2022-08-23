@@ -6,9 +6,7 @@ compatibility_date = "2022-01-20"
 
 
 [build]
-# TODO Revert this temporary fix once
-# https://github.com/cloudflare/workers-rs/issues/204 is closed.
-command = "cargo install -q --git https://github.com/cloudflare/workers-rs --branch zeb/esbuild && worker-build"
+command = "cargo install -q --git https://github.com/cloudflare/workers-rs && worker-build"
 
 [build.upload]
 dir    = "build/worker"
