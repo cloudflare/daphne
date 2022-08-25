@@ -170,8 +170,16 @@ impl DurableObject for ReportStore {
                 //   processed. This way we can avoid storing "agg_job" here.
                 //
                 // In the meantime, to avoid flakyness in interop tests, supress the bug in
-                // development environments by never clearing the agg job queue.
-                if empty && self.env.var("DAP_DEPLOYMENT")?.to_string() != "dev" {
+                // development environments by never clearing the agg job queue if a workaround flag
+                // is set. Note that it is necessary to restart miniflare between test runs in order
+                // to reset the DO state.
+                if empty
+                    && self
+                        .env
+                        .var("DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION")?
+                        .to_string()
+                        == "true"
+                {
                     let agg_job: Option<AggregationJob> = state_get(&self.state, "agg_job").await?;
                     if let Some(agg_job) = agg_job {
                         // NOTE There is only one agg job queue for now. In the future, work will
