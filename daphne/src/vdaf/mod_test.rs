@@ -63,8 +63,8 @@ impl<M: Debug> DapHelperTransition<M> {
 // TODO Exercise all of the Prio3 variants and not just Count.
 const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
 
-#[test]
-fn roundtrip_report() {
+#[tokio::test]
+async fn roundtrip_report() {
     let t = Test::new(TEST_VDAF);
     let report = t
         .vdaf
@@ -86,6 +86,7 @@ fn roundtrip_report() {
             &report.extensions,
             &report.encrypted_input_shares[0],
         )
+        .await
         .unwrap();
 
     let (helper_step, helper_share) = TEST_VDAF
@@ -98,6 +99,7 @@ fn roundtrip_report() {
             &report.extensions,
             &report.encrypted_input_shares[1],
         )
+        .await
         .unwrap();
 
     match (leader_step, helper_step, leader_share, helper_share) {
@@ -161,8 +163,8 @@ fn roundtrip_report_unsupported_hpke_suite() {
     assert_matches!(res, Err(DapError::Fatal(s)) => assert_eq!(s, "HPKE ciphersuite not implemented (999, 1, 1)"));
 }
 
-#[test]
-fn agg_init_req() {
+#[tokio::test]
+async fn agg_init_req() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -170,7 +172,10 @@ fn agg_init_req() {
         DapMeasurement::U64(0),
     ]);
 
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports.clone()).unwrap_continue();
+    let (leader_state, agg_init_req) = t
+        .produce_agg_init_req(reports.clone())
+        .await
+        .unwrap_continue();
     assert_eq!(leader_state.seq.len(), 3);
     assert_eq!(agg_init_req.task_id, t.task_id);
     assert_eq!(agg_init_req.agg_param.len(), 0);
@@ -179,7 +184,7 @@ fn agg_init_req() {
         assert_eq!(report_shares.nonce, report.nonce);
     }
 
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
     assert_eq!(agg_resp.transitions.len(), 3);
     for (sub, report) in agg_resp.transitions.iter().zip(reports.iter()) {
@@ -187,27 +192,33 @@ fn agg_init_req() {
     }
 }
 
-#[test]
-fn agg_init_req_fail_hpke_decrypt_err() {
+#[tokio::test]
+async fn agg_init_req_fail_hpke_decrypt_err() {
     let t = Test::new(TEST_VDAF);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Simulate HPKE decryption error of leader's report share.
     reports[0].encrypted_input_shares[0].payload[0] ^= 1;
 
-    assert_matches!(t.produce_agg_init_req(reports), DapLeaderTransition::Skip);
+    assert_matches!(
+        t.produce_agg_init_req(reports).await,
+        DapLeaderTransition::Skip
+    );
 }
 
-#[test]
-fn agg_resp_fail_hpke_decrypt_err() {
+#[tokio::test]
+async fn agg_resp_fail_hpke_decrypt_err() {
     let mut t = Test::new(TEST_VDAF);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Simulate HPKE decryption error of helper's report share.
     reports[0].encrypted_input_shares[1].payload[0] ^= 1;
 
-    let (_, agg_req) = t.produce_agg_init_req(reports.clone()).unwrap_continue();
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).unwrap_continue();
+    let (_, agg_req) = t
+        .produce_agg_init_req(reports.clone())
+        .await
+        .unwrap_continue();
+    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
 
     assert_eq!(agg_resp.transitions.len(), 1);
     assert_matches!(
@@ -216,12 +227,12 @@ fn agg_resp_fail_hpke_decrypt_err() {
     );
 }
 
-#[test]
-fn agg_resp_abort_transition_out_of_order() {
+#[tokio::test]
+async fn agg_resp_abort_transition_out_of_order() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     // Helper sends transitions out of order.
     let tmp = agg_resp.transitions[0].clone();
@@ -234,12 +245,12 @@ fn agg_resp_abort_transition_out_of_order() {
     );
 }
 
-#[test]
-fn agg_resp_abort_nonce_repeated() {
+#[tokio::test]
+async fn agg_resp_abort_nonce_repeated() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     // Helper sends a transition twice.
     let repeated_transition = agg_resp.transitions[0].clone();
@@ -251,13 +262,13 @@ fn agg_resp_abort_nonce_repeated() {
     );
 }
 
-#[test]
-fn agg_resp_abort_unrecognized_nonce() {
+#[tokio::test]
+async fn agg_resp_abort_unrecognized_nonce() {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     // Helper sent a transition with an unrecognized Nonce.
     agg_resp.transitions.push(Transition {
@@ -274,12 +285,12 @@ fn agg_resp_abort_unrecognized_nonce() {
     );
 }
 
-#[test]
-fn agg_resp_abort_invalid_transition() {
+#[tokio::test]
+async fn agg_resp_abort_invalid_transition() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     // Helper sent a transition with an unrecognized Nonce.
     agg_resp.transitions[0].var = TransitionVar::Finished;
@@ -290,8 +301,8 @@ fn agg_resp_abort_invalid_transition() {
     );
 }
 
-#[test]
-fn agg_cont_req() {
+#[tokio::test]
+async fn agg_cont_req() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -300,8 +311,8 @@ fn agg_cont_req() {
         DapMeasurement::U64(0),
         DapMeasurement::U64(1),
     ]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     let (leader_uncommitted, agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
@@ -348,17 +359,18 @@ fn agg_cont_req() {
     );
 }
 
-#[test]
-fn agg_cont_req_skip_vdaf_prep_error() {
+#[tokio::test]
+async fn agg_cont_req_skip_vdaf_prep_error() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
         DapMeasurement::U64(1),
         DapMeasurement::U64(1),
     ]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (helper_state, agg_resp) = t
         .handle_agg_init_req(agg_init_req.clone())
+        .await
         .unwrap_continue();
 
     let (_, mut agg_cont_req) = t
@@ -384,13 +396,13 @@ fn agg_cont_req_skip_vdaf_prep_error() {
     );
 }
 
-#[test]
-fn agg_cont_abort_unrecognized_nonce() {
+#[tokio::test]
+async fn agg_cont_abort_unrecognized_nonce() {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
@@ -413,12 +425,12 @@ fn agg_cont_abort_unrecognized_nonce() {
     );
 }
 
-#[test]
-fn agg_cont_req_abort_transition_out_of_order() {
+#[tokio::test]
+async fn agg_cont_req_abort_transition_out_of_order() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
@@ -434,12 +446,12 @@ fn agg_cont_req_abort_transition_out_of_order() {
     );
 }
 
-#[test]
-fn agg_cont_req_abort_nonce_repeated() {
+#[tokio::test]
+async fn agg_cont_req_abort_nonce_repeated() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
@@ -454,8 +466,8 @@ fn agg_cont_req_abort_nonce_repeated() {
     );
 }
 
-#[test]
-fn encrypted_agg_share() {
+#[tokio::test]
+async fn encrypted_agg_share() {
     let t = Test::new(TEST_VDAF);
     let leader_agg_share = DapAggregateShare {
         report_count: 50,
@@ -476,16 +488,18 @@ fn encrypted_agg_share() {
         t.produce_leader_encrypted_agg_share(&batch_interval, &leader_agg_share);
     let helper_encrypted_agg_share =
         t.produce_helper_encrypted_agg_share(&batch_interval, &helper_agg_share);
-    let agg_res = t.consume_encrypted_agg_shares(
-        &batch_interval,
-        vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
-    );
+    let agg_res = t
+        .consume_encrypted_agg_shares(
+            &batch_interval,
+            vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
+        )
+        .await;
 
     assert_eq!(agg_res, DapAggregateResult::U64(32));
 }
 
-#[test]
-fn helper_state_serialization() {
+#[tokio::test]
+async fn helper_state_serialization() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -494,8 +508,8 @@ fn helper_state_serialization() {
         DapMeasurement::U64(0),
         DapMeasurement::U64(1),
     ]);
-    let (_, agg_init_req) = t.produce_agg_init_req(reports).unwrap_continue();
-    let (want, _) = t.handle_agg_init_req(agg_init_req).unwrap_continue();
+    let (_, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
+    let (want, _) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
     let got =
         DapHelperState::get_decoded(TEST_VDAF, &want.get_encoded(TEST_VDAF).unwrap()).unwrap();
@@ -571,7 +585,7 @@ impl<'a> Test<'a> {
         reports
     }
 
-    fn produce_agg_init_req(
+    async fn produce_agg_init_req(
         &self,
         reports: Vec<Report>,
     ) -> DapLeaderTransition<AggregateInitializeReq> {
@@ -583,10 +597,11 @@ impl<'a> Test<'a> {
                 &self.agg_job_id,
                 reports,
             )
+            .await
             .unwrap()
     }
 
-    fn handle_agg_init_req(
+    async fn handle_agg_init_req(
         &mut self,
         agg_init_req: AggregateInitializeReq,
     ) -> DapHelperTransition<AggregateResp> {
@@ -597,6 +612,7 @@ impl<'a> Test<'a> {
                 &self.vdaf_verify_key,
                 &agg_init_req,
             )
+            .await
             .unwrap();
 
         for report_share in agg_init_req.report_shares {
@@ -692,7 +708,7 @@ impl<'a> Test<'a> {
             .unwrap()
     }
 
-    fn consume_encrypted_agg_shares(
+    async fn consume_encrypted_agg_shares(
         &self,
         batch_interval: &Interval,
         enc_agg_shares: Vec<HpkeCiphertext>,
@@ -704,10 +720,14 @@ impl<'a> Test<'a> {
                 batch_interval,
                 enc_agg_shares,
             )
+            .await
             .unwrap()
     }
 
-    pub(crate) fn roundtrip(&mut self, measurements: Vec<DapMeasurement>) -> DapAggregateResult {
+    pub(crate) async fn roundtrip(
+        &mut self,
+        measurements: Vec<DapMeasurement>,
+    ) -> DapAggregateResult {
         let batch_interval = Interval {
             start: self.now,
             duration: 3600,
@@ -717,8 +737,8 @@ impl<'a> Test<'a> {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let (leader_state, agg_init) = self.produce_agg_init_req(reports).unwrap_continue();
-        let (helper_state, agg_resp) = self.handle_agg_init_req(agg_init).unwrap_continue();
+        let (leader_state, agg_init) = self.produce_agg_init_req(reports).await.unwrap_continue();
+        let (helper_state, agg_resp) = self.handle_agg_init_req(agg_init).await.unwrap_continue();
         let got = DapHelperState::get_decoded(
             &self.vdaf,
             &helper_state
@@ -757,5 +777,6 @@ impl<'a> Test<'a> {
             &batch_interval,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
+        .await
     }
 }

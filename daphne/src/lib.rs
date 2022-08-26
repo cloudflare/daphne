@@ -36,6 +36,7 @@ use crate::{
         VdafAggregateShare, VdafError, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
+use messages::HpkeKemId;
 use prio::{
     codec::{CodecError, Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
@@ -291,6 +292,10 @@ pub struct DapGlobalConfig {
     /// Batch intervals cannot end more than `max_batch_interval_end`
     /// apart from the current batch interval.
     pub max_batch_interval_end: u64,
+
+    /// HPKE KEM types that are supported. Used when generating HPKE
+    /// receiver config.
+    pub supported_hpke_kems: Vec<HpkeKemId>,
 }
 
 /// Per-task DAP parameters.

@@ -140,6 +140,7 @@ async fn janus_helper() {
             &batch_interval,
             collect_resp.encrypted_agg_shares,
         )
+        .await
         .unwrap();
     assert_eq!(agg_res, daphne::DapAggregateResult::U128(13 as u128));
 

@@ -7,7 +7,7 @@
 //! draft-ietf-ppm-dap-01.
 
 use crate::{
-    config::{DaphneWorkerConfig, DaphneWorkerDeployment},
+    config::{DaphneWorkerConfig, DaphneWorkerDeployment, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG},
     dap_err,
     durable::{
         aggregate_store::{
@@ -38,7 +38,7 @@ use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
     constants,
-    hpke::HpkeDecrypter,
+    hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
         ReportShare, TransitionFailure,
@@ -49,6 +49,7 @@ use daphne::{
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode};
+use rand::Rng;
 use std::collections::HashMap;
 use worker::*;
 
@@ -64,29 +65,87 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     Ok(worker_resp)
 }
 
+#[async_trait(?Send)]
 impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
-    fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
-        if self.hpke_receiver_config_list.is_empty() {
-            return None;
+    async fn get_hpke_config_for(
+        &self,
+        _task_id: &Id,
+    ) -> std::result::Result<Option<HpkeConfig>, DapError> {
+        let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE").map_err(dap_err)?;
+        let keys = kv_store
+            .list()
+            .limit(1)
+            .prefix(KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG.to_string())
+            .execute()
+            .await
+            .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+
+        if keys.keys.is_empty() {
+            // Generate a new random HPKE config ID and key for KV.
+            let hpke_config_id: u8 = rand::thread_rng().gen();
+            let new_key = format!("{}/{}", KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_config_id);
+
+            // Generate a new HPKE receiver config.
+            //
+            // NOTE(nakatsuka-y): When we suport multiple HPKE KEMs in the future we should:
+            // - Remove the following check for the number of HPKE KEMs
+            // - Add a logic that selects a HPKE KEM to give to the HpkeReceiverConfig::gen
+            if self.global_config.supported_hpke_kems.len() != 1 {
+                return Err(DapError::Fatal(
+                    "The number of supported HPKE KEMs must be 1".to_string(),
+                ));
+            }
+            let hpke_receiver_config =
+                HpkeReceiverConfig::gen(hpke_config_id, self.global_config.supported_hpke_kems[0]);
+
+            // Store newly generated HPKE receiver config into KV.
+            kv_store
+                .put(&new_key, hpke_receiver_config.clone())
+                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+                .execute()
+                .await
+                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+
+            Ok(Some(hpke_receiver_config.config))
+        } else {
+            // Return the first HPKE receiver config.
+            let builder = kv_store.get(&keys.keys[0].name);
+            if let Some(hpke_receiver_config) = builder
+                .json::<HpkeReceiverConfig>()
+                .await
+                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+            {
+                Ok(Some(hpke_receiver_config.config))
+            } else {
+                Ok(None)
+            }
         }
-
-        // Always advertise the first HPKE config in the list.
-        Some(&(self.hpke_receiver_config_list[0]).config)
     }
 
-    fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
-        self.get_hpke_receiver_config_for(config_id).is_some()
+    async fn can_hpke_decrypt(
+        &self,
+        _task_id: &Id,
+        config_id: u8,
+    ) -> std::result::Result<bool, DapError> {
+        let hpke_receiver_configs = self
+            .cached_hpke_receiver_configs(config_id)
+            .await
+            .map_err(dap_err)?;
+        Ok(hpke_receiver_configs.get(&config_id).is_some())
     }
 
-    fn hpke_decrypt(
+    async fn hpke_decrypt(
         &self,
         _task_id: &Id,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
-        if let Some(hpke_receiver_config) = self.get_hpke_receiver_config_for(ciphertext.config_id)
-        {
+        let hpke_receiver_configs = self
+            .cached_hpke_receiver_configs(ciphertext.config_id)
+            .await
+            .map_err(dap_err)?;
+        if let Some(hpke_receiver_config) = hpke_receiver_configs.get(&ciphertext.config_id) {
             Ok(hpke_receiver_config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))

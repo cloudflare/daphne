@@ -7,7 +7,8 @@ use daphne::messages::{Id, Interval, Nonce};
 pub const GLOBAL_CONFIG: &str = r#"{
     "max_batch_duration": 360000,
     "min_batch_interval_start": 259200,
-    "max_batch_interval_end": 259200
+    "max_batch_interval_end": 259200,
+    "supported_hpke_kems": ["X25519HkdfSha256"]
 }"#;
 
 const DAP_TASK_LIST: &str = r#"{
@@ -55,29 +56,6 @@ const DAP_TASK_LIST: &str = r#"{
     }
 }"#;
 
-const DAP_HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
-    {
-        "config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key": "5dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
-        },
-        "secret_key": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
-    },
-    {
-        "config": {
-            "id": 14,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key": "b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
-        },
-        "secret_key": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
-    }
-]"#;
-
 const DAP_BUCKET_KEY: &str = "773a0e77ffcfa580c11ad031c35cad02";
 
 #[test]
@@ -87,7 +65,6 @@ fn daphne_param() {
     let config: DaphneWorkerConfig<String> = DaphneWorkerConfig::from_test_config(
         GLOBAL_CONFIG,
         DAP_TASK_LIST,
-        DAP_HPKE_RECEIVER_CONFIG_LIST,
         DAP_BUCKET_KEY,
         bucket_count,
     )

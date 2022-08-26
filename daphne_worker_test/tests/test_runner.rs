@@ -30,7 +30,8 @@ const JANUS_HELPER_TASK: &str = "410d5e0abd94a88b8435a192cc458cc1667da2989827584
 pub const GLOBAL_CONFIG: &str = r#"{
     "max_batch_duration": 360000,
     "min_batch_interval_start": 259200,
-    "max_batch_interval_end": 259200
+    "max_batch_interval_end": 259200,
+    "supported_hpke_kems": ["X25519HkdfSha256"]
 }"#;
 
 // This value of this JSON string must match DAP_TASK_LIST in tests/backend/leader.env.

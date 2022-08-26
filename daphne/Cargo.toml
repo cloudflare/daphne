@@ -17,10 +17,6 @@ readme = "../README.md"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "dapf"
-path = "src/bin/dapf.rs"
-
 [dependencies]
 assert_matches = "1.5.0"
 async-trait = "0.1.56"
@@ -35,10 +31,7 @@ serde = { version = "^1.0", features = ["derive"] }
 rand = "0.8.5"
 thiserror = "1.0"
 url = { version = "2.2.2", features = ["serde"] }
-clap = { version = "3.2.12", features = ["derive"] } # Required for daph CLI
-reqwest = { version = "0.11.11", features = ["blocking"] } # Required for daph CLI
-anyhow = "1.0.58" # Required for daph CLI
 matchit = "0.6.0"
 
 [dev-dependencies]
-tokio = { version = "^1.19", features = ["macros","rt"] }
+tokio = { version = "^1.19", features = ["rt", "macros"] }

@@ -211,9 +211,9 @@ impl VdafConfig {
     ///
     /// * `encrypted_input_share` is the encrypted input share.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn consume_report_share<D: HpkeDecrypter>(
+    pub(crate) async fn consume_report_share(
         &self,
-        decrypter: &D,
+        decrypter: &impl HpkeDecrypter,
         is_leader: bool,
         verify_key: &VdafVerifyKey,
         task_id: &Id,
@@ -238,8 +238,9 @@ impl VdafConfig {
         let nonce_end = aad.len();
         encode_u16_items(&mut aad, &(), extensions);
 
-        let input_share_data =
-            decrypter.hpke_decrypt(task_id, &info, &aad, encrypted_input_share)?;
+        let input_share_data = decrypter
+            .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
+            .await?;
 
         let nonce_data = &aad[nonce_start..nonce_end];
         let agg_id = if is_leader { 0 } else { 1 };
@@ -282,9 +283,9 @@ impl VdafConfig {
     /// * `task_id` indicates the DAP task for which the set of reports are being aggregated.
     ///
     /// * `reports` is the set of reports uploaded by Clients.
-    pub(crate) fn produce_agg_init_req<D: HpkeDecrypter>(
+    pub(crate) async fn produce_agg_init_req(
         &self,
-        decrypter: &D,
+        decrypter: &impl HpkeDecrypter,
         verify_key: &VdafVerifyKey,
         task_id: &Id,
         agg_job_id: &Id,
@@ -313,15 +314,18 @@ impl VdafConfig {
                 (it.next().unwrap(), it.next().unwrap())
             };
 
-            match self.consume_report_share(
-                decrypter,
-                true, // is_leader
-                verify_key,
-                task_id,
-                &report.nonce,
-                &report.extensions,
-                &leader_share,
-            ) {
+            match self
+                .consume_report_share(
+                    decrypter,
+                    true, // is_leader
+                    verify_key,
+                    task_id,
+                    &report.nonce,
+                    &report.extensions,
+                    &leader_share,
+                )
+                .await
+            {
                 Ok((step, message)) => {
                     states.push((step, message, report.nonce.clone()));
                     seq.push(ReportShare {
@@ -378,15 +382,12 @@ impl VdafConfig {
     /// * `early_rejects` is a tableindicating the set of reports in `agg_init_req` that the Helper
     /// knows in advance it must reject. Each key is the report's nonce and the corresponding value
     /// is the transition failure the Helper is to transmit.
-    pub(crate) fn handle_agg_init_req<D>(
+    pub(crate) async fn handle_agg_init_req(
         &self,
-        decrypter: &D,
+        decrypter: &impl HpkeDecrypter,
         verify_key: &VdafVerifyKey,
         agg_init_req: &AggregateInitializeReq,
-    ) -> Result<DapHelperTransition<AggregateResp>, DapAbort>
-    where
-        D: HpkeDecrypter,
-    {
+    ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut states = Vec::with_capacity(num_reports);
@@ -397,15 +398,18 @@ impl VdafConfig {
             }
             processed.insert(report_share.nonce.clone());
 
-            let var = match self.consume_report_share(
-                decrypter,
-                false, // is_leader
-                verify_key,
-                &agg_init_req.task_id,
-                &report_share.nonce,
-                &report_share.extensions,
-                &report_share.encrypted_input_share,
-            ) {
+            let var = match self
+                .consume_report_share(
+                    decrypter,
+                    false, // is_leader
+                    verify_key,
+                    &agg_init_req.task_id,
+                    &report_share.nonce,
+                    &report_share.extensions,
+                    &report_share.encrypted_input_share,
+                )
+                .await
+            {
                 Ok((step, message)) => {
                     let message_data = match self {
                         Self::Prio3(..) => prio3_encode_prepare_message(&message),
@@ -728,9 +732,9 @@ impl VdafConfig {
     /// Aggregators. The first encrypted aggregate shares must be the Leader's.
     //
     // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
-    pub fn consume_encrypted_agg_shares<D: HpkeDecrypter>(
+    pub async fn consume_encrypted_agg_shares(
         &self,
-        decrypter: &D,
+        decrypter: &impl HpkeDecrypter,
         task_id: &Id,
         batch_interval: &Interval,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
@@ -752,8 +756,9 @@ impl VdafConfig {
                 CTX_ROLE_HELPER
             };
 
-            let agg_share_data =
-                decrypter.hpke_decrypt(task_id, &info, &aad, agg_share_ciphertext)?;
+            let agg_share_data = decrypter
+                .hpke_decrypt(task_id, &info, &aad, agg_share_ciphertext)
+                .await?;
             agg_shares.push(agg_share_data);
         }
 

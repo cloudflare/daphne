@@ -29,7 +29,8 @@ use url::Url;
 pub const GLOBAL_CONFIG: &str = r#"{
     "max_batch_duration": 360000,
     "min_batch_interval_start": 259200,
-    "max_batch_interval_end": 259200
+    "max_batch_interval_end": 259200,
+    "supported_hpke_kems": ["X25519HkdfSha256"]
 }"#;
 
 // Secret key of "collector_hpke_config":
@@ -194,21 +195,22 @@ impl BearerTokenProvider for MockAggregator {
     }
 }
 
+#[async_trait(?Send)]
 impl HpkeDecrypter for MockAggregator {
-    fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
+    async fn get_hpke_config_for(&self, _task_id: &Id) -> Result<Option<HpkeConfig>, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // Always advertise the first HPKE config in the list.
-        Some(&self.hpke_receiver_config_list[0].config)
+        Ok(Some(self.hpke_receiver_config_list[0].config.clone()))
     }
 
-    fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
-        self.get_hpke_receiver_config_for(config_id).is_some()
+    async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {
+        Ok(self.get_hpke_receiver_config_for(config_id).is_some())
     }
 
-    fn hpke_decrypt(
+    async fn hpke_decrypt(
         &self,
         _task_id: &Id,
         info: &[u8],

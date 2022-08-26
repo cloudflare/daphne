@@ -25,8 +25,13 @@ use prio::{
     codec::{Decode, Encode},
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
-use std::collections::HashMap;
-use worker::*;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock, RwLockReadGuard},
+};
+use worker::{kv::KvStore, *};
+
+pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
 
 /// Long-lived parameters used a daphne across DAP tasks.
 pub(crate) struct DaphneWorkerConfig<D> {
@@ -38,7 +43,10 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     pub(crate) global_config: DapGlobalConfig,
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
-    pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
+
+    /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
+    /// receiver config for the first time from Cloudflare KV.
+    pub(crate) hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
 
     /// Leader's bearer token for each task.
     pub(crate) leader_bearer_tokens: HashMap<Id, BearerToken>,
@@ -66,22 +74,6 @@ impl<D> DaphneWorkerConfig<D> {
         let tasks: HashMap<Id, DapTaskConfig> =
             serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
                 .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
-
-        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> = serde_json::from_str(
-            ctx.secret("DAP_HPKE_RECEIVER_CONFIG_LIST")?
-                .to_string()
-                .as_ref(),
-        )
-        .map_err(|e| {
-            Error::RustError(format!(
-                "Failed to parse DAP_HPKE_RECEIVER_CONFIG_LIST: {}",
-                e
-            ))
-        })?;
-
-        if hpke_receiver_config_list.is_empty() {
-            return Err(Error::RustError("empty DAP_HPKE_CONFIG_LIST".to_string()));
-        }
 
         let bucket_key = Seed::get_decoded(
             &hex::decode(ctx.secret("DAP_BUCKET_KEY")?.to_string()).map_err(int_err)?,
@@ -167,7 +159,7 @@ impl<D> DaphneWorkerConfig<D> {
             client,
             global_config,
             tasks,
-            hpke_receiver_config_list,
+            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
             leader_bearer_tokens,
             collector_bearer_tokens,
             deployment,
@@ -183,7 +175,6 @@ impl<D> DaphneWorkerConfig<D> {
     pub(crate) fn from_test_config(
         json_global_config: &str,
         json_task_list: &str,
-        json_hpke_receiver_config_list: &str,
         json_bucket_key: &str,
         bucket_count: u64,
     ) -> Result<Self> {
@@ -195,7 +186,7 @@ impl<D> DaphneWorkerConfig<D> {
             client: None,
             global_config: serde_json::from_str(json_global_config)?,
             tasks: serde_json::from_str(json_task_list)?,
-            hpke_receiver_config_list: serde_json::from_str(json_hpke_receiver_config_list)?,
+            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
             leader_bearer_tokens: HashMap::default(),
             collector_bearer_tokens: None,
             deployment: DaphneWorkerDeployment::default(),
@@ -264,16 +255,57 @@ impl<D> DaphneWorkerConfig<D> {
         DurableConnector::new(&self.ctx.as_ref().expect("no route context configured").env)
     }
 
-    pub(crate) fn get_hpke_receiver_config_for(
+    pub(crate) fn kv(&self, binding: &str) -> Result<KvStore> {
+        self.ctx
+            .as_ref()
+            .ok_or_else(|| Error::RustError("route context does not exist".to_string()))?
+            .kv(binding)
+    }
+
+    // Get a reference to the HPKE receiver configs, ensuring that the config indicated by
+    // `hpke_config_id` is cached (if it exists).
+    pub(crate) async fn cached_hpke_receiver_configs(
         &self,
         hpke_config_id: u8,
-    ) -> Option<&HpkeReceiverConfig> {
-        for hpke_receiver_config in self.hpke_receiver_config_list.iter() {
-            if hpke_config_id == hpke_receiver_config.config.id {
-                return Some(hpke_receiver_config);
+    ) -> Result<RwLockReadGuard<HashMap<u8, HpkeReceiverConfig>>> {
+        // If the config is cached, then return immediately.
+        {
+            let hpke_receiver_configs = self.hpke_receiver_configs.read().map_err(|e| {
+                Error::RustError(format!(
+                    "Failed to lock hpke_receiver_configs for reading: {}",
+                    e
+                ))
+            })?;
+
+            if hpke_receiver_configs.get(&hpke_config_id).is_some() {
+                return Ok(hpke_receiver_configs);
             }
         }
-        None
+
+        // If the config is not cached, try to populate it from KV before returning.
+        let new_key = format!("{}/{}", KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_config_id);
+        let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE")?;
+        let builder = kv_store.get(&new_key);
+        if let Some(hpke_receiver_config) = builder.json::<HpkeReceiverConfig>().await? {
+            // TODO(cjpatton) Consider indicating whether a config is known to not exist. This
+            // would avoid hitting KV multiple times when the same expired config is used for
+            // multiple reports.
+            let mut hpke_receiver_configs = self.hpke_receiver_configs.write().map_err(|e| {
+                Error::RustError(format!(
+                    "Failed to lock hpke_receiver_configs for writing: {}",
+                    e
+                ))
+            })?;
+            hpke_receiver_configs.insert(hpke_config_id, hpke_receiver_config);
+        }
+
+        let hpke_receiver_configs = self.hpke_receiver_configs.read().map_err(|e| {
+            Error::RustError(format!(
+                "Failed to lock hpke_receiver_configs for reading: {}",
+                e
+            ))
+        })?;
+        Ok(hpke_receiver_configs)
     }
 
     /// Clear all persistant durable objects storage.

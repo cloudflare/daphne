@@ -74,7 +74,8 @@ enum Action {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
@@ -217,12 +218,14 @@ fn main() -> Result<()> {
             let batch_interval = assert_matches!(batch_selector,
                         BatchSelector::Interval(batch_interval) => batch_interval);
             let collect_resp = CollectResp::get_decoded(&resp.bytes()?)?;
-            let agg_res = vdaf.consume_encrypted_agg_shares(
-                receiver,
-                &task_id,
-                &batch_interval,
-                collect_resp.encrypted_agg_shares,
-            )?;
+            let agg_res = vdaf
+                .consume_encrypted_agg_shares(
+                    receiver,
+                    &task_id,
+                    &batch_interval,
+                    collect_resp.encrypted_agg_shares,
+                )
+                .await?;
 
             print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())
