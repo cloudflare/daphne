@@ -10,6 +10,7 @@ use crate::{
     },
     DapError,
 };
+use async_trait::async_trait;
 use hpke::{aead, kdf, kem, Deserializable, Kem, OpModeR};
 use prio::codec::{CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -79,15 +80,16 @@ impl HpkeConfig {
 }
 
 /// HPKE decrypter functionality.
+#[async_trait(?Send)]
 pub trait HpkeDecrypter {
     /// Look up the HPKE configuration to use for the given task ID.
-    fn get_hpke_config_for(&self, task_id: &Id) -> Option<&HpkeConfig>;
+    async fn get_hpke_config_for(&self, task_id: &Id) -> Result<Option<HpkeConfig>, DapError>;
 
     /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
-    fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> bool;
+    async fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> Result<bool, DapError>;
 
     /// Decrypt the given HPKE ciphertext using the given info and AAD string.
-    fn hpke_decrypt(
+    async fn hpke_decrypt(
         &self,
         task_id: &Id,
         info: &[u8],
@@ -210,9 +212,8 @@ impl HpkeReceiverConfig {
         }
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn gen(id: u8, kem_id: HpkeKemId) -> Self {
+    /// Generate and return a new HPKE receiver context given a HPKE config ID and HPKE KEM.
+    pub fn gen(id: u8, kem_id: HpkeKemId) -> Self {
         use hpke::Serializable;
 
         match kem_id {
@@ -220,8 +221,8 @@ impl HpkeReceiverConfig {
                 let (sk, pk) = kem::X25519HkdfSha256::gen_keypair(&mut rand::thread_rng());
                 HpkeReceiverConfig {
                     config: HpkeConfig {
-                        id: id,
-                        kem_id: kem_id,
+                        id,
+                        kem_id,
                         kdf_id: HpkeKdfId::HkdfSha256,
                         aead_id: HpkeAeadId::Aes128Gcm,
                         public_key: pk.to_bytes().to_vec(),
@@ -233,8 +234,8 @@ impl HpkeReceiverConfig {
                 let (sk, pk) = kem::DhP256HkdfSha256::gen_keypair(&mut rand::thread_rng());
                 HpkeReceiverConfig {
                     config: HpkeConfig {
-                        id: id,
-                        kem_id: kem_id,
+                        id,
+                        kem_id,
                         kdf_id: HpkeKdfId::HkdfSha256,
                         aead_id: HpkeAeadId::Aes128Gcm,
                         public_key: pk.to_bytes().to_vec(),
@@ -250,16 +251,17 @@ impl HpkeReceiverConfig {
     }
 }
 
+#[async_trait(?Send)]
 impl HpkeDecrypter for HpkeReceiverConfig {
-    fn get_hpke_config_for(&self, _task_id: &Id) -> Option<&HpkeConfig> {
+    async fn get_hpke_config_for(&self, _task_id: &Id) -> Result<Option<HpkeConfig>, DapError> {
         unreachable!("not implemented");
     }
 
-    fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> bool {
-        config_id == self.config.id
+    async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {
+        Ok(config_id == self.config.id)
     }
 
-    fn hpke_decrypt(
+    async fn hpke_decrypt(
         &self,
         _task_id: &Id,
         info: &[u8],

@@ -3,15 +3,17 @@
 
 use crate::{vdaf::mod_test::Test, DapAggregateResult, DapMeasurement, VdafConfig};
 
-#[test]
-fn roundtrip() {
+#[tokio::test]
+async fn roundtrip() {
     let mut t = Test::new(&VdafConfig::Prio2 { dimension: 5 });
-    let got = t.roundtrip(vec![
-        DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
-        DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
-        DapMeasurement::U32Vec(vec![1, 0, 0, 0, 1]),
-        DapMeasurement::U32Vec(vec![0, 1, 0, 0, 1]),
-        DapMeasurement::U32Vec(vec![0, 0, 1, 0, 1]),
-    ]);
+    let got = t
+        .roundtrip(vec![
+            DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
+            DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
+            DapMeasurement::U32Vec(vec![1, 0, 0, 0, 1]),
+            DapMeasurement::U32Vec(vec![0, 1, 0, 0, 1]),
+            DapMeasurement::U32Vec(vec![0, 0, 1, 0, 1]),
+        ])
+        .await;
     assert_eq!(got, DapAggregateResult::U32Vec(vec![3, 3, 1, 0, 5]));
 }

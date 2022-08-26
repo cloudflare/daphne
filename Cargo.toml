@@ -4,6 +4,7 @@
 
 members = [
     "daphne",
+    "daphne/dapf",
     "daphne_worker",
     "daphne_worker_test",
 ]

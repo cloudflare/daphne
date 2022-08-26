@@ -28,6 +28,11 @@ bindings = [
   { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
 ]
 
+[[kv_namespaces]]
+  binding = "DAP_HPKE_RECEIVER_CONFIG_STORE"
+  id = "<ignored>"
+  preview_id = "<ignored>"
+
 
 [vars]
 WORKERS_RS_VERSION = "0.0.11"

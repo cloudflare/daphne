@@ -154,6 +154,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
 
             let hpke_config = self
                 .get_hpke_config_for(task_id)
+                .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
             Ok(DapResponse {
                 media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
@@ -258,7 +259,10 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // Check that the indicated HpkeConfig is present.
         //
         // TODO spec: It's not clear if this behavior is MUST, SHOULD, or MAY.
-        if !self.can_hpke_decrypt(&report.task_id, report.encrypted_input_shares[0].config_id) {
+        if !self
+            .can_hpke_decrypt(&report.task_id, report.encrypted_input_shares[0].config_id)
+            .await?
+        {
             return Err(DapAbort::UnrecognizedHpkeConfig);
         }
 
@@ -337,13 +341,16 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         // Prepare AggregateInitializeReq.
         let agg_job_id = Id(rng.gen());
-        let transition = task_config.vdaf.produce_agg_init_req(
-            self,
-            &task_config.vdaf_verify_key,
-            task_id,
-            &agg_job_id,
-            reports,
-        )?;
+        let transition = task_config
+            .vdaf
+            .produce_agg_init_req(
+                self,
+                &task_config.vdaf_verify_key,
+                task_id,
+                &agg_job_id,
+                reports,
+            )
+            .await?;
         let (state, agg_init_req) = match transition {
             DapLeaderTransition::Continue(state, agg_init_req) => (state, agg_init_req),
             DapLeaderTransition::Skip => return Ok(0),
@@ -566,11 +573,10 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 let early_rejects_future =
                     self.mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares);
 
-                let transition = task_config.vdaf.handle_agg_init_req(
-                    self,
-                    &task_config.vdaf_verify_key,
-                    &agg_init_req,
-                )?;
+                let transition = task_config
+                    .vdaf
+                    .handle_agg_init_req(self, &task_config.vdaf_verify_key, &agg_init_req)
+                    .await?;
 
                 // Check that helper state with task_id and agg_job_id does not exist.
                 if helper_state.await?.is_some() {

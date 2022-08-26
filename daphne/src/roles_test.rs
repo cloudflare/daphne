@@ -190,6 +190,7 @@ impl MockAggregator {
                 &agg_job_id,
                 reports,
             )
+            .await
             .unwrap();
         assert_matches!(transition, DapLeaderTransition::Continue(..));
         let (leader_state, agg_init_req) = transition.unwrap_continue();

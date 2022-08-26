@@ -34,6 +34,22 @@ async fn e2e_helper_hpke_config() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_hpke_configs_are_cached() {
+    let t = TestRunner::default().await;
+    let client = t.http_client();
+    // Get a set of HPKE configs from leader and helper.
+    let hpke_config_list_0 = t.get_hpke_configs(&client).await;
+    // Get another set of HPKE configs from leader and helper.
+    let hpke_config_list_1 = t.get_hpke_configs(&client).await;
+    // The leader HPKE configs in the two sets must be the same because we store
+    // the HPKE receiver config in KV.
+    assert_eq!(hpke_config_list_0[0], hpke_config_list_1[0]);
+    // The same holds for the helper HPKE config.
+    assert_eq!(hpke_config_list_0[1], hpke_config_list_1[1]);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_upload() {
     let t = TestRunner::default().await;
     let mut rng = thread_rng();
@@ -141,12 +157,12 @@ async fn e2e_leader_upload() {
                 extensions: Vec::default(),
                 encrypted_input_shares: vec![
                     HpkeCiphertext {
-                        config_id: 23,
+                        config_id: hpke_config_list[0].id,
                         enc: b"encapsulated key".to_vec(),
                         payload: b"ciphertext".to_vec(),
                     },
                     HpkeCiphertext {
-                        config_id: 14,
+                        config_id: hpke_config_list[1].id,
                         enc: b"encapsulated key".to_vec(),
                         payload: b"ciphertext".to_vec(),
                     },
@@ -335,6 +351,7 @@ async fn e2e_leader_collect_ok() {
             &batch_interval,
             collect_resp.encrypted_agg_shares.clone(),
         )
+        .await
         .unwrap();
     assert_eq!(agg_res, DapAggregateResult::U128(t.min_batch_size as u128));
 
