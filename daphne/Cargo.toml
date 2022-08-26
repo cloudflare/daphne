@@ -2,6 +2,7 @@
 
 [package]
 name = "daphne"
+description = "Implementation of the DAP specification"
 version = "0.0.1"
 authors = [
   "Christopher Patton <cpatton@cloudflare.com>",
@@ -9,6 +10,9 @@ authors = [
 ]
 edition = "2021"
 license = "BSD-3-Clause"
+homepage = "https://github.com/cloudflare/daphne"
+repository = "https://github.com/cloudflare/daphne"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
