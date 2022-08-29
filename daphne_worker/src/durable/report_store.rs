@@ -7,7 +7,7 @@ use crate::{
         leader_agg_job_queue::{
             AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        state_get, state_get_or_default, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+        state_get, state_get_or_default, DurableConnector, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
         BINDING_DAP_REPORT_STORE,
     },
     int_err, now,
@@ -98,6 +98,7 @@ impl DurableObject for ReportStore {
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+        let durable = DurableConnector::new(&self.env);
         let mut rng = thread_rng();
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORT_STORE);
@@ -184,10 +185,14 @@ impl DurableObject for ReportStore {
                     if let Some(agg_job) = agg_job {
                         // NOTE There is only one agg job queue for now. In the future, work will
                         // be sharded across multiple queues.
-                        let namespace =
-                            self.env.durable_object(BINDING_DAP_LEADER_AGG_JOB_QUEUE)?;
-                        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-                        durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, &agg_job).await?;
+                        durable
+                            .post(
+                                BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+                                DURABLE_LEADER_AGG_JOB_QUEUE_FINISH,
+                                durable_queue_name(0),
+                                &agg_job,
+                            )
+                            .await?;
                         self.state.storage().delete("agg_job").await?;
                     }
                 }
@@ -221,11 +226,16 @@ impl DurableObject for ReportStore {
                         rand: rng.gen(),
                     };
 
-                    let namespace = self.env.durable_object(BINDING_DAP_LEADER_AGG_JOB_QUEUE)?;
                     // TODO Shard the work across multiple job queues rather than just one. (See
                     // issue #25.) For now there is jsut one job queue.
-                    let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-                    durable_post!(stub, DURABLE_LEADER_AGG_JOB_QUEUE_PUT, &agg_job).await?;
+                    durable
+                        .post(
+                            BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+                            DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
+                            durable_queue_name(0),
+                            &agg_job,
+                        )
+                        .await?;
                     self.state.storage().put("agg_job", agg_job).await?;
                 }
                 Response::from_json(&res)

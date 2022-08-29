@@ -71,10 +71,10 @@ impl DurableObject for AggregateStore {
                 let agg_share_delta = req.json().await?;
                 agg_share.merge(agg_share_delta).map_err(int_err)?;
                 self.state.storage().put("agg_share", agg_share).await?;
-                Response::from_json(&String::new())
+                Response::from_json(&())
             }
 
-            (DURABLE_AGGREGATE_STORE_GET, Method::Post) => {
+            (DURABLE_AGGREGATE_STORE_GET, Method::Get) => {
                 // NOTE: The following logic is correct for `max_batch_lifetime = 1`, but
                 // requires changes when we allow batch lifetime longer than 1.
                 let agg_share: DapAggregateShare =
@@ -89,7 +89,7 @@ impl DurableObject for AggregateStore {
 
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
                 self.state.storage().put("collected", true).await?;
-                Response::from_json(&String::new())
+                Response::from_json(&())
             }
 
             _ => Err(int_err(format!(

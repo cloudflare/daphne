@@ -69,7 +69,7 @@ impl DurableObject for HelperStateStore {
                     .storage()
                     .put("helper_state", helper_state)
                     .await?;
-                Response::empty()
+                Response::from_json(&())
             }
 
             (DURABLE_HELPER_STATE_GET, Method::Post) => {

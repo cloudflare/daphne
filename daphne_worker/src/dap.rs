@@ -156,17 +156,17 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
         // shares that have already been marked collected.
+        let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
-            requests.push(self.durable_post(
+            requests.push(durable.get(
                 BINDING_DAP_AGGREGATE_STORE,
                 DURABLE_AGGREGATE_STORE_GET,
                 durable_name,
-                &(),
             ));
         }
 
@@ -197,24 +197,19 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         let agg_shares =
             DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
 
+        let durable = self.durable();
         let mut requests = Vec::new();
         for (window, agg_share) in agg_shares.into_iter() {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
-            requests.push(self.durable_post(
+            requests.push(durable.post::<_, ()>(
                 BINDING_DAP_AGGREGATE_STORE,
                 DURABLE_AGGREGATE_STORE_MERGE,
                 durable_name,
                 agg_share,
             ));
         }
-        let responses: Vec<String> = try_join_all(requests).await?;
-        for result in responses {
-            if !result.is_empty() {
-                return Err(DapError::fatal("unexpected response"));
-            }
-        }
-
+        try_join_all(requests).await?;
         Ok(())
     }
 
@@ -225,17 +220,17 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
+        let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
-            requests.push(self.durable_post(
+            requests.push(durable.get(
                 BINDING_DAP_AGGREGATE_STORE,
                 DURABLE_AGGREGATE_STORE_GET,
                 durable_name,
-                &(),
             ));
         }
         let responses: Vec<AggregateStoreResult> = try_join_all(requests).await?;
@@ -261,11 +256,12 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
         // Mark reports collected.
+        let durable = self.durable();
         let mut requests = Vec::new();
         for durable_name in
             self.iter_report_store_names(&task_config.version, task_id, batch_interval)?
         {
-            requests.push(self.durable_post(
+            requests.push(durable.post(
                 BINDING_DAP_REPORT_STORE,
                 DURABLE_REPORT_STORE_MARK_COLLECTED,
                 durable_name,
@@ -280,26 +276,21 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         }
 
         // Mark aggregate shares collected.
+        let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
             .step_by(task_config.min_batch_duration.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
-            requests.push(self.durable_post(
+            requests.push(durable.post::<_, ()>(
                 BINDING_DAP_AGGREGATE_STORE,
                 DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
                 durable_name,
                 &(),
             ));
         }
-        let responses: Vec<String> = try_join_all(requests).await?;
-        for result in responses {
-            if !result.is_empty() {
-                return Err(DapError::fatal("unexpected response"));
-            }
-        }
-
+        try_join_all(requests).await?;
         Ok(())
     }
 }
@@ -310,13 +301,17 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
     async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(&report.task_id)?;
-        let durable_namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
-        let durable_name =
-            self.durable_report_store_name(task_config, &report.task_id, &report.nonce);
-        let stub = durable_namespace.id_from_name(&durable_name)?.get_stub()?;
         let report_hex = hex::encode(report.get_encoded());
-        let mut resp = durable_post!(stub, DURABLE_REPORT_STORE_PUT_PENDING, &report_hex).await?;
-        match resp.json().await? {
+        let res: ReportStoreResult = self
+            .durable()
+            .post(
+                BINDING_DAP_REPORT_STORE,
+                DURABLE_REPORT_STORE_PUT_PENDING,
+                self.durable_report_store_name(task_config, &report.task_id, &report.nonce),
+                &report_hex,
+            )
+            .await?;
+        match res {
             ReportStoreResult::Ok => Ok(()),
             ReportStoreResult::Err(t) => return Err(DapError::Transition(t)),
         }
@@ -331,31 +326,30 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         //
         // NOTE There is only one agg job queue for now (`queue_num == 0`). In the future, work
         // will be sharded across multiple queues.
-        let namespace = self.durable_object(BINDING_DAP_LEADER_AGG_JOB_QUEUE)?;
-        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        let mut resp = durable_post!(
-            stub,
-            DURABLE_LEADER_AGG_JOB_QUEUE_GET,
-            &selector.max_buckets
-        )
-        .await?;
-        let res: Vec<String> = resp.json().await?;
+        let res: Vec<String> = self
+            .durable()
+            .post(
+                BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+                DURABLE_LEADER_AGG_JOB_QUEUE_GET,
+                durable_queue_name(0),
+                &selector.max_buckets,
+            )
+            .await?;
 
         // Drain at most `selector.max_reports` from each bucket.
         //
         // TODO Figure out if we can safely handle each bucket in parallel.
-        let namespace = self.durable_object(BINDING_DAP_REPORT_STORE)?;
         let mut reports_per_task: HashMap<Id, Vec<Report>> = HashMap::new();
         for report_store_id_hex in res.into_iter() {
-            let stub = namespace.id_from_string(&report_store_id_hex)?.get_stub()?;
-            let reports_from_durable: Vec<String> = durable_post!(
-                stub,
-                DURABLE_REPORT_STORE_GET_PENDING,
-                &selector.max_reports
-            )
-            .await?
-            .json()
-            .await?;
+            let reports_from_durable: Vec<String> = self
+                .durable()
+                .post_by_id_hex(
+                    BINDING_DAP_REPORT_STORE,
+                    DURABLE_REPORT_STORE_GET_PENDING,
+                    report_store_id_hex,
+                    &selector.max_reports,
+                )
+                .await?;
 
             for report_hex in reports_from_durable {
                 let report =
@@ -389,11 +383,14 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 
         // Try to put the request into collection job queue. If the request is overlapping
         // with past requests, then abort.
-        let namespace = self.durable_object(BINDING_DAP_LEADER_COL_JOB_QUEUE)?;
-        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        let collect_id: Id = durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_PUT, &collect_req)
-            .await?
-            .json()
+        let collect_id: Id = self
+            .durable()
+            .post(
+                BINDING_DAP_LEADER_COL_JOB_QUEUE,
+                DURABLE_LEADER_COL_JOB_QUEUE_PUT,
+                durable_queue_name(0),
+                &collect_req,
+            )
             .await?;
 
         let mut url = task_config.leader_url.clone();
@@ -424,28 +421,29 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         _task_id: &Id,
         collect_id: &Id,
     ) -> std::result::Result<DapCollectJob, DapError> {
-        let namespace = self.durable_object(BINDING_DAP_LEADER_COL_JOB_QUEUE)?;
-        let stub = namespace.id_from_name(&durable_queue_name(0))?.get_stub()?;
-        let res: DapCollectJob =
-            durable_post!(stub, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, &collect_id)
-                .await?
-                .json()
-                .await?;
+        let res: DapCollectJob = self
+            .durable()
+            .post(
+                BINDING_DAP_LEADER_COL_JOB_QUEUE,
+                DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
+                durable_queue_name(0),
+                &collect_id,
+            )
+            .await?;
         Ok(res)
     }
 
     async fn get_pending_collect_jobs(
         &self,
     ) -> std::result::Result<Vec<(Id, CollectReq)>, DapError> {
-        let leader_state_namespace = self.durable_object(BINDING_DAP_LEADER_COL_JOB_QUEUE)?;
-        let leader_state_stub = leader_state_namespace
-            .id_from_name(&durable_queue_name(0))?
-            .get_stub()?;
-        let res: Vec<(Id, CollectReq)> =
-            durable_get!(leader_state_stub, DURABLE_LEADER_COL_JOB_QUEUE_GET)
-                .await?
-                .json()
-                .await?;
+        let res: Vec<(Id, CollectReq)> = self
+            .durable()
+            .get(
+                BINDING_DAP_LEADER_COL_JOB_QUEUE,
+                DURABLE_LEADER_COL_JOB_QUEUE_GET,
+                durable_queue_name(0),
+            )
+            .await?;
         Ok(res)
     }
 
@@ -455,16 +453,14 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
         collect_id: &Id,
         collect_resp: &CollectResp,
     ) -> std::result::Result<(), DapError> {
-        let leader_state_namespace = self.durable_object(BINDING_DAP_LEADER_COL_JOB_QUEUE)?;
-        let leader_state_stub = leader_state_namespace
-            .id_from_name(&durable_queue_name(0))?
-            .get_stub()?;
-        durable_post!(
-            leader_state_stub,
-            DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
-            &(collect_id.clone(), collect_resp.clone(),)
-        )
-        .await?;
+        self.durable()
+            .post(
+                BINDING_DAP_LEADER_COL_JOB_QUEUE,
+                DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
+                durable_queue_name(0),
+                (collect_id, collect_resp),
+            )
+            .await?;
         Ok(())
     }
 
@@ -566,9 +562,10 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
             }
         }
 
+        let durable = self.durable();
         let mut requests = Vec::new();
         for (durable_name, nonce_hex_set) in durable_requests.into_iter() {
-            requests.push(self.durable_post(
+            requests.push(durable.post(
                 BINDING_DAP_REPORT_STORE,
                 DURABLE_REPORT_STORE_PUT_PROCESSED,
                 durable_name,
@@ -595,17 +592,15 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         helper_state: &DapHelperState,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let namespace = self.durable_object(BINDING_DAP_HELPER_STATE_STORE)?;
-        let stub = namespace
-            .id_from_name(&durable_helper_state_name(
-                &task_config.version,
-                task_id,
-                agg_job_id,
-            ))?
-            .get_stub()?;
-
         let helper_state_hex = hex::encode(helper_state.get_encoded(&task_config.vdaf)?);
-        durable_post!(stub, DURABLE_HELPER_STATE_PUT, &helper_state_hex).await?;
+        self.durable()
+            .post(
+                BINDING_DAP_HELPER_STATE_STORE,
+                DURABLE_HELPER_STATE_PUT,
+                durable_helper_state_name(&task_config.version, task_id, agg_job_id),
+                helper_state_hex,
+            )
+            .await?;
         Ok(())
     }
 
@@ -615,18 +610,14 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
         agg_job_id: &Id,
     ) -> std::result::Result<Option<DapHelperState>, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let namespace = self.durable_object(BINDING_DAP_HELPER_STATE_STORE)?;
-        let stub = namespace
-            .id_from_name(&durable_helper_state_name(
-                &task_config.version,
-                task_id,
-                agg_job_id,
-            ))?
-            .get_stub()?;
-
-        let res: Option<String> = durable_post!(stub, DURABLE_HELPER_STATE_GET, &())
-            .await?
-            .json()
+        let res: Option<String> = self
+            .durable()
+            .post(
+                BINDING_DAP_HELPER_STATE_STORE,
+                DURABLE_HELPER_STATE_GET,
+                durable_helper_state_name(&task_config.version, task_id, agg_job_id),
+                (),
+            )
             .await?;
 
         match res {
