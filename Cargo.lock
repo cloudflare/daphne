@@ -510,7 +510,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "url",
- "worker",
 ]
 
 [[package]]

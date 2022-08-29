@@ -6,6 +6,7 @@
 //! Daphne-Worker configuration.
 
 use crate::{
+    dap_err,
     durable::{
         report_store::durable_report_store_name, DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR,
         DURABLE_DELETE_ALL,
@@ -286,7 +287,8 @@ impl<D> DaphneWorkerConfig<D> {
                 "garbage_collector".to_string(),
                 &(),
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         Ok(())
     }
 

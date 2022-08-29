@@ -8,6 +8,7 @@
 
 use crate::{
     config::{DaphneWorkerConfig, DaphneWorkerDeployment},
+    dap_err,
     durable::{
         aggregate_store::{
             durable_agg_store_name, AggregateStoreResult, DURABLE_AGGREGATE_STORE_GET,
@@ -170,7 +171,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
             ));
         }
 
-        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await?;
+        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await.map_err(dap_err)?;
 
         for resp in responses {
             // If this agg share has been collected before, return BatchCollected error.
@@ -209,7 +210,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 agg_share,
             ));
         }
-        try_join_all(requests).await?;
+        try_join_all(requests).await.map_err(dap_err)?;
         Ok(())
     }
 
@@ -233,7 +234,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 durable_name,
             ));
         }
-        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await?;
+        let responses: Vec<AggregateStoreResult> = try_join_all(requests).await.map_err(dap_err)?;
 
         let mut agg_share = DapAggregateShare::default();
         for resp in responses {
@@ -258,8 +259,9 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
         // Mark reports collected.
         let durable = self.durable();
         let mut requests = Vec::new();
-        for durable_name in
-            self.iter_report_store_names(&task_config.version, task_id, batch_interval)?
+        for durable_name in self
+            .iter_report_store_names(&task_config.version, task_id, batch_interval)
+            .map_err(dap_err)?
         {
             requests.push(durable.post(
                 BINDING_DAP_REPORT_STORE,
@@ -268,7 +270,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 &(),
             ));
         }
-        let responses: Vec<ReportStoreResult> = try_join_all(requests).await?;
+        let responses: Vec<ReportStoreResult> = try_join_all(requests).await.map_err(dap_err)?;
         for result in responses {
             if let ReportStoreResult::Err(_) = result {
                 return Err(DapError::fatal("unexpected response"));
@@ -290,7 +292,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
                 &(),
             ));
         }
-        try_join_all(requests).await?;
+        try_join_all(requests).await.map_err(dap_err)?;
         Ok(())
     }
 }
@@ -310,7 +312,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 self.durable_report_store_name(task_config, &report.task_id, &report.nonce),
                 &report_hex,
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         match res {
             ReportStoreResult::Ok => Ok(()),
             ReportStoreResult::Err(t) => return Err(DapError::Transition(t)),
@@ -334,7 +337,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 durable_queue_name(0),
                 &selector.max_buckets,
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
 
         // Drain at most `selector.max_reports` from each bucket.
         //
@@ -349,7 +353,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                     report_store_id_hex,
                     &selector.max_reports,
                 )
-                .await?;
+                .await
+                .map_err(dap_err)?;
 
             for report_hex in reports_from_durable {
                 let report =
@@ -391,7 +396,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 durable_queue_name(0),
                 &collect_req,
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
 
         let mut url = task_config.leader_url.clone();
         if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
@@ -429,7 +435,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 durable_queue_name(0),
                 &collect_id,
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         Ok(res)
     }
 
@@ -443,7 +450,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 DURABLE_LEADER_COL_JOB_QUEUE_GET,
                 durable_queue_name(0),
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         Ok(res)
     }
 
@@ -460,7 +468,8 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
                 durable_queue_name(0),
                 (collect_id, collect_resp),
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         Ok(())
     }
 
@@ -572,7 +581,8 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
                 nonce_hex_set,
             ));
         }
-        let responses: Vec<Vec<(String, TransitionFailure)>> = try_join_all(requests).await?;
+        let responses: Vec<Vec<(String, TransitionFailure)>> =
+            try_join_all(requests).await.map_err(dap_err)?;
 
         let mut early_fails = HashMap::new();
         for response in responses.into_iter() {
@@ -600,7 +610,8 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
                 durable_helper_state_name(&task_config.version, task_id, agg_job_id),
                 helper_state_hex,
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
         Ok(())
     }
 
@@ -618,7 +629,8 @@ impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
                 durable_helper_state_name(&task_config.version, task_id, agg_job_id),
                 (),
             )
-            .await?;
+            .await
+            .map_err(dap_err)?;
 
         match res {
             Some(helper_state_hex) => {
