@@ -74,12 +74,6 @@ impl From<serde_json::Error> for DapError {
     }
 }
 
-impl From<worker::Error> for DapError {
-    fn from(e: worker::Error) -> Self {
-        Self::Fatal(format!("worker: {}", e))
-    }
-}
-
 impl From<hex::FromHexError> for DapError {
     fn from(e: hex::FromHexError) -> Self {
         Self::Fatal(format!("from hex: {}", e))
