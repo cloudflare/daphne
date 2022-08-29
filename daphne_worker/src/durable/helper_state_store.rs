@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable::{state_get, BINDING_DAP_HELPER_STATE_STORE},
-    int_err,
+    durable::{state_get, state_set_if_not_exists},
+    int_err, now,
 };
 use daphne::{messages::Id, DapVersion};
+use std::time::Duration;
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -34,7 +35,6 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 /// aggregation job ID.
 #[durable_object]
 pub struct HelperStateStore {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,
@@ -51,8 +51,22 @@ impl DurableObject for HelperStateStore {
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_HELPER_STATE_STORE);
+        // Ensure this DO instance is garbage collected eventually.
+        if !self.touched
+            && !state_set_if_not_exists::<bool>(&self.state, "touched", &true)
+                .await?
+                .unwrap_or(false)
+        {
+            let secs: u64 = self
+                .env
+                .var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
+                .to_string()
+                .parse()
+                .map_err(int_err)?;
+            let scheduled_time = Duration::from_secs(now() + secs);
+            self.state.storage().set_alarm(scheduled_time).await?;
+            self.touched = true;
+        }
 
         match (req.path().as_ref(), req.method()) {
             (DURABLE_HELPER_STATE_PUT, Method::Post) => {
@@ -86,5 +100,15 @@ impl DurableObject for HelperStateStore {
                 req.path()
             ))),
         }
+    }
+
+    async fn alarm(&mut self) -> Result<Response> {
+        self.state.storage().delete_all().await?;
+        self.touched = false;
+        console_debug!(
+            "HelperStateStore: deleted instance {}",
+            self.state.id().to_string()
+        );
+        Response::from_json(&())
     }
 }
