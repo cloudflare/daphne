@@ -22,7 +22,7 @@ daphne = { version = "0.1.0", path = "../daphne" } # draft-ietf-ppm-dap-01
 futures = "0.3.21"
 async-trait = "0.1.56"
 base64 = "0.13.0"
-worker = "0.0.10"
+worker = { git = "https://github.com/cloudflare/workers-rs", rev = "3423647" }
 serde_json = "1.0.82"
 getrandom = { version = "0.2", features = ["js"] } # Required for prio
 prio = "=0.8.2"
