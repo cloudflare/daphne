@@ -1,8 +1,10 @@
 # Daphne
 
 Daphne is a Rust implementation of the Distributed Aggregation Protocol
-([DAP](https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap)) standard. DAP is
+([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard. DAP is
 under active development in the PPM working group of the IETF.
+
+Daphne currently implements draft-ietf-ppm-dap-01.
 
 This software is intended to support experimental DAP deployments and is not yet
 suitable for use in production. Daphne will evolve along with the DAP draft:
@@ -10,7 +12,7 @@ Backwards compatibility with previous drafts won't be guaranteed until the draft
 itself begins to stabilize. API-breaking changes between releases should also be
 expected.
 
-This repository contains three crates:
+The [repository](https://github.com/cloudflare/daphne) contains three crates:
 
 * `daphne` (aka "Daphne") -- Implementation of the core DAP protocol logic for
   Clients, Aggregators, and Collectors. This crate does not provide the
@@ -31,17 +33,23 @@ This repository contains three crates:
 ## Testing
 
 The `daphne` crate relies on unit tests. The `daphne_worker` crate relies mostly
-on integration tests implemented in `daphne_worker_test`. Integration tests can
-be run via docker-compose:
+on integration tests implemented in `daphne_worker_test`. See the README in that
+directory for instructions on running Daphne-Worker locally.
+
+> NOTE Integration tests can be run via docker-compose, but this is not working
+> at the moment.
 
 ```
 docker-compose up --build --abort-on-container-exit --exit-code-from test
 ```
 
-See the README in that directory for instructions on running Daphne-Worker
-locally.
+
 
 ## Acknowledgements
+
+Thanks to Yoshimichi Nakatsuka who contributed signficantly to Daphne during his
+internship at Cloudflare Research. Thanks to Brandon Pitman for testing,
+reporting bugs, and sending patches.
 
 The name "Daphne" is credited to Cloudflare Research interns Tim Alberdingk
 Thijm and James Larisch, who came up with the name independently.
