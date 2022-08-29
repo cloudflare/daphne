@@ -217,10 +217,6 @@ async fn e2e_internal_leader_process() {
 }
 
 // Test that all reports eventually get drained at minimum aggregation rate.
-//
-// BUG(issue#73) We're temporarily not removing completed agg jobs from the queue. This this test
-// to flake due to a call to /internal/process handling an empty bucket.
-#[ignore]
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_process_min_agg_rate() {
