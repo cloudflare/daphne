@@ -30,7 +30,6 @@ struct OrderedCollectReq {
     collect_req: CollectReq,
 }
 
-// XXX Rename instance
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
 /// An instance of the [`LeaderCollectionJobQueue`] DO is named `queue/<queue_num>`, where
@@ -162,7 +161,7 @@ impl DurableObject for LeaderCollectionJobQueue {
                     .put(&processed_key, collect_resp)
                     .await?;
                 delete_pending_future.await?;
-                Response::from_json(&String::new())
+                Response::from_json(&())
             }
 
             // Retrieve a completed CollectResp.

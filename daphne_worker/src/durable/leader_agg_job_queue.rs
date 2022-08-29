@@ -74,7 +74,7 @@ impl DurableObject for LeaderAggregationJobQueue {
                     "LeaderAggregationJobQueue: bucket {} has been scheduled",
                     agg_job.report_store_id_hex
                 );
-                Response::from_json(&String::new())
+                Response::from_json(&())
             }
 
             (DURABLE_LEADER_AGG_JOB_QUEUE_GET, Method::Post) => {
@@ -98,7 +98,7 @@ impl DurableObject for LeaderAggregationJobQueue {
             (DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, Method::Post) => {
                 let agg_job: AggregationJob = req.json().await?;
                 self.state.storage().delete(&agg_job.bucket_key()).await?;
-                Response::from_json(&String::new())
+                Response::from_json(&())
             }
 
             _ => Err(int_err(format!(

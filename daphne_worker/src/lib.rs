@@ -24,39 +24,6 @@ pub struct InternalAggregateInfo {
     pub max_reports: u64,
 }
 
-macro_rules! durable_get {
-    (
-            $stub:expr,
-            $path:expr
-    ) => {{
-        let req = Request::new_with_init(
-            &format!("https://fake-host{}", $path),
-            RequestInit::new().with_method(Method::Get),
-        )?;
-
-        $stub.fetch_with_request(req)
-    }};
-}
-
-macro_rules! durable_post {
-    (
-        $stub:expr,
-        $path:expr,
-        $serializable:expr
-    ) => {{
-        use wasm_bindgen::JsValue;
-        let req = Request::new_with_init(
-            &format!("https://fake-host{}", $path),
-            RequestInit::new().with_method(Method::Post).with_body(Some(
-                // TODO Figure out how to send raw bytes to DOs rather than a JSON blob.
-                JsValue::from_str(&serde_json::to_string($serializable)?),
-            )),
-        )?;
-
-        $stub.fetch_with_request(req)
-    }};
-}
-
 macro_rules! parse_id {
     (
         $option_str:expr

@@ -22,6 +22,7 @@ impl DurableObject for GarbageCollector {
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+        let durable = durable::DurableConnector::new(&self.env);
         let mut rng = thread_rng();
         match (req.path().as_ref(), req.method()) {
             // Schedule a durable object (DO) instance for deletion.
@@ -61,7 +62,7 @@ impl DurableObject for GarbageCollector {
                     durable_ref.binding,
                     durable_ref.id_hex
                 );
-                Response::empty()
+                Response::from_json(&())
             }
 
             // Delete all DO instances.
@@ -82,9 +83,14 @@ impl DurableObject for GarbageCollector {
                 while !item.done() {
                     let (_durable_handle, durable_ref): (String, durable::DurableReference) =
                         item.value().into_serde()?;
-                    let namespace = self.env.durable_object(&durable_ref.binding)?;
-                    let stub = namespace.id_from_string(&durable_ref.id_hex)?.get_stub()?;
-                    durable_post!(stub, durable::DURABLE_DELETE_ALL, &()).await?;
+                    durable
+                        .post_by_id_hex(
+                            &durable_ref.binding,
+                            durable::DURABLE_DELETE_ALL,
+                            durable_ref.id_hex.clone(),
+                            &(),
+                        )
+                        .await?;
                     console_debug!(
                         "GarbageCollector: deleted {} instance {}",
                         durable_ref.binding,
@@ -94,7 +100,7 @@ impl DurableObject for GarbageCollector {
                 }
 
                 self.state.storage().delete_all().await?;
-                Response::empty()
+                Response::from_json(&())
             }
 
             _ => Err(int_err(format!(

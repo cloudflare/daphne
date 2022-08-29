@@ -7,7 +7,8 @@
 
 use crate::{
     durable::{
-        report_store::durable_report_store_name, BINDING_DAP_GARBAGE_COLLECTOR, DURABLE_DELETE_ALL,
+        report_store::durable_report_store_name, DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR,
+        DURABLE_DELETE_ALL,
     },
     int_err,
 };
@@ -23,7 +24,6 @@ use prio::{
     codec::{Decode, Encode},
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use worker::*;
 
@@ -259,11 +259,8 @@ impl<D> DaphneWorkerConfig<D> {
         })
     }
 
-    pub(crate) fn durable_object(&self, binding: &str) -> Result<ObjectNamespace> {
-        self.ctx
-            .as_ref()
-            .expect("no route context configured")
-            .durable_object(binding)
+    pub(crate) fn durable(&self) -> DurableConnector<'_> {
+        DurableConnector::new(&self.ctx.as_ref().expect("no route context configured").env)
     }
 
     pub(crate) fn get_hpke_receiver_config_for(
@@ -282,9 +279,14 @@ impl<D> DaphneWorkerConfig<D> {
     ///
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
     pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
-        let namespace = self.durable_object(BINDING_DAP_GARBAGE_COLLECTOR)?;
-        let stub = namespace.id_from_name("garbage_collector")?.get_stub()?;
-        durable_post!(stub, DURABLE_DELETE_ALL, &()).await?;
+        self.durable()
+            .post(
+                BINDING_DAP_GARBAGE_COLLECTOR,
+                DURABLE_DELETE_ALL,
+                "garbage_collector".to_string(),
+                &(),
+            )
+            .await?;
         Ok(())
     }
 
@@ -327,19 +329,6 @@ impl<D> DaphneWorkerConfig<D> {
         self.tasks
             .get(task_id)
             .ok_or_else(|| DapError::fatal("unrecognized task"))
-    }
-
-    pub(crate) async fn durable_post<I: Serialize, O: for<'a> Deserialize<'a>>(
-        &self,
-        durable_binding: &'static str,
-        durable_path: &'static str,
-        durable_name: String,
-        data: I,
-    ) -> Result<O> {
-        let namespace = self.durable_object(durable_binding)?;
-        let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        let mut resp = durable_post!(stub, &durable_path, &data).await?;
-        resp.json().await
     }
 }
 
