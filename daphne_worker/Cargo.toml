@@ -3,7 +3,7 @@
 [package]
 name = "daphne_worker"
 description = "Workers backend for Daphne"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   "Christopher Patton <cpatton@cloudflare.com>",
   "Armando Faz Hernandez <armfazh@cloudflare.com>",
@@ -18,7 +18,7 @@ readme = "../README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-daphne = { version = "0.1.0", path = "../daphne" } # draft-ietf-ppm-dap-01
+daphne = "0.1.0" # draft-ietf-ppm-dap-01
 futures = "0.3.21"
 async-trait = "0.1.56"
 base64 = "0.13.0"
