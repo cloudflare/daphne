@@ -29,7 +29,7 @@
 //! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
 
 use crate::{
-    messages::{CollectResp, HpkeConfig, Interval, Nonce, TransitionFailure},
+    messages::{CollectResp, HpkeConfig, Interval, Nonce, Time, TransitionFailure},
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
@@ -386,7 +386,7 @@ pub enum DapAggregateResult {
 /// The Leader's state after sending an AggregateInitReq.
 #[derive(Debug)]
 pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafState, VdafMessage, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, VdafMessage, Time, Nonce)>,
 }
 
 /// The Leader's state after sending an AggregateContReq.
@@ -398,7 +398,7 @@ pub struct DapLeaderUncommitted {
 /// The Helper's state during the aggregation flow.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DapHelperState {
-    pub(crate) seq: Vec<(VdafState, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, Time, Nonce)>,
 }
 
 impl DapHelperState {
@@ -411,7 +411,7 @@ impl DapHelperState {
     /// Note that the encoding format is not specified by the DAP standard.
     pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
         let mut bytes = vec![];
-        for (state, nonce) in self.seq.iter() {
+        for (state, time, nonce) in self.seq.iter() {
             match (vdaf_config, state) {
                 (VdafConfig::Prio3(prio3_config), _) => {
                     prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
@@ -421,6 +421,7 @@ impl DapHelperState {
                 }
                 _ => return Err(DapError::fatal("VDAF config and prep state mismatch")),
             }
+            time.encode(&mut bytes);
             nonce.encode(&mut bytes);
         }
         Ok(bytes)
@@ -439,8 +440,9 @@ impl DapHelperState {
                     prio2_decode_prepare_state(*dimension, 1, &mut r)?
                 }
             };
+            let time = Time::decode(&mut r)?;
             let nonce = Nonce::decode(&mut r)?;
-            seq.push((state, nonce))
+            seq.push((state, time, nonce))
         }
 
         Ok(DapHelperState { seq })

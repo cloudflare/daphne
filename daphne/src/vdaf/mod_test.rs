@@ -82,8 +82,7 @@ async fn roundtrip_report() {
             true, // is_leader
             &t.vdaf_verify_key,
             &t.task_id,
-            &report.nonce,
-            &report.extensions,
+            &report.metadata,
             &report.encrypted_input_shares[0],
         )
         .await
@@ -95,8 +94,7 @@ async fn roundtrip_report() {
             false, // is_leader
             &t.vdaf_verify_key,
             &t.task_id,
-            &report.nonce,
-            &report.extensions,
+            &report.metadata,
             &report.encrypted_input_shares[1],
         )
         .await
@@ -181,14 +179,14 @@ async fn agg_init_req() {
     assert_eq!(agg_init_req.agg_param.len(), 0);
     assert_eq!(agg_init_req.report_shares.len(), 3);
     for (report_shares, report) in agg_init_req.report_shares.iter().zip(reports.iter()) {
-        assert_eq!(report_shares.nonce, report.nonce);
+        assert_eq!(report_shares.metadata.nonce, report.metadata.nonce);
     }
 
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
     assert_eq!(agg_resp.transitions.len(), 3);
     for (sub, report) in agg_resp.transitions.iter().zip(reports.iter()) {
-        assert_eq!(sub.nonce, report.nonce);
+        assert_eq!(sub.nonce, report.metadata.nonce);
     }
 }
 
@@ -272,10 +270,7 @@ async fn agg_resp_abort_unrecognized_nonce() {
 
     // Helper sent a transition with an unrecognized Nonce.
     agg_resp.transitions.push(Transition {
-        nonce: Nonce {
-            time: rng.gen(),
-            rand: rng.gen(),
-        },
+        nonce: Nonce(rng.gen()),
         var: TransitionVar::Continued(b"whatever".to_vec()),
     });
 
@@ -388,11 +383,11 @@ async fn agg_cont_req_skip_vdaf_prep_error() {
     assert_eq!(2, agg_resp.transitions.len());
     assert_eq!(
         agg_resp.transitions[0].nonce,
-        agg_init_req.report_shares[0].nonce
+        agg_init_req.report_shares[0].metadata.nonce
     );
     assert_eq!(
         agg_resp.transitions[1].nonce,
-        agg_init_req.report_shares[2].nonce
+        agg_init_req.report_shares[2].metadata.nonce
     );
 }
 
@@ -411,10 +406,7 @@ async fn agg_cont_abort_unrecognized_nonce() {
     agg_cont_req.transitions.insert(
         1,
         Transition {
-            nonce: Nonce {
-                time: rng.gen(),
-                rand: rng.gen(),
-            },
+            nonce: Nonce(rng.gen()),
             var: TransitionVar::Finished, // Expected transition type for Prio3 at this stage
         },
     );
@@ -618,7 +610,7 @@ impl<'a> Test<'a> {
         for report_share in agg_init_req.report_shares {
             // Make sure the Leader doesn't try to aggregate these reports again.
             self.early_rejects.insert(
-                report_share.nonce.clone(),
+                report_share.metadata.nonce.clone(),
                 TransitionFailure::ReportReplayed,
             );
         }

@@ -7,9 +7,9 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeCiphertext,
-        HpkeConfig, Id, Interval, Nonce, Report, ReportShare, Transition, TransitionFailure,
-        TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeCiphertext, HpkeConfig,
+        Id, Interval, Nonce, Report, ReportMetadata, ReportShare, Time, Transition,
+        TransitionFailure, TransitionVar,
     },
     vdaf::{
         prio2::{
@@ -26,7 +26,7 @@ use crate::{
     VdafConfig,
 };
 use prio::{
-    codec::{encode_u16_items, CodecError, Encode},
+    codec::{CodecError, Encode},
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
         prio2::{Prio2PrepareShare, Prio2PrepareState},
@@ -139,14 +139,15 @@ impl VdafConfig {
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],
-        now: u64,
+        time: Time,
         task_id: &Id,
         measurement: DapMeasurement,
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
-        let nonce = Nonce {
-            time: now,
-            rand: rng.gen(),
+        let metadata = ReportMetadata {
+            nonce: Nonce(rng.gen()),
+            time,
+            extensions: Vec::new(),
         };
 
         let encoded_input_shares = match self {
@@ -163,10 +164,9 @@ impl VdafConfig {
         info[..N].copy_from_slice(CTX_INPUT_SHARE);
         info[N] = CTX_ROLE_CLIENT; // Sender role (receiver role set below)
 
-        let mut aad = Vec::with_capacity(50);
+        let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
-        nonce.encode(&mut aad);
-        0_u16.encode(&mut aad); // Empty extensions
+        metadata.encode(&mut aad);
 
         let mut encrypted_input_shares = Vec::with_capacity(encoded_input_shares.len());
         for (i, (hpke_config, input_share_data)) in hpke_config_list
@@ -190,8 +190,7 @@ impl VdafConfig {
 
         Ok(Report {
             task_id: task_id.clone(),
-            nonce,
-            extensions: vec![],
+            metadata,
             encrypted_input_shares,
         })
     }
@@ -217,8 +216,7 @@ impl VdafConfig {
         is_leader: bool,
         verify_key: &VdafVerifyKey,
         task_id: &Id,
-        nonce: &Nonce,
-        extensions: &[Extension],
+        metadata: &ReportMetadata,
         encrypted_input_share: &HpkeCiphertext,
     ) -> Result<(VdafState, VdafMessage), DapError> {
         const N: usize = CTX_INPUT_SHARE.len();
@@ -231,18 +229,14 @@ impl VdafConfig {
             CTX_ROLE_HELPER
         }; // Receiver role
 
-        let mut aad = Vec::with_capacity(50 + extensions.len());
+        let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
-        let nonce_start = aad.len();
-        nonce.encode(&mut aad);
-        let nonce_end = aad.len();
-        encode_u16_items(&mut aad, &(), extensions);
+        metadata.encode(&mut aad);
 
         let input_share_data = decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
             .await?;
 
-        let nonce_data = &aad[nonce_start..nonce_end];
         let agg_id = if is_leader { 0 } else { 1 };
         match (self, verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
@@ -250,7 +244,7 @@ impl VdafConfig {
                     prio3_config,
                     verify_key,
                     agg_id,
-                    nonce_data,
+                    metadata.nonce.as_ref(),
                     &input_share_data,
                 )?)
             }
@@ -259,7 +253,7 @@ impl VdafConfig {
                     *dimension,
                     verify_key,
                     agg_id,
-                    nonce_data,
+                    metadata.nonce.as_ref(),
                     &input_share_data,
                 )?)
             }
@@ -295,13 +289,13 @@ impl VdafConfig {
         let mut states = Vec::with_capacity(reports.len());
         let mut seq = Vec::with_capacity(reports.len());
         for report in reports.into_iter() {
-            if processed.contains(&report.nonce) {
+            if processed.contains(&report.metadata.nonce) {
                 return Err(DapError::fatal(
                     "tried to process report sequence with non-unique nonces",
                 )
                 .into());
             }
-            processed.insert(report.nonce.clone());
+            processed.insert(report.metadata.nonce.clone());
 
             if &report.task_id != task_id || report.encrypted_input_shares.len() != 2 {
                 return Err(
@@ -320,17 +314,20 @@ impl VdafConfig {
                     true, // is_leader
                     verify_key,
                     task_id,
-                    &report.nonce,
-                    &report.extensions,
+                    &report.metadata,
                     &leader_share,
                 )
                 .await
             {
                 Ok((step, message)) => {
-                    states.push((step, message, report.nonce.clone()));
+                    states.push((
+                        step,
+                        message,
+                        report.metadata.time,
+                        report.metadata.nonce.clone(),
+                    ));
                     seq.push(ReportShare {
-                        nonce: report.nonce,
-                        extensions: report.extensions,
+                        metadata: report.metadata,
                         encrypted_input_share: helper_share,
                     });
                 }
@@ -393,10 +390,10 @@ impl VdafConfig {
         let mut states = Vec::with_capacity(num_reports);
         let mut transitions = Vec::with_capacity(num_reports);
         for report_share in agg_init_req.report_shares.iter() {
-            if processed.contains(&report_share.nonce) {
+            if processed.contains(&report_share.metadata.nonce) {
                 return Err(DapAbort::UnrecognizedMessage);
             }
-            processed.insert(report_share.nonce.clone());
+            processed.insert(report_share.metadata.nonce.clone());
 
             let var = match self
                 .consume_report_share(
@@ -404,8 +401,7 @@ impl VdafConfig {
                     false, // is_leader
                     verify_key,
                     &agg_init_req.task_id,
-                    &report_share.nonce,
-                    &report_share.extensions,
+                    &report_share.metadata,
                     &report_share.encrypted_input_share,
                 )
                 .await
@@ -415,7 +411,11 @@ impl VdafConfig {
                         Self::Prio3(..) => prio3_encode_prepare_message(&message),
                         Self::Prio2 { .. } => prio2_encode_prepare_message(&message),
                     };
-                    states.push((step, report_share.nonce.clone()));
+                    states.push((
+                        step,
+                        report_share.metadata.time,
+                        report_share.metadata.nonce.clone(),
+                    ));
                     TransitionVar::Continued(message_data)
                 }
 
@@ -425,7 +425,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                nonce: report_share.nonce.clone(),
+                nonce: report_share.metadata.nonce.clone(),
                 var,
             });
         }
@@ -461,7 +461,7 @@ impl VdafConfig {
 
         let mut seq = Vec::with_capacity(state.seq.len());
         let mut states = Vec::with_capacity(state.seq.len());
-        for (helper, (leader_step, leader_message, leader_nonce)) in
+        for (helper, (leader_step, leader_message, leader_time, leader_nonce)) in
             agg_resp.transitions.into_iter().zip(state.seq.into_iter())
         {
             // TODO spec: Consider removing the nonce from the AggregateResp.
@@ -503,7 +503,7 @@ impl VdafConfig {
 
                     states.push((
                         DapOutputShare {
-                            time: leader_nonce.time,
+                            time: leader_time,
                             checksum: checksum.as_ref().try_into().unwrap(),
                             data,
                         },
@@ -554,7 +554,7 @@ impl VdafConfig {
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let mut processed = HashSet::with_capacity(state.seq.len());
         let mut recognized = HashSet::with_capacity(state.seq.len());
-        for (_, nonce) in state.seq.iter() {
+        for (_, _, nonce) in state.seq.iter() {
             recognized.insert(nonce.clone());
         }
 
@@ -576,7 +576,7 @@ impl VdafConfig {
                 return Err(DapAbort::UnrecognizedMessage);
             }
 
-            for (helper_step, helper_nonce) in &mut helper_iter {
+            for (helper_step, helper_time, helper_nonce) in &mut helper_iter {
                 processed.insert(helper_nonce.clone());
                 if helper_nonce != leader.nonce {
                     // Presumably the leader has skipped this report.
@@ -607,7 +607,7 @@ impl VdafConfig {
                         );
 
                         out_shares.push(DapOutputShare {
-                            time: helper_nonce.time,
+                            time: helper_time,
                             checksum: checksum.as_ref().try_into().unwrap(),
                             data,
                         });
