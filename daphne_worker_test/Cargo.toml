@@ -2,7 +2,7 @@
 
 [package]
 name = "daphne-worker-test"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   "Christopher Patton <cpatton@cloudflare.com>",
   "Armando Faz Hernandez <armfazh@cloudflare.com>",
@@ -21,7 +21,7 @@ test_janus = []
 [dependencies]
 daphne_worker = { path = "../daphne_worker" }
 cfg-if = "0.1.2"
-worker = { git = "https://github.com/cloudflare/workers-rs", rev = "3423647" }
+worker = "0.0.11"
 serde_json = "1.0.82"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
@@ -33,7 +33,7 @@ console_error_panic_hook = { version = "0.1.1", optional = true }
 [dev-dependencies]
 assert_matches = "1.5.0"
 base64 = "0.13.0"
-daphne = { path = "../daphne" }
+daphne = "0.1.1"
 hex = { version = "0.4.3", features = ["serde"] }
 lazy_static = "1.4.0"
 futures = "0.3.21"

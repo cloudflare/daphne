@@ -3,7 +3,7 @@
 
 use crate::{
     durable::{state_get, state_set_if_not_exists},
-    int_err, now,
+    int_err,
 };
 use daphne::{messages::Id, DapVersion};
 use std::time::Duration;
@@ -63,7 +63,7 @@ impl DurableObject for HelperStateStore {
                 .to_string()
                 .parse()
                 .map_err(int_err)?;
-            let scheduled_time = Duration::from_secs(now() + secs);
+            let scheduled_time = Duration::from_secs(secs);
             self.state.storage().set_alarm(scheduled_time).await?;
             self.touched = true;
         }
