@@ -18,11 +18,11 @@ readme = "../README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-daphne = "0.1.0" # draft-ietf-ppm-dap-01
+daphne = "0.1.1"
 futures = "0.3.21"
 async-trait = "0.1.56"
 base64 = "0.13.0"
-worker = { git = "https://github.com/cloudflare/workers-rs", rev = "3423647" }
+worker = "0.0.11"
 serde_json = "1.0.82"
 getrandom = { version = "0.2", features = ["js"] } # Required for prio
 prio = "=0.8.2"
