@@ -3,21 +3,10 @@
 
 use crate::messages::{
     AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
-    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportShare, Transition,
-    TransitionVar,
+    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportMetadata,
+    ReportShare, Transition, TransitionVar,
 };
 use prio::codec::{Decode, Encode};
-
-#[test]
-fn read_nonce() {
-    let data = [
-        0, 0, 0, 0, 97, 152, 50, 20, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
-    ];
-
-    let nonce = Nonce::get_decoded(&data).unwrap();
-    assert_eq!(nonce.time, 1637364244);
-    assert_eq!(nonce.rand, [23; 16]);
-}
 
 #[test]
 fn read_report() {
@@ -26,14 +15,14 @@ fn read_report() {
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
             11, 12, 13, 14, 15, 16,
         ]),
-        nonce: Nonce {
+        metadata: ReportMetadata {
             time: 1637364244,
-            rand: [23; 16],
+            nonce: Nonce([23; 16]),
+            extensions: vec![Extension::Unhandled {
+                typ: 0xfff,
+                payload: b"some extension".to_vec(),
+            }],
         },
-        extensions: vec![Extension::Unhandled {
-            typ: 0xfff,
-            payload: b"some extension".to_vec(),
-        }],
         encrypted_input_shares: vec![
             HpkeCiphertext {
                 config_id: 23,
@@ -59,11 +48,11 @@ fn read_agg_init_req() {
         agg_param: b"this is an aggregation parameter".to_vec(),
         report_shares: vec![
             ReportShare {
-                nonce: Nonce {
+                metadata: ReportMetadata {
                     time: 1637361337,
-                    rand: [99; 16],
+                    nonce: Nonce([99; 16]),
+                    extensions: Vec::default(),
                 },
-                extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 23,
                     enc: b"encapsulated key".to_vec(),
@@ -71,11 +60,11 @@ fn read_agg_init_req() {
                 },
             },
             ReportShare {
-                nonce: Nonce {
+                metadata: ReportMetadata {
                     time: 163736423,
-                    rand: [17; 16],
+                    nonce: Nonce([17; 16]),
+                    extensions: Vec::default(),
                 },
-                extensions: Vec::default(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 0,
                     enc: vec![],
@@ -96,17 +85,11 @@ fn read_agg_cont_req() {
         agg_job_id: Id([1; 32]),
         transitions: vec![
             Transition {
-                nonce: Nonce {
-                    time: 1637361337,
-                    rand: [0; 16],
-                },
+                nonce: Nonce([0; 16]),
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
-                nonce: Nonce {
-                    time: 163736423,
-                    rand: [1; 16],
-                },
+                nonce: Nonce([1; 16]),
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                 ),
@@ -123,17 +106,11 @@ fn read_agg_resp() {
     let want = AggregateResp {
         transitions: vec![
             Transition {
-                nonce: Nonce {
-                    time: 1637361337,
-                    rand: [22; 16],
-                },
+                nonce: Nonce([22; 16]),
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
-                nonce: Nonce {
-                    time: 163736423,
-                    rand: [255; 16],
-                },
+                nonce: Nonce([255; 16]),
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                 ),

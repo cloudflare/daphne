@@ -8,7 +8,7 @@ use crate::{
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
-        ReportShare, TransitionFailure,
+        ReportShare, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
@@ -417,17 +417,22 @@ impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
             .or_insert_with(ReportStore::new);
 
         for report_share in report_shares.iter() {
-            let bucket_info = BucketInfo::new(task_config, task_id, &report_share.nonce);
+            let bucket_info = BucketInfo::new(task_config, task_id, report_share.metadata.time);
 
             // Check whether Report has been collected or replayed.
-            if let Err(transition_failure) =
-                self.check_report(&bucket_info, &report_share.nonce, report_store, agg_store)
-            {
-                early_fails.insert(report_share.nonce.clone(), transition_failure);
+            if let Err(transition_failure) = self.check_report(
+                &bucket_info,
+                &report_share.metadata.nonce,
+                report_store,
+                agg_store,
+            ) {
+                early_fails.insert(report_share.metadata.nonce.clone(), transition_failure);
             };
 
             // Mark Report processed.
-            report_store.processed.insert(report_share.nonce.clone());
+            report_store
+                .processed
+                .insert(report_share.metadata.nonce.clone());
         }
 
         Ok(early_fails)
@@ -503,7 +508,7 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
             .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
-        let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
+        let bucket_info = BucketInfo::new(task_config, task_id, report.metadata.time);
 
         // Lock AggStateStore.
         let agg_store_mutex_guard = self
@@ -523,9 +528,12 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
             .or_insert_with(ReportStore::new);
 
         // Check whether Report has been collected or replayed.
-        if let Err(transition_failure) =
-            self.check_report(&bucket_info, &report.nonce, report_store, agg_store)
-        {
+        if let Err(transition_failure) = self.check_report(
+            &bucket_info,
+            &report.metadata.nonce,
+            report_store,
+            agg_store,
+        ) {
             return Err(DapError::Transition(transition_failure));
         };
 
@@ -717,12 +725,12 @@ pub(crate) struct HelperStateInfo {
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub(crate) struct BucketInfo {
     task_id: Id,
-    window: u64,
+    window: Time,
 }
 
 impl BucketInfo {
-    pub(crate) fn new(task_config: &DapTaskConfig, task_id: &Id, nonce: &Nonce) -> Self {
-        let window = nonce.time - (nonce.time % task_config.min_batch_duration);
+    pub(crate) fn new(task_config: &DapTaskConfig, task_id: &Id, time: Time) -> Self {
+        let window = time - (time % task_config.min_batch_duration);
 
         Self {
             task_id: task_id.clone(),

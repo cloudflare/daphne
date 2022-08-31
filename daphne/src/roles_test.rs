@@ -11,7 +11,7 @@ use crate::{
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
         AggregateShareResp, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report,
-        ReportShare, Transition, TransitionFailure, TransitionVar,
+        ReportMetadata, ReportShare, Transition, TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
@@ -377,11 +377,11 @@ async fn http_post_collect_unauthorized_request() {
 async fn http_post_aggregate_failure_hpke_decrypt_error() {
     let helper = MockAggregator::new();
     let report_shares = vec![ReportShare {
-        nonce: Nonce {
+        metadata: ReportMetadata {
             time: helper.now,
-            rand: [1; 16],
+            nonce: Nonce([1; 16]),
+            extensions: Vec::default(),
         },
-        extensions: Vec::default(),
         encrypted_input_share: HpkeCiphertext {
             config_id: 23,
             enc: b"invalid encapsulated key".to_vec(),
@@ -412,8 +412,7 @@ async fn http_post_aggregate_transition_continue() {
 
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
-        nonce: report.nonce,
-        extensions: report.extensions,
+        metadata: report.metadata.clone(),
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -439,8 +438,7 @@ async fn http_post_aggregate_failure_report_replayed() {
 
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
-        nonce: report.nonce.clone(),
-        extensions: report.extensions,
+        metadata: report.metadata.clone(),
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -454,7 +452,7 @@ async fn http_post_aggregate_failure_report_replayed() {
         let mut report_store_mutex_guard = helper.report_store.lock().expect("lock() failed");
         let report_store = report_store_mutex_guard.deref_mut();
         let mut processed = HashSet::new();
-        processed.insert(report.nonce.clone());
+        processed.insert(report.metadata.nonce.clone());
         report_store.insert(
             task_id.clone(),
             ReportStore {
@@ -485,8 +483,7 @@ async fn http_post_aggregate_failure_batch_collected() {
 
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
-        nonce: report.nonce.clone(),
-        extensions: report.extensions,
+        metadata: report.metadata.clone(),
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -499,7 +496,7 @@ async fn http_post_aggregate_failure_batch_collected() {
     {
         let mut agg_store_mutex_guard = helper.agg_store.lock().expect("lock() failed");
         let agg_store = agg_store_mutex_guard.deref_mut();
-        let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
+        let bucket_info = BucketInfo::new(task_config, task_id, report.metadata.time);
         let agg_store_state = AggStoreState {
             agg_share: DapAggregateShare::default(),
             collected: true,
@@ -527,8 +524,7 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
 
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
-        nonce: report.nonce.clone(),
-        extensions: report.extensions,
+        metadata: report.metadata.clone(),
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];

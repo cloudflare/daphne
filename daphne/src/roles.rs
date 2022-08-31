@@ -613,7 +613,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                                 agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
 
                                 // Remove VDAF preparation state of reports that were rejected early.
-                                if state.seq[i].1 == agg_resp.transitions[i].nonce {
+                                if state.seq[i].2 == agg_resp.transitions[i].nonce {
                                     let _val = state.seq.remove(i);
                                 } else {
                                     // The nonce in the Helper state and Aggregate response must be aligned.
