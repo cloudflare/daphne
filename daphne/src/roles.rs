@@ -12,7 +12,7 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, CollectReq, CollectResp, Id, Interval, Nonce,
+        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id, Nonce,
         Report, ReportShare, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
@@ -28,10 +28,11 @@ use url::Url;
 macro_rules! check_batch_param {
     (
         $task_config:expr,
-        $batch_interval:expr,
+        $batch_selector:expr,
         $agg_param:expr
     ) => {{
-        if !$batch_interval.is_valid_for($task_config) {
+        let batch_interval = $batch_selector.unwrap_interval();
+        if !batch_interval.is_valid_for($task_config) {
             return Err(DapAbort::InvalidBatchInterval);
         }
 
@@ -43,21 +44,22 @@ macro_rules! check_batch_param {
     }};
 }
 
-macro_rules! check_batch_interval_boundary {
+macro_rules! check_batch_boundary {
     (
         $global_config:expr,
         $now:expr,
-        $batch_interval:expr
+        $batch_selector:expr
     ) => {{
-        if $batch_interval.duration > $global_config.max_batch_duration {
+        let batch_interval = $batch_selector.unwrap_interval();
+        if batch_interval.duration > $global_config.max_batch_duration {
             return Err(DapAbort::BadRequest("batch interval too large".to_string()));
         }
-        if $now.abs_diff($batch_interval.start) > $global_config.min_batch_interval_start {
+        if $now.abs_diff(batch_interval.start) > $global_config.min_batch_interval_start {
             return Err(DapAbort::BadRequest(
                 "batch interval too far into past".to_string(),
             ));
         }
-        if $now.abs_diff($batch_interval.end()) > $global_config.max_batch_interval_end {
+        if $now.abs_diff(batch_interval.end()) > $global_config.max_batch_interval_end {
             return Err(DapAbort::BadRequest(
                 "batch interval too far into future".to_string(),
             ));
@@ -98,12 +100,12 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> u64;
 
-    /// Check whether the given collect request interval does not overlap
-    /// with requests received in the past.
+    /// Check whether the batch determined by the collect request would overlap with a previous
+    /// batch.
     async fn is_batch_overlapping(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> Result<bool, DapError>;
 
     /// Store a set of output shares.
@@ -113,16 +115,19 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
         out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError>;
 
-    /// Fetch the aggregate share for the given batch interval.
+    /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError>;
 
     /// Mark a batch as collected.
-    async fn mark_collected(&self, task_id: &Id, batch_interval: &Interval)
-        -> Result<(), DapError>;
+    async fn mark_collected(
+        &self,
+        task_id: &Id,
+        batch_selector: &BatchSelector,
+    ) -> Result<(), DapError>;
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
     async fn http_get_hpke_config(&'a self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
@@ -297,31 +302,28 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
-        check_batch_param!(
-            task_config,
-            collect_req.batch_interval,
-            collect_req.agg_param
-        );
+        check_batch_param!(task_config, collect_req.query, collect_req.agg_param);
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
-        // Check that the batch interval is not too wide or too far into the past/future.
+        // Check that the batch boundaries.
         let global_config = self.get_global_config();
         let now = self.get_current_time();
-        check_batch_interval_boundary!(global_config, now, collect_req.batch_interval);
+        check_batch_boundary!(global_config, now, collect_req.query);
 
-        // Check that the batch interval does not overlap with past requests.
+        // Check that the batch does not overlap with previous batches.
         if self
-            .is_batch_overlapping(&collect_req.task_id, &collect_req.batch_interval)
+            .is_batch_overlapping(&collect_req.task_id, &collect_req.query)
             .await?
         {
             return Err(DapAbort::BatchOverlap);
         }
 
-        if !collect_req.batch_interval.is_valid_for(task_config) {
+        let batch_interval = collect_req.query.unwrap_interval();
+        if !batch_interval.is_valid_for(task_config) {
             return Err(DapAbort::InvalidBatchInterval);
         }
 
@@ -424,7 +426,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         collect_req: CollectReq,
     ) -> Result<u64, DapAbort> {
         let leader_agg_share = self
-            .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+            .get_agg_share(&collect_req.task_id, &collect_req.query)
             .await?;
 
         // Check that the minimum batch size is met.
@@ -436,14 +438,14 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &collect_req.task_id,
-            &collect_req.batch_interval,
+            &collect_req.query,
             &leader_agg_share,
         )?;
 
         // Prepare AggregateShareReq.
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_interval: collect_req.batch_interval.clone(),
+            batch_selector: collect_req.query.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -468,7 +470,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?;
 
         // Mark reports as collected.
-        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_interval)
+        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_selector)
             .await?;
 
         Ok(agg_share_req.report_count)
@@ -708,7 +710,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
         let task_config = wrapped_task_config.as_ref();
         check_batch_param!(
             task_config,
-            agg_share_req.batch_interval,
+            agg_share_req.batch_selector,
             agg_share_req.agg_param
         );
 
@@ -717,21 +719,20 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
-        // Check that the batch interval is not too wide or too far into the past/future.
+        // Check the batch boundaries.
         let global_config = self.get_global_config();
         let now = self.get_current_time();
-        check_batch_interval_boundary!(global_config, now, agg_share_req.batch_interval);
+        check_batch_boundary!(global_config, now, agg_share_req.batch_selector);
 
-        // Check that the batch interval does not overlap with past requests.
+        // Check that the batch does not overlap with previous boundaries.
         if self
-            .is_batch_overlapping(&agg_share_req.task_id, &agg_share_req.batch_interval)
+            .is_batch_overlapping(&agg_share_req.task_id, &agg_share_req.batch_selector)
             .await?
         {
             return Err(DapAbort::BatchOverlap);
         }
-
         let agg_share = self
-            .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_interval)
+            .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_selector)
             .await?;
 
         // Check that we have aggreagted the same set of reports as the leader.
@@ -747,13 +748,13 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
         }
 
         // Mark each aggregated report as collected.
-        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_interval)
+        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_selector)
             .await?;
 
         let encrypted_agg_share = task_config.vdaf.produce_helper_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &agg_share_req.task_id,
-            &agg_share_req.batch_interval,
+            &agg_share_req.batch_selector,
             &agg_share,
         )?;
 
