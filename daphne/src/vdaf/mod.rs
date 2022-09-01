@@ -7,9 +7,9 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeCiphertext, HpkeConfig,
-        Id, Interval, Nonce, Report, ReportMetadata, ReportShare, Time, Transition,
-        TransitionFailure, TransitionVar,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchParameter, BatchSelector,
+        HpkeCiphertext, HpkeConfig, Id, Nonce, Report, ReportMetadata, ReportShare, Time,
+        Transition, TransitionFailure, TransitionVar,
     },
     vdaf::{
         prio2::{
@@ -351,6 +351,7 @@ impl VdafConfig {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
                 agg_param: Vec::default(),
+                batch_param: BatchParameter::TimeInterval,
                 report_shares: seq,
             },
         ))
@@ -699,10 +700,10 @@ impl VdafConfig {
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(true, hpke_config, task_id, batch_interval, agg_share)
+        produce_encrypted_agg_share(true, hpke_config, task_id, batch_selector, agg_share)
     }
 
     /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
@@ -711,10 +712,10 @@ impl VdafConfig {
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(false, hpke_config, task_id, batch_interval, agg_share)
+        produce_encrypted_agg_share(false, hpke_config, task_id, batch_selector, agg_share)
     }
 
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -736,7 +737,7 @@ impl VdafConfig {
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
     ) -> Result<DapAggregateResult, DapError> {
         const N: usize = CTX_AGG_SHARE.len();
@@ -746,7 +747,7 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad);
-        batch_interval.encode(&mut aad);
+        batch_selector.encode(&mut aad);
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
@@ -779,7 +780,7 @@ fn produce_encrypted_agg_share(
     is_leader: bool,
     hpke_config: &HpkeConfig,
     task_id: &Id,
-    batch_interval: &Interval,
+    batch_selector: &BatchSelector,
     agg_share: &DapAggregateShare,
 ) -> Result<HpkeCiphertext, DapAbort> {
     let agg_share_data = agg_share
@@ -801,7 +802,7 @@ fn produce_encrypted_agg_share(
     // TODO spec: Consider adding agg param to AAD.
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad);
-    batch_interval.encode(&mut aad);
+    batch_selector.encode(&mut aad);
 
     let (enc, payload) = hpke_config
         .encrypt(&info, &aad, &agg_share_data)

@@ -10,8 +10,9 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
-        AggregateShareResp, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report,
-        ReportMetadata, ReportShare, Transition, TransitionFailure, TransitionVar,
+        AggregateShareResp, BatchParameter, BatchSelector, CollectReq, CollectResp, HpkeCiphertext,
+        Id, Interval, Nonce, Query, Report, ReportMetadata, ReportShare, Transition,
+        TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapHelper, DapLeader},
     testing::{
@@ -61,6 +62,7 @@ impl MockAggregator {
         let task_id = self.nominal_task_id();
         let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
+        let batch_param = BatchParameter::TimeInterval;
 
         DapRequest {
             version,
@@ -69,6 +71,7 @@ impl MockAggregator {
                 task_id: task_id.clone(),
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
+                batch_param,
                 report_shares,
             }
             .get_encoded(),
@@ -114,7 +117,7 @@ impl MockAggregator {
             media_type: Some(MEDIA_TYPE_AGG_SHARE_REQ),
             payload: AggregateShareReq {
                 task_id: task_id.clone(),
-                batch_interval: Interval::default(),
+                batch_selector: BatchSelector::default(),
                 agg_param: Vec::default(),
                 report_count,
                 checksum,
@@ -135,7 +138,7 @@ impl MockAggregator {
             media_type: Some(MEDIA_TYPE_COLLECT_REQ),
             payload: CollectReq {
                 task_id: task_id.clone(),
-                batch_interval: Interval::default(),
+                query: Query::default(),
                 agg_param: Vec::default(),
             }
             .get_encoded(),
@@ -244,7 +247,7 @@ impl MockAggregator {
     ) {
         // Leader: Get Leader's encrypted aggregate share.
         let leader_agg_share = self
-            .get_agg_share(&collect_req.task_id, &collect_req.batch_interval)
+            .get_agg_share(&collect_req.task_id, &collect_req.query)
             .await
             .unwrap();
 
@@ -253,7 +256,7 @@ impl MockAggregator {
             .produce_leader_encrypted_agg_share(
                 &task_config.collector_hpke_config,
                 &collect_req.task_id,
-                &collect_req.batch_interval,
+                &collect_req.query,
                 &leader_agg_share,
             )
             .unwrap();
@@ -261,7 +264,7 @@ impl MockAggregator {
         // Leader: Prepare AggregateShareReq.
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_interval: collect_req.batch_interval.clone(),
+            batch_selector: collect_req.query.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -290,7 +293,7 @@ impl MockAggregator {
             .unwrap();
 
         // Leader: Mark the reports as collected.
-        self.mark_collected(task_id, &agg_share_req.batch_interval)
+        self.mark_collected(task_id, &agg_share_req.batch_selector)
             .await
             .unwrap();
     }
@@ -656,7 +659,7 @@ async fn poll_collect_job_test_results() {
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(leader.now),
+        query: task_config.query_for_current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -716,9 +719,11 @@ async fn http_post_collect_fail_invalid_batch_interval() {
     // Collector: Create a CollectReq with a very large batch interval.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: Interval {
-            start: now - (now % task_config.min_batch_duration),
-            duration: leader.global_config.max_batch_duration + task_config.min_batch_duration,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: now - (now % task_config.min_batch_duration),
+                duration: leader.global_config.max_batch_duration + task_config.min_batch_duration,
+            },
         },
         agg_param: Vec::default(),
     };
@@ -740,12 +745,14 @@ async fn http_post_collect_fail_invalid_batch_interval() {
     // Collector: Create a CollectReq with a batch interval in the past.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: Interval {
-            start: now
-                - (now % task_config.min_batch_duration)
-                - leader.global_config.min_batch_interval_start
-                - task_config.min_batch_duration,
-            duration: task_config.min_batch_duration * 2,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: now
+                    - (now % task_config.min_batch_duration)
+                    - leader.global_config.min_batch_interval_start
+                    - task_config.min_batch_duration,
+                duration: task_config.min_batch_duration * 2,
+            },
         },
         agg_param: Vec::default(),
     };
@@ -767,11 +774,13 @@ async fn http_post_collect_fail_invalid_batch_interval() {
     // Collector: Create a CollectReq with a batch interval in the future.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: Interval {
-            start: now - (now % task_config.min_batch_duration)
-                + leader.global_config.max_batch_interval_end
-                - task_config.min_batch_duration,
-            duration: task_config.min_batch_duration * 2,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: now - (now % task_config.min_batch_duration)
+                    + leader.global_config.max_batch_interval_end
+                    - task_config.min_batch_duration,
+                duration: task_config.min_batch_duration * 2,
+            },
         },
         agg_param: Vec::default(),
     };
@@ -801,11 +810,13 @@ async fn http_post_collect_succeed_max_batch_interval() {
     // Collector: Create a CollectReq with a very large batch interval.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: Interval {
-            start: now
-                - (now % task_config.min_batch_duration)
-                - leader.global_config.max_batch_duration / 2,
-            duration: leader.global_config.max_batch_duration,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: now
+                    - (now % task_config.min_batch_duration)
+                    - leader.global_config.max_batch_duration / 2,
+                duration: leader.global_config.max_batch_duration,
+            },
         },
         agg_param: Vec::default(),
     };
@@ -844,7 +855,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     // Collector: Create first CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(now),
+        query: task_config.query_for_current_batch_window(now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -869,7 +880,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     // Collector: Create second CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(now),
+        query: task_config.query_for_current_batch_window(now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -898,7 +909,7 @@ async fn http_post_collect_success() {
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(leader.now),
+        query: task_config.query_for_current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();
@@ -987,7 +998,7 @@ async fn e2e() {
     // Collector: Create a CollectReq.
     let collect_req = CollectReq {
         task_id: task_id.clone(),
-        batch_interval: task_config.current_batch_window(leader.now),
+        query: task_config.query_for_current_batch_window(leader.now),
         agg_param: Vec::default(),
     };
     let version = task_config.version.clone();

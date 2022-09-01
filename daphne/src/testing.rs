@@ -7,7 +7,7 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Nonce, Report,
         ReportShare, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
@@ -272,13 +272,14 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn is_batch_overlapping(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> Result<bool, DapError> {
         let mut agg_store_mutex_guard = self
             .agg_store
             .lock()
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let agg_store = agg_store_mutex_guard.deref_mut();
+        let batch_interval = batch_selector.unwrap_interval();
         for (inner_bucket_info, agg_store_state) in agg_store.iter() {
             if task_id == &inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window
@@ -335,7 +336,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn get_agg_share(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
         // Lock agg_store.
         let mut agg_store_mutex_guard = self
@@ -346,6 +347,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
+        let batch_interval = batch_selector.unwrap_interval();
         for (inner_bucket_info, agg_store_state) in agg_store.iter() {
             if task_id == &inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window
@@ -365,7 +367,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn mark_collected(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> Result<(), DapError> {
         // Mark aggregate shares as collected.
         let mut agg_store_mutex_guard = self
@@ -373,6 +375,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
             .lock()
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let agg_store = agg_store_mutex_guard.deref_mut();
+        let batch_interval = batch_selector.unwrap_interval();
         for (inner_bucket_info, agg_store_state) in agg_store.iter_mut() {
             if task_id == &inner_bucket_info.task_id
                 && batch_interval.start <= inner_bucket_info.window

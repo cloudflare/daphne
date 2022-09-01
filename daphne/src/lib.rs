@@ -29,7 +29,7 @@
 //! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
 
 use crate::{
-    messages::{CollectResp, HpkeConfig, Interval, Nonce, Time, TransitionFailure},
+    messages::{CollectResp, HpkeConfig, Nonce, Time, TransitionFailure},
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
@@ -313,14 +313,17 @@ pub struct DapTaskConfig {
     pub(crate) collector_hpke_config: HpkeConfig,
 }
 
+#[cfg(test)]
 impl DapTaskConfig {
     /// Convert at timestamp `now` into an [`Interval`] that contains it. The timestamp is the
     /// numbre of seconds since the beginning of UNIX time.
-    pub fn current_batch_window(&self, now: u64) -> Interval {
+    pub fn query_for_current_batch_window(&self, now: u64) -> crate::messages::Query {
         let start = now - (now % self.min_batch_duration);
-        Interval {
-            start,
-            duration: self.min_batch_duration,
+        crate::messages::Query::TimeInterval {
+            batch_interval: crate::messages::Interval {
+                start,
+                duration: self.min_batch_duration,
+            },
         }
     }
 }

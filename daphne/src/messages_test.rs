@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::messages::{
-    AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
-    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report, ReportMetadata,
-    ReportShare, Transition, TransitionVar,
+    AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchParameter, Extension,
+    HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, Report,
+    ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use prio::codec::{Decode, Encode};
 
@@ -46,6 +46,9 @@ fn read_agg_init_req() {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
         agg_param: b"this is an aggregation parameter".to_vec(),
+        batch_param: BatchParameter::FixedSize {
+            batch_id: Id([0; 32]),
+        },
         report_shares: vec![
             ReportShare {
                 metadata: ReportMetadata {

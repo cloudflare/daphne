@@ -4,8 +4,8 @@
 use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, HpkeAeadId, HpkeCiphertext,
-        HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition,
+        AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
+        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition,
         TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
@@ -472,17 +472,19 @@ async fn encrypted_agg_share() {
         data: Some(VdafAggregateShare::Field64(vec![9.into()].into())),
     };
 
-    let batch_interval = Interval {
-        start: 1637359200,
-        duration: 7200,
+    let batch_selector = BatchSelector::TimeInterval {
+        batch_interval: Interval {
+            start: 1637359200,
+            duration: 7200,
+        },
     };
     let leader_encrypted_agg_share =
-        t.produce_leader_encrypted_agg_share(&batch_interval, &leader_agg_share);
+        t.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
     let helper_encrypted_agg_share =
-        t.produce_helper_encrypted_agg_share(&batch_interval, &helper_agg_share);
+        t.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
     let agg_res = t
         .consume_encrypted_agg_shares(
-            &batch_interval,
+            &batch_selector,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
         .await;
@@ -672,14 +674,14 @@ impl<'a> Test<'a> {
 
     fn produce_leader_encrypted_agg_share(
         &self,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.vdaf
             .produce_leader_encrypted_agg_share(
                 &self.collector_hpke_config,
                 &self.task_id,
-                batch_interval,
+                batch_selector,
                 agg_share,
             )
             .unwrap()
@@ -687,14 +689,14 @@ impl<'a> Test<'a> {
 
     fn produce_helper_encrypted_agg_share(
         &self,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.vdaf
             .produce_helper_encrypted_agg_share(
                 &self.collector_hpke_config,
                 &self.task_id,
-                batch_interval,
+                batch_selector,
                 agg_share,
             )
             .unwrap()
@@ -702,14 +704,14 @@ impl<'a> Test<'a> {
 
     async fn consume_encrypted_agg_shares(
         &self,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
         enc_agg_shares: Vec<HpkeCiphertext>,
     ) -> DapAggregateResult {
         self.vdaf
             .consume_encrypted_agg_shares(
                 &self.collector_hpke_receiver_config,
                 &self.task_id,
-                batch_interval,
+                batch_selector,
                 enc_agg_shares,
             )
             .await
@@ -720,9 +722,11 @@ impl<'a> Test<'a> {
         &mut self,
         measurements: Vec<DapMeasurement>,
     ) -> DapAggregateResult {
-        let batch_interval = Interval {
-            start: self.now,
-            duration: 3600,
+        let batch_selector = BatchSelector::TimeInterval {
+            batch_interval: Interval {
+                start: self.now,
+                duration: 3600,
+            },
         };
 
         // Clients: Shard
@@ -754,7 +758,7 @@ impl<'a> Test<'a> {
         assert_eq!(leader_agg_shares.len(), 1);
         let (_batch_window, leader_agg_share) = leader_agg_shares.into_iter().next().unwrap();
         let leader_encrypted_agg_share =
-            self.produce_leader_encrypted_agg_share(&batch_interval, &leader_agg_share);
+            self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
 
         // Helper: Aggregation
         let helper_agg_shares =
@@ -762,11 +766,11 @@ impl<'a> Test<'a> {
         assert_eq!(helper_agg_shares.len(), 1);
         let (_batch_window, helper_agg_share) = helper_agg_shares.into_iter().next().unwrap();
         let helper_encrypted_agg_share =
-            self.produce_helper_encrypted_agg_share(&batch_interval, &helper_agg_share);
+            self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
 
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
-            &batch_interval,
+            &batch_selector,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
         .await

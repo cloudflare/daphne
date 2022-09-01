@@ -16,6 +16,8 @@ const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
 const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
 const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
+const QUERY_TYPE_TIME_INTERVAL: u16 = 0x0001;
+const QUERY_TYPE_FIXED_SIZE: u16 = 0x0002;
 
 /// The identifier for a DAP task.
 #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
@@ -189,12 +191,43 @@ impl Decode for ReportShare {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchParameter {
+    TimeInterval,
+    FixedSize { batch_id: Id },
+}
+
+impl Encode for BatchParameter {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes),
+            Self::FixedSize { batch_id } => {
+                QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                batch_id.encode(bytes);
+            }
+        }
+    }
+}
+
+impl Decode for BatchParameter {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        match u16::decode(bytes)? {
+            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
+            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSize {
+                batch_id: Id::decode(bytes)?,
+            }),
+            _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
 /// Aggregate initialization request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AggregateInitializeReq {
     pub task_id: Id,
     pub agg_job_id: Id,
     pub agg_param: Vec<u8>,
+    pub batch_param: BatchParameter,
     pub report_shares: Vec<ReportShare>,
 }
 
@@ -203,6 +236,7 @@ impl Encode for AggregateInitializeReq {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
         encode_prefixed_bytes::<2>(bytes, &self.agg_param);
+        self.batch_param.encode(bytes);
         encode_prefixed_items::<4, _>(bytes, &self.report_shares);
     }
 }
@@ -213,6 +247,7 @@ impl Decode for AggregateInitializeReq {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
             agg_param: decode_prefixed_bytes::<2>(bytes)?,
+            batch_param: BatchParameter::decode(bytes)?,
             report_shares: decode_prefixed_items::<4, _>(bytes)?,
         })
     }
@@ -426,20 +461,75 @@ impl Decode for Interval {
     }
 }
 
+/// A query issued by the Collector in a collect request.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Query {
+    TimeInterval { batch_interval: Interval },
+    FixedSize { batch_id: Id },
+}
+
+impl Query {
+    pub(crate) fn unwrap_interval(&self) -> &Interval {
+        if let BatchSelector::TimeInterval { ref batch_interval } = self {
+            batch_interval
+        } else {
+            panic!("TODO(issue #100)");
+        }
+    }
+}
+
+impl Encode for Query {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::TimeInterval { batch_interval } => {
+                QUERY_TYPE_TIME_INTERVAL.encode(bytes);
+                batch_interval.encode(bytes);
+            }
+            Self::FixedSize { batch_id } => {
+                QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                batch_id.encode(bytes);
+            }
+        }
+    }
+}
+
+impl Decode for Query {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        match u16::decode(bytes)? {
+            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                batch_interval: Interval::decode(bytes)?,
+            }),
+            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSize {
+                batch_id: Id::decode(bytes)?,
+            }),
+            _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
+impl Default for Query {
+    fn default() -> Self {
+        Self::TimeInterval {
+            batch_interval: Interval::default(),
+        }
+    }
+}
+
 /// A collect request.
 //
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CollectReq {
     pub task_id: Id,
-    pub batch_interval: Interval,
+    pub query: Query,
     pub agg_param: Vec<u8>,
 }
 
 impl Encode for CollectReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.batch_interval.encode(bytes);
+        self.query.encode(bytes);
         encode_prefixed_bytes::<2>(bytes, &self.agg_param);
     }
 }
@@ -448,7 +538,7 @@ impl Decode for CollectReq {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            batch_interval: Interval::decode(bytes)?,
+            query: Query::decode(bytes)?,
             agg_param: decode_prefixed_bytes::<2>(bytes)?,
         })
     }
@@ -476,13 +566,20 @@ impl Decode for CollectResp {
     }
 }
 
+/// A batch selector issued by the Leader in an aggregate-share request.
+//
+// NOTE(cjpatton) This structure is identical to Query, hence the typedef. Eventually the
+// strudcture might change (https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/issues/342), at which
+// point we will need to make BatchSelector its own struct.
+pub type BatchSelector = Query;
+
 /// An aggregate-share request.
 //
 // TODO Add serialization tests.
 #[derive(Debug, Default)]
 pub struct AggregateShareReq {
     pub task_id: Id,
-    pub batch_interval: Interval,
+    pub batch_selector: BatchSelector,
     pub agg_param: Vec<u8>,
     pub report_count: u64,
     pub checksum: [u8; 32],
@@ -491,7 +588,7 @@ pub struct AggregateShareReq {
 impl Encode for AggregateShareReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.batch_interval.encode(bytes);
+        self.batch_selector.encode(bytes);
         encode_prefixed_bytes::<2>(bytes, &self.agg_param);
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
@@ -502,7 +599,7 @@ impl Decode for AggregateShareReq {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            batch_interval: Interval::decode(bytes)?,
+            batch_selector: BatchSelector::decode(bytes)?,
             agg_param: decode_prefixed_bytes::<2>(bytes)?,
             report_count: u64::decode(bytes)?,
             checksum: {
