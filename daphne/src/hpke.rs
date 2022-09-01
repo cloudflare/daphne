@@ -5,8 +5,8 @@
 
 use crate::{
     messages::{
-        decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
-        HpkeKemId, Id,
+        decode_prefixed_bytes, encode_prefixed_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig,
+        HpkeKdfId, HpkeKemId, Id,
     },
     DapError,
 };
@@ -286,7 +286,7 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
 impl Encode for HpkeReceiverConfig {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.config.encode(bytes);
-        encode_u16_bytes(bytes, &self.secret_key);
+        encode_prefixed_bytes::<2>(bytes, &self.secret_key);
     }
 }
 
@@ -294,7 +294,7 @@ impl Decode for HpkeReceiverConfig {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             config: HpkeConfig::decode(bytes)?,
-            secret_key: decode_u16_bytes(bytes)?,
+            secret_key: decode_prefixed_bytes::<2>(bytes)?,
         })
     }
 }
