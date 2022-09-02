@@ -464,6 +464,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         // Complete the collect job.
         let collect_resp = CollectResp {
+            report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
         self.finish_collect_job(&collect_req.task_id, collect_id, &collect_resp)
