@@ -7,7 +7,7 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        encode_prefixed_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
+        encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
         BatchParameter, BatchSelector, HpkeCiphertext, HpkeConfig, Id, Nonce, Report,
         ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
@@ -170,7 +170,7 @@ impl VdafConfig {
         task_id.encode(&mut aad);
         metadata.encode(&mut aad);
         // TODO spec: Consider folding the public share into a field called "header".
-        encode_prefixed_bytes::<4>(&mut aad, &public_share);
+        encode_u32_bytes(&mut aad, &public_share);
 
         let mut encrypted_input_shares = Vec::with_capacity(encoded_input_shares.len());
         for (i, (hpke_config, input_share_data)) in hpke_config_list
@@ -239,7 +239,7 @@ impl VdafConfig {
         task_id.encode(&mut aad);
         metadata.encode(&mut aad);
         // TODO spec: Consider folding the public share into a field called "header".
-        encode_prefixed_bytes::<4>(&mut aad, public_share);
+        encode_u32_bytes(&mut aad, public_share);
 
         let input_share_data = decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
@@ -749,6 +749,7 @@ impl VdafConfig {
         decrypter: &impl HpkeDecrypter<'_>,
         task_id: &Id,
         batch_selector: &BatchSelector,
+        report_count: u64,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
     ) -> Result<DapAggregateResult, DapError> {
         const N: usize = CTX_AGG_SHARE.len();
@@ -780,9 +781,14 @@ impl VdafConfig {
             ));
         }
 
+        let num_measurements = usize::try_from(report_count).unwrap();
         match self {
-            Self::Prio3(prio3_config) => Ok(prio3_unshard(prio3_config, agg_shares)?),
-            Self::Prio2 { dimension } => Ok(prio2_unshard(*dimension, agg_shares)?),
+            Self::Prio3(prio3_config) => {
+                Ok(prio3_unshard(prio3_config, num_measurements, agg_shares)?)
+            }
+            Self::Prio2 { dimension } => {
+                Ok(prio2_unshard(*dimension, num_measurements, agg_shares)?)
+            }
         }
     }
 }

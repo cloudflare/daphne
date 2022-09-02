@@ -127,7 +127,7 @@ async fn roundtrip_report() {
             let helper_agg_share = vdaf.aggregate(&(), [helper_out_share]).unwrap();
 
             assert_eq!(
-                vdaf.unshard(&(), vec![leader_agg_share, helper_agg_share])
+                vdaf.unshard(&(), vec![leader_agg_share, helper_agg_share], 1)
                     .unwrap(),
                 1,
             );
@@ -323,6 +323,7 @@ async fn agg_cont_req() {
 
     let leader_out_shares = t.handle_final_agg_resp(leader_uncommitted, agg_resp);
     assert_eq!(leader_out_shares.len(), 5);
+    let num_measurements = leader_out_shares.len();
 
     let leader_agg_share = leader_out_shares
         .into_iter()
@@ -350,7 +351,7 @@ async fn agg_cont_req() {
 
     let vdaf = Prio3::new_aes128_count(2).unwrap();
     assert_eq!(
-        vdaf.unshard(&(), [leader_agg_share, helper_agg_share])
+        vdaf.unshard(&(), [leader_agg_share, helper_agg_share], num_measurements,)
             .unwrap(),
         3,
     );
@@ -487,6 +488,7 @@ async fn encrypted_agg_share() {
     let agg_res = t
         .consume_encrypted_agg_shares(
             &batch_selector,
+            50,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
         .await;
@@ -707,6 +709,7 @@ impl<'a> Test<'a> {
     async fn consume_encrypted_agg_shares(
         &self,
         batch_selector: &BatchSelector,
+        report_count: u64,
         enc_agg_shares: Vec<HpkeCiphertext>,
     ) -> DapAggregateResult {
         self.vdaf
@@ -714,6 +717,7 @@ impl<'a> Test<'a> {
                 &self.collector_hpke_receiver_config,
                 &self.task_id,
                 batch_selector,
+                report_count,
                 enc_agg_shares,
             )
             .await
@@ -753,6 +757,7 @@ impl<'a> Test<'a> {
             .handle_agg_cont_req(helper_state, &agg_cont)
             .unwrap_finish();
         let leader_out_shares = self.handle_final_agg_resp(uncommitted, agg_resp);
+        let report_count = u64::try_from(leader_out_shares.len()).unwrap();
 
         // Leader: Aggregation
         let leader_agg_shares =
@@ -773,6 +778,7 @@ impl<'a> Test<'a> {
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
             &batch_selector,
+            report_count,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
         .await
