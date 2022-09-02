@@ -555,11 +555,13 @@ impl Decode for CollectReq {
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CollectResp {
+    pub report_count: u64,
     pub encrypted_agg_shares: Vec<HpkeCiphertext>,
 }
 
 impl Encode for CollectResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
+        self.report_count.encode(bytes);
         encode_prefixed_items::<4, _>(bytes, &self.encrypted_agg_shares);
     }
 }
@@ -567,6 +569,7 @@ impl Encode for CollectResp {
 impl Decode for CollectResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
+            report_count: u64::decode(bytes)?,
             encrypted_agg_shares: decode_prefixed_items::<4, _>(bytes)?,
         })
     }

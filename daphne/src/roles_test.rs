@@ -285,6 +285,7 @@ impl MockAggregator {
 
         // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
         let collect_resp = CollectResp {
+            report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, helper_enc_agg_share],
         };
 
@@ -692,6 +693,7 @@ async fn poll_collect_job_test_results() {
     let resp = leader.get_pending_collect_jobs().await.unwrap();
     let (collect_id, _collect_req) = &resp[0];
     let collect_resp = CollectResp {
+        report_count: 0,
         encrypted_agg_shares: Vec::default(),
     };
 
