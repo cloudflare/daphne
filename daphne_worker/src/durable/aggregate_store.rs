@@ -66,11 +66,17 @@ impl DurableObject for AggregateStore {
 
         match (req.path().as_ref(), req.method()) {
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
+                let agg_share_delta = req.json().await?;
+
+                // To keep this pair of get and put operations atomic, there should be no await
+                // points between them. See the note below `transaction()` on
+                // https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#transactional-storage-api.
+                // See issue #109.
                 let mut agg_share: DapAggregateShare =
                     state_get_or_default(&self.state, "agg_share").await?;
-                let agg_share_delta = req.json().await?;
                 agg_share.merge(agg_share_delta).map_err(int_err)?;
                 self.state.storage().put("agg_share", agg_share).await?;
+
                 Response::from_json(&())
             }
 
