@@ -14,7 +14,7 @@ license = "BSD-3-Clause"
 daphne = "0.1.2" # TODO(issue #100) Use path = "../daphne" instead.
 assert_matches = "1.5.0"
 base64 = "0.13.0"
-prio = { version = "=0.8.2" }
+prio = "=0.8.2"
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0.82"
 url = { version = "2.2.2", features = ["serde"] }

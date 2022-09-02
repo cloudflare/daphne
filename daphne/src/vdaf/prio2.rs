@@ -23,7 +23,7 @@ pub(crate) fn prio2_shard(
     measurement: DapMeasurement,
 ) -> Result<Vec<Vec<u8>>, VdafError> {
     let vdaf = Prio2::new(dimension as usize)?;
-    let input_shares = match measurement {
+    let (_public_share, input_shares) = match measurement {
         DapMeasurement::U32Vec(ref data) => vdaf.shard(data)?,
         _ => panic!("prio2_shard: unexpected measurement type"),
     };
@@ -45,7 +45,8 @@ pub(crate) fn prio2_prepare_init(
     let vdaf = Prio2::new(dimension as usize)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
-    let (state, share) = vdaf.prepare_init(verify_key, agg_id, &(), nonce_data, &input_share)?;
+    let (state, share) =
+        vdaf.prepare_init(verify_key, agg_id, &(), nonce_data, &(), &input_share)?;
     Ok((VdafState::Prio2(state), VdafMessage::Prio2Share(share)))
 }
 
@@ -120,6 +121,7 @@ pub(crate) fn prio2_encode_prepare_message(message: &VdafMessage) -> Vec<u8> {
 /// Interpret `encoded_agg_shares` as a sequence of encoded aggregate shares and unshard them.
 pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
     dimension: u32,
+    num_measurements: usize,
     encoded_agg_shares: M,
 ) -> Result<DapAggregateResult, VdafError> {
     let vdaf = Prio2::new(dimension as usize)?;
@@ -129,6 +131,6 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
             .map_err(|e| CodecError::Other(Box::new(e)))?;
         agg_shares.push(agg_share)
     }
-    let agg_res = vdaf.unshard(&(), agg_shares)?;
+    let agg_res = vdaf.unshard(&(), agg_shares, num_measurements)?;
     Ok(DapAggregateResult::U32Vec(agg_res))
 }

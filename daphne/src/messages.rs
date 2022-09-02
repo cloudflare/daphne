@@ -4,7 +4,10 @@
 //! Messages in the DAP protocol.
 
 use crate::DapTaskConfig;
-use prio::codec::{CodecError, Decode, Encode};
+use prio::codec::{
+    decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
+    Encode,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -97,7 +100,7 @@ impl Encode for Extension {
         match self {
             Self::Unhandled { typ, payload } => {
                 typ.encode(bytes);
-                encode_prefixed_bytes::<2>(bytes, payload);
+                encode_u16_bytes(bytes, payload);
             }
         }
     }
@@ -107,7 +110,7 @@ impl Decode for Extension {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self::Unhandled {
             typ: u16::decode(bytes)?,
-            payload: decode_prefixed_bytes::<2>(bytes)?,
+            payload: decode_u16_bytes(bytes)?,
         })
     }
 }
@@ -125,7 +128,7 @@ impl Encode for ReportMetadata {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.time.encode(bytes);
         self.nonce.encode(bytes);
-        encode_prefixed_items::<2, _>(bytes, &self.extensions);
+        encode_u16_items(bytes, &(), &self.extensions);
     }
 }
 
@@ -134,7 +137,7 @@ impl Decode for ReportMetadata {
         Ok(Self {
             time: Time::decode(bytes)?,
             nonce: Nonce::decode(bytes)?,
-            extensions: decode_prefixed_items::<2, _>(bytes)?,
+            extensions: decode_u16_items(&(), bytes)?,
         })
     }
 }
@@ -153,8 +156,8 @@ impl Encode for Report {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.metadata.encode(bytes);
-        encode_prefixed_bytes::<4>(bytes, &self.public_share);
-        encode_prefixed_items::<4, _>(bytes, &self.encrypted_input_shares);
+        encode_u32_bytes(bytes, &self.public_share);
+        encode_u32_items(bytes, &(), &self.encrypted_input_shares);
     }
 }
 
@@ -163,8 +166,8 @@ impl Decode for Report {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             metadata: ReportMetadata::decode(bytes)?,
-            public_share: decode_prefixed_bytes::<4>(bytes)?,
-            encrypted_input_shares: decode_prefixed_items::<4, _>(bytes)?,
+            public_share: decode_u32_bytes(bytes)?,
+            encrypted_input_shares: decode_u32_items(&(), bytes)?,
         })
     }
 }
@@ -182,7 +185,7 @@ pub struct ReportShare {
 impl Encode for ReportShare {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.metadata.encode(bytes);
-        encode_prefixed_bytes::<4>(bytes, &self.public_share);
+        encode_u32_bytes(bytes, &self.public_share);
         self.encrypted_input_share.encode(bytes);
     }
 }
@@ -191,7 +194,7 @@ impl Decode for ReportShare {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             metadata: ReportMetadata::decode(bytes)?,
-            public_share: decode_prefixed_bytes::<4>(bytes)?,
+            public_share: decode_u32_bytes(bytes)?,
             encrypted_input_share: HpkeCiphertext::decode(bytes)?,
         })
     }
@@ -241,9 +244,9 @@ impl Encode for AggregateInitializeReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
-        encode_prefixed_bytes::<2>(bytes, &self.agg_param);
+        encode_u16_bytes(bytes, &self.agg_param);
         self.batch_param.encode(bytes);
-        encode_prefixed_items::<4, _>(bytes, &self.report_shares);
+        encode_u32_items(bytes, &(), &self.report_shares);
     }
 }
 
@@ -252,9 +255,9 @@ impl Decode for AggregateInitializeReq {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
-            agg_param: decode_prefixed_bytes::<2>(bytes)?,
+            agg_param: decode_u16_bytes(bytes)?,
             batch_param: BatchParameter::decode(bytes)?,
-            report_shares: decode_prefixed_items::<4, _>(bytes)?,
+            report_shares: decode_u32_items(&(), bytes)?,
         })
     }
 }
@@ -271,7 +274,7 @@ impl Encode for AggregateContinueReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
-        encode_prefixed_items::<4, _>(bytes, &self.transitions);
+        encode_u32_items(bytes, &(), &self.transitions);
     }
 }
 
@@ -280,7 +283,7 @@ impl Decode for AggregateContinueReq {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
-            transitions: decode_prefixed_items::<4, _>(bytes)?,
+            transitions: decode_u32_items(&(), bytes)?,
         })
     }
 }
@@ -325,7 +328,7 @@ impl Encode for TransitionVar {
         match self {
             TransitionVar::Continued(vdaf_message) => {
                 0_u8.encode(bytes);
-                encode_prefixed_bytes::<4>(bytes, vdaf_message);
+                encode_u32_bytes(bytes, vdaf_message);
             }
             TransitionVar::Finished => {
                 1_u8.encode(bytes);
@@ -341,7 +344,7 @@ impl Encode for TransitionVar {
 impl Decode for TransitionVar {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
-            0 => Ok(Self::Continued(decode_prefixed_bytes::<4>(bytes)?)),
+            0 => Ok(Self::Continued(decode_u32_bytes(bytes)?)),
             1 => Ok(Self::Finished),
             2 => Ok(Self::Failed(TransitionFailure::decode(bytes)?)),
             _ => Err(CodecError::UnexpectedValue),
@@ -413,14 +416,14 @@ pub struct AggregateResp {
 
 impl Encode for AggregateResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_prefixed_items::<4, _>(bytes, &self.transitions);
+        encode_u32_items(bytes, &(), &self.transitions);
     }
 }
 
 impl Decode for AggregateResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
-            transitions: decode_prefixed_items::<4, _>(bytes)?,
+            transitions: decode_u32_items(&(), bytes)?,
         })
     }
 }
@@ -536,7 +539,7 @@ impl Encode for CollectReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.query.encode(bytes);
-        encode_prefixed_bytes::<2>(bytes, &self.agg_param);
+        encode_u16_bytes(bytes, &self.agg_param);
     }
 }
 
@@ -545,7 +548,7 @@ impl Decode for CollectReq {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             query: Query::decode(bytes)?,
-            agg_param: decode_prefixed_bytes::<2>(bytes)?,
+            agg_param: decode_u16_bytes(bytes)?,
         })
     }
 }
@@ -562,7 +565,7 @@ pub struct CollectResp {
 impl Encode for CollectResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.report_count.encode(bytes);
-        encode_prefixed_items::<4, _>(bytes, &self.encrypted_agg_shares);
+        encode_u32_items(bytes, &(), &self.encrypted_agg_shares);
     }
 }
 
@@ -570,7 +573,7 @@ impl Decode for CollectResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             report_count: u64::decode(bytes)?,
-            encrypted_agg_shares: decode_prefixed_items::<4, _>(bytes)?,
+            encrypted_agg_shares: decode_u32_items(&(), bytes)?,
         })
     }
 }
@@ -598,7 +601,7 @@ impl Encode for AggregateShareReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.batch_selector.encode(bytes);
-        encode_prefixed_bytes::<2>(bytes, &self.agg_param);
+        encode_u16_bytes(bytes, &self.agg_param);
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
     }
@@ -609,7 +612,7 @@ impl Decode for AggregateShareReq {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             batch_selector: BatchSelector::decode(bytes)?,
-            agg_param: decode_prefixed_bytes::<2>(bytes)?,
+            agg_param: decode_u16_bytes(bytes)?,
             report_count: u64::decode(bytes)?,
             checksum: {
                 let mut checksum = [0u8; 32];
@@ -765,7 +768,7 @@ impl Encode for HpkeConfig {
         self.kem_id.encode(bytes);
         self.kdf_id.encode(bytes);
         self.aead_id.encode(bytes);
-        encode_prefixed_bytes::<2>(bytes, &self.public_key);
+        encode_u16_bytes(bytes, &self.public_key);
     }
 }
 
@@ -776,7 +779,7 @@ impl Decode for HpkeConfig {
             kem_id: HpkeKemId::decode(bytes)?,
             kdf_id: HpkeKdfId::decode(bytes)?,
             aead_id: HpkeAeadId::decode(bytes)?,
-            public_key: decode_prefixed_bytes::<2>(bytes)?,
+            public_key: decode_u16_bytes(bytes)?,
         })
     }
 }
@@ -796,8 +799,8 @@ pub struct HpkeCiphertext {
 impl Encode for HpkeCiphertext {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.config_id.encode(bytes);
-        encode_prefixed_bytes::<2>(bytes, &self.enc);
-        encode_prefixed_bytes::<4>(bytes, &self.payload);
+        encode_u16_bytes(bytes, &self.enc);
+        encode_u32_bytes(bytes, &self.payload);
     }
 }
 
@@ -805,8 +808,8 @@ impl Decode for HpkeCiphertext {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             config_id: u8::decode(bytes)?,
-            enc: decode_prefixed_bytes::<2>(bytes)?,
-            payload: decode_prefixed_bytes::<4>(bytes)?,
+            enc: decode_u16_bytes(bytes)?,
+            payload: decode_u32_bytes(bytes)?,
         })
     }
 }
@@ -825,83 +828,30 @@ pub(crate) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     r == 0
 }
 
-// TODO(issue #100) Replace this stuff with libprio once 0.10.0 is ready.
-fn encode_prefix<const PREFIX_BYTES: usize>(bytes: &mut Vec<u8>, len: usize) {
-    let prefix_start = bytes.len();
-    bytes.extend_from_slice(&[0; PREFIX_BYTES]);
-    let prefix_end = bytes.len();
-    write_prefix::<PREFIX_BYTES>(&mut bytes[prefix_start..prefix_end], len);
-}
-
-fn write_prefix<const PREFIX_BYTES: usize>(buf: &mut [u8], len: usize) {
-    for i in (0..PREFIX_BYTES).rev() {
-        buf[PREFIX_BYTES - i - 1] = ((len >> (i << 3)) & 255) as u8;
-    }
-}
-
-pub(crate) fn decode_prefix<const PREFIX_BYTES: usize>(
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<usize, CodecError> {
-    let mut len = 0;
-    for i in (0..PREFIX_BYTES).rev() {
-        len |= (u8::decode(bytes)? as usize) << (i << 3);
-    }
-    Ok(len)
-}
-
-pub(crate) fn encode_prefixed_bytes<const PREFIX_BYTES: usize>(bytes: &mut Vec<u8>, input: &[u8]) {
-    encode_prefix::<PREFIX_BYTES>(bytes, input.len());
+pub(crate) fn encode_u16_bytes(bytes: &mut Vec<u8>, input: &[u8]) {
+    u16::try_from(input.len())
+        .expect("length too large for u16")
+        .encode(bytes);
     bytes.extend_from_slice(input);
 }
 
-pub(crate) fn decode_prefixed_bytes<const PREFIX_BYTES: usize>(
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<Vec<u8>, CodecError> {
-    let len = decode_prefix::<PREFIX_BYTES>(bytes)?;
+pub(crate) fn decode_u16_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
+    let len = u16::decode(bytes)? as usize;
     let mut out = vec![0; len];
     bytes.read_exact(&mut out)?;
     Ok(out)
 }
 
-fn encode_prefixed_items<const PREFIX_BYTES: usize, I: Encode>(bytes: &mut Vec<u8>, items: &[I]) {
-    let prefix_start = bytes.len();
-    bytes.extend_from_slice(&[0; PREFIX_BYTES]);
-    let prefix_end = bytes.len();
-    for item in items {
-        item.encode(bytes);
-    }
-    let len = bytes.len() - prefix_end;
-    write_prefix::<PREFIX_BYTES>(&mut bytes[prefix_start..prefix_end], len);
+pub(crate) fn encode_u32_bytes(bytes: &mut Vec<u8>, input: &[u8]) {
+    u32::try_from(input.len())
+        .expect("length too large for u32")
+        .encode(bytes);
+    bytes.extend_from_slice(input);
 }
 
-fn decode_prefixed_items<const PREFIX_BYTES: usize, I: Decode>(
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<Vec<I>, CodecError> {
-    let len = decode_prefix::<PREFIX_BYTES>(bytes)?;
-    decode_items(len, bytes)
-}
-
-fn decode_items<I: Decode>(len: usize, bytes: &mut Cursor<&[u8]>) -> Result<Vec<I>, CodecError> {
-    let mut decoded = Vec::new();
-    let initial_position = bytes.position() as usize;
-
-    // Create cursor over specified portion of provided cursor to ensure we can't read past length.
-    let inner = bytes.get_ref();
-
-    // Make sure encoded length doesn't overflow usize or go past the end of provided byte buffer.
-    let (items_end, overflowed) = initial_position.overflowing_add(len);
-    if overflowed || items_end > inner.len() {
-        return Err(CodecError::LengthPrefixTooBig(len));
-    }
-
-    let mut sub = Cursor::new(&bytes.get_ref()[initial_position..items_end]);
-
-    while sub.position() < len as u64 {
-        decoded.push(I::decode(&mut sub)?);
-    }
-
-    // Advance outer cursor by the amount read in the inner cursor
-    bytes.set_position(initial_position as u64 + sub.position());
-
-    Ok(decoded)
+pub(crate) fn decode_u32_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
+    let len = u32::decode(bytes)? as usize;
+    let mut out = vec![0; len];
+    bytes.read_exact(&mut out)?;
+    Ok(out)
 }

@@ -76,6 +76,7 @@ fn test_prepare(
     // Unshard
     let agg_res = prio3_unshard(
         config,
+        1,
         [
             leader_out_share.get_encoded(),
             helper_out_share.get_encoded(),

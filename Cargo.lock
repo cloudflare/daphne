@@ -113,6 +113,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
+name = "az"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
+
+[[package]]
 name = "base16ct"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -174,6 +180,12 @@ name = "bumpalo"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1ad822118d20d2c234f427000d5acc36eabe1e29a348c89b63dd60b13f28e5d"
+
+[[package]]
+name = "bytemuck"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f5715e491b5a1598fc2bef5a606847b5dc1d48ea625bd3c02c00de8285591da"
 
 [[package]]
 name = "byteorder"
@@ -414,6 +426,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crunchy"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+
+[[package]]
 name = "crypto-bigint"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -497,7 +515,7 @@ dependencies = [
  "base64",
  "clap 3.2.19",
  "daphne 0.1.2",
- "prio",
+ "prio 0.8.2",
  "reqwest",
  "serde",
  "serde_json",
@@ -518,7 +536,7 @@ dependencies = [
  "hex",
  "hpke 0.8.0",
  "matchit 0.6.0",
- "prio",
+ "prio 0.8.2",
  "rand",
  "ring",
  "serde",
@@ -538,7 +556,7 @@ dependencies = [
  "hex",
  "hpke 0.8.0",
  "matchit 0.6.0",
- "prio",
+ "prio 0.10.0",
  "rand",
  "ring",
  "serde",
@@ -565,7 +583,7 @@ dependencies = [
  "janus_core",
  "janus_server",
  "lazy_static",
- "prio",
+ "prio 0.8.2",
  "rand",
  "reqwest",
  "ring",
@@ -590,7 +608,7 @@ dependencies = [
  "hex",
  "hpke 0.8.0",
  "matchit 0.6.0",
- "prio",
+ "prio 0.8.2",
  "rand",
  "reqwest-wasm",
  "ring",
@@ -813,6 +831,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixed"
+version = "1.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0371cd413fb63f8ec1b9eb4dff47fa2c88b21abc681771234c84808b9920991"
+dependencies = [
+ "az",
+ "bytemuck",
+ "half",
+ "typenum",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1035,15 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.3",
  "tracing",
+]
+
+[[package]]
+name = "half"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad6a9459c9c30b177b925162351f97e7d967c7ea8bab3b8352805327daf45554"
+dependencies = [
+ "crunchy",
 ]
 
 [[package]]
@@ -1341,7 +1380,7 @@ source = "git+https://github.com/divviup/janus?rev=e5ed423cfc96051894de2997aa013
 dependencies = [
  "http",
  "janus_core",
- "prio",
+ "prio 0.8.2",
  "reqwest",
  "thiserror",
  "tokio",
@@ -1365,7 +1404,7 @@ dependencies = [
  "num_enum",
  "postgres-protocol",
  "postgres-types",
- "prio",
+ "prio 0.8.2",
  "rand",
  "ring",
  "serde",
@@ -1400,7 +1439,7 @@ dependencies = [
  "num_enum",
  "opentelemetry",
  "postgres-types",
- "prio",
+ "prio 0.8.2",
  "rand",
  "reqwest",
  "ring",
@@ -1944,6 +1983,26 @@ dependencies = [
  "cipher 0.4.3",
  "cmac",
  "ctr 0.9.1",
+ "getrandom",
+ "ring",
+ "serde",
+ "static_assertions",
+ "thiserror",
+]
+
+[[package]]
+name = "prio"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0453e1ec5f2f48af9a67aab1d812f9aec48619dda0d9a59e2f79ebd235448ec"
+dependencies = [
+ "aes 0.8.1",
+ "aes-gcm",
+ "base64",
+ "byteorder",
+ "cmac",
+ "ctr 0.9.1",
+ "fixed",
  "getrandom",
  "ring",
  "serde",

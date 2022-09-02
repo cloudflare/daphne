@@ -27,7 +27,7 @@ macro_rules! shard {
         $measurement:expr
     ) => {{
         // Split measurement into input shares.
-        let input_shares = $vdaf.shard($measurement)?;
+        let (_public_share, input_shares) = $vdaf.shard($measurement)?;
 
         // Encode input shares.
         input_shares
@@ -72,7 +72,7 @@ macro_rules! prep_init {
             Prio3InputShare::get_decoded_with_param(&(&$vdaf, $agg_id), $input_share_data)?;
 
         // Run the prepare-init algorithm, returning the initial state.
-        $vdaf.prepare_init($verify_key, $agg_id, &(), $nonce_data, &input_share)?
+        $vdaf.prepare_init($verify_key, $agg_id, &(), $nonce_data, &(), &input_share)?
     }};
 }
 
@@ -290,6 +290,7 @@ pub(crate) fn prio3_encode_prepare_message(message: &VdafMessage) -> Vec<u8> {
 macro_rules! unshard {
     (
         $vdaf:ident,
+        $num_measurements:ident,
         $agg_shares:expr
     ) => {{
         let mut agg_shares = Vec::with_capacity($vdaf.num_aggregators());
@@ -298,29 +299,30 @@ macro_rules! unshard {
                 .map_err(|e| CodecError::Other(Box::new(e)))?;
             agg_shares.push(agg_share)
         }
-        $vdaf.unshard(&(), agg_shares)
+        $vdaf.unshard(&(), agg_shares, $num_measurements)
     }};
 }
 
 /// Interpret `agg_shares` as a sequence of encoded aggregate shares and unshard them.
 pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
     config: &Prio3Config,
+    num_measurements: usize,
     agg_shares: M,
 ) -> Result<DapAggregateResult, VdafError> {
     match &config {
         Prio3Config::Count => {
             let vdaf = Prio3::new_aes128_count(2)?;
-            let agg_res = unshard!(vdaf, agg_shares)?;
+            let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64(agg_res))
         }
         Prio3Config::Histogram { buckets } => {
             let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
-            let agg_res = unshard!(vdaf, agg_shares)?;
+            let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
         Prio3Config::Sum { bits } => {
             let vdaf = Prio3::new_aes128_sum(2, *bits)?;
-            let agg_res = unshard!(vdaf, agg_shares)?;
+            let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128(agg_res))
         }
     }
