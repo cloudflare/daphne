@@ -7,9 +7,9 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchParameter, BatchSelector,
-        HpkeCiphertext, HpkeConfig, Id, Nonce, Report, ReportMetadata, ReportShare, Time,
-        Transition, TransitionFailure, TransitionVar,
+        encode_prefixed_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
+        BatchParameter, BatchSelector, HpkeCiphertext, HpkeConfig, Id, Nonce, Report,
+        ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
     vdaf::{
         prio2::{
@@ -135,7 +135,7 @@ impl VdafConfig {
     ///
     /// * `measurement` is the measurement.
     //
-    // TODO spec: Decide if truncating the timestamp should be a MAY or SHOULD.
+    // TODO(issue #100): Truncate the timestamp, as required in DAP-02.
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],
@@ -150,6 +150,8 @@ impl VdafConfig {
             extensions: Vec::new(),
         };
 
+        // TODO(issue #100) Set this to the output of `shard()`.
+        let public_share = Vec::new();
         let encoded_input_shares = match self {
             Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
             Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
@@ -167,6 +169,8 @@ impl VdafConfig {
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
         metadata.encode(&mut aad);
+        // TODO spec: Consider folding the public share into a field called "header".
+        encode_prefixed_bytes::<4>(&mut aad, &public_share);
 
         let mut encrypted_input_shares = Vec::with_capacity(encoded_input_shares.len());
         for (i, (hpke_config, input_share_data)) in hpke_config_list
@@ -191,6 +195,7 @@ impl VdafConfig {
         Ok(Report {
             task_id: task_id.clone(),
             metadata,
+            public_share,
             encrypted_input_shares,
         })
     }
@@ -217,6 +222,7 @@ impl VdafConfig {
         verify_key: &VdafVerifyKey,
         task_id: &Id,
         metadata: &ReportMetadata,
+        public_share: &[u8],
         encrypted_input_share: &HpkeCiphertext,
     ) -> Result<(VdafState, VdafMessage), DapError> {
         const N: usize = CTX_INPUT_SHARE.len();
@@ -232,6 +238,8 @@ impl VdafConfig {
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
         metadata.encode(&mut aad);
+        // TODO spec: Consider folding the public share into a field called "header".
+        encode_prefixed_bytes::<4>(&mut aad, public_share);
 
         let input_share_data = decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
@@ -315,6 +323,7 @@ impl VdafConfig {
                     verify_key,
                     task_id,
                     &report.metadata,
+                    &report.public_share,
                     &leader_share,
                 )
                 .await
@@ -328,6 +337,7 @@ impl VdafConfig {
                     ));
                     seq.push(ReportShare {
                         metadata: report.metadata,
+                        public_share: report.public_share,
                         encrypted_input_share: helper_share,
                     });
                 }
@@ -403,6 +413,7 @@ impl VdafConfig {
                     verify_key,
                     &agg_init_req.task_id,
                     &report_share.metadata,
+                    &report_share.public_share,
                     &report_share.encrypted_input_share,
                 )
                 .await

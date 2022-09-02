@@ -23,6 +23,7 @@ fn read_report() {
                 payload: b"some extension".to_vec(),
             }],
         },
+        public_share: b"public share".to_vec(),
         encrypted_input_shares: vec![
             HpkeCiphertext {
                 config_id: 23,
@@ -56,6 +57,7 @@ fn read_agg_init_req() {
                     nonce: Nonce([99; 16]),
                     extensions: Vec::default(),
                 },
+                public_share: b"public share".to_vec(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 23,
                     enc: b"encapsulated key".to_vec(),
@@ -68,6 +70,7 @@ fn read_agg_init_req() {
                     nonce: Nonce([17; 16]),
                     extensions: Vec::default(),
                 },
+                public_share: b"public share".to_vec(),
                 encrypted_input_share: HpkeCiphertext {
                     config_id: 0,
                     enc: vec![],

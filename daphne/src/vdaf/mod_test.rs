@@ -83,6 +83,7 @@ async fn roundtrip_report() {
             &t.vdaf_verify_key,
             &t.task_id,
             &report.metadata,
+            &report.public_share,
             &report.encrypted_input_shares[0],
         )
         .await
@@ -95,6 +96,7 @@ async fn roundtrip_report() {
             &t.vdaf_verify_key,
             &t.task_id,
             &report.metadata,
+            &report.public_share,
             &report.encrypted_input_shares[1],
         )
         .await
