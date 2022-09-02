@@ -361,7 +361,10 @@ impl TestRunner {
 
         let problem_details: serde_json::Value = resp.json().await.unwrap();
         let got = problem_details.as_object().unwrap().get("type").unwrap();
-        assert_eq!(got, expected_err_type);
+        assert_eq!(
+            got,
+            &format!("urn:ietf:params:ppm:dap:error:{}", expected_err_type)
+        );
     }
 
     pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {

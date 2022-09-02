@@ -3,7 +3,7 @@
 [package]
 name = "daphne"
 description = "Implementation of the DAP specification"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
   "Christopher Patton <cpatton@cloudflare.com>",
   "Armando Faz Hernandez <armfazh@cloudflare.com>",

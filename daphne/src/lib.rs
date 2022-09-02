@@ -194,7 +194,7 @@ impl DapAbort {
         };
 
         ProblemDetails {
-            typ,
+            typ: format!("urn:ietf:params:ppm:dap:error:{}", typ),
             taskid: None,   // TODO interop: Implement as specified.
             instance: None, // TODO interop: Implement as specified.
             detail,
