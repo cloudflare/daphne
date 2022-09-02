@@ -385,6 +385,7 @@ async fn http_post_aggregate_failure_hpke_decrypt_error() {
             nonce: Nonce([1; 16]),
             extensions: Vec::default(),
         },
+        public_share: b"public share".to_vec(),
         encrypted_input_share: HpkeCiphertext {
             config_id: 23,
             enc: b"invalid encapsulated key".to_vec(),
@@ -416,6 +417,7 @@ async fn http_post_aggregate_transition_continue() {
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         metadata: report.metadata.clone(),
+        public_share: report.public_share,
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -442,6 +444,7 @@ async fn http_post_aggregate_failure_report_replayed() {
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         metadata: report.metadata.clone(),
+        public_share: report.public_share,
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -487,6 +490,7 @@ async fn http_post_aggregate_failure_batch_collected() {
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         metadata: report.metadata.clone(),
+        public_share: report.public_share,
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];
@@ -528,6 +532,7 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
         metadata: report.metadata.clone(),
+        public_share: report.public_share,
         // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
         encrypted_input_share: report.encrypted_input_shares[1].clone(),
     }];

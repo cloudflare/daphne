@@ -145,6 +145,7 @@ impl Decode for ReportMetadata {
 pub struct Report {
     pub task_id: Id,
     pub metadata: ReportMetadata,
+    pub public_share: Vec<u8>,
     pub encrypted_input_shares: Vec<HpkeCiphertext>,
 }
 
@@ -152,6 +153,7 @@ impl Encode for Report {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.metadata.encode(bytes);
+        encode_prefixed_bytes::<4>(bytes, &self.public_share);
         encode_prefixed_items::<4, _>(bytes, &self.encrypted_input_shares);
     }
 }
@@ -161,6 +163,7 @@ impl Decode for Report {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             metadata: ReportMetadata::decode(bytes)?,
+            public_share: decode_prefixed_bytes::<4>(bytes)?,
             encrypted_input_shares: decode_prefixed_items::<4, _>(bytes)?,
         })
     }
@@ -172,12 +175,14 @@ impl Decode for Report {
 #[allow(missing_docs)]
 pub struct ReportShare {
     pub metadata: ReportMetadata,
+    pub public_share: Vec<u8>,
     pub encrypted_input_share: HpkeCiphertext,
 }
 
 impl Encode for ReportShare {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.metadata.encode(bytes);
+        encode_prefixed_bytes::<4>(bytes, &self.public_share);
         self.encrypted_input_share.encode(bytes);
     }
 }
@@ -186,6 +191,7 @@ impl Decode for ReportShare {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             metadata: ReportMetadata::decode(bytes)?,
+            public_share: decode_prefixed_bytes::<4>(bytes)?,
             encrypted_input_share: HpkeCiphertext::decode(bytes)?,
         })
     }
