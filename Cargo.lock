@@ -304,9 +304,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.20"
+version = "3.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
+checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
 dependencies = [
  "atty",
  "bitflags",
@@ -495,33 +495,12 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "base64",
- "clap 3.2.20",
+ "clap 3.2.19",
  "daphne 0.1.2",
  "prio",
  "reqwest",
  "serde",
  "serde_json",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "daphne"
-version = "0.1.2"
-dependencies = [
- "assert_matches",
- "async-trait",
- "base64",
- "getrandom",
- "hex",
- "hpke 0.8.0",
- "matchit 0.6.0",
- "prio",
- "rand",
- "ring",
- "serde",
- "serde_json",
- "thiserror",
  "tokio",
  "url",
 ]
@@ -549,6 +528,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "daphne"
+version = "0.2.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "base64",
+ "getrandom",
+ "hex",
+ "hpke 0.8.0",
+ "matchit 0.6.0",
+ "prio",
+ "rand",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "daphne-worker-test"
 version = "0.1.2"
 dependencies = [
@@ -556,7 +556,7 @@ dependencies = [
  "base64",
  "cfg-if 0.1.10",
  "console_error_panic_hook",
- "daphne 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "daphne 0.1.2",
  "daphne_worker",
  "deadpool-postgres",
  "futures",
@@ -584,7 +584,7 @@ version = "0.1.2"
 dependencies = [
  "async-trait",
  "base64",
- "daphne 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "daphne 0.1.2",
  "futures",
  "getrandom",
  "hex",
@@ -1632,9 +1632,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.14.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f7254b99e31cad77da24b08ebf628882739a608578bb1bcdfc1f9c21260d7c0"
+checksum = "074864da206b4973b84eb91683020dbefd6a8c3f0f38e054d93954e891935e4e"
 
 [[package]]
 name = "opaque-debug"
@@ -2705,9 +2705,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.21.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89797afd69d206ccd11fb0ea560a44bbb87731d020670e79416d442919257d42"
+checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
 dependencies = [
  "autocfg",
  "bytes",
