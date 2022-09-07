@@ -479,7 +479,11 @@ pub enum Query {
 }
 
 impl Query {
-    pub(crate) fn unwrap_interval(&self) -> &Interval {
+    /// Return a reference to the query batch interval. Panics if the query type is not
+    /// "time_interval".
+    ///
+    /// TODO(issue #100) Deprecate this once "fixed_size" support is added.
+    pub fn unwrap_interval(&self) -> &Interval {
         if let BatchSelector::TimeInterval { ref batch_interval } = self {
             batch_interval
         } else {

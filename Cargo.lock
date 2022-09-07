@@ -508,40 +508,18 @@ dependencies = [
 
 [[package]]
 name = "dapf"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_matches",
  "base64",
  "clap 3.2.19",
- "daphne 0.1.2",
- "prio 0.8.2",
+ "daphne",
+ "prio 0.10.0",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
- "url",
-]
-
-[[package]]
-name = "daphne"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "150b45b6e1df7fcbaff121c2ac09059152e6335a81e986d89ce5c88abbcba17d"
-dependencies = [
- "assert_matches",
- "async-trait",
- "base64",
- "getrandom",
- "hex",
- "hpke 0.8.0",
- "matchit 0.6.0",
- "prio 0.8.2",
- "rand",
- "ring",
- "serde",
- "serde_json",
- "thiserror",
  "url",
 ]
 
@@ -568,13 +546,13 @@ dependencies = [
 
 [[package]]
 name = "daphne-worker-test"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "assert_matches",
  "base64",
  "cfg-if 0.1.10",
  "console_error_panic_hook",
- "daphne 0.1.2",
+ "daphne",
  "daphne_worker",
  "deadpool-postgres",
  "futures",
@@ -583,6 +561,7 @@ dependencies = [
  "janus_core",
  "janus_server",
  "lazy_static",
+ "prio 0.10.0",
  "prio 0.8.2",
  "rand",
  "reqwest",
@@ -598,17 +577,17 @@ dependencies = [
 
 [[package]]
 name = "daphne_worker"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64",
- "daphne 0.1.2",
+ "daphne",
  "futures",
  "getrandom",
  "hex",
  "hpke 0.8.0",
  "matchit 0.6.0",
- "prio 0.8.2",
+ "prio 0.10.0",
  "rand",
  "reqwest-wasm",
  "ring",

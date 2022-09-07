@@ -42,6 +42,9 @@ The `daphne_worker` crate also has integration tests for
 [Janus](https://github.com/divviup/janus). To run these, make sure that your
 Docker environment is running and then do
 
+> NOTE Daphne implements DAP-02, but Janus implements DAP-01. These tests are
+> expected to fail until Janus is upgraded.
+
 ```
 DAP_DEPLOYMENT=dev cargo test --features=test_janus -- --test-threads 1
 ```

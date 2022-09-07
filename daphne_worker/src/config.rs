@@ -17,12 +17,12 @@ use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{HpkeConfig, Id, Interval, Nonce},
+    messages::{HpkeConfig, Id, Interval, ReportMetadata},
     DapError, DapGlobalConfig, DapRequest, DapTaskConfig, DapVersion,
 };
 use matchit::Router;
 use prio::{
-    codec::{Decode, Encode},
+    codec::Decode,
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
 use std::{
@@ -200,12 +200,12 @@ impl<D> DaphneWorkerConfig<D> {
         &self,
         task_config: &DapTaskConfig,
         task_id: &Id,
-        nonce: &Nonce,
+        metadata: &ReportMetadata,
     ) -> String {
         let mut bucket_seed = [0; 8];
-        PrgAes128::seed_stream(&self.bucket_key, &nonce.get_encoded()).fill(&mut bucket_seed);
+        PrgAes128::seed_stream(&self.bucket_key, metadata.nonce.as_ref()).fill(&mut bucket_seed);
         let bucket = u64::from_be_bytes(bucket_seed) % self.bucket_count;
-        let time = nonce.time - (nonce.time % task_config.min_batch_duration);
+        let time = metadata.time - (metadata.time % task_config.min_batch_duration);
         durable_report_store_name(&task_config.version, &task_id.to_hex(), time, bucket)
     }
 

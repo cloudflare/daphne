@@ -11,6 +11,7 @@ use daphne::{
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
+use janus_prio::codec::Decode as JanusPrioDecode;
 use prio::codec::{Decode, Encode};
 use std::{
     collections::HashMap,

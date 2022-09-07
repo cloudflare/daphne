@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::durable::report_store::nonce_hex_from_report;
-use daphne::messages::{Id, Nonce, Report};
+use daphne::messages::{Id, Nonce, Report, ReportMetadata};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 
@@ -14,11 +14,12 @@ fn test_nonce_hex_from_report() {
     let mut rng = thread_rng();
     let report = Report {
         task_id: Id(rng.gen()),
-        nonce: Nonce {
+        metadata: ReportMetadata {
             time: rng.gen(),
-            rand: rng.gen(),
+            nonce: Nonce(rng.gen()),
+            extensions: Vec::default(),
         },
-        extensions: Vec::default(),
+        public_share: Vec::default(),
         encrypted_input_shares: Vec::default(),
     };
 
@@ -26,6 +27,6 @@ fn test_nonce_hex_from_report() {
     let key = nonce_hex_from_report(&report_hex).unwrap();
     assert_eq!(
         Nonce::get_decoded(&hex::decode(key).unwrap()).unwrap(),
-        report.nonce
+        report.metadata.nonce
     );
 }

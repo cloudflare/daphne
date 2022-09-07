@@ -8,10 +8,8 @@ mod test_runner;
 use assert_matches::assert_matches;
 use daphne::constants;
 use daphne_worker::InternalAggregateInfo;
-use prio::{
-    codec::{Decode, Encode},
-    vdaf::prio3::Prio3,
-};
+use janus_prio::{codec::Decode as JanusPrioDecode, vdaf::prio3::Prio3 as JanusPrioPrio3};
+use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use test_runner::{TestRunner, COLLECTOR_HPKE_RECEIVER_CONFIG};
 
@@ -32,7 +30,7 @@ async fn janus_client() {
 
     let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
         assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
-            Prio3::new_aes128_sum(2, *bits).unwrap()
+            JanusPrioPrio3::new_aes128_sum(2, *bits).unwrap()
         )
     });
 
@@ -114,7 +112,9 @@ async fn janus_helper() {
     // Get the collect URI.
     let collect_req = daphne::messages::CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: batch_interval.clone(),
+        query: daphne::messages::Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
         agg_param: Vec::new(),
     };
     let collect_uri = t
@@ -137,8 +137,11 @@ async fn janus_helper() {
         .consume_encrypted_agg_shares(
             &decrypter,
             &t.task_id,
-            &batch_interval,
-            collect_resp.encrypted_agg_shares,
+            &daphne::messages::BatchSelector::TimeInterval {
+                batch_interval: batch_interval.clone(),
+            },
+            collect_resp.report_count,
+            collect_resp.encrypted_agg_shares.clone(),
         )
         .await
         .unwrap();
