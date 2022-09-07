@@ -37,8 +37,8 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryInto};
 
-const CTX_INPUT_SHARE: &[u8] = b"dap-01 input share";
-const CTX_AGG_SHARE: &[u8] = b"dap-01 aggregate share";
+const CTX_INPUT_SHARE: &[u8] = b"dap-02 input share";
+const CTX_AGG_SHARE: &[u8] = b"dap-02 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
