@@ -270,15 +270,15 @@ impl DurableObject for ReportStore {
 }
 
 pub(crate) fn nonce_hex_from_report(report_hex: &str) -> Option<&str> {
-    // task_id
-    if report_hex.len() < 64 {
+    // task_id (32 bytes) + time (8 bytes)
+    if report_hex.len() < 80 {
         return None;
     }
-    let report_hex = &report_hex[64..];
+    let report_hex = &report_hex[80..];
 
     // nonce
-    if report_hex.len() < 48 {
+    if report_hex.len() < 32 {
         return None;
     }
-    Some(&report_hex[..48])
+    Some(&report_hex[..32])
 }

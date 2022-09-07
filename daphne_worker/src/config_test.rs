@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::config::DaphneWorkerConfig;
-use daphne::messages::{Id, Interval, Nonce};
+use daphne::messages::{Id, Interval, Nonce, ReportMetadata};
 
 pub const GLOBAL_CONFIG: &str = r#"{
     "max_batch_duration": 360000,
@@ -75,12 +75,13 @@ fn daphne_param() {
     let task_config = config.tasks.get(&task_id).unwrap();
 
     // Try computing a batch name.
-    let nonce = Nonce {
+    let metadata = ReportMetadata {
         time: now,
-        rand: [1; 16],
+        nonce: Nonce([1; 16]),
+        extensions: Vec::new(),
     };
     assert_eq!(
-        config.durable_report_store_name(&task_config, &task_id, &nonce),
+        config.durable_report_store_name(&task_config, &task_id, &metadata),
         "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1"
     );
 

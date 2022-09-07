@@ -43,7 +43,7 @@ use daphne::{
     constants,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Nonce, Report, ReportShare,
         TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
@@ -240,9 +240,10 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn is_batch_overlapping(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
+        let batch_interval = batch_selector.unwrap_interval();
 
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
@@ -307,9 +308,10 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn get_agg_share(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
+        let batch_interval = batch_selector.unwrap_interval();
 
         let durable = self.durable();
         let mut requests = Vec::new();
@@ -342,9 +344,10 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn mark_collected(
         &self,
         task_id: &Id,
-        batch_interval: &Interval,
+        batch_selector: &BatchSelector,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
+        let batch_interval = batch_selector.unwrap_interval();
 
         // Mark reports collected.
         let durable = self.durable();
@@ -399,7 +402,7 @@ impl<'a, D> DapLeader<'a, BearerToken> for DaphneWorkerConfig<D> {
             .post(
                 BINDING_DAP_REPORT_STORE,
                 DURABLE_REPORT_STORE_PUT_PENDING,
-                self.durable_report_store_name(task_config, &report.task_id, &report.nonce),
+                self.durable_report_store_name(task_config, &report.task_id, &report.metadata),
                 &report_hex,
             )
             .await
@@ -652,8 +655,8 @@ impl<'a, D> DapHelper<'a, BearerToken> for DaphneWorkerConfig<D> {
         let mut durable_requests: HashMap<String, Vec<String>> = HashMap::new();
         for report_share in report_shares.iter() {
             let durable_name =
-                self.durable_report_store_name(task_config, task_id, &report_share.nonce);
-            let nonce_hex = hex::encode(report_share.nonce.get_encoded());
+                self.durable_report_store_name(task_config, task_id, &report_share.metadata);
+            let nonce_hex = hex::encode(report_share.metadata.nonce.get_encoded());
             if let Some(nonce_hex_set) = durable_requests.get_mut(&durable_name) {
                 nonce_hex_set.push(nonce_hex);
             } else {

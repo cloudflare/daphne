@@ -2,17 +2,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::{anyhow, Context, Result};
-use assert_matches::assert_matches;
 use clap::{Parser, Subcommand};
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{CollectReq, CollectResp, HpkeConfig, Id, Interval},
+    messages::{CollectReq, CollectResp, HpkeConfig, Id, Query},
     DapMeasurement, ProblemDetails, VdafConfig,
 };
 use prio::codec::{Decode, Encode};
 use reqwest::blocking::{Client, ClientBuilder};
-use serde::Deserialize;
 use std::{
     io::{stdin, Read},
     time::SystemTime,
@@ -147,15 +145,13 @@ async fn main() -> Result<()> {
                 .lock()
                 .read_to_string(&mut buf)
                 .with_context(|| "failed to read measurement from stdin")?;
-            let batch_selector: BatchSelector =
+            let query: Query =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             // Construct collect request.
-            let batch_interval = assert_matches!(batch_selector,
-                BatchSelector::Interval(batch_interval) => batch_interval);
             let collect_req = CollectReq {
                 task_id,
-                batch_interval,
+                query,
                 agg_param: Vec::default(),
             };
 
@@ -202,7 +198,7 @@ async fn main() -> Result<()> {
                 .lock()
                 .read_to_string(&mut buf)
                 .with_context(|| "failed to read measurement from stdin")?;
-            let batch_selector: BatchSelector =
+            let query: Query =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             let resp = http_client.get(uri).send()?;
@@ -215,14 +211,13 @@ async fn main() -> Result<()> {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
 
-            let batch_interval = assert_matches!(batch_selector,
-                        BatchSelector::Interval(batch_interval) => batch_interval);
             let collect_resp = CollectResp::get_decoded(&resp.bytes()?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
                     receiver,
                     &task_id,
-                    &batch_interval,
+                    &query,
+                    collect_resp.report_count,
                     collect_resp.encrypted_agg_shares,
                 )
                 .await?;
@@ -256,10 +251,4 @@ fn get_hpke_config(http_client: &Client, task_id: &Id, base_url: &str) -> Result
 
     let hpke_config_bytes = resp.bytes().with_context(|| "failed to read response")?;
     Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum BatchSelector {
-    Interval(Interval),
 }

@@ -8,7 +8,10 @@ mod test_runner;
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report},
+    messages::{
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Query, Report,
+        ReportMetadata,
+    },
     DapAggregateResult, DapMeasurement,
 };
 use daphne_worker::InternalAggregateInfo;
@@ -150,11 +153,12 @@ async fn e2e_leader_upload() {
         .body(
             Report {
                 task_id: t.task_id.clone(),
-                nonce: Nonce {
+                metadata: ReportMetadata {
                     time: t.now,
-                    rand: [1; 16],
+                    nonce: Nonce([1; 16]),
+                    extensions: Vec::default(),
                 },
-                extensions: Vec::default(),
+                public_share: b"public share".to_vec(),
                 encrypted_input_shares: vec![
                     HpkeCiphertext {
                         config_id: hpke_config_list[0].id,
@@ -301,7 +305,9 @@ async fn e2e_leader_collect_ok() {
     // Get the collect URI.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: batch_interval.clone(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
         agg_param: Vec::new(),
     };
     let collect_uri = t
@@ -348,7 +354,10 @@ async fn e2e_leader_collect_ok() {
         .consume_encrypted_agg_shares(
             &decrypter,
             &t.task_id,
-            &batch_interval,
+            &BatchSelector::TimeInterval {
+                batch_interval: batch_interval.clone(),
+            },
+            collect_resp.report_count,
             collect_resp.encrypted_agg_shares.clone(),
         )
         .await
@@ -419,7 +428,9 @@ async fn e2e_leader_collect_ok_interleaved() {
     // ... then the collect request is issued ...
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: batch_interval.clone(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
         agg_param: Vec::new(),
     };
     let _collect_uri = t
@@ -461,7 +472,9 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
     // Get the collect URI.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: batch_interval.clone(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
         agg_param: Vec::new(),
     };
     let collect_uri = t
@@ -521,7 +534,7 @@ async fn e2e_leader_collect_accept_max_batch_duration() {
     // Maximum allowed batch duration.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval,
+        query: Query::TimeInterval { batch_interval },
         agg_param: Vec::new(),
     };
     let _collect_uri = t
@@ -540,9 +553,11 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     // Start of batch interval does not align with min_batch_duration.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: Interval {
-            start: batch_interval.start + 1,
-            duration: batch_interval.duration,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: batch_interval.start + 1,
+                duration: batch_interval.duration,
+            },
         },
         agg_param: Vec::new(),
     };
@@ -560,9 +575,11 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     // Batch interval duration does not align wiht min_batch_duration.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: Interval {
-            start: batch_interval.start,
-            duration: batch_interval.duration - 1,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: batch_interval.start,
+                duration: batch_interval.duration - 1,
+            },
         },
         agg_param: Vec::new(),
     };
@@ -605,7 +622,9 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
     // Get the collect URI.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: batch_interval.clone(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
         agg_param: Vec::new(),
     };
     let _collect_uri = t
@@ -642,9 +661,11 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
     // a little bit.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        batch_interval: Interval {
-            start: batch_interval.start,
-            duration: batch_interval.duration * 2,
+        query: Query::TimeInterval {
+            batch_interval: Interval {
+                start: batch_interval.start,
+                duration: batch_interval.duration * 2,
+            },
         },
         agg_param: Vec::new(),
     };
