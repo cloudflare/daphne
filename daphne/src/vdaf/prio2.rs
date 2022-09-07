@@ -89,7 +89,7 @@ pub(crate) fn prio2_helper_prepare_finish(
             PrepareTransition::Continue(..) => {
                 panic!("prio2_helper_prepare_finish: unexpected transition (continued)")
             }
-            PrepareTransition::Finish(out_share) => (out_share),
+            PrepareTransition::Finish(out_share) => out_share,
         },
         _ => panic!("prio2_helper_prepare_finish: unexpected helper state type"),
     };

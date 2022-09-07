@@ -163,12 +163,9 @@ impl MockAggregator {
     }
 
     fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
-        for hpke_receiver_config in self.hpke_receiver_config_list.iter() {
-            if hpke_config_id == hpke_receiver_config.config.id {
-                return Some(hpke_receiver_config);
-            }
-        }
-        None
+        self.hpke_receiver_config_list
+            .iter()
+            .find(|&hpke_receiver_config| hpke_config_id == hpke_receiver_config.config.id)
     }
 
     /// Task to use for nominal tests.
