@@ -745,7 +745,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
         // Check that the minimum batch size is met.
         if agg_share.report_count < task_config.min_batch_size {
-            return Err(DapAbort::InsufficientBatchSize);
+            return Err(DapAbort::InvalidBatchSize);
         }
 
         // Mark each aggregated report as collected.

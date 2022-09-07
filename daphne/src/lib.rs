@@ -133,9 +133,10 @@ pub enum DapAbort {
     #[error("invalidProtocolVersion")]
     InvalidProtocolVersion,
 
-    /// Insufficient batch size. Sent in response to a CollectReq or AggregateShareReq.
-    #[error("insufficientBatchSize")]
-    InsufficientBatchSize,
+    /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
+    /// AggregateShareReq.
+    #[error("invalidBatchSize")]
+    InvalidBatchSize,
 
     /// Replayed report. Sent in response to an upload request containing a Report that has been replayed.
     //
@@ -182,7 +183,7 @@ impl DapAbort {
             | Self::BatchOverlap
             | Self::InvalidBatchInterval
             | Self::InvalidProtocolVersion
-            | Self::InsufficientBatchSize
+            | Self::InvalidBatchSize
             | Self::ReplayedReport
             | Self::StaleReport
             | Self::UnauthorizedRequest
