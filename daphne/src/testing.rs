@@ -198,14 +198,23 @@ impl<'a> HpkeDecrypter<'a> for MockAggregator {
 
     async fn get_hpke_config_for(
         &'a self,
-        _task_id: &Id,
-    ) -> Result<Option<&'a HpkeConfig>, DapError> {
+        task_id: Option<&Id>,
+    ) -> Result<&'a HpkeConfig, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
-            return Ok(None);
+            return Err(DapError::fatal("emtpy HPKE receiver config list"));
+        }
+
+        // Aggregators MAY abort if the HPKE config request does not specify a task ID. While not
+        // required for MockAggregator, we simulate this behavior for testing purposes.
+        //
+        // TODO(cjpatton) To make this clearer, have MockAggregator store a map from task IDs to
+        // HPKE receiver configs.
+        if task_id.is_none() {
+            return Err(DapError::Abort(DapAbort::MissingTaskId));
         }
 
         // Always advertise the first HPKE config in the list.
-        Ok(Some(&self.hpke_receiver_config_list[0].config))
+        Ok(&self.hpke_receiver_config_list[0].config)
     }
 
     async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {

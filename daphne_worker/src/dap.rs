@@ -74,8 +74,8 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
 
     async fn get_hpke_config_for(
         &'a self,
-        _task_id: &Id,
-    ) -> std::result::Result<Option<GuardedHpkeReceiverConfig<'a>>, DapError> {
+        _task_id: Option<&Id>,
+    ) -> std::result::Result<GuardedHpkeReceiverConfig<'a>, DapError> {
         let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE").map_err(dap_err)?;
         let keys = kv_store
             .list()
@@ -120,7 +120,8 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
         Ok(self
             .hpke_receiver_config(hpke_config_id)
             .await
-            .map_err(dap_err)?)
+            .map_err(dap_err)?
+            .ok_or_else(|| DapError::fatal("empty HPKE receiver config list"))?)
     }
 
     async fn can_hpke_decrypt(

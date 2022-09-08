@@ -85,11 +85,11 @@ pub trait HpkeDecrypter<'a> {
     /// Return type of `get_hpke_config_for()`, wraps a reference to an HPKE config.
     type WrappedHpkeConfig: AsRef<HpkeConfig>;
 
-    /// Look up the HPKE configuration to use for the given task ID.
+    /// Look up the HPKE configuration to use for the given task ID (if specified).
     async fn get_hpke_config_for(
         &'a self,
-        task_id: &Id,
-    ) -> Result<Option<Self::WrappedHpkeConfig>, DapError>;
+        task_id: Option<&Id>,
+    ) -> Result<Self::WrappedHpkeConfig, DapError>;
 
     /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
     async fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> Result<bool, DapError>;
@@ -263,8 +263,8 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
 
     async fn get_hpke_config_for(
         &'a self,
-        _task_id: &Id,
-    ) -> Result<Option<Self::WrappedHpkeConfig>, DapError> {
+        _task_id: Option<&Id>,
+    ) -> Result<Self::WrappedHpkeConfig, DapError> {
         unreachable!("not implemented");
     }
 

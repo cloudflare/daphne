@@ -5,7 +5,7 @@ use crate::{
     auth::BearerToken,
     constants::{
         MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ,
-        MEDIA_TYPE_COLLECT_REQ, MEDIA_TYPE_REPORT,
+        MEDIA_TYPE_COLLECT_REQ, MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_REPORT,
     },
     hpke::HpkeReceiverConfig,
     messages::{
@@ -31,6 +31,7 @@ use std::{
     ops::DerefMut,
     vec,
 };
+use url::Url;
 
 // MockAggregator's implementation of DapLeader::get_report() always returns reports for a single
 // task. This macro is used to conveniently unwrap the task ID and reports for testing purposes.
@@ -316,6 +317,49 @@ async fn http_post_aggregate_init_unauthorized_request() {
     assert_matches!(
         helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+#[tokio::test]
+async fn http_get_hpke_config_unrecognized_task() {
+    let aggregator = MockAggregator::new();
+    let mut rng = thread_rng();
+    let task_id = Id(rng.gen());
+    let req = DapRequest {
+        version: DapVersion::Draft01,
+        media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+        payload: Vec::new(),
+        url: Url::parse(&format!(
+            "http://aggregator.biz/v01/hpke_config?task_id={}",
+            task_id.to_base64url()
+        ))
+        .unwrap(),
+        sender_auth: None,
+    };
+
+    assert_matches!(
+        aggregator.http_get_hpke_config(&req).await,
+        Err(DapAbort::UnrecognizedTask)
+    );
+}
+
+#[tokio::test]
+async fn http_get_hpke_config_missing_task_id() {
+    let aggregator = MockAggregator::new();
+    let req = DapRequest {
+        version: DapVersion::Draft01,
+        media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+        payload: Vec::new(),
+        url: Url::parse("http://aggregator.biz/v01/hpke_config").unwrap(),
+        sender_auth: None,
+    };
+
+    // An Aggregator is permitted to abort an HPKE config request if the task ID is missing. Note
+    // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
+    // used for all tasks.
+    assert_matches!(
+        aggregator.http_get_hpke_config(&req).await,
+        Err(DapAbort::MissingTaskId)
     );
 }
 
