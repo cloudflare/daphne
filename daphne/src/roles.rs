@@ -163,18 +163,13 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
             if task_config.as_ref().version != req.version {
                 return Err(DapAbort::InvalidProtocolVersion);
             }
-
-            let hpke_config = self
-                .get_hpke_config_for(task_id)
-                .await?
-                .ok_or(DapAbort::UnrecognizedTask)?;
-            Ok(DapResponse {
-                media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
-                payload: hpke_config.as_ref().get_encoded(),
-            })
-        } else {
-            Err(DapAbort::BadRequest("missing query parameter".into()))
         }
+
+        let hpke_config = self.get_hpke_config_for(id.as_ref()).await?;
+        Ok(DapResponse {
+            media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+            payload: hpke_config.as_ref().get_encoded(),
+        })
     }
 }
 

@@ -138,6 +138,10 @@ pub enum DapAbort {
     #[error("invalidBatchSize")]
     InvalidBatchSize,
 
+    /// Request with missing task ID.
+    #[error("missingTaskID")]
+    MissingTaskId,
+
     /// Replayed report. Sent in response to an upload request containing a Report that has been replayed.
     //
     // TODO spec: Define this error type.
@@ -184,6 +188,7 @@ impl DapAbort {
             | Self::InvalidBatchInterval
             | Self::InvalidProtocolVersion
             | Self::InvalidBatchSize
+            | Self::MissingTaskId
             | Self::ReplayedReport
             | Self::StaleReport
             | Self::UnauthorizedRequest
