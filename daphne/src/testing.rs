@@ -94,7 +94,7 @@ pub(crate) struct MockAggregateInfo {
 pub(crate) struct MockAggregator {
     pub(crate) now: u64,
     pub(crate) global_config: DapGlobalConfig,
-    tasks: HashMap<Id, DapTaskConfig>,
+    pub(crate) tasks: HashMap<Id, DapTaskConfig>,
     hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
     leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
@@ -244,7 +244,9 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapAggregator<'static, BearerToken> for MockAggregator {
+impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
+    type WrappedDapTaskConfig = &'a DapTaskConfig;
+
     async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
         self.bearer_token_authorized(req).await
     }
@@ -253,8 +255,11 @@ impl DapAggregator<'static, BearerToken> for MockAggregator {
         &self.global_config
     }
 
-    fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
-        self.tasks.get(task_id)
+    async fn get_task_config_for(
+        &'a self,
+        task_id: &Id,
+    ) -> Result<Option<&'a DapTaskConfig>, DapError> {
+        Ok(self.tasks.get(task_id))
     }
 
     fn get_current_time(&self) -> u64 {
@@ -293,6 +298,7 @@ impl DapAggregator<'static, BearerToken> for MockAggregator {
     ) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
+            .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
         let agg_shares =
@@ -381,7 +387,7 @@ impl DapAggregator<'static, BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapHelper<'static, BearerToken> for MockAggregator {
+impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
@@ -389,6 +395,7 @@ impl DapHelper<'static, BearerToken> for MockAggregator {
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
+            .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
         let mut early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
 
@@ -487,13 +494,14 @@ impl DapHelper<'static, BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapLeader<'static, BearerToken> for MockAggregator {
+impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
     type ReportSelector = MockAggregateInfo;
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
         let task_id = &report.task_id;
         let task_config = self
             .get_task_config_for(task_id)
+            .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
         let bucket_info = BucketInfo::new(task_config, task_id, &report.nonce);
 
@@ -571,6 +579,7 @@ impl DapLeader<'static, BearerToken> for MockAggregator {
         let mut rng = thread_rng();
         let task_config = self
             .get_task_config_for(&collect_req.task_id)
+            .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
         let mut leader_state_store_mutex_guard = self

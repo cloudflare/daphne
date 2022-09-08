@@ -213,6 +213,8 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
 
 #[async_trait(?Send)]
 impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
+    type WrappedDapTaskConfig = &'a DapTaskConfig;
+
     async fn authorized(
         &self,
         req: &DapRequest<BearerToken>,
@@ -224,8 +226,11 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         &self.global_config
     }
 
-    fn get_task_config_for(&self, task_id: &Id) -> Option<&DapTaskConfig> {
-        self.tasks.get(task_id)
+    async fn get_task_config_for(
+        &'a self,
+        task_id: &Id,
+    ) -> std::result::Result<Option<&'a DapTaskConfig>, DapError> {
+        Ok(self.tasks.get(task_id))
     }
 
     fn get_current_time(&self) -> u64 {

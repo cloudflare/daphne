@@ -44,7 +44,7 @@ macro_rules! get_reports {
 impl MockAggregator {
     fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
-        let task_config = self.get_task_config_for(task_id).unwrap();
+        let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -59,7 +59,7 @@ impl MockAggregator {
     fn gen_test_agg_init_req(&self, report_shares: Vec<ReportShare>) -> DapRequest<BearerToken> {
         let mut rng = thread_rng();
         let task_id = self.nominal_task_id();
-        let task_config = self.get_task_config_for(task_id).unwrap();
+        let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -83,7 +83,7 @@ impl MockAggregator {
         transitions: Vec<Transition>,
     ) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
-        let task_config = self.get_task_config_for(task_id).unwrap();
+        let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -106,7 +106,7 @@ impl MockAggregator {
         checksum: [u8; 32],
     ) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
-        let task_config = self.get_task_config_for(task_id).unwrap();
+        let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -127,7 +127,7 @@ impl MockAggregator {
 
     fn gen_test_collect_req(&self) -> DapRequest<BearerToken> {
         let task_id = self.nominal_task_id();
-        let task_config = self.get_task_config_for(task_id).unwrap();
+        let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -481,7 +481,7 @@ async fn http_post_aggregate_failure_report_replayed() {
 async fn http_post_aggregate_failure_batch_collected() {
     let helper = MockAggregator::new();
     let task_id = helper.nominal_task_id();
-    let task_config = helper.get_task_config_for(task_id).unwrap();
+    let task_config = helper.tasks.get(task_id).unwrap();
 
     let report = helper.gen_test_report(task_id);
     let report_shares = vec![ReportShare {
@@ -655,7 +655,7 @@ async fn get_reports_empty_response() {
 async fn poll_collect_job_test_results() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
@@ -714,7 +714,7 @@ async fn poll_collect_job_test_results() {
 async fn http_post_collect_fail_invalid_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
     let now = leader.now;
 
     // Collector: Create a CollectReq with a very large batch interval.
@@ -799,7 +799,7 @@ async fn http_post_collect_fail_invalid_batch_interval() {
 async fn http_post_collect_succeed_max_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
     let now = leader.now;
 
     // Collector: Create a CollectReq with a very large batch interval.
@@ -831,7 +831,7 @@ async fn http_post_collect_succeed_max_batch_interval() {
 async fn http_post_collect_fail_overlapping_batch_interval() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
     let helper = MockAggregator::new();
     let now = leader.now;
 
@@ -897,7 +897,7 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
 async fn http_post_collect_success() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
 
     // Collector: Create a CollectReq.
     let collector_collect_req = CollectReq {
@@ -942,7 +942,7 @@ async fn http_post_collect_success() {
 async fn http_post_fail_wrong_dap_version() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
 
     // Send a request with the wrong DAP version.
     let report = leader.gen_test_report(task_id);
@@ -975,7 +975,7 @@ async fn successful_http_post_upload() {
 async fn e2e() {
     let leader = MockAggregator::new();
     let task_id = leader.nominal_task_id();
-    let task_config = leader.get_task_config_for(task_id).unwrap();
+    let task_config = leader.tasks.get(task_id).unwrap();
 
     let helper = MockAggregator::new();
 

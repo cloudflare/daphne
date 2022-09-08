@@ -325,6 +325,12 @@ impl DapTaskConfig {
     }
 }
 
+impl AsRef<DapTaskConfig> for DapTaskConfig {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 struct ShadowDapTaskConfig {
     version: DapVersion,
