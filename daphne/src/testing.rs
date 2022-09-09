@@ -196,14 +196,19 @@ impl BearerTokenProvider for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl HpkeDecrypter for MockAggregator {
-    async fn get_hpke_config_for(&self, _task_id: &Id) -> Result<Option<HpkeConfig>, DapError> {
+impl<'a> HpkeDecrypter<'a> for MockAggregator {
+    type WrappedHpkeConfig = &'a HpkeConfig;
+
+    async fn get_hpke_config_for(
+        &'a self,
+        _task_id: &Id,
+    ) -> Result<Option<&'a HpkeConfig>, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
             return Ok(None);
         }
 
         // Always advertise the first HPKE config in the list.
-        Ok(Some(self.hpke_receiver_config_list[0].config.clone()))
+        Ok(Some(&self.hpke_receiver_config_list[0].config))
     }
 
     async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {
@@ -239,7 +244,7 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapAggregator<BearerToken> for MockAggregator {
+impl DapAggregator<'static, BearerToken> for MockAggregator {
     async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
         self.bearer_token_authorized(req).await
     }
@@ -376,7 +381,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapHelper<BearerToken> for MockAggregator {
+impl DapHelper<'static, BearerToken> for MockAggregator {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
@@ -482,7 +487,7 @@ impl DapHelper<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl DapLeader<BearerToken> for MockAggregator {
+impl DapLeader<'static, BearerToken> for MockAggregator {
     type ReportSelector = MockAggregateInfo;
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {

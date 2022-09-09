@@ -7,7 +7,10 @@
 //! draft-ietf-ppm-dap-01.
 
 use crate::{
-    config::{DaphneWorkerConfig, DaphneWorkerDeployment, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG},
+    config::{
+        DaphneWorkerConfig, DaphneWorkerDeployment, GuardedHpkeReceiverConfig,
+        KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+    },
     dap_err,
     durable::{
         aggregate_store::{
@@ -40,8 +43,8 @@ use daphne::{
     constants,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce, Report,
-        ReportShare, TransitionFailure,
+        CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Report, ReportShare,
+        TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapOutputShare,
@@ -66,11 +69,13 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 }
 
 #[async_trait(?Send)]
-impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
+impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
+    type WrappedHpkeConfig = GuardedHpkeReceiverConfig<'a>;
+
     async fn get_hpke_config_for(
-        &self,
+        &'a self,
         _task_id: &Id,
-    ) -> std::result::Result<Option<HpkeConfig>, DapError> {
+    ) -> std::result::Result<Option<GuardedHpkeReceiverConfig<'a>>, DapError> {
         let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE").map_err(dap_err)?;
         let keys = kv_store
             .list()
@@ -80,7 +85,7 @@ impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
             .await
             .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
 
-        if keys.keys.is_empty() {
+        let hpke_config_id = if keys.keys.is_empty() {
             // Generate a new random HPKE config ID and key for KV.
             let hpke_config_id: u8 = rand::thread_rng().gen();
             let new_key = format!("{}/{}", KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_config_id);
@@ -106,20 +111,16 @@ impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
                 .await
                 .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
 
-            Ok(Some(hpke_receiver_config.config))
+            hpke_config_id
         } else {
-            // Return the first HPKE receiver config.
-            let builder = kv_store.get(&keys.keys[0].name);
-            if let Some(hpke_receiver_config) = builder
-                .json::<HpkeReceiverConfig>()
-                .await
-                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
-            {
-                Ok(Some(hpke_receiver_config.config))
-            } else {
-                Ok(None)
-            }
-        }
+            // Return the first HPKE receiver config in the list.
+            parse_hpke_config_id_from_kv_key_name(keys.keys[0].name.as_str())?
+        };
+
+        Ok(self
+            .hpke_receiver_config(hpke_config_id)
+            .await
+            .map_err(dap_err)?)
     }
 
     async fn can_hpke_decrypt(
@@ -127,11 +128,11 @@ impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
         _task_id: &Id,
         config_id: u8,
     ) -> std::result::Result<bool, DapError> {
-        let hpke_receiver_configs = self
-            .cached_hpke_receiver_configs(config_id)
+        Ok(self
+            .hpke_receiver_config(config_id)
             .await
-            .map_err(dap_err)?;
-        Ok(hpke_receiver_configs.get(&config_id).is_some())
+            .map_err(dap_err)?
+            .is_some())
     }
 
     async fn hpke_decrypt(
@@ -141,16 +142,41 @@ impl<D> HpkeDecrypter for DaphneWorkerConfig<D> {
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
-        let hpke_receiver_configs = self
-            .cached_hpke_receiver_configs(ciphertext.config_id)
+        if let Some(hpke_receiver_config) = self
+            .hpke_receiver_config(ciphertext.config_id)
             .await
-            .map_err(dap_err)?;
-        if let Some(hpke_receiver_config) = hpke_receiver_configs.get(&ciphertext.config_id) {
-            Ok(hpke_receiver_config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+            .map_err(dap_err)?
+        {
+            Ok(hpke_receiver_config.decryptor().decrypt(
+                info,
+                aad,
+                &ciphertext.enc,
+                &ciphertext.payload,
+            )?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }
     }
+}
+
+fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, DapError> {
+    let mut iter = name.split('/');
+    if let Some(prefix) = iter.next() {
+        if prefix == KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG {
+            if let Some(config_id_str) = iter.next() {
+                if iter.next().is_none() {
+                    if let Ok(config_id) = config_id_str.parse::<u8>() {
+                        return Ok(config_id);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(DapError::Fatal(format!(
+        "malformed kv_store HPKE receiver config key: '{}'",
+        name
+    )))
 }
 
 #[async_trait(?Send)]
@@ -186,7 +212,7 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
+impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn authorized(
         &self,
         req: &DapRequest<BearerToken>,
@@ -357,7 +383,7 @@ impl<D> DapAggregator<BearerToken> for DaphneWorkerConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
+impl<'a, D> DapLeader<'a, BearerToken> for DaphneWorkerConfig<D> {
     type ReportSelector = InternalAggregateInfo;
 
     async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
@@ -610,7 +636,7 @@ impl<D> DapLeader<BearerToken> for DaphneWorkerConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapHelper<BearerToken> for DaphneWorkerConfig<D> {
+impl<'a, D> DapHelper<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn mark_aggregated(
         &self,
         task_id: &Id,

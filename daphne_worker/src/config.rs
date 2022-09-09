@@ -17,7 +17,7 @@ use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{Id, Interval, Nonce},
+    messages::{HpkeConfig, Id, Interval, Nonce},
     DapError, DapGlobalConfig, DapRequest, DapTaskConfig, DapVersion,
 };
 use matchit::Router;
@@ -264,10 +264,10 @@ impl<D> DaphneWorkerConfig<D> {
 
     // Get a reference to the HPKE receiver configs, ensuring that the config indicated by
     // `hpke_config_id` is cached (if it exists).
-    pub(crate) async fn cached_hpke_receiver_configs(
+    pub(crate) async fn hpke_receiver_config(
         &self,
         hpke_config_id: u8,
-    ) -> Result<RwLockReadGuard<HashMap<u8, HpkeReceiverConfig>>> {
+    ) -> Result<Option<GuardedHpkeReceiverConfig>> {
         // If the config is cached, then return immediately.
         {
             let hpke_receiver_configs = self.hpke_receiver_configs.read().map_err(|e| {
@@ -278,7 +278,10 @@ impl<D> DaphneWorkerConfig<D> {
             })?;
 
             if hpke_receiver_configs.get(&hpke_config_id).is_some() {
-                return Ok(hpke_receiver_configs);
+                return Ok(Some(GuardedHpkeReceiverConfig {
+                    hpke_receiver_configs,
+                    hpke_config_id,
+                }));
             }
         }
 
@@ -305,7 +308,15 @@ impl<D> DaphneWorkerConfig<D> {
                 e
             ))
         })?;
-        Ok(hpke_receiver_configs)
+
+        if hpke_receiver_configs.get(&hpke_config_id).is_some() {
+            Ok(Some(GuardedHpkeReceiverConfig {
+                hpke_receiver_configs,
+                hpke_config_id,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Clear all persistant durable objects storage.
@@ -363,6 +374,30 @@ impl<D> DaphneWorkerConfig<D> {
         self.tasks
             .get(task_id)
             .ok_or_else(|| DapError::fatal("unrecognized task"))
+    }
+}
+
+/// RwLockReadGuard'ed HPKE receiver config.
+pub(crate) struct GuardedHpkeReceiverConfig<'a> {
+    hpke_receiver_configs: RwLockReadGuard<'a, HashMap<u8, HpkeReceiverConfig>>,
+    hpke_config_id: u8,
+}
+
+impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
+    fn as_ref(&self) -> &HpkeConfig {
+        &self
+            .hpke_receiver_configs
+            .get(&self.hpke_config_id)
+            .unwrap()
+            .config
+    }
+}
+
+impl GuardedHpkeReceiverConfig<'_> {
+    pub(crate) fn decryptor(&self) -> &HpkeReceiverConfig {
+        self.hpke_receiver_configs
+            .get(&self.hpke_config_id)
+            .unwrap()
     }
 }
 
