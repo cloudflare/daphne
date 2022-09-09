@@ -616,6 +616,12 @@ pub struct HpkeConfig {
     pub(crate) public_key: Vec<u8>,
 }
 
+impl AsRef<HpkeConfig> for HpkeConfig {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 impl Encode for HpkeConfig {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.id.encode(bytes);

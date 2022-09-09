@@ -79,7 +79,7 @@ pub trait DapAuthorizedSender<S> {
 
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
-pub trait DapAggregator<S>: HpkeDecrypter + Sized {
+pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
     /// Decide whether the given DAP request is authorized.
     async fn authorized(&self, req: &DapRequest<S>) -> Result<bool, DapError>;
 
@@ -119,7 +119,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
         -> Result<(), DapError>;
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
-    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn http_get_hpke_config(&'a self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -158,7 +158,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
                 .ok_or(DapAbort::UnrecognizedTask)?;
             Ok(DapResponse {
                 media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
-                payload: hpke_config.get_encoded(),
+                payload: hpke_config.as_ref().get_encoded(),
             })
         } else {
             Err(DapAbort::BadRequest("missing query parameter".into()))
@@ -192,7 +192,7 @@ macro_rules! leader_post {
 
 /// DAP Leader functionality.
 #[async_trait(?Send)]
-pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
+pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;
 
@@ -513,7 +513,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
 /// DAP Helper functionality.
 #[async_trait(?Send)]
-pub trait DapHelper<S>: DapAggregator<S> {
+pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
     /// Update the metadata for the given set of report shares, marking them as aggregated. The
     /// return value is the subset of the report shares that will not be aggregated due to a
     /// transition failure. This occurs if, for example, the report was previously aggregated, but

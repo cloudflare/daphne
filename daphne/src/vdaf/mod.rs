@@ -213,7 +213,7 @@ impl VdafConfig {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn consume_report_share(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: &impl HpkeDecrypter<'_>,
         is_leader: bool,
         verify_key: &VdafVerifyKey,
         task_id: &Id,
@@ -285,7 +285,7 @@ impl VdafConfig {
     /// * `reports` is the set of reports uploaded by Clients.
     pub(crate) async fn produce_agg_init_req(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: &impl HpkeDecrypter<'_>,
         verify_key: &VdafVerifyKey,
         task_id: &Id,
         agg_job_id: &Id,
@@ -384,7 +384,7 @@ impl VdafConfig {
     /// is the transition failure the Helper is to transmit.
     pub(crate) async fn handle_agg_init_req(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: &impl HpkeDecrypter<'_>,
         verify_key: &VdafVerifyKey,
         agg_init_req: &AggregateInitializeReq,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
@@ -734,7 +734,7 @@ impl VdafConfig {
     // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
     pub async fn consume_encrypted_agg_shares(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: &impl HpkeDecrypter<'_>,
         task_id: &Id,
         batch_interval: &Interval,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
