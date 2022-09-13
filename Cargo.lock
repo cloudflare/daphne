@@ -496,7 +496,7 @@ dependencies = [
  "assert_matches",
  "base64",
  "clap 3.2.20",
- "daphne",
+ "daphne 0.1.2",
  "prio",
  "reqwest",
  "serde",
@@ -527,6 +527,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "daphne"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "150b45b6e1df7fcbaff121c2ac09059152e6335a81e986d89ce5c88abbcba17d"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "base64",
+ "getrandom",
+ "hex",
+ "hpke 0.8.0",
+ "matchit 0.6.0",
+ "prio",
+ "rand",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "daphne-worker-test"
 version = "0.1.2"
 dependencies = [
@@ -534,7 +556,7 @@ dependencies = [
  "base64",
  "cfg-if 0.1.10",
  "console_error_panic_hook",
- "daphne",
+ "daphne 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "daphne_worker",
  "deadpool-postgres",
  "futures",
@@ -562,7 +584,7 @@ version = "0.1.2"
 dependencies = [
  "async-trait",
  "base64",
- "daphne",
+ "daphne 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "getrandom",
  "hex",
