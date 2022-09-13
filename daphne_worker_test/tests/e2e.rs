@@ -195,7 +195,7 @@ async fn e2e_internal_leader_process() {
 
     let agg_info = InternalAggregateInfo {
         max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
-        max_reports: t.min_batch_size,
+        max_reports: t.query_config.min_batch_size(),
     };
 
     let batch_interval = t.batch_interval();
@@ -288,7 +288,7 @@ async fn e2e_leader_collect_ok() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.min_batch_size {
+    for _ in 0..t.query_config.min_batch_size() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -330,15 +330,18 @@ async fn e2e_leader_collect_ok() {
         )
         .await;
     assert_eq!(
-        agg_telem.reports_processed, t.min_batch_size,
+        agg_telem.reports_processed,
+        t.query_config.min_batch_size(),
         "reports processed"
     );
     assert_eq!(
-        agg_telem.reports_aggregated, t.min_batch_size,
+        agg_telem.reports_aggregated,
+        t.query_config.min_batch_size(),
         "reports aggregated"
     );
     assert_eq!(
-        agg_telem.reports_collected, t.min_batch_size,
+        agg_telem.reports_collected,
+        t.query_config.min_batch_size(),
         "reports collected"
     );
 
@@ -362,7 +365,10 @@ async fn e2e_leader_collect_ok() {
         )
         .await
         .unwrap();
-    assert_eq!(agg_res, DapAggregateResult::U128(t.min_batch_size as u128));
+    assert_eq!(
+        agg_res,
+        DapAggregateResult::U128(t.query_config.min_batch_size() as u128)
+    );
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
     // GET semantics.
@@ -399,7 +405,7 @@ async fn e2e_leader_collect_ok_interleaved() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.min_batch_size {
+    for _ in 0..t.query_config.min_batch_size() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -421,7 +427,8 @@ async fn e2e_leader_collect_ok_interleaved() {
     // All reports for the task get processed ...
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(
-        agg_telem.reports_processed, t.min_batch_size,
+        agg_telem.reports_processed,
+        t.query_config.min_batch_size(),
         "reports processed"
     );
 
@@ -440,7 +447,8 @@ async fn e2e_leader_collect_ok_interleaved() {
     // ... then the collect job gets completed.
     let agg_telem = t.internal_process(&client, &agg_info).await;
     assert_eq!(
-        agg_telem.reports_collected, t.min_batch_size,
+        agg_telem.reports_collected,
+        t.query_config.min_batch_size(),
         "reports collected"
     );
 }
@@ -455,7 +463,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
-    for _ in 0..t.min_batch_size - 1 {
+    for _ in 0..t.query_config.min_batch_size() - 1 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -492,8 +500,14 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
             },
         )
         .await;
-    assert_eq!(agg_telem.reports_processed, t.min_batch_size - 1);
-    assert_eq!(agg_telem.reports_aggregated, t.min_batch_size - 1);
+    assert_eq!(
+        agg_telem.reports_processed,
+        t.query_config.min_batch_size() - 1
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated,
+        t.query_config.min_batch_size() - 1
+    );
     assert_eq!(agg_telem.reports_collected, 0);
 
     // Poll the collect URI before the ColleectResp is ready.
@@ -527,7 +541,7 @@ async fn e2e_leader_collect_accept_max_batch_duration() {
     let t = TestRunner::default().await;
     let client = t.http_client();
     let batch_interval = Interval {
-        start: t.now - (t.now % t.min_batch_duration) - t.max_batch_duration / 2,
+        start: t.now - (t.now % t.time_precision) - t.max_batch_duration / 2,
         duration: t.max_batch_duration,
     };
 
@@ -550,7 +564,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     let batch_interval = t.batch_interval();
     let path = "collect";
 
-    // Start of batch interval does not align with min_batch_duration.
+    // Start of batch interval does not align with time_precision.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
         query: Query::TimeInterval {
@@ -605,7 +619,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.min_batch_size {
+    for _ in 0..t.query_config.min_batch_size() {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -642,15 +656,18 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         )
         .await;
     assert_eq!(
-        agg_telem.reports_processed, t.min_batch_size,
+        agg_telem.reports_processed,
+        t.query_config.min_batch_size(),
         "reports processed"
     );
     assert_eq!(
-        agg_telem.reports_aggregated, t.min_batch_size,
+        agg_telem.reports_aggregated,
+        t.query_config.min_batch_size(),
         "reports aggregated"
     );
     assert_eq!(
-        agg_telem.reports_collected, t.min_batch_size,
+        agg_telem.reports_collected,
+        t.query_config.min_batch_size(),
         "reports collected"
     );
 

@@ -424,8 +424,13 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .get_agg_share(&collect_req.task_id, &collect_req.query)
             .await?;
 
-        // Check that the minimum batch size is met.
-        if leader_agg_share.report_count < task_config.min_batch_size {
+        // Check the batch size. If not not ready, then return early.
+        //
+        // TODO Consider logging this error, as it shouuld never happen.
+        if !task_config
+            .query
+            .check_batch_size(leader_agg_share.report_count)?
+        {
             return Ok(0);
         }
 
@@ -738,8 +743,12 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
             return Err(DapAbort::BatchMismatch);
         }
 
-        // Check that the minimum batch size is met.
-        if agg_share.report_count < task_config.min_batch_size {
+        // Check the batch size.
+        if !task_config
+            .query
+            .check_batch_size(agg_share.report_count)
+            .unwrap_or(false)
+        {
             return Err(DapAbort::InvalidBatchSize);
         }
 

@@ -19,8 +19,8 @@ use crate::{
         AggStoreState, BucketInfo, MockAggregateInfo, MockAggregator, ReportStore,
         COLLECTOR_BEARER_TOKEN, HPKE_RECEIVER_CONFIG_LIST, LEADER_BEARER_TOKEN,
     },
-    DapAbort, DapAggregateShare, DapCollectJob, DapLeaderTransition, DapMeasurement, DapRequest,
-    DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
+    DapAbort, DapAggregateShare, DapCollectJob, DapLeaderTransition, DapMeasurement,
+    DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use matchit::Router;
@@ -63,7 +63,10 @@ impl MockAggregator {
         let task_id = self.nominal_task_id();
         let task_config = self.tasks.get(task_id).unwrap();
         let version = task_config.version.clone();
-        let batch_param = BatchParameter::TimeInterval;
+        let batch_param = match task_config.query {
+            DapQueryConfig::TimeInterval { .. } => BatchParameter::TimeInterval,
+            _ => panic!("TODO(issue #100)"),
+        };
 
         DapRequest {
             version,
@@ -772,8 +775,8 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         task_id: task_id.clone(),
         query: Query::TimeInterval {
             batch_interval: Interval {
-                start: now - (now % task_config.min_batch_duration),
-                duration: leader.global_config.max_batch_duration + task_config.min_batch_duration,
+                start: now - (now % task_config.time_precision),
+                duration: leader.global_config.max_batch_duration + task_config.time_precision,
             },
         },
         agg_param: Vec::default(),
@@ -799,10 +802,10 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: now
-                    - (now % task_config.min_batch_duration)
+                    - (now % task_config.time_precision)
                     - leader.global_config.min_batch_interval_start
-                    - task_config.min_batch_duration,
-                duration: task_config.min_batch_duration * 2,
+                    - task_config.time_precision,
+                duration: task_config.time_precision * 2,
             },
         },
         agg_param: Vec::default(),
@@ -827,10 +830,10 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         task_id: task_id.clone(),
         query: Query::TimeInterval {
             batch_interval: Interval {
-                start: now - (now % task_config.min_batch_duration)
+                start: now - (now % task_config.time_precision)
                     + leader.global_config.max_batch_interval_end
-                    - task_config.min_batch_duration,
-                duration: task_config.min_batch_duration * 2,
+                    - task_config.time_precision,
+                duration: task_config.time_precision * 2,
             },
         },
         agg_param: Vec::default(),
@@ -864,7 +867,7 @@ async fn http_post_collect_succeed_max_batch_interval() {
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: now
-                    - (now % task_config.min_batch_duration)
+                    - (now % task_config.time_precision)
                     - leader.global_config.max_batch_duration / 2,
                 duration: leader.global_config.max_batch_duration,
             },

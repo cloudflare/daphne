@@ -29,7 +29,7 @@
 //! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
 
 use crate::{
-    messages::{CollectResp, HpkeConfig, Nonce, Time, TransitionFailure},
+    messages::{CollectResp, Duration, HpkeConfig, Nonce, Time, TransitionFailure},
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
@@ -252,7 +252,7 @@ pub struct ProblemDetails {
 }
 
 /// DAP version used for a task.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum DapVersion {
     #[serde(rename = "v01")]
     Draft01,
@@ -304,18 +304,80 @@ pub struct DapGlobalConfig {
     pub supported_hpke_kems: Vec<HpkeKemId>,
 }
 
+/// DAP Query configuration.
+//
+// TODO(cjpatton) Once we implement maximum batch lifetime, put the parameter here.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DapQueryConfig {
+    /// The "time-interval" query type. Each report in the batch must fall into the time interval
+    /// specified by the query.
+    TimeInterval { min_batch_size: u64 },
+
+    /// The "fixed-size" query type. The Leader partitions the reports into arbitary batches of
+    /// roughly the same size.
+    FixedSize {
+        min_batch_size: u64,
+        max_batch_size: u64,
+    },
+}
+
+impl DapQueryConfig {
+    /// Check if the batch is ready to aggregate based on the report count. Returns an error if the
+    /// report count is too large.
+    pub(crate) fn check_batch_size(&self, report_count: u64) -> Result<bool, DapAbort> {
+        match self {
+            Self::TimeInterval { .. } => (),
+            Self::FixedSize {
+                min_batch_size: _,
+                max_batch_size,
+            } => {
+                if report_count > *max_batch_size {
+                    return Err(DapAbort::InvalidBatchSize);
+                }
+            }
+        };
+
+        Ok(report_count >= self.min_batch_size())
+    }
+
+    /// Return the minimum batch size determined by the query configuration.
+    pub fn min_batch_size(&self) -> u64 {
+        match self {
+            Self::TimeInterval { min_batch_size } => *min_batch_size,
+            Self::FixedSize { min_batch_size, .. } => *min_batch_size,
+        }
+    }
+}
+
 /// Per-task DAP parameters.
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
+    /// The protocol version (i.e., which draft).
     pub version: DapVersion,
+
+    /// Base URL of the Leader.
     pub leader_url: Url,
+
+    /// Base URL of the Helper.
     pub helper_url: Url,
-    pub min_batch_duration: u64, // seconds
-    pub min_batch_size: u64,     // number of reports
+
+    /// Report granularity. Used by the Client to truncate the timestamp and by the Aggregators to
+    /// constrain the batch interval of time=interval queries.
+    pub time_precision: Duration,
+
+    /// The query configuration for this task.
+    pub query: DapQueryConfig,
+
+    /// The VDAF configuration for this task.
     pub vdaf: VdafConfig,
+
+    /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
     #[serde(skip_serializing)]
     pub(crate) vdaf_verify_key: VdafVerifyKey,
+
+    /// The Collector's HPKE configuration for this task.
     pub(crate) collector_hpke_config: HpkeConfig,
 }
 
@@ -324,11 +386,11 @@ impl DapTaskConfig {
     /// Convert at timestamp `now` into an [`Interval`] that contains it. The timestamp is the
     /// numbre of seconds since the beginning of UNIX time.
     pub fn query_for_current_batch_window(&self, now: u64) -> crate::messages::Query {
-        let start = now - (now % self.min_batch_duration);
+        let start = now - (now % self.time_precision);
         crate::messages::Query::TimeInterval {
             batch_interval: crate::messages::Interval {
                 start,
-                duration: self.min_batch_duration,
+                duration: self.time_precision,
             },
         }
     }
@@ -345,8 +407,8 @@ struct ShadowDapTaskConfig {
     version: DapVersion,
     leader_url: Url,
     helper_url: Url,
-    min_batch_duration: u64,
-    min_batch_size: u64,
+    time_precision: Duration,
+    query: DapQueryConfig,
     vdaf: VdafConfig,
     #[serde(with = "hex")]
     vdaf_verify_key: Vec<u8>,
@@ -365,8 +427,8 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             version: shadow.version,
             leader_url: shadow.leader_url,
             helper_url: shadow.helper_url,
-            min_batch_duration: shadow.min_batch_duration,
-            min_batch_size: shadow.min_batch_size,
+            time_precision: shadow.time_precision,
+            query: shadow.query,
             vdaf: shadow.vdaf,
             vdaf_verify_key,
             collector_hpke_config: shadow.collector_hpke_config,

@@ -205,7 +205,7 @@ impl<D> DaphneWorkerConfig<D> {
         let mut bucket_seed = [0; 8];
         PrgAes128::seed_stream(&self.bucket_key, metadata.nonce.as_ref()).fill(&mut bucket_seed);
         let bucket = u64::from_be_bytes(bucket_seed) % self.bucket_count;
-        let time = metadata.time - (metadata.time % task_config.min_batch_duration);
+        let time = metadata.time - (metadata.time % task_config.time_precision);
         durable_report_store_name(&task_config.version, &task_id.to_hex(), time, bucket)
     }
 
@@ -224,7 +224,7 @@ impl<D> DaphneWorkerConfig<D> {
             .tasks
             .get(task_id)
             .ok_or_else(|| Error::RustError(format!("Unrecognized task ID: {}", task_id_hex)))?
-            .min_batch_duration;
+            .time_precision;
 
         if interval.end() <= interval.start {
             return Err(Error::RustError(
@@ -235,12 +235,12 @@ impl<D> DaphneWorkerConfig<D> {
 
         if interval.start % time_step != 0 || interval.end() % time_step != 0 {
             return Err(Error::RustError(
-                "Batch interval does not align with min_batch_duration".to_string(),
+                "Batch interval does not align with time_precision".to_string(),
             ));
         }
 
         Ok(DurableNameIterator {
-            version: version.clone(),
+            version: *version,
             task_id_hex,
             time_start: interval.start,
             time_mod: interval.end() - interval.start,
