@@ -18,7 +18,7 @@ readme = "../README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-daphne = { path = "../daphne" }
+daphne = "0.1.2" # TODO(issue #100) Use path = "../daphne" instead.
 futures = "0.3.21"
 async-trait = "0.1.56"
 base64 = "0.13.0"
