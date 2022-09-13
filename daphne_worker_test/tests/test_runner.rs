@@ -7,7 +7,8 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     messages::{HpkeConfig, Id, Interval},
-    DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, DapVersion, VdafConfig,
+    DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
+    VdafConfig,
 };
 use daphne_worker::InternalAggregateInfo;
 use futures::channel::oneshot::Sender;
@@ -53,8 +54,12 @@ const LEADER_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 10,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 10
+            }
+        },
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -75,8 +80,12 @@ const LEADER_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 10,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 10
+            }
+        },
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -106,8 +115,12 @@ const HELPER_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 10,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 10
+            }
+        },
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -131,8 +144,12 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 10,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 10
+            }
+        },
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -167,8 +184,8 @@ pub struct TestRunner {
     pub version: DapVersion,
     pub task_id: Id,
     pub now: u64,
-    pub min_batch_duration: u64,
-    pub min_batch_size: u64,
+    pub time_precision: u64,
+    pub query_config: DapQueryConfig,
     pub max_batch_duration: u64,
     pub min_batch_interval_start: u64,
     pub max_batch_interval_end: u64,
@@ -231,8 +248,8 @@ impl TestRunner {
             version: task_config.version.clone(),
             task_id: task_id.clone(),
             now,
-            min_batch_duration: task_config.min_batch_duration,
-            min_batch_size: task_config.min_batch_size,
+            time_precision: task_config.time_precision,
+            query_config: task_config.query.clone(),
             max_batch_duration: global_config.max_batch_duration,
             min_batch_interval_start: global_config.min_batch_interval_start,
             max_batch_interval_end: global_config.max_batch_interval_end,
@@ -244,13 +261,10 @@ impl TestRunner {
         // Ensure the helper has a matching task config.
         if let Some(helper_task_config) = helper_task_list.get(&task_id) {
             assert_eq!(
-                helper_task_config.min_batch_duration,
-                task_config.min_batch_duration
+                helper_task_config.time_precision,
+                task_config.time_precision
             );
-            assert_eq!(
-                helper_task_config.min_batch_size,
-                task_config.min_batch_size
-            );
+            assert_eq!(helper_task_config.query, task_config.query);
             assert_eq!(helper_task_config.vdaf, task_config.vdaf);
         } else {
             panic!("Helper does not have as matching task configuration");
@@ -271,10 +285,10 @@ impl TestRunner {
     }
 
     pub fn batch_interval(&self) -> Interval {
-        let start = self.now - (self.now % self.min_batch_duration);
+        let start = self.now - (self.now % self.time_precision);
         Interval {
             start,
-            duration: self.min_batch_duration * 2,
+            duration: self.time_precision * 2,
         }
     }
 
@@ -500,8 +514,8 @@ impl TestRunner {
             janus_core::message::Role::Helper,
             vec![vdaf_verify_key],
             1, // max_batch_lifetime
-            t.min_batch_size,
-            janus_core::message::Duration::from_seconds(t.min_batch_duration),
+            t.query_config.min_batch_size(),
+            janus_core::message::Duration::from_seconds(t.time_precision),
             janus_core::message::Duration::from_seconds(0), // clock skew tolerance
             collector_hpke_config,
             vec![leader_bearer_token],

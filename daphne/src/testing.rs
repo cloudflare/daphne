@@ -50,8 +50,12 @@ pub const TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 1,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 1
+            }
+        },
         "vdaf": {
             "prio3": "count"
         },
@@ -309,7 +313,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
         let agg_shares =
-            DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
+            DapAggregateShare::batches_from_out_shares(out_shares, task_config.time_precision)?;
 
         let mut agg_store_mutex_guard = self
             .agg_store
@@ -739,7 +743,7 @@ pub(crate) struct BucketInfo {
 
 impl BucketInfo {
     pub(crate) fn new(task_config: &DapTaskConfig, task_id: &Id, time: Time) -> Self {
-        let window = time - (time % task_config.min_batch_duration);
+        let window = time - (time % task_config.time_precision);
 
         Self {
             task_id: task_id.clone(),

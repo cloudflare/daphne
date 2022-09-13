@@ -252,7 +252,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
-            .step_by(task_config.min_batch_duration.try_into().unwrap())
+            .step_by(task_config.time_precision.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
@@ -288,7 +288,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         let task_config = self.try_get_task_config_for(task_id)?;
 
         let agg_shares =
-            DapAggregateShare::batches_from_out_shares(out_shares, task_config.min_batch_duration)?;
+            DapAggregateShare::batches_from_out_shares(out_shares, task_config.time_precision)?;
 
         let durable = self.durable();
         let mut requests = Vec::new();
@@ -317,7 +317,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
-            .step_by(task_config.min_batch_duration.try_into().unwrap())
+            .step_by(task_config.time_precision.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
@@ -375,7 +375,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         let durable = self.durable();
         let mut requests = Vec::new();
         for window in (batch_interval.start..batch_interval.end())
-            .step_by(task_config.min_batch_duration.try_into().unwrap())
+            .step_by(task_config.time_precision.try_into().unwrap())
         {
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);

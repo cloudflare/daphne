@@ -23,8 +23,12 @@ const DAP_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 100,
+        "time_precision": 3600,
+        "query": {
+            "time_interval": {
+                "min_batch_size": 100
+            }
+        },
         "vdaf": {
             "prio3": {
                 "sum": {
@@ -45,8 +49,13 @@ const DAP_TASK_LIST: &str = r#"{
             "aead_id": "Aes128Gcm",
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
-        "min_batch_duration": 3600,
-        "min_batch_size": 10,
+        "time_precision": 3600,
+        "query": {
+            "fixed_size": {
+                "min_batch_size": 100,
+                "max_batch_size": 110
+            }
+        },
         "vdaf": {
             "prio2": {
                 "dimension": 100

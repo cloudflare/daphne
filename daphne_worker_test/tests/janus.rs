@@ -39,7 +39,7 @@ async fn janus_client() {
     let janus_client_parameters = janus_client::ClientParameters::new(
         task_id,
         vec![t.leader_url.clone(), t.helper_url.clone()],
-        janus_core::message::Duration::from_seconds(t.min_batch_duration),
+        janus_core::message::Duration::from_seconds(t.time_precision),
     );
 
     let client_clock = janus_core::time::test_util::MockClock::new(
@@ -78,7 +78,7 @@ async fn janus_helper() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
     let agg_info = InternalAggregateInfo {
         max_buckets: 100, // Needs to be large enough to touch each bucket.
-        max_reports: t.min_batch_size,
+        max_reports: t.query_config.min_batch_size(),
     };
 
     // Upload a number of reports (a few more than the aggregation rate).

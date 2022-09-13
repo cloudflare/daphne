@@ -200,6 +200,8 @@ impl Decode for ReportShare {
     }
 }
 
+/// Batch parameter conveyed to the Helper by the Leader in the aggreagtion sub-protocol. Used to
+/// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BatchParameter {
     TimeInterval,
@@ -444,9 +446,9 @@ impl Interval {
 
     /// Check that the batch interval is valid for the given task configuration.
     pub fn is_valid_for(&self, task_config: &DapTaskConfig) -> bool {
-        if self.start % task_config.min_batch_duration != 0
-            || self.duration % task_config.min_batch_duration != 0
-            || self.duration < task_config.min_batch_duration
+        if self.start % task_config.time_precision != 0
+            || self.duration % task_config.time_precision != 0
+            || self.duration < task_config.time_precision
         {
             return false;
         }

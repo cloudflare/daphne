@@ -361,7 +361,7 @@ impl VdafConfig {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
                 agg_param: Vec::default(),
-                batch_param: BatchParameter::TimeInterval,
+                batch_param: BatchParameter::TimeInterval, // TODO(issue #100)
                 report_shares: seq,
             },
         ))
