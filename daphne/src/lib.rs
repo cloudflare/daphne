@@ -105,12 +105,6 @@ impl From<VdafError> for DapError {
     }
 }
 
-impl From<::hpke::HpkeError> for DapError {
-    fn from(_e: ::hpke::HpkeError) -> Self {
-        Self::Transition(TransitionFailure::HpkeDecryptError)
-    }
-}
-
 /// DAP aborts.
 #[derive(Debug, thiserror::Error)]
 pub enum DapAbort {
@@ -373,7 +367,7 @@ impl DapGlobalConfig {
     pub fn gen_hpke_receiver_config_list(
         &self,
         first_config_id: u8,
-    ) -> impl IntoIterator<Item = HpkeReceiverConfig> {
+    ) -> impl Iterator<Item = Result<HpkeReceiverConfig, DapError>> {
         assert!(self.supported_hpke_kems.len() <= 256);
         let kem_ids = self.supported_hpke_kems.clone();
         kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {

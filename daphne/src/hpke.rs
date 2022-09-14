@@ -3,6 +3,14 @@
 
 //! Hybrid Public-Key Encryption ([HPKE](https://datatracker.ietf.org/doc/rfc9180/)).
 
+use hpke_rs::{Hpke, HpkeError, HpkePrivateKey, HpkePublicKey, Mode};
+use hpke_rs_crypto::{
+    error::Error,
+    types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm},
+    HpkeCrypto,
+};
+use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
+
 use crate::{
     messages::{
         decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
@@ -11,25 +19,47 @@ use crate::{
     DapError,
 };
 use async_trait::async_trait;
-use hpke::{aead, kdf, kem, Deserializable, Kem, OpModeR};
 use prio::codec::{CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
-impl HpkeConfig {
-    fn check_suite(&self) -> Result<(), DapError> {
-        match (self.kem_id, self.kdf_id, self.aead_id) {
-            (HpkeKemId::P256HkdfSha256, HpkeKdfId::HkdfSha256, HpkeAeadId::Aes128Gcm) => Ok(()),
-            (HpkeKemId::X25519HkdfSha256, HpkeKdfId::HkdfSha256, HpkeAeadId::Aes128Gcm) => Ok(()),
-            (kem_id, kdf_id, aead_id) => Err(DapError::Fatal(format!(
-                "HPKE ciphersuite not implemented ({}, {}, {})",
-                u16::from(kem_id),
-                u16::from(kdf_id),
-                u16::from(aead_id)
-            ))),
-        }
+impl From<HpkeError> for DapError {
+    fn from(_e: HpkeError) -> Self {
+        Self::Transition(TransitionFailure::HpkeDecryptError)
     }
+}
 
+impl From<Error> for DapError {
+    fn from(_e: Error) -> Self {
+        Self::Transition(TransitionFailure::HpkeDecryptError)
+    }
+}
+
+fn check_suite<T: HpkeCrypto>(
+    kem_id: HpkeKemId,
+    kdf_id: HpkeKdfId,
+    aead_id: HpkeAeadId,
+) -> Result<Hpke<T>, DapError> {
+    let s = format!(
+        "HPKE ciphersuite not implemented ({}, {}, {})",
+        u16::from(kem_id),
+        u16::from(kdf_id),
+        u16::from(aead_id)
+    );
+    let maperr = |_| DapError::Fatal(s.clone());
+    let kem = KemAlgorithm::try_from(u16::from(kem_id)).map_err(maperr)?;
+    let kdf = KdfAlgorithm::try_from(u16::from(kdf_id)).map_err(maperr)?;
+    let aead = AeadAlgorithm::try_from(u16::from(aead_id)).map_err(maperr)?;
+    match (kem, kdf, aead) {
+        (KemAlgorithm::DhKemP256, KdfAlgorithm::HkdfSha256, AeadAlgorithm::Aes128Gcm)
+        | (KemAlgorithm::DhKem25519, KdfAlgorithm::HkdfSha256, AeadAlgorithm::Aes128Gcm) => {
+            Ok(Hpke::new(Mode::Base, kem, kdf, aead))
+        }
+        _ => Err(DapError::Fatal(s)),
+    }
+}
+
+impl HpkeConfig {
     /// Encrypt `plaintext` with info string `info` and associated data `aad` using this HPKE
     /// configuration. The return values are the encapsulated key and the ciphertext.
     pub fn encrypt(
@@ -38,44 +68,26 @@ impl HpkeConfig {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
-        use hpke::{OpModeS, Serializable};
+        let sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
+        let pk = HpkePublicKey::new(self.public_key.clone());
+        let (enc, mut ctx) = sender.setup_sender(&pk, info, None, None, None)?;
+        let ciphertext = ctx.seal(aad, plaintext)?;
+        Ok((enc, ciphertext))
+    }
 
-        self.check_suite()?;
-
-        // Note: this is a fairly ugly way of dealing with agility in rust-hpke, but it's
-        // a temporary workaround until we have a more ergonomic HPKE library.
-        match self.kem_id {
-            HpkeKemId::P256HkdfSha256 => {
-                let pk = <kem::DhP256HkdfSha256 as Kem>::PublicKey::from_bytes(&self.public_key)?;
-                let (enc, mut sender) = hpke::setup_sender::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::DhP256HkdfSha256,
-                    _,
-                >(
-                    &OpModeS::Base, &pk, info, &mut rand::thread_rng()
-                )?;
-
-                Ok((enc.to_bytes().to_vec(), sender.seal(plaintext, aad)?))
-            }
-            HpkeKemId::X25519HkdfSha256 => {
-                let pk = <kem::X25519HkdfSha256 as Kem>::PublicKey::from_bytes(&self.public_key)?;
-                let (enc, mut sender) = hpke::setup_sender::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::X25519HkdfSha256,
-                    _,
-                >(
-                    &OpModeS::Base, &pk, info, &mut rand::thread_rng()
-                )?;
-
-                Ok((enc.to_bytes().to_vec(), sender.seal(plaintext, aad)?))
-            }
-            _ => {
-                // We should never get here.
-                panic!("Unsupported KEM ({:?})", self.kem_id);
-            }
-        }
+    pub(crate) fn decrypt(
+        &self,
+        secret_key: &[u8],
+        info: &[u8],
+        aad: &[u8],
+        enc: &[u8],
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, DapError> {
+        let receiver: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
+        let sk = HpkePrivateKey::new(secret_key.to_vec());
+        let mut ctx = receiver.setup_receiver(enc, &sk, info, None, None, None)?;
+        let plaintext = ctx.open(aad, ciphertext)?;
+        Ok(plaintext)
     }
 }
 
@@ -113,66 +125,13 @@ pub struct HpkeReceiverConfig {
 }
 
 impl HpkeReceiverConfig {
-    // Check that the cipher suite is the one we support.
-    fn check_suite(&self) -> Result<(), DapError> {
-        match (self.config.kem_id, self.config.kdf_id, self.config.aead_id) {
-            (HpkeKemId::P256HkdfSha256, HpkeKdfId::HkdfSha256, HpkeAeadId::Aes128Gcm) => Ok(()),
-            (HpkeKemId::X25519HkdfSha256, HpkeKdfId::HkdfSha256, HpkeAeadId::Aes128Gcm) => Ok(()),
-            (kem_id, kdf_id, aead_id) => Err(DapError::Fatal(format!(
-                "HPKE ciphersuite not implemented ({}, {}, {})",
-                u16::from(kem_id),
-                u16::from(kdf_id),
-                u16::from(aead_id)
-            ))),
-        }
-    }
-
     pub fn encrypt(
         &self,
         info: &[u8],
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
-        use hpke::{OpModeS, Serializable};
-
-        self.check_suite()?;
-
-        // Note: this is a fairly ugly way of dealing with agility in rust-hpke, but it's
-        // a temporary workaround until we have a more ergonomic HPKE library.
-        match self.config.kem_id {
-            HpkeKemId::P256HkdfSha256 => {
-                let pk =
-                    <kem::DhP256HkdfSha256 as Kem>::PublicKey::from_bytes(&self.config.public_key)?;
-                let (enc, mut sender) = hpke::setup_sender::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::DhP256HkdfSha256,
-                    _,
-                >(
-                    &OpModeS::Base, &pk, info, &mut rand::thread_rng()
-                )?;
-
-                Ok((enc.to_bytes().to_vec(), sender.seal(plaintext, aad)?))
-            }
-            HpkeKemId::X25519HkdfSha256 => {
-                let pk =
-                    <kem::X25519HkdfSha256 as Kem>::PublicKey::from_bytes(&self.config.public_key)?;
-                let (enc, mut sender) = hpke::setup_sender::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::X25519HkdfSha256,
-                    _,
-                >(
-                    &OpModeS::Base, &pk, info, &mut rand::thread_rng()
-                )?;
-
-                Ok((enc.to_bytes().to_vec(), sender.seal(plaintext, aad)?))
-            }
-            _ => {
-                // We should never get here.
-                unreachable!("Unsupported KEM ({:?})", self.config.kem_id);
-            }
-        }
+        self.config.encrypt(info, aad, plaintext)
     }
 
     /// Decrypt `ciphertext` with info string `info` and associated data `aad` using this HPKE
@@ -184,75 +143,41 @@ impl HpkeReceiverConfig {
         enc: &[u8],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, DapError> {
-        self.check_suite()?;
-
-        // Note: this is a fairly ugly way of dealing with agility in rust-hpke, but it's
-        // a temporary workaround until we have a more ergonomic HPKE library.
-        match self.config.kem_id {
-            HpkeKemId::P256HkdfSha256 => {
-                let sk = <kem::DhP256HkdfSha256 as Kem>::PrivateKey::from_bytes(&self.secret_key)?;
-                let enc = <kem::DhP256HkdfSha256 as Kem>::EncappedKey::from_bytes(enc)?;
-                let mut receiver = hpke::setup_receiver::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::DhP256HkdfSha256,
-                >(&OpModeR::Base, &sk, &enc, info)?;
-                let pt = receiver.open(ciphertext, aad)?;
-                Ok(pt)
-            }
-            HpkeKemId::X25519HkdfSha256 => {
-                let sk = <kem::X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&self.secret_key)?;
-                let enc = <kem::X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(enc)?;
-                let mut receiver = hpke::setup_receiver::<
-                    aead::AesGcm128,
-                    kdf::HkdfSha256,
-                    kem::X25519HkdfSha256,
-                >(&OpModeR::Base, &sk, &enc, info)?;
-                let pt = receiver.open(ciphertext, aad)?;
-                Ok(pt)
-            }
-            _ => {
-                // We should never get here.
-                unreachable!("Unsupported KEM ({:?})", self.config.kem_id);
-            }
-        }
+        self.config
+            .decrypt(&self.secret_key, info, aad, enc, ciphertext)
     }
 
     /// Generate and return a new HPKE receiver context given a HPKE config ID and HPKE KEM.
-    pub fn gen(id: u8, kem_id: HpkeKemId) -> Self {
-        use hpke::Serializable;
-
-        match kem_id {
-            HpkeKemId::X25519HkdfSha256 => {
-                let (sk, pk) = kem::X25519HkdfSha256::gen_keypair(&mut rand::thread_rng());
-                HpkeReceiverConfig {
+    pub fn gen(id: u8, kem_id: HpkeKemId) -> Result<Self, DapError> {
+        let kem = match kem_id {
+            HpkeKemId::P256HkdfSha256 => KemAlgorithm::DhKemP256,
+            HpkeKemId::X25519HkdfSha256 => KemAlgorithm::DhKem25519,
+            HpkeKemId::NotImplemented(x) => {
+                return Err(DapError::Fatal(format!("Unsupported KEM ({:?})", x)))
+            }
+        };
+        let kdf = KdfAlgorithm::HkdfSha256;
+        let aead = AeadAlgorithm::Aes128Gcm;
+        let generator = Hpke::<ImplHpkeCrypto>::new(Mode::Base, kem, kdf, aead);
+        match generator.generate_key_pair() {
+            Ok(keypair) => {
+                let pk = keypair.public_key();
+                let sk = keypair.private_key();
+                Ok(HpkeReceiverConfig {
                     config: HpkeConfig {
                         id,
                         kem_id,
                         kdf_id: HpkeKdfId::HkdfSha256,
                         aead_id: HpkeAeadId::Aes128Gcm,
-                        public_key: pk.to_bytes().to_vec(),
+                        public_key: Vec::from(pk.as_slice()),
                     },
-                    secret_key: sk.to_bytes().to_vec(),
-                }
+                    secret_key: Vec::from(sk.as_slice()),
+                })
             }
-            HpkeKemId::P256HkdfSha256 => {
-                let (sk, pk) = kem::DhP256HkdfSha256::gen_keypair(&mut rand::thread_rng());
-                HpkeReceiverConfig {
-                    config: HpkeConfig {
-                        id,
-                        kem_id,
-                        kdf_id: HpkeKdfId::HkdfSha256,
-                        aead_id: HpkeAeadId::Aes128Gcm,
-                        public_key: pk.to_bytes().to_vec(),
-                    },
-                    secret_key: sk.to_bytes().to_vec(),
-                }
-            }
-            _ => {
-                // We should never get here.
-                unreachable!("Unsupported KEM ({:?})", kem_id);
-            }
+            Err(e) => Err(DapError::Fatal(format!(
+                "bad key generation for KEM ({:?}) caused by {:?}",
+                kem_id, e
+            ))),
         }
     }
 

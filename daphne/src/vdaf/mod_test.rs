@@ -602,11 +602,11 @@ impl<'a> Test<'a> {
         let agg_job_id = Id(rng.gen());
         let vdaf_verify_key = vdaf.gen_verify_key();
         let leader_hpke_receiver_config =
-            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
         let helper_hpke_receiver_config =
-            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
         let collector_hpke_receiver_config =
-            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
         let leader_hpke_config = leader_hpke_receiver_config.clone().config;
         let helper_hpke_config = helper_hpke_receiver_config.clone().config;
         let collector_hpke_config = collector_hpke_receiver_config.clone().config;

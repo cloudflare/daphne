@@ -103,7 +103,7 @@ impl TestRunner {
         };
 
         let collector_hpke_receiver =
-            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
 
         let task_config = DapTaskConfig {
             version: version,
