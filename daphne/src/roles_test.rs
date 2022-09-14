@@ -84,7 +84,7 @@ impl Test {
         let helper_url = Url::parse("http://helper.com:8788/v02/").unwrap();
         let time_precision = 3600;
         let collector_hpke_receiver_config =
-            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
 
         // Create the task list.
         let time_interval_task_id = Id(rng.gen());
@@ -147,8 +147,8 @@ impl Test {
 
         let leader_hpke_receiver_config_list = global_config
             .gen_hpke_receiver_config_list(rng.gen())
-            .into_iter()
-            .collect();
+            .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
+            .expect("failed to generate HPKE receiver config");
         let leader = MockAggregator {
             now,
             global_config: global_config.clone(),
@@ -166,8 +166,8 @@ impl Test {
 
         let helper_hpke_receiver_config_list = global_config
             .gen_hpke_receiver_config_list(rng.gen())
-            .into_iter()
-            .collect();
+            .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
+            .expect("failed to generate HPKE receiver config");
         let helper = MockAggregator {
             now,
             global_config,

@@ -103,11 +103,11 @@ impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorkerConfig<D> {
             }
 
             let mut hpke_config_id = None;
-            for hpke_receiver_config in self
+            for it in self
                 .global_config
                 .gen_hpke_receiver_config_list(rand::random())
-                .into_iter()
             {
+                let hpke_receiver_config = it.expect("failed to generate HPKE receiver config");
                 if hpke_config_id.is_none() {
                     hpke_config_id = Some(hpke_receiver_config.config.id);
                 }

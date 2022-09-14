@@ -9,7 +9,7 @@ fn encrypt_roundtrip_x25519_hkdf_sha256() {
     let info = b"info string";
     let aad = b"associated data";
     let plaintext = b"plaintext";
-    let config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256);
+    let config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256).unwrap();
     println!("{}", serde_json::to_string(&config).unwrap());
     let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
     assert_eq!(
@@ -23,7 +23,7 @@ fn encrypt_roundtrip_p256_hkdf_sha256() {
     let info = b"info string";
     let aad = b"associated data";
     let plaintext = b"plaintext";
-    let config = HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256);
+    let config = HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256).unwrap();
     println!("{}", serde_json::to_string(&config).unwrap());
     let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
     assert_eq!(
