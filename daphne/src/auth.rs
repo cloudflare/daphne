@@ -38,6 +38,12 @@ impl From<String> for BearerToken {
     }
 }
 
+impl From<&str> for BearerToken {
+    fn from(token: &str) -> Self {
+        Self(token.to_string())
+    }
+}
+
 /// A source of bearer tokens used for authorizing DAP requests.
 #[async_trait(?Send)]
 pub trait BearerTokenProvider {

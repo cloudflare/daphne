@@ -26,69 +26,6 @@ use std::{
 };
 use url::Url;
 
-pub const GLOBAL_CONFIG: &str = r#"{
-    "max_batch_duration": 360000,
-    "min_batch_interval_start": 259200,
-    "max_batch_interval_end": 259200,
-    "supported_hpke_kems": ["X25519HkdfSha256"]
-}"#;
-
-// Secret key of "collector_hpke_config":
-// 60890f1e438bf1f0e9ad2bd839acf1341137eee623bf7906972bf1cc80bb5d7b
-//
-// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
-// When adding paths, they must not start with a "/".
-pub const TASK_LIST: &str = r#"{
-    "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v01",
-        "leader_url": "https://leader.biz/v01/",
-        "helper_url": "http://helper.com:8788/v01/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "query": {
-            "time_interval": {
-                "min_batch_size": 1
-            }
-        },
-        "vdaf": {
-            "prio3": "count"
-        },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-    }
-}"#;
-
-pub const HPKE_RECEIVER_CONFIG_LIST: &str = r#"[
-    {
-        "config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key": "5dc71373c6aa7b0af67944a370ab96d8b8216832579c19159ca35d10f25a2765"
-        },
-        "secret_key": "888e94344585f44530d03e250268be6c6a5caca5314513dcec488cc431486c69"
-    },
-    {
-        "config": {
-            "id": 14,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key": "b07126295bcfcdeaec61b310fd7ffbf8c6ca7f6c17e3e0a80a5405a242e5084b"
-        },
-        "secret_key": "b809a4df399548f56c3a15ebaa4925dd292637f0b7e2f6bc3ba60376b69aa05e"
-    }
-]"#;
-
-pub const LEADER_BEARER_TOKEN: &str = "ivA1e7LpnySDNn1AulaZggFLQ1n7jZ8GWOUO7GY4hgs=";
-pub const COLLECTOR_BEARER_TOKEN: &str = "syfRfvcvNFF5MJk4Y-B7xjRIqD_iNzhaaEB9mYqO9hk=";
-
 pub(crate) struct MockAggregateInfo {
     pub(crate) task_id: Id,
     pub(crate) agg_rate: u64,
@@ -96,51 +33,20 @@ pub(crate) struct MockAggregateInfo {
 
 #[allow(dead_code)]
 pub(crate) struct MockAggregator {
-    pub(crate) now: u64,
+    pub(crate) now: Time,
     pub(crate) global_config: DapGlobalConfig,
     pub(crate) tasks: HashMap<Id, DapTaskConfig>,
-    hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
+    pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
+    pub(crate) leader_token: BearerToken,
+    pub(crate) collector_token: Option<BearerToken>, // Not set by Helper
     pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
-    leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
-    helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
+    pub(crate) leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
+    pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
 }
 
 #[allow(dead_code)]
 impl MockAggregator {
-    pub(crate) fn new() -> Self {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let global_config: DapGlobalConfig =
-            serde_json::from_str(GLOBAL_CONFIG).expect("failed to parse global config");
-
-        let tasks: HashMap<Id, DapTaskConfig> =
-            serde_json::from_str(TASK_LIST).expect("failed to parse task list");
-
-        let hpke_receiver_config_list: Vec<HpkeReceiverConfig> =
-            serde_json::from_str(HPKE_RECEIVER_CONFIG_LIST)
-                .expect("failed to parse hpke_receiver_config_list");
-
-        let report_store = Arc::new(Mutex::new(HashMap::new()));
-        let leader_state_store = Arc::new(Mutex::new(HashMap::new()));
-        let helper_state_store = Arc::new(Mutex::new(HashMap::new()));
-        let agg_store = Arc::new(Mutex::new(HashMap::new()));
-
-        Self {
-            now,
-            global_config,
-            tasks,
-            hpke_receiver_config_list,
-            report_store,
-            leader_state_store,
-            helper_state_store,
-            agg_store,
-        }
-    }
-
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
     /// 2) the report has been submitted by the client in the past.
@@ -171,12 +77,6 @@ impl MockAggregator {
             .iter()
             .find(|&hpke_receiver_config| hpke_config_id == hpke_receiver_config.config.id)
     }
-
-    /// Task to use for nominal tests.
-    pub(crate) fn nominal_task_id(&self) -> &Id {
-        // Just use the first key in the hash map.
-        self.tasks.keys().next().as_ref().unwrap()
-    }
 }
 
 #[async_trait(?Send)]
@@ -185,14 +85,20 @@ impl BearerTokenProvider for MockAggregator {
         &self,
         _task_id: &Id,
     ) -> Result<Option<BearerToken>, DapError> {
-        Ok(Some(BearerToken::from(LEADER_BEARER_TOKEN.to_string())))
+        Ok(Some(self.leader_token.clone()))
     }
 
     async fn get_collector_bearer_token_for(
         &self,
         _task_id: &Id,
     ) -> Result<Option<BearerToken>, DapError> {
-        Ok(Some(BearerToken::from(COLLECTOR_BEARER_TOKEN.to_string())))
+        if let Some(ref collector_token) = self.collector_token {
+            Ok(Some(collector_token.clone()))
+        } else {
+            Err(DapError::fatal(
+                "MockAggregator not configured with Collector bearer token",
+            ))
+        }
     }
 }
 
