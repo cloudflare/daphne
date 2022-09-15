@@ -594,7 +594,7 @@ pub type BatchSelector = Query;
 /// An aggregate-share request.
 //
 // TODO Add serialization tests.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AggregateShareReq {
     pub task_id: Id,
     pub batch_selector: BatchSelector,

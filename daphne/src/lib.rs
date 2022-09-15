@@ -29,6 +29,7 @@
 //! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
 
 use crate::{
+    hpke::HpkeReceiverConfig,
     messages::{CollectResp, Duration, HpkeConfig, Nonce, Time, TransitionFailure},
     vdaf::{
         prio2::prio2_decode_prepare_state,
@@ -283,7 +284,7 @@ impl AsRef<str> for DapVersion {
 //
 // NOTE: Consider whether the following parameters should be included
 // in the spec.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct DapGlobalConfig {
     /// Maximum interval duration permitted in CollectReq.
     /// Prevents Collectors from requesting wide range or reports.
@@ -302,6 +303,23 @@ pub struct DapGlobalConfig {
     /// HPKE KEM types that are supported. Used when generating HPKE
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
+}
+
+impl DapGlobalConfig {
+    /// Generate a list of HPKE receiver configurations, one for each element of supported KEM
+    /// algorithm. `first_config_id` is used as the first config ID; subsequent IDs are chosen by
+    /// incrementing `first_config_id`.
+    pub fn gen_hpke_receiver_config_list(
+        &self,
+        first_config_id: u8,
+    ) -> impl IntoIterator<Item = HpkeReceiverConfig> {
+        assert!(self.supported_hpke_kems.len() <= 256);
+        let kem_ids = self.supported_hpke_kems.clone();
+        kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {
+            let (config_id, _overflowed) = first_config_id.overflowing_add(i as u8);
+            HpkeReceiverConfig::gen(config_id, kem_id)
+        })
+    }
 }
 
 /// DAP Query configuration.
@@ -351,7 +369,7 @@ impl DapQueryConfig {
 }
 
 /// Per-task DAP parameters.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
     /// The protocol version (i.e., which draft).

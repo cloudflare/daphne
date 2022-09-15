@@ -41,7 +41,7 @@ use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
     constants,
-    hpke::{HpkeDecrypter, HpkeReceiverConfig},
+    hpke::HpkeDecrypter,
     messages::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Nonce, Report, ReportShare,
         TransitionFailure,
@@ -52,7 +52,6 @@ use daphne::{
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode};
-use rand::Rng;
 use std::collections::HashMap;
 use worker::*;
 
@@ -86,37 +85,48 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
             .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
 
         let hpke_config_id = if keys.keys.is_empty() {
-            // Generate a new random HPKE config ID and key for KV.
-            let hpke_config_id: u8 = rand::thread_rng().gen();
-            let new_key = format!("{}/{}", KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_config_id);
-
-            // Generate a new HPKE receiver config.
+            // Generate a new HPKE receiver config and store it in KV.
             //
-            // NOTE(nakatsuka-y): When we suport multiple HPKE KEMs in the future we should:
-            // - Remove the following check for the number of HPKE KEMs
-            // - Add a logic that selects a HPKE KEM to give to the HpkeReceiverConfig::gen
+            // For now, expect that only one KEM algorithm is supported and that only one config
+            // will be used at anyone time.
             if self.global_config.supported_hpke_kems.len() != 1 {
                 return Err(DapError::Fatal(
                     "The number of supported HPKE KEMs must be 1".to_string(),
                 ));
             }
-            let hpke_receiver_config =
-                HpkeReceiverConfig::gen(hpke_config_id, self.global_config.supported_hpke_kems[0]);
 
-            // Store newly generated HPKE receiver config into KV.
-            kv_store
-                .put(&new_key, hpke_receiver_config.clone())
-                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
-                .execute()
-                .await
-                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+            let mut hpke_config_id = None;
+            for hpke_receiver_config in self
+                .global_config
+                .gen_hpke_receiver_config_list(rand::random())
+                .into_iter()
+            {
+                if hpke_config_id.is_none() {
+                    hpke_config_id = Some(hpke_receiver_config.config.id);
+                }
+                let new_kv_config_key = format!(
+                    "{}/{}",
+                    KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_receiver_config.config.id,
+                );
 
-            hpke_config_id
+                kv_store
+                    .put(&new_kv_config_key, hpke_receiver_config)
+                    .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+                    .execute()
+                    .await
+                    .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+            }
+
+            hpke_config_id.unwrap()
         } else {
             // Return the first HPKE receiver config in the list.
             parse_hpke_config_id_from_kv_key_name(keys.keys[0].name.as_str())?
         };
 
+        // Fetch the indicated HPKE config from KV.
+        //
+        // TODO(cjpatton) Figure out how likely this is to fail if we had to generate a new key
+        // pair and write it to KV during this call.
         Ok(self
             .hpke_receiver_config(hpke_config_id)
             .await

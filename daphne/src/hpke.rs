@@ -6,7 +6,7 @@
 use crate::{
     messages::{
         decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
-        HpkeKemId, Id,
+        HpkeKemId, Id, TransitionFailure,
     },
     DapError,
 };
@@ -279,6 +279,9 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
+        if ciphertext.config_id != self.config.id {
+            return Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId));
+        }
         self.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)
     }
 }

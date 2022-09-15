@@ -207,6 +207,20 @@ async fn agg_init_req_fail_hpke_decrypt_err() {
 }
 
 #[tokio::test]
+async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id() {
+    let t = Test::new(TEST_VDAF);
+    let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+
+    // Client tries to send Leader encrypted input with incorrect config ID.
+    reports[0].encrypted_input_shares[0].config_id ^= 1;
+
+    assert_matches!(
+        t.produce_agg_init_req(reports).await,
+        DapLeaderTransition::Skip
+    );
+}
+
+#[tokio::test]
 async fn agg_resp_fail_hpke_decrypt_err() {
     let mut t = Test::new(TEST_VDAF);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
@@ -224,6 +238,27 @@ async fn agg_resp_fail_hpke_decrypt_err() {
     assert_matches!(
         agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
+    );
+}
+
+#[tokio::test]
+async fn agg_resp_fail_hpke_decrypt_err_wrong_id() {
+    let mut t = Test::new(TEST_VDAF);
+    let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+
+    // Client tries to send Helper encrypted input with incorrect config ID.
+    reports[0].encrypted_input_shares[1].config_id ^= 1;
+
+    let (_, agg_req) = t
+        .produce_agg_init_req(reports.clone())
+        .await
+        .unwrap_continue();
+    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
+
+    assert_eq!(agg_resp.transitions.len(), 1);
+    assert_matches!(
+        agg_resp.transitions[0].var,
+        TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
     );
 }
 
