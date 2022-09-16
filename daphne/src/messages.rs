@@ -3,7 +3,6 @@
 
 //! Messages in the DAP protocol.
 
-use crate::DapTaskConfig;
 use prio::codec::{
     decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
     Encode,
@@ -442,17 +441,6 @@ impl Interval {
     /// Return the end of the interval, i.e., `self.start + self.duration`.
     pub fn end(&self) -> Time {
         self.start + self.duration
-    }
-
-    /// Check that the batch interval is valid for the given task configuration.
-    pub fn is_valid_for(&self, task_config: &DapTaskConfig) -> bool {
-        if self.start % task_config.time_precision != 0
-            || self.duration % task_config.time_precision != 0
-            || self.duration < task_config.time_precision
-        {
-            return false;
-        }
-        true
     }
 }
 

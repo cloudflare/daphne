@@ -113,6 +113,10 @@ pub enum DapAbort {
     #[error("badRequest")]
     BadRequest(String),
 
+    /// Invalid batch. Sent in response to a CollectReq or AggregateShareReq.
+    #[error("batchInvalid")]
+    BatchInvalid,
+
     /// Batch mismatch. Sent in response to an AggregateShareReq.
     #[error("batchMismatch")]
     BatchMismatch,
@@ -126,10 +130,6 @@ pub enum DapAbort {
     #[error("internalError: {0}")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
-    /// Invalid batch interval. Sent in response to a CollectReq or AggregateShareReq.
-    #[error("invalidBatchInterval")]
-    InvalidBatchInterval,
-
     /// Invalid DAP version. Sent in response to requests for an unsupported (or unknown) DAP version.
     #[error("invalidProtocolVersion")]
     InvalidProtocolVersion,
@@ -142,6 +142,10 @@ pub enum DapAbort {
     /// Request with missing task ID.
     #[error("missingTaskID")]
     MissingTaskId,
+
+    /// Query mismatch. Sent in response to a CollectReq or AggregateShareReq.
+    #[error("queryMismatch")]
+    QueryMismatch,
 
     /// Replayed report. Sent in response to an upload request containing a Report that has been replayed.
     //
@@ -184,11 +188,12 @@ impl DapAbort {
     /// request was targeted and `task_id` is the associated TaskID.
     pub fn to_problem_details(&self) -> ProblemDetails {
         let (typ, detail) = match self {
-            Self::BatchMismatch
+            Self::BatchInvalid
+            | Self::BatchMismatch
             | Self::BatchOverlap
-            | Self::InvalidBatchInterval
             | Self::InvalidProtocolVersion
             | Self::InvalidBatchSize
+            | Self::QueryMismatch
             | Self::MissingTaskId
             | Self::ReplayedReport
             | Self::StaleReport

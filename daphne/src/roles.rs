@@ -12,60 +12,18 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id, Nonce,
-        Report, ReportShare, TransitionFailure, TransitionVar,
+        AggregateShareReq, AggregateShareResp, BatchParameter, BatchSelector, CollectReq,
+        CollectResp, Id, Nonce, Report, ReportShare, Time, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
-    DapRequest, DapResponse, DapTaskConfig, DapVersion,
+    DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use std::collections::HashMap;
 use url::Url;
-
-macro_rules! check_batch_param {
-    (
-        $task_config:expr,
-        $batch_selector:expr,
-        $agg_param:expr
-    ) => {{
-        let batch_interval = $batch_selector.unwrap_interval();
-        if !batch_interval.is_valid_for($task_config) {
-            return Err(DapAbort::InvalidBatchInterval);
-        }
-
-        // Check that the aggreation parameter is suitable for the given VDAF.
-        if !$task_config.vdaf.is_valid_agg_param(&$agg_param) {
-            // TODO spec: Define this behavior.
-            return Err(DapAbort::UnrecognizedMessage);
-        }
-    }};
-}
-
-macro_rules! check_batch_boundary {
-    (
-        $global_config:expr,
-        $now:expr,
-        $batch_selector:expr
-    ) => {{
-        let batch_interval = $batch_selector.unwrap_interval();
-        if batch_interval.duration > $global_config.max_batch_duration {
-            return Err(DapAbort::BadRequest("batch interval too large".to_string()));
-        }
-        if $now.abs_diff(batch_interval.start) > $global_config.min_batch_interval_start {
-            return Err(DapAbort::BadRequest(
-                "batch interval too far into past".to_string(),
-            ));
-        }
-        if $now.abs_diff(batch_interval.end()) > $global_config.max_batch_interval_end {
-            return Err(DapAbort::BadRequest(
-                "batch interval too far into future".to_string(),
-            ));
-        }
-    }};
-}
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
 #[async_trait(?Send)]
@@ -282,6 +240,8 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
     async fn http_post_collect(&'a self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
+        let now = self.get_current_time();
+
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -297,36 +257,25 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
-        check_batch_param!(task_config, collect_req.query, collect_req.agg_param);
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
-        // Check that the batch boundaries.
-        let global_config = self.get_global_config();
-        let now = self.get_current_time();
-        check_batch_boundary!(global_config, now, collect_req.query);
-
-        // Check that the batch does not overlap with previous batches.
-        if self
-            .is_batch_overlapping(&collect_req.task_id, &collect_req.query)
-            .await?
-        {
-            return Err(DapAbort::BatchOverlap);
-        }
-
-        let batch_interval = collect_req.query.unwrap_interval();
-        if !batch_interval.is_valid_for(task_config) {
-            return Err(DapAbort::InvalidBatchInterval);
-        }
-
-        // Check that the aggreation parameter is suitable for the given VDAF.
-        if !task_config.vdaf.is_valid_agg_param(&collect_req.agg_param) {
-            // TODO spec: Define this behavior.
-            return Err(DapAbort::UnrecognizedMessage);
-        }
+        // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
+        // collected batches.
+        //
+        // TODO(issue #100) For "fixed_size" we need to check if we recognize the batch ID.
+        check_batch(
+            self,
+            task_config,
+            &collect_req.task_id,
+            &collect_req.query,
+            &collect_req.agg_param,
+            now,
+        )
+        .await?;
 
         Ok(self.init_collect_job(&collect_req).await?)
     }
@@ -587,6 +536,13 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                     return Err(DapAbort::InvalidProtocolVersion);
                 }
 
+                // Ensure we know which batch the request pertains to.
+                check_part_batch(
+                    task_config,
+                    &agg_init_req.batch_param,
+                    &agg_init_req.agg_param,
+                )?;
+
                 // Run mark_aggregated and handle_agg_init_req concurrently.
                 let early_rejects_future =
                     self.mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares);
@@ -694,6 +650,8 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
         &'a self,
         req: &DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
+        let now = self.get_current_time();
+
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -709,29 +667,26 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
-        check_batch_param!(
-            task_config,
-            agg_share_req.batch_selector,
-            agg_share_req.agg_param
-        );
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
-        // Check the batch boundaries.
-        let global_config = self.get_global_config();
-        let now = self.get_current_time();
-        check_batch_boundary!(global_config, now, agg_share_req.batch_selector);
+        // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
+        // collected batches.
+        //
+        // TODO(issue #100) For "fixed_size" we need to check if we recognize the batch ID.
+        check_batch(
+            self,
+            task_config,
+            &agg_share_req.task_id,
+            &agg_share_req.batch_selector,
+            &agg_share_req.agg_param,
+            now,
+        )
+        .await?;
 
-        // Check that the batch does not overlap with previous boundaries.
-        if self
-            .is_batch_overlapping(&agg_share_req.task_id, &agg_share_req.batch_selector)
-            .await?
-        {
-            return Err(DapAbort::BatchOverlap);
-        }
         let agg_share = self
             .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_selector)
             .await?;
@@ -772,4 +727,79 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
             payload: agg_share_resp.get_encoded(),
         })
     }
+}
+
+fn check_part_batch(
+    task_config: &DapTaskConfig,
+    batch_param: &BatchParameter,
+    agg_param: &[u8],
+) -> Result<(), DapAbort> {
+    match (&task_config.query, batch_param) {
+        (DapQueryConfig::TimeInterval { .. }, BatchParameter::TimeInterval)
+        | (DapQueryConfig::FixedSize { .. }, BatchParameter::FixedSize { .. }) => (),
+        _ => return Err(DapAbort::QueryMismatch),
+    };
+
+    // Check that the aggreation parameter is suitable for the given VDAF.
+    if !task_config.vdaf.is_valid_agg_param(agg_param) {
+        // TODO spec: Define this behavior.
+        return Err(DapAbort::UnrecognizedMessage);
+    }
+
+    Ok(())
+}
+
+async fn check_batch<'a, S>(
+    agg: &impl DapAggregator<'a, S>,
+    task_config: &DapTaskConfig,
+    task_id: &Id,
+    batch_sel: &BatchSelector,
+    agg_param: &[u8],
+    now: Time,
+) -> Result<(), DapAbort> {
+    let global_config = agg.get_global_config();
+    let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
+
+    // Check that the aggreation parameter is suitable for the given VDAF.
+    if !task_config.vdaf.is_valid_agg_param(agg_param) {
+        // TODO spec: Define this behavior.
+        return Err(DapAbort::UnrecognizedMessage);
+    }
+
+    // Check that the batch boundaries are valid.
+    match (&task_config.query, batch_sel) {
+        (DapQueryConfig::TimeInterval { .. }, BatchSelector::TimeInterval { batch_interval }) => {
+            if batch_interval.start % task_config.time_precision != 0
+                || batch_interval.duration % task_config.time_precision != 0
+                || batch_interval.duration < task_config.time_precision
+            {
+                return Err(DapAbort::BatchInvalid);
+            }
+
+            if batch_interval.duration > global_config.max_batch_duration {
+                return Err(DapAbort::BadRequest("batch interval too large".to_string()));
+            }
+
+            if now.abs_diff(batch_interval.start) > global_config.min_batch_interval_start {
+                return Err(DapAbort::BadRequest(
+                    "batch interval too far into past".to_string(),
+                ));
+            }
+
+            if now.abs_diff(batch_interval.end()) > global_config.max_batch_interval_end {
+                return Err(DapAbort::BadRequest(
+                    "batch interval too far into future".to_string(),
+                ));
+            }
+        }
+        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSize { .. }) => (),
+        _ => return Err(DapAbort::QueryMismatch),
+    };
+
+    // Check that the batch does not overlap with any previously collected batch.
+    if batch_overlapping.await? {
+        return Err(DapAbort::BatchOverlap);
+    }
+
+    Ok(())
 }
