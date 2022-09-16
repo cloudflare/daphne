@@ -582,7 +582,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
         400,
-        "invalidBatchInterval",
+        "batchInvalid",
     )
     .await;
 
@@ -604,7 +604,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
         400,
-        "invalidBatchInterval",
+        "batchInvalid",
     )
     .await;
 }

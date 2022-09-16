@@ -466,6 +466,38 @@ impl Test {
     }
 }
 
+// Test that the Helper properly handles the batch parameter in the AggregateInitializeReq.
+#[tokio::test]
+async fn http_post_aggregate_invalid_batch_selector() {
+    let mut rng = thread_rng();
+    let t = Test::new();
+    let task_id = &t.time_interval_task_id;
+    let task_config = t.leader.tasks.get(task_id).unwrap();
+
+    // Helper expects "time_interval" query, but Leader indicates "fixed_size".
+    let req = t
+        .leader_authorized_req(
+            task_id,
+            task_config.version,
+            MEDIA_TYPE_AGG_INIT_REQ,
+            AggregateInitializeReq {
+                task_id: task_id.clone(),
+                agg_job_id: Id(rng.gen()),
+                agg_param: Vec::default(),
+                batch_param: BatchParameter::FixedSize {
+                    batch_id: Id(rng.gen()),
+                },
+                report_shares: Vec::default(),
+            },
+            task_config.helper_url.join("aggregate").unwrap(),
+        )
+        .await;
+    assert_matches!(
+        t.helper.http_post_aggregate(&req).await.unwrap_err(),
+        DapAbort::QueryMismatch
+    );
+}
+
 #[tokio::test]
 async fn http_post_aggregate_init_unauthorized_request() {
     let t = Test::new();
@@ -569,6 +601,38 @@ async fn http_post_aggregate_share_unauthorized_request() {
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await,
         Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+// Test that the Helper handles the batch selector sent from the Leader properly.
+#[tokio::test]
+async fn http_post_aggregate_share_invalid_batch_selector() {
+    let mut rng = thread_rng();
+    let t = Test::new();
+    let task_id = &t.time_interval_task_id;
+    let task_config = t.leader.tasks.get(task_id).unwrap();
+
+    // Helper expects "time_interval" query, but Leader sent "fixed_size".
+    let req = t
+        .leader_authorized_req(
+            task_id,
+            task_config.version,
+            MEDIA_TYPE_AGG_SHARE_REQ,
+            AggregateShareReq {
+                task_id: task_id.clone(),
+                batch_selector: BatchSelector::FixedSize {
+                    batch_id: Id(rng.gen()),
+                },
+                agg_param: Vec::default(),
+                report_count: 0,
+                checksum: [0; 32],
+            },
+            task_config.helper_url.join("aggregate_share").unwrap(),
+        )
+        .await;
+    assert_matches!(
+        t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
+        DapAbort::QueryMismatch
     );
 }
 
@@ -1122,6 +1186,35 @@ async fn http_post_collect_success() {
     assert_eq!(
         collector_collect_id.to_string(),
         leader_collect_id.to_base64url()
+    );
+}
+
+// Test that the Leader handles queries from the Collector properly.
+#[tokio::test]
+async fn http_post_collect_invalid_query() {
+    let mut rng = thread_rng();
+    let t = Test::new();
+    let task_id = &t.time_interval_task_id;
+    let task_config = t.leader.tasks.get(task_id).unwrap();
+
+    // Leader expects "time_interval" query, but Collector sent "fixed_size".
+    let req = t
+        .collector_authorized_req(
+            task_config.version,
+            MEDIA_TYPE_COLLECT_REQ,
+            CollectReq {
+                task_id: task_id.clone(),
+                query: Query::FixedSize {
+                    batch_id: Id(rng.gen()),
+                },
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        )
+        .await;
+    assert_matches!(
+        t.leader.http_post_collect(&req).await.unwrap_err(),
+        DapAbort::QueryMismatch
     );
 }
 
