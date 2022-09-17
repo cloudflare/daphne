@@ -10,12 +10,12 @@ use crate::{
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
-        AggregateShareResp, BatchParameter, BatchSelector, CollectReq, CollectResp, HpkeCiphertext,
-        HpkeKemId, Id, Interval, Query, Report, ReportShare, Time, Transition, TransitionFailure,
-        TransitionVar,
+        AggregateShareResp, BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeKemId, Id,
+        Interval, PartialBatchSelector, Query, Report, ReportShare, Time, Transition,
+        TransitionFailure, TransitionVar,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    testing::{AggStore, MockAggregateInfo, MockAggregator, ReportStore},
+    testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapLeaderTransition,
     DapMeasurement, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
@@ -25,8 +25,7 @@ use matchit::Router;
 use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    ops::DerefMut,
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::SystemTime,
     vec,
@@ -37,7 +36,8 @@ macro_rules! get_reports {
     ($leader:expr, $selector:expr) => {{
         let reports_per_task = $leader.get_reports($selector).await.unwrap();
         assert_eq!(reports_per_task.len(), 1);
-        reports_per_task.into_iter().next().unwrap()
+        let (task_id, (part_batch_sel, reports)) = reports_per_task.into_iter().next().unwrap();
+        (task_id, part_batch_sel, reports)
     }};
 }
 
@@ -45,12 +45,8 @@ struct Test {
     now: Time,
     leader: MockAggregator,
     helper: MockAggregator,
-    #[allow(dead_code)] // TODO(issue #100) Remove
-    collector_hpke_receiver_config: HpkeReceiverConfig,
-    #[allow(dead_code)] // TODO(issue #100) Remove
     collector_token: BearerToken,
     time_interval_task_id: Id,
-    #[allow(dead_code)] // TODO(issue #100) Remove
     fixed_size_task_id: Id,
 }
 
@@ -156,7 +152,6 @@ impl Test {
             now,
             leader,
             helper,
-            collector_hpke_receiver_config,
             collector_token,
             time_interval_task_id,
             fixed_size_task_id,
@@ -164,8 +159,7 @@ impl Test {
     }
 
     fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
-        let task_id = &self.time_interval_task_id;
-        let task_config = self.leader.tasks.get(task_id).unwrap();
+        let task_config = self.leader.tasks.get(&report.task_id).unwrap();
         let version = task_config.version.clone();
 
         DapRequest {
@@ -184,8 +178,8 @@ impl Test {
     ) -> DapRequest<BearerToken> {
         let mut rng = thread_rng();
         let task_config = self.leader.tasks.get(task_id).unwrap();
-        let batch_param = match task_config.query {
-            DapQueryConfig::TimeInterval { .. } => BatchParameter::TimeInterval,
+        let part_batch_sel = match task_config.query {
+            DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
             _ => panic!("TODO(issue #100)"),
         };
 
@@ -197,7 +191,7 @@ impl Test {
                 task_id: task_id.clone(),
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
-                batch_param,
+                part_batch_sel,
                 report_shares,
             },
             task_config.helper_url.join("aggregate").unwrap(),
@@ -241,7 +235,7 @@ impl Test {
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
                 task_id: task_id.clone(),
-                batch_selector: BatchSelector::default(),
+                batch_sel: BatchSelector::default(),
                 agg_param: Vec::default(),
                 report_count,
                 checksum,
@@ -282,11 +276,8 @@ impl Test {
         let task_config = wrapped.as_ref().unwrap();
 
         // Leader: Store received report to ReportStore.
-        let selector = &MockAggregateInfo {
-            task_id: task_id.clone(),
-            agg_rate: 1,
-        };
-        let (task_id, reports) = get_reports!(self.leader, selector);
+        let report_sel = MockAggregatorReportSelector(task_id.clone());
+        let (task_id, part_batch_sel, reports) = get_reports!(self.leader, &report_sel);
 
         // Leader: Consume report share.
         let mut rng = thread_rng();
@@ -298,6 +289,7 @@ impl Test {
                 &task_config.vdaf_verify_key,
                 &task_id,
                 &agg_job_id,
+                &part_batch_sel,
                 reports,
             )
             .await?;
@@ -344,7 +336,9 @@ impl Test {
         let out_shares = task_config
             .vdaf
             .handle_final_agg_resp(leader_uncommitted, agg_resp)?;
-        self.leader.put_out_shares(&task_id, out_shares).await?;
+        self.leader
+            .put_out_shares(&task_id, &part_batch_sel, out_shares)
+            .await?;
 
         Ok(())
     }
@@ -387,7 +381,7 @@ impl Test {
         // Leader->Helper: HTTP POST /aggregate_share
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_selector: collect_req.query.clone(),
+            batch_sel: collect_req.query.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -408,6 +402,7 @@ impl Test {
 
         // Leader: Complete the collect job.
         let collect_resp = CollectResp {
+            part_batch_sel: collect_req.query.clone().into(),
             report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
@@ -415,7 +410,7 @@ impl Test {
             .finish_collect_job(task_id, collect_id, &collect_resp)
             .await?;
         self.leader
-            .mark_collected(task_id, &agg_share_req.batch_selector)
+            .mark_collected(task_id, &agg_share_req.batch_sel)
             .await?;
 
         // Collector: Poll the collect job.
@@ -468,7 +463,7 @@ impl Test {
 
 // Test that the Helper properly handles the batch parameter in the AggregateInitializeReq.
 #[tokio::test]
-async fn http_post_aggregate_invalid_batch_selector() {
+async fn http_post_aggregate_invalid_batch_sel() {
     let mut rng = thread_rng();
     let t = Test::new();
     let task_id = &t.time_interval_task_id;
@@ -484,7 +479,7 @@ async fn http_post_aggregate_invalid_batch_selector() {
                 task_id: task_id.clone(),
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
-                batch_param: BatchParameter::FixedSize {
+                part_batch_sel: PartialBatchSelector::FixedSize {
                     batch_id: Id(rng.gen()),
                 },
                 report_shares: Vec::default(),
@@ -606,21 +601,20 @@ async fn http_post_aggregate_share_unauthorized_request() {
 
 // Test that the Helper handles the batch selector sent from the Leader properly.
 #[tokio::test]
-async fn http_post_aggregate_share_invalid_batch_selector() {
+async fn http_post_aggregate_share_invalid_batch_sel() {
     let mut rng = thread_rng();
     let t = Test::new();
-    let task_id = &t.time_interval_task_id;
-    let task_config = t.leader.tasks.get(task_id).unwrap();
 
     // Helper expects "time_interval" query, but Leader sent "fixed_size".
+    let task_config = t.leader.tasks.get(&t.time_interval_task_id).unwrap();
     let req = t
         .leader_authorized_req(
-            task_id,
+            &t.time_interval_task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
-                task_id: task_id.clone(),
-                batch_selector: BatchSelector::FixedSize {
+                task_id: t.time_interval_task_id.clone(),
+                batch_sel: BatchSelector::FixedSize {
                     batch_id: Id(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -633,6 +627,30 @@ async fn http_post_aggregate_share_invalid_batch_selector() {
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
         DapAbort::QueryMismatch
+    );
+
+    // Leader sends aggregate share request for unrecognized batch ID.
+    let task_config = t.leader.tasks.get(&t.fixed_size_task_id).unwrap();
+    let req = t
+        .leader_authorized_req(
+            &t.fixed_size_task_id,
+            task_config.version,
+            MEDIA_TYPE_AGG_SHARE_REQ,
+            AggregateShareReq {
+                task_id: t.fixed_size_task_id.clone(),
+                batch_sel: BatchSelector::FixedSize {
+                    batch_id: Id(rng.gen()), // Unrecognized batch ID
+                },
+                agg_param: Vec::default(),
+                report_count: 0,
+                checksum: [0; 32],
+            },
+            task_config.helper_url.join("aggregate_share").unwrap(),
+        )
+        .await;
+    assert_matches!(
+        t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
+        DapAbort::BatchInvalid
     );
 }
 
@@ -738,19 +756,16 @@ async fn http_post_aggregate_failure_report_replayed() {
     }];
     let req = t.gen_test_agg_init_req(task_id, report_shares).await;
 
-    // The following scope is to ensure that the report_store lock is released before http_post_aggregate is called.
+    // Add dummy data to report store backend. This is done in a new scope so that the lock on the
+    // report store is released before running the test.
     {
-        let mut report_store_mutex_guard = t.helper.report_store.lock().expect("lock() failed");
-        let report_store = report_store_mutex_guard.deref_mut();
-        let mut processed = HashSet::new();
-        processed.insert(report.metadata.nonce.clone());
-        report_store.insert(
-            task_id.clone(),
-            ReportStore {
-                pending: VecDeque::new(),
-                processed,
-            },
-        );
+        let mut guard = t
+            .helper
+            .report_store
+            .lock()
+            .expect("report_store: failed to lock");
+        let report_store = guard.entry(task_id.clone()).or_default();
+        report_store.processed.insert(report.metadata.nonce.clone());
     }
 
     // Get AggregateResp and then extract the transition data from inside.
@@ -792,11 +807,8 @@ async fn http_post_aggregate_failure_batch_collected() {
         let agg_store = guard.entry(task_id.clone()).or_default();
 
         agg_store.insert(
-            BatchSelector::TimeInterval {
-                batch_interval: Interval {
-                    start: task_config.truncate_time(t.now),
-                    duration: task_config.time_precision,
-                },
+            DapBatchBucketOwned::TimeInterval {
+                batch_window: task_config.truncate_time(t.now),
             },
             AggStore {
                 agg_share: DapAggregateShare::default(),
@@ -861,11 +873,18 @@ async fn http_post_aggregate_fail_send_cont_req() {
 async fn http_post_upload_fail_send_invalid_report() {
     let t = Test::new();
     let task_id = &t.time_interval_task_id;
+    let task_config = t.leader.tasks.get(task_id).unwrap();
 
     // Construct a report payload with an invalid task ID.
     let mut report_empty_task_id = t.gen_test_report(task_id).await;
     report_empty_task_id.task_id = Id([0; 32]);
-    let req = t.gen_test_upload_req(report_empty_task_id);
+    let req = DapRequest {
+        version: task_config.version,
+        media_type: Some(MEDIA_TYPE_REPORT),
+        payload: report_empty_task_id.get_encoded(),
+        url: task_config.leader_url.join("upload").unwrap(),
+        sender_auth: None,
+    };
 
     // Expect failure due to invalid task ID in report.
     assert_matches!(
@@ -926,18 +945,15 @@ async fn get_reports_empty_response() {
     // Get one report. This should return with the report that was uploaded earlier.
     // We also check that the task ID associated to the report is the same one we
     // requested.
-    let selector = &MockAggregateInfo {
-        task_id: task_id.clone(),
-        agg_rate: 1,
-    };
-    let (returned_task_id, reports) = get_reports!(t.leader, selector);
+    let report_sel = MockAggregatorReportSelector(task_id.clone());
+    let (returned_task_id, _part_batch_sel, reports) = get_reports!(t.leader, &report_sel);
     assert_eq!(reports.len(), 1);
     assert_eq!(&returned_task_id, task_id);
 
     // Try to get another report. This should not return an error, but simply
     // an empty vector, as we drained the ReportStore above. The task ID
     // associated to the report should be the same one we requested.
-    let (returned_task_id, reports) = get_reports!(t.leader, selector);
+    let (returned_task_id, _part_batch_sel, reports) = get_reports!(t.leader, &report_sel);
     assert_eq!(reports.len(), 0);
     assert_eq!(&returned_task_id, task_id);
 }
@@ -979,6 +995,7 @@ async fn poll_collect_job_test_results() {
     let resp = t.leader.get_pending_collect_jobs().await.unwrap();
     let (collect_id, _collect_req) = &resp[0];
     let collect_resp = CollectResp {
+        part_batch_sel: PartialBatchSelector::TimeInterval,
         report_count: 0,
         encrypted_agg_shares: Vec::default(),
     };
@@ -1206,16 +1223,15 @@ async fn http_post_collect_success() {
 async fn http_post_collect_invalid_query() {
     let mut rng = thread_rng();
     let t = Test::new();
-    let task_id = &t.time_interval_task_id;
-    let task_config = t.leader.tasks.get(task_id).unwrap();
 
     // Leader expects "time_interval" query, but Collector sent "fixed_size".
+    let task_config = t.leader.tasks.get(&t.time_interval_task_id).unwrap();
     let req = t
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
             CollectReq {
-                task_id: task_id.clone(),
+                task_id: t.time_interval_task_id.clone(),
                 query: Query::FixedSize {
                     batch_id: Id(rng.gen()),
                 },
@@ -1227,6 +1243,27 @@ async fn http_post_collect_invalid_query() {
     assert_matches!(
         t.leader.http_post_collect(&req).await.unwrap_err(),
         DapAbort::QueryMismatch
+    );
+
+    // Collector indicates unrecognized batch ID.
+    let task_config = t.leader.tasks.get(&t.fixed_size_task_id).unwrap();
+    let req = t
+        .collector_authorized_req(
+            task_config.version,
+            MEDIA_TYPE_COLLECT_REQ,
+            CollectReq {
+                task_id: t.fixed_size_task_id.clone(),
+                query: Query::FixedSize {
+                    batch_id: Id(rng.gen()), // Unrecognized batch ID
+                },
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        )
+        .await;
+    assert_matches!(
+        t.leader.http_post_collect(&req).await.unwrap_err(),
+        DapAbort::BatchInvalid
     );
 }
 
@@ -1262,9 +1299,8 @@ async fn successful_http_post_upload() {
         .expect("upload failed unexpectedly");
 }
 
-// Test the end-to-end protocol.
 #[tokio::test]
-async fn e2e() {
+async fn e2e_time_interval() {
     let t = Test::new();
     let task_id = &t.time_interval_task_id;
 
@@ -1284,5 +1320,26 @@ async fn e2e() {
         .get(task_id)
         .unwrap()
         .query_for_current_batch_window(t.now);
+    t.run_col_job(task_id, &query).await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_fixed_size() {
+    let t = Test::new();
+    let task_id = &t.fixed_size_task_id;
+
+    let report = t.gen_test_report(task_id).await;
+    let req = t.gen_test_upload_req(report);
+
+    // Client: Send upload request to Leader.
+    t.leader.http_post_upload(&req).await.unwrap();
+
+    // Leader: Run aggregation job.
+    t.run_agg_job(task_id).await.unwrap();
+
+    // Collector: Create collection job and poll result.
+    let query = Query::FixedSize {
+        batch_id: t.leader.current_batch(task_id).unwrap(),
+    };
     t.run_col_job(task_id, &query).await.unwrap();
 }

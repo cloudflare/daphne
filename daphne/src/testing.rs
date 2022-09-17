@@ -7,17 +7,19 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce,
-        Report, ReportMetadata, ReportShare, Time, TransitionFailure,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Nonce,
+        PartialBatchSelector, Report, ReportMetadata, ReportShare, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+    DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
+    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
 };
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     ops::DerefMut,
@@ -26,10 +28,38 @@ use std::{
 };
 use url::Url;
 
-pub(crate) struct MockAggregateInfo {
-    pub(crate) task_id: Id,
-    pub(crate) agg_rate: u64,
+#[derive(Eq, Hash, PartialEq)]
+pub(crate) enum DapBatchBucketOwned {
+    FixedSize { batch_id: Id },
+    TimeInterval { batch_window: Time },
 }
+
+impl From<DapBatchBucketOwned> for PartialBatchSelector {
+    fn from(bucket: DapBatchBucketOwned) -> Self {
+        match bucket {
+            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSize { batch_id },
+            DapBatchBucketOwned::TimeInterval { .. } => Self::TimeInterval,
+        }
+    }
+}
+
+impl<'a> DapBatchBucket<'a> {
+    // TODO(cjpatton) Figure out how to use `ToOwned` properly. The lifetime parameter causes
+    // confusion for the compiler for implementing `Borrow`. The goal is to avoid cloning the
+    // bucket each time we need to check if it exists in the set.
+    pub(crate) fn to_owned_bucket(&self) -> DapBatchBucketOwned {
+        match self {
+            Self::FixedSize { batch_id } => DapBatchBucketOwned::FixedSize {
+                batch_id: (*batch_id).clone(),
+            },
+            Self::TimeInterval { batch_window } => DapBatchBucketOwned::TimeInterval {
+                batch_window: *batch_window,
+            },
+        }
+    }
+}
+
+pub(crate) struct MockAggregatorReportSelector(pub(crate) Id);
 
 #[allow(dead_code)]
 pub(crate) struct MockAggregator {
@@ -42,7 +72,7 @@ pub(crate) struct MockAggregator {
     pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
     pub(crate) leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<BatchSelector, AggStore>>>>,
+    pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<DapBatchBucketOwned, AggStore>>>>,
 }
 
 #[allow(dead_code)]
@@ -53,26 +83,14 @@ impl MockAggregator {
     async fn check_report_early_fail(
         &self,
         task_id: &Id,
+        bucket: &DapBatchBucketOwned,
         metadata: &ReportMetadata,
     ) -> Option<TransitionFailure> {
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
-        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
-            panic!("TODO(issue #100)");
-        }
-
-        let batch_selector = BatchSelector::TimeInterval {
-            batch_interval: Interval {
-                start: task_config.truncate_time(metadata.time),
-                duration: task_config.time_precision,
-            },
-        };
-
         // Check AggStateStore to see whether the report is part of a batch that has already
         // been collected.
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
-        if matches!(agg_store.get(&batch_selector), Some(inner_agg_store) if inner_agg_store.collected)
-        {
+        if matches!(agg_store.get(bucket), Some(inner_agg_store) if inner_agg_store.collected) {
             return Some(TransitionFailure::BatchCollected);
         }
 
@@ -81,12 +99,8 @@ impl MockAggregator {
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        if guard
-            .entry(task_id.clone())
-            .or_default()
-            .processed
-            .contains(&metadata.nonce)
-        {
+        let report_store = guard.entry(task_id.clone()).or_default();
+        if report_store.processed.contains(&metadata.nonce) {
             return Some(TransitionFailure::ReportReplayed);
         }
 
@@ -97,6 +111,76 @@ impl MockAggregator {
         self.hpke_receiver_config_list
             .iter()
             .find(|&hpke_receiver_config| hpke_config_id == hpke_receiver_config.config.id)
+    }
+
+    /// Assign the report to a bucket.
+    ///
+    /// TODO(cjpatton) Figure out if we can avoid returning and owned thing here.
+    fn assign_report_to_bucket(&self, report: &Report) -> Option<DapBatchBucketOwned> {
+        let mut rng = thread_rng();
+        let task_config = self
+            .tasks
+            .get(&report.task_id)
+            .expect("tasks: unrecognized task");
+
+        match task_config.query {
+            // For fixed-size queries, the bucket corresponds to a single batch.
+            DapQueryConfig::FixedSize {
+                min_batch_size,
+                max_batch_size: _,
+            } => {
+                let mut guard = self
+                    .leader_state_store
+                    .lock()
+                    .expect("leader_state_store: failed to lock");
+                let leader_state_store = guard.entry(report.task_id.clone()).or_default();
+
+                // Assign the report to the first unsaturated batch.
+                for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
+                    if *report_count < min_batch_size {
+                        *report_count += 1;
+                        return Some(DapBatchBucketOwned::FixedSize {
+                            batch_id: batch_id.clone(),
+                        });
+                    }
+                }
+
+                // No unsaturated batch exists, so create a new batch.
+                let batch_id = Id(rng.gen());
+                leader_state_store
+                    .batch_queue
+                    .push_back((batch_id.clone(), 1));
+                Some(DapBatchBucketOwned::FixedSize { batch_id })
+            }
+
+            // For time-interval queries, the bucket is the batch window computed by truncating the
+            // report timestamp.
+            DapQueryConfig::TimeInterval { .. } => Some(DapBatchBucketOwned::TimeInterval {
+                batch_window: task_config.truncate_time(report.metadata.time),
+            }),
+        }
+    }
+
+    /// Return the ID of the batch currently being filled with reports. Panics unless the task is
+    /// configured for fixed-size queries.
+    pub(crate) fn current_batch(&self, task_id: &Id) -> Option<Id> {
+        // Calling current_batch() is only well-defined for fixed-size tasks.
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
+        assert_matches!(task_config.query, DapQueryConfig::FixedSize { .. });
+
+        let guard = self
+            .leader_state_store
+            .lock()
+            .expect("leader_state_store: failed to lock");
+        let leader_state_store = guard
+            .get(task_id)
+            .expect("leader_state_store: unrecognized task");
+
+        leader_state_store
+            .batch_queue
+            .front()
+            .cloned() // TODO(cjpatton) Avoid clone by returning MutexGuard
+            .map(|(batch_id, _report_count)| batch_id)
     }
 }
 
@@ -199,7 +283,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         Ok(self.tasks.get(task_id))
     }
 
-    fn get_current_time(&self) -> u64 {
+    fn get_current_time(&self) -> Time {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -209,56 +293,58 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn is_batch_overlapping(
         &self,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
         let guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         let agg_store = if let Some(agg_store) = guard.get(task_id) {
             agg_store
         } else {
             return Ok(false);
         };
 
-        let batch_interval = batch_selector.unwrap_interval();
-        for (inner_selector, inner_agg_store) in agg_store.iter() {
-            let inner_interval = inner_selector.unwrap_interval();
-            if batch_interval.start <= inner_interval.start
-                && batch_interval.end() > inner_interval.start
-                && inner_agg_store.collected
-            {
-                return Ok(true);
+        for bucket in task_config.batch_span_for_sel(batch_sel)? {
+            if let Some(inner_agg_store) = agg_store.get(&bucket.to_owned_bucket()) {
+                if inner_agg_store.collected {
+                    return Ok(true);
+                }
             }
         }
 
         Ok(false)
     }
 
+    async fn batch_exists(&self, task_id: &Id, batch_id: &Id) -> Result<bool, DapError> {
+        let guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        if let Some(agg_store) = guard.get(task_id) {
+            Ok(agg_store
+                .get(&DapBatchBucketOwned::FixedSize {
+                    batch_id: batch_id.clone(),
+                })
+                .is_some())
+        } else {
+            Ok(false)
+        }
+    }
+
     async fn put_out_shares(
         &self,
         task_id: &Id,
+        part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
-        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
-            panic!("TODO(issue #100)");
-        }
-
-        let agg_shares =
-            DapAggregateShare::batches_from_out_shares(out_shares, task_config.time_precision)?;
 
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
-        for (window, agg_share_delta) in agg_shares.into_iter() {
-            let batch_selector = BatchSelector::TimeInterval {
-                batch_interval: Interval {
-                    start: window,
-                    duration: task_config.time_precision,
-                },
-            };
-
-            let inner_agg_store = agg_store.entry(batch_selector).or_default();
+        for (bucket, agg_share_delta) in task_config
+            .batch_span_for_out_shares(part_batch_sel, out_shares)?
+            .into_iter()
+        {
+            let inner_agg_store = agg_store.entry(bucket.to_owned_bucket()).or_default();
             inner_agg_store.agg_share.merge(agg_share_delta)?;
         }
 
@@ -268,19 +354,16 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn get_agg_share(
         &self,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
-        let guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.get(task_id).expect("agg_store: unrecognized task");
+        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = guard.entry(task_id.clone()).or_default();
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
-        let batch_interval = batch_selector.unwrap_interval();
-        for (inner_selector, inner_agg_store) in agg_store.iter() {
-            let inner_interval = inner_selector.unwrap_interval();
-            if batch_interval.start <= inner_interval.start
-                && batch_interval.end() > inner_interval.start
-            {
+        for bucket in task_config.batch_span_for_sel(batch_sel)? {
+            if let Some(inner_agg_store) = agg_store.get(&bucket.to_owned_bucket()) {
                 if inner_agg_store.collected {
                     return Err(DapError::Abort(DapAbort::BatchOverlap));
                 } else {
@@ -295,17 +378,14 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     async fn mark_collected(
         &self,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
 
-        let batch_interval = batch_selector.unwrap_interval();
-        for (inner_selector, inner_agg_store) in agg_store.iter_mut() {
-            let inner_interval = inner_selector.unwrap_interval();
-            if batch_interval.start <= inner_interval.start
-                && batch_interval.end() > inner_interval.start
-            {
+        for bucket in task_config.batch_span_for_sel(batch_sel)? {
+            if let Some(inner_agg_store) = agg_store.get_mut(&bucket.to_owned_bucket()) {
                 inner_agg_store.collected = true;
             }
         }
@@ -319,19 +399,24 @@ impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
+        part_batch_sel: &PartialBatchSelector,
         report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         let mut early_fails = HashMap::new();
         for report_share in report_shares.iter() {
+            let bucket =
+                task_config.batch_bucket_for_meta(&report_share.metadata, part_batch_sel)?;
+
             // Check whether Report has been collected or replayed.
             if let Some(transition_failure) = self
-                .check_report_early_fail(task_id, &report_share.metadata)
+                .check_report_early_fail(task_id, &bucket.to_owned_bucket(), &report_share.metadata)
                 .await
             {
                 early_fails.insert(report_share.metadata.nonce.clone(), transition_failure);
             };
 
-            // Mark Report processed.
+            // Mark report processed.
             let mut guard = self
                 .report_store
                 .lock()
@@ -407,21 +492,16 @@ impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
 
 #[async_trait(?Send)]
 impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
-    type ReportSelector = MockAggregateInfo;
+    type ReportSelector = MockAggregatorReportSelector;
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
-        let task_id = &report.task_id;
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or_else(|| DapError::fatal("task not found"))?;
-        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
-            panic!("TODO(issue #100)");
-        }
+        let bucket = self
+            .assign_report_to_bucket(report)
+            .expect("could not determine batch for report");
 
         // Check whether Report has been collected or replayed.
         if let Some(transition_failure) = self
-            .check_report_early_fail(task_id, &report.metadata)
+            .check_report_early_fail(&report.task_id, bucket.borrow(), &report.metadata)
             .await
         {
             return Err(DapError::Transition(transition_failure));
@@ -432,49 +512,60 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        let report_store = guard.entry(task_id.clone()).or_default();
-        report_store.pending.push_back(report.clone());
+        let queue = guard
+            .get_mut(&report.task_id)
+            .expect("report_store: unrecognized task")
+            .pending
+            .entry(bucket)
+            .or_default();
+        queue.push_back(report.clone());
         Ok(())
     }
 
     async fn get_reports(
         &self,
-        selector: &MockAggregateInfo,
-    ) -> Result<HashMap<Id, Vec<Report>>, DapError> {
-        // Lock report_store.
-        let agg_rate = selector
-            .agg_rate
-            .try_into()
-            .expect("agg_rate is larger than usize");
-        let mut reports = Vec::with_capacity(agg_rate);
-        let mut report_store_mutex_guard = self
+        report_sel: &MockAggregatorReportSelector,
+    ) -> Result<HashMap<Id, (PartialBatchSelector, Vec<Report>)>, DapError> {
+        let mut guard = self
             .report_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let report_store = report_store_mutex_guard.deref_mut();
+            .expect("report_store: failed to lock");
+        let task_id = &report_sel.0;
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
+        let report_store = guard.entry(task_id.clone()).or_default();
 
-        // Fetch reports.
-        for (inner_task_id, store) in report_store.iter_mut() {
-            if &selector.task_id == inner_task_id {
-                let num_reports_remaining = agg_rate - reports.len();
-                let num_reports_drained = std::cmp::min(num_reports_remaining, store.pending.len());
-                let mut reports_drained: Vec<Report> =
-                    store.pending.drain(..num_reports_drained).collect();
-                if reports_drained.len() + reports.len() > agg_rate {
-                    return Err(DapError::fatal(
-                        "number of reports received from report_store exceeds the number requested",
-                    ));
+        // For the task indicated by the report selector, choose a single report to aggregate.
+        match task_config.query {
+            DapQueryConfig::TimeInterval { .. } => {
+                // Aggregate reports in any order.
+                let mut reports = Vec::new();
+                for (_bucket, queue) in report_store.pending.iter_mut() {
+                    if !queue.is_empty() {
+                        reports.append(&mut queue.drain(..1).collect());
+                        break;
+                    }
                 }
+                return Ok(HashMap::from([(
+                    task_id.clone(),
+                    (PartialBatchSelector::TimeInterval, reports),
+                )]));
+            }
+            DapQueryConfig::FixedSize { .. } => {
+                // Drain the batch that is being filled.
+                let bucket = if let Some(batch_id) = self.current_batch(task_id) {
+                    DapBatchBucketOwned::FixedSize { batch_id }
+                } else {
+                    return Ok(HashMap::default());
+                };
 
-                reports.append(&mut reports_drained);
-
-                if reports.len() == agg_rate {
-                    break;
-                }
+                let queue = report_store
+                    .pending
+                    .get_mut(&bucket)
+                    .expect("report_store: unknown bucket");
+                let reports = queue.drain(..1).collect();
+                return Ok(HashMap::from([(task_id.clone(), (bucket.into(), reports))]));
             }
         }
-
-        Ok(HashMap::from([(selector.task_id.clone(), reports)]))
     }
 
     // Called after receiving a CollectReq from Collector.
@@ -505,7 +596,7 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
         // Store Collect ID and CollectReq into LeaderState.
         let leader_state = leader_state_store
             .entry(collect_req.task_id.clone())
-            .or_insert_with(LeaderState::new);
+            .or_default();
         leader_state.collect_ids.push_back(collect_id.clone());
         let collect_job_state = CollectJobState::Pending(collect_req.clone());
         leader_state
@@ -562,7 +653,6 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
         Ok(res)
     }
 
-    // Called after finishing aggregation job to put resuts into LeaderState.
     async fn finish_collect_job(
         &self,
         task_id: &Id,
@@ -582,6 +672,13 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
             .collect_jobs
             .get_mut(collect_id)
             .ok_or_else(|| DapError::fatal("collect job not found for collect_id"))?;
+
+        // Remove the batch from the batch queue.
+        if let PartialBatchSelector::FixedSize { ref batch_id } = collect_resp.part_batch_sel {
+            leader_state
+                .batch_queue
+                .retain(|(id, _report_count)| id != batch_id);
+        }
 
         match collect_job {
             CollectJobState::Pending(_) => {
@@ -619,7 +716,7 @@ pub(crate) struct HelperStateInfo {
 /// Stores the reports received from Clients.
 #[derive(Default)]
 pub(crate) struct ReportStore {
-    pub(crate) pending: VecDeque<Report>,
+    pub(crate) pending: HashMap<DapBatchBucketOwned, VecDeque<Report>>,
     pub(crate) processed: HashSet<Nonce>,
 }
 
@@ -632,18 +729,11 @@ pub(crate) enum CollectJobState {
 /// LeaderState keeps track of the following:
 /// * Collect IDs in their order of arrival.
 /// * The state of the collect job associated to the Collect ID.
+#[derive(Default)]
 pub(crate) struct LeaderState {
     collect_ids: VecDeque<Id>,
     collect_jobs: HashMap<Id, CollectJobState>,
-}
-
-impl LeaderState {
-    pub(crate) fn new() -> LeaderState {
-        Self {
-            collect_ids: VecDeque::default(),
-            collect_jobs: HashMap::default(),
-        }
-    }
+    batch_queue: VecDeque<(Id, u64)>, // Batch ID, batch size
 }
 
 /// AggStore keeps track of the following:

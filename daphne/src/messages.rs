@@ -201,13 +201,22 @@ impl Decode for ReportShare {
 
 /// Batch parameter conveyed to the Helper by the Leader in the aggreagtion sub-protocol. Used to
 /// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BatchParameter {
+#[derive(Clone, Debug, Eq, Deserialize, PartialEq, Serialize)]
+pub enum PartialBatchSelector {
     TimeInterval,
     FixedSize { batch_id: Id },
 }
 
-impl Encode for BatchParameter {
+impl From<BatchSelector> for PartialBatchSelector {
+    fn from(batch_sel: BatchSelector) -> Self {
+        match batch_sel {
+            BatchSelector::TimeInterval { .. } => Self::TimeInterval,
+            BatchSelector::FixedSize { batch_id } => Self::FixedSize { batch_id },
+        }
+    }
+}
+
+impl Encode for PartialBatchSelector {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
             Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes),
@@ -219,7 +228,7 @@ impl Encode for BatchParameter {
     }
 }
 
-impl Decode for BatchParameter {
+impl Decode for PartialBatchSelector {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u16::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
@@ -237,7 +246,7 @@ pub struct AggregateInitializeReq {
     pub task_id: Id,
     pub agg_job_id: Id,
     pub agg_param: Vec<u8>,
-    pub batch_param: BatchParameter,
+    pub part_batch_sel: PartialBatchSelector,
     pub report_shares: Vec<ReportShare>,
 }
 
@@ -246,7 +255,7 @@ impl Encode for AggregateInitializeReq {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
         encode_u16_bytes(bytes, &self.agg_param);
-        self.batch_param.encode(bytes);
+        self.part_batch_sel.encode(bytes);
         encode_u32_items(bytes, &(), &self.report_shares);
     }
 }
@@ -257,7 +266,7 @@ impl Decode for AggregateInitializeReq {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
             agg_param: decode_u16_bytes(bytes)?,
-            batch_param: BatchParameter::decode(bytes)?,
+            part_batch_sel: PartialBatchSelector::decode(bytes)?,
             report_shares: decode_u32_items(&(), bytes)?,
         })
     }
@@ -552,12 +561,14 @@ impl Decode for CollectReq {
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CollectResp {
+    pub part_batch_sel: PartialBatchSelector,
     pub report_count: u64,
     pub encrypted_agg_shares: Vec<HpkeCiphertext>,
 }
 
 impl Encode for CollectResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
+        self.part_batch_sel.encode(bytes);
         self.report_count.encode(bytes);
         encode_u32_items(bytes, &(), &self.encrypted_agg_shares);
     }
@@ -566,6 +577,7 @@ impl Encode for CollectResp {
 impl Decode for CollectResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
+            part_batch_sel: PartialBatchSelector::decode(bytes)?,
             report_count: u64::decode(bytes)?,
             encrypted_agg_shares: decode_u32_items(&(), bytes)?,
         })
@@ -585,7 +597,7 @@ pub type BatchSelector = Query;
 #[derive(Clone, Debug, Default)]
 pub struct AggregateShareReq {
     pub task_id: Id,
-    pub batch_selector: BatchSelector,
+    pub batch_sel: BatchSelector,
     pub agg_param: Vec<u8>,
     pub report_count: u64,
     pub checksum: [u8; 32],
@@ -594,7 +606,7 @@ pub struct AggregateShareReq {
 impl Encode for AggregateShareReq {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.batch_selector.encode(bytes);
+        self.batch_sel.encode(bytes);
         encode_u16_bytes(bytes, &self.agg_param);
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
@@ -605,7 +617,7 @@ impl Decode for AggregateShareReq {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            batch_selector: BatchSelector::decode(bytes)?,
+            batch_sel: BatchSelector::decode(bytes)?,
             agg_param: decode_u16_bytes(bytes)?,
             report_count: u64::decode(bytes)?,
             checksum: {

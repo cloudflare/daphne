@@ -5,8 +5,8 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
-        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce, Report, Transition,
-        TransitionFailure, TransitionVar,
+        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce,
+        PartialBatchSelector, Report, Transition, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -628,6 +628,7 @@ impl<'a> Test<'a> {
                 &self.vdaf_verify_key,
                 &self.task_id,
                 &self.agg_job_id,
+                &PartialBatchSelector::TimeInterval,
                 reports,
             )
             .await
@@ -795,18 +796,12 @@ impl<'a> Test<'a> {
         let report_count = u64::try_from(leader_out_shares.len()).unwrap();
 
         // Leader: Aggregation
-        let leader_agg_shares =
-            DapAggregateShare::batches_from_out_shares(leader_out_shares, 3600).unwrap();
-        assert_eq!(leader_agg_shares.len(), 1);
-        let (_batch_window, leader_agg_share) = leader_agg_shares.into_iter().next().unwrap();
+        let leader_agg_share = DapAggregateShare::try_from_out_shares(leader_out_shares).unwrap();
         let leader_encrypted_agg_share =
             self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
 
         // Helper: Aggregation
-        let helper_agg_shares =
-            DapAggregateShare::batches_from_out_shares(helper_out_shares, 3600).unwrap();
-        assert_eq!(helper_agg_shares.len(), 1);
-        let (_batch_window, helper_agg_share) = helper_agg_shares.into_iter().next().unwrap();
+        let helper_agg_share = DapAggregateShare::try_from_out_shares(helper_out_shares).unwrap();
         let helper_encrypted_agg_share =
             self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
 

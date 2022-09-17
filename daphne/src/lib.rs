@@ -30,7 +30,10 @@
 
 use crate::{
     hpke::HpkeReceiverConfig,
-    messages::{CollectResp, Duration, HpkeConfig, Nonce, Time, TransitionFailure},
+    messages::{
+        BatchSelector, CollectResp, Duration, HpkeConfig, Id, Interval, Nonce,
+        PartialBatchSelector, ReportMetadata, Time, TransitionFailure,
+    },
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
@@ -364,11 +367,57 @@ impl DapQueryConfig {
         Ok(report_count >= self.min_batch_size())
     }
 
+    pub(crate) fn is_valid_part_batch_sel(&self, part_batch_sel: &PartialBatchSelector) -> bool {
+        matches!(
+            (&self, part_batch_sel),
+            (
+                Self::TimeInterval { .. },
+                PartialBatchSelector::TimeInterval
+            ) | (
+                Self::FixedSize { .. },
+                PartialBatchSelector::FixedSize { .. }
+            )
+        )
+    }
+
+    pub(crate) fn is_valid_batch_sel(&self, batch_sel: &BatchSelector) -> bool {
+        matches!(
+            (&self, batch_sel),
+            (
+                Self::TimeInterval { .. },
+                BatchSelector::TimeInterval { .. }
+            ) | (Self::FixedSize { .. }, BatchSelector::FixedSize { .. })
+        )
+    }
+
     /// Return the minimum batch size determined by the query configuration.
     pub fn min_batch_size(&self) -> u64 {
         match self {
             Self::TimeInterval { min_batch_size } => *min_batch_size,
             Self::FixedSize { min_batch_size, .. } => *min_batch_size,
+        }
+    }
+}
+
+/// A batch bucket.
+///
+/// A bucket is the smallest, disjoint set of reports that can be queried: For time-interval
+/// queries, the bucket to which a report is assigned is determined by truncating its timestamp by
+/// the task's `time_precision` parameter; for fixed-size queries, the span consists of a single
+/// bucket, which is the batch determined by the batch ID (i.e., the partial batch selector).
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub enum DapBatchBucket<'a> {
+    FixedSize { batch_id: &'a Id },
+    TimeInterval { batch_window: Time },
+}
+
+impl<'a> DapBatchBucket<'a> {
+    /// TODO(issue #100) Deprecate this once "fixed_size" support is added.
+    pub fn unwrap_window(&self) -> Time {
+        if let Self::TimeInterval { batch_window } = self {
+            *batch_window
+        } else {
+            panic!("TODO(issue #100)");
         }
     }
 }
@@ -420,6 +469,87 @@ impl DapTaskConfig {
 
     pub(crate) fn truncate_time(&self, time: Time) -> Time {
         time - (time % self.time_precision)
+    }
+
+    /// Compute the "batch span" of a set of output shares and, for each buckent in the span,
+    /// aggregate the output shares into an aggregate share.
+    pub fn batch_span_for_out_shares<'a>(
+        &self,
+        part_batch_sel: &'a PartialBatchSelector,
+        out_shares: Vec<DapOutputShare>,
+    ) -> Result<HashMap<DapBatchBucket<'a>, DapAggregateShare>, DapError> {
+        if !self.query.is_valid_part_batch_sel(part_batch_sel) {
+            return Err(DapError::fatal(
+                "partial batch selector not compatible with task",
+            ));
+        }
+
+        let mut agg_shares: HashMap<DapBatchBucket<'a>, DapAggregateShare> = HashMap::new();
+        for out_share in out_shares.into_iter() {
+            let bucket = match part_batch_sel {
+                PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
+                    batch_window: self.truncate_time(out_share.time),
+                },
+                PartialBatchSelector::FixedSize { batch_id } => {
+                    DapBatchBucket::FixedSize { batch_id }
+                }
+            };
+
+            let agg_share = agg_shares.entry(bucket).or_default();
+            agg_share.merge(DapAggregateShare {
+                report_count: 1,
+                checksum: out_share.checksum,
+                data: Some(out_share.data),
+            })?;
+        }
+
+        Ok(agg_shares)
+    }
+
+    /// Return the batch span determined by the given batch selector.
+    pub fn batch_span_for_sel<'a>(
+        &self,
+        batch_sel: &'a BatchSelector,
+    ) -> Result<Vec<DapBatchBucket<'a>>, DapError> {
+        if !self.query.is_valid_batch_sel(batch_sel) {
+            return Err(DapError::fatal("batch selector not compatible with task"));
+        }
+
+        match batch_sel {
+            BatchSelector::TimeInterval {
+                batch_interval: Interval { start, duration },
+            } => {
+                let windows = duration / self.time_precision;
+                Ok((0..windows)
+                    .map(|i| DapBatchBucket::TimeInterval {
+                        batch_window: start + i * self.time_precision,
+                    })
+                    .collect())
+            }
+            BatchSelector::FixedSize { batch_id } => {
+                Ok(vec![DapBatchBucket::FixedSize { batch_id }])
+            }
+        }
+    }
+
+    /// Return the batch bucket for a report with the given metadata.
+    pub fn batch_bucket_for_meta<'a>(
+        &self,
+        metadata: &'a ReportMetadata,
+        part_batch_sel: &'a PartialBatchSelector,
+    ) -> Result<DapBatchBucket<'a>, DapError> {
+        if !self.query.is_valid_part_batch_sel(part_batch_sel) {
+            return Err(DapError::fatal(
+                "partial batch selector not compatible with task",
+            ));
+        }
+
+        Ok(match part_batch_sel {
+            PartialBatchSelector::FixedSize { batch_id } => DapBatchBucket::FixedSize { batch_id },
+            PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
+                batch_window: self.truncate_time(metadata.time),
+            },
+        })
     }
 }
 
@@ -496,6 +626,7 @@ pub struct DapLeaderUncommitted {
 /// The Helper's state during the aggregation flow.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DapHelperState {
+    pub(crate) part_batch_sel: PartialBatchSelector,
     pub(crate) seq: Vec<(VdafState, Time, Nonce)>,
 }
 
@@ -509,6 +640,7 @@ impl DapHelperState {
     /// Note that the encoding format is not specified by the DAP standard.
     pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
         let mut bytes = vec![];
+        self.part_batch_sel.encode(&mut bytes);
         for (state, time, nonce) in self.seq.iter() {
             match (vdaf_config, state) {
                 (VdafConfig::Prio3(prio3_config), _) => {
@@ -527,8 +659,9 @@ impl DapHelperState {
 
     /// Decode the Helper state from a byte string.
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
-        let mut seq = vec![];
         let mut r = std::io::Cursor::new(data);
+        let part_batch_sel = PartialBatchSelector::decode(&mut r)?;
+        let mut seq = vec![];
         while (r.position() as usize) < data.len() {
             let state = match vdaf_config {
                 VdafConfig::Prio3(ref prio3_config) => {
@@ -543,7 +676,10 @@ impl DapHelperState {
             seq.push((state, time, nonce))
         }
 
-        Ok(DapHelperState { seq })
+        Ok(DapHelperState {
+            part_batch_sel,
+            seq,
+        })
     }
 }
 
@@ -603,33 +739,26 @@ impl DapAggregateShare {
         Ok(())
     }
 
-    /// Transform a sequence of output shares into a map from batch intervals to aggregate shares.
-    pub fn batches_from_out_shares(
-        out_shares: Vec<DapOutputShare>,
-        min_batch_interval: u64,
-    ) -> Result<HashMap<u64, Self>, DapError> {
-        let mut agg_shares: HashMap<u64, Self> = HashMap::new();
-        for out_share in out_shares.into_iter() {
-            let interval = out_share.time - (out_share.time % min_batch_interval);
-            let agg_share_delta = DapAggregateShare {
-                report_count: 1,
-                checksum: out_share.checksum,
-                data: Some(out_share.data),
-            };
-            if let Some(agg_share) = agg_shares.get_mut(&interval) {
-                agg_share.merge(agg_share_delta)?;
-            } else {
-                agg_shares.insert(interval, agg_share_delta);
-            }
-        }
-        Ok(agg_shares)
-    }
-
     /// Set the aggregate share to zero.
     pub fn reset(&mut self) {
         self.report_count = 0;
         self.checksum = [0; 32];
         self.data = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_from_out_shares(
+        out_shares: impl IntoIterator<Item = DapOutputShare>,
+    ) -> Result<Self, DapError> {
+        let mut agg_share = Self::default();
+        for out_share in out_shares.into_iter() {
+            agg_share.merge(DapAggregateShare {
+                report_count: 1,
+                checksum: out_share.checksum,
+                data: Some(out_share.data),
+            })?;
+        }
+        Ok(agg_share)
     }
 }
 
