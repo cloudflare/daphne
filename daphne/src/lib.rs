@@ -404,10 +404,10 @@ pub struct DapTaskConfig {
     pub(crate) collector_hpke_config: HpkeConfig,
 }
 
-#[cfg(test)]
 impl DapTaskConfig {
     /// Convert at timestamp `now` into an [`Interval`] that contains it. The timestamp is the
     /// numbre of seconds since the beginning of UNIX time.
+    #[cfg(test)]
     pub fn query_for_current_batch_window(&self, now: u64) -> crate::messages::Query {
         let start = now - (now % self.time_precision);
         crate::messages::Query::TimeInterval {
@@ -416,6 +416,10 @@ impl DapTaskConfig {
                 duration: self.time_precision,
             },
         }
+    }
+
+    pub(crate) fn truncate_time(&self, time: Time) -> Time {
+        time - (time % self.time_precision)
     }
 }
 

@@ -15,7 +15,7 @@ use crate::{
         TransitionVar,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    testing::{AggStoreState, BucketInfo, MockAggregateInfo, MockAggregator, ReportStore},
+    testing::{AggStore, MockAggregateInfo, MockAggregator, ReportStore},
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapLeaderTransition,
     DapMeasurement, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
@@ -781,16 +781,28 @@ async fn http_post_aggregate_failure_batch_collected() {
     }];
     let req = t.gen_test_agg_init_req(task_id, report_shares).await;
 
-    // This is to ensure that the lock is released before we call http_post_aggregate.
+    // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
+    // is released before running the test. Otherwise the test will deadlock.
     {
-        let mut agg_store_mutex_guard = t.helper.agg_store.lock().expect("lock() failed");
-        let agg_store = agg_store_mutex_guard.deref_mut();
-        let bucket_info = BucketInfo::new(task_config, task_id, report.metadata.time);
-        let agg_store_state = AggStoreState {
-            agg_share: DapAggregateShare::default(),
-            collected: true,
-        };
-        agg_store.insert(bucket_info, agg_store_state);
+        let mut guard = t
+            .helper
+            .agg_store
+            .lock()
+            .expect("agg_store: failed to lock");
+        let agg_store = guard.entry(task_id.clone()).or_default();
+
+        agg_store.insert(
+            BatchSelector::TimeInterval {
+                batch_interval: Interval {
+                    start: task_config.truncate_time(t.now),
+                    duration: task_config.time_precision,
+                },
+            },
+            AggStore {
+                agg_share: DapAggregateShare::default(),
+                collected: true,
+            },
+        );
     }
 
     // Get AggregateResp and then extract the transition data from inside.

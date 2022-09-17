@@ -430,7 +430,7 @@ impl Decode for AggregateResp {
 }
 
 /// A batch interval.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[allow(missing_docs)]
 pub struct Interval {
     pub start: Time,
@@ -461,7 +461,7 @@ impl Decode for Interval {
 }
 
 /// A query issued by the Collector in a collect request.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Query {
     TimeInterval { batch_interval: Interval },

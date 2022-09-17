@@ -7,12 +7,12 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Nonce, Report,
-        ReportShare, Time, TransitionFailure,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Interval, Nonce,
+        Report, ReportMetadata, ReportShare, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapOutputShare, DapRequest, DapResponse, DapTaskConfig,
+    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
 };
 use async_trait::async_trait;
 use rand::{thread_rng, Rng};
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     sync::{Arc, Mutex},
     time::SystemTime,
 };
@@ -42,7 +42,7 @@ pub(crate) struct MockAggregator {
     pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
     pub(crate) leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    pub(crate) agg_store: Arc<Mutex<HashMap<BucketInfo, AggStoreState>>>,
+    pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<BatchSelector, AggStore>>>>,
 }
 
 #[allow(dead_code)]
@@ -50,26 +50,47 @@ impl MockAggregator {
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
     /// 2) the report has been submitted by the client in the past.
-    fn check_report(
+    async fn check_report_early_fail(
         &self,
-        bucket_info: &BucketInfo,
-        nonce: &Nonce,
-        report_store: &ReportStore,
-        agg_store: &HashMap<BucketInfo, AggStoreState>,
-    ) -> Result<(), TransitionFailure> {
+        task_id: &Id,
+        metadata: &ReportMetadata,
+    ) -> Option<TransitionFailure> {
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
+        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+            panic!("TODO(issue #100)");
+        }
+
+        let batch_selector = BatchSelector::TimeInterval {
+            batch_interval: Interval {
+                start: task_config.truncate_time(metadata.time),
+                duration: task_config.time_precision,
+            },
+        };
+
         // Check AggStateStore to see whether the report is part of a batch that has already
         // been collected.
-        if matches!(agg_store.get(bucket_info), Some(agg_store_state) if agg_store_state.collected)
+        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = guard.entry(task_id.clone()).or_default();
+        if matches!(agg_store.get(&batch_selector), Some(inner_agg_store) if inner_agg_store.collected)
         {
-            return Err(TransitionFailure::BatchCollected);
+            return Some(TransitionFailure::BatchCollected);
         }
 
         // Check whether the same report has been submitted in the past.
-        if report_store.processed.contains(nonce) {
-            return Err(TransitionFailure::ReportReplayed);
+        let mut guard = self
+            .report_store
+            .lock()
+            .expect("report_store: failed to lock");
+        if guard
+            .entry(task_id.clone())
+            .or_default()
+            .processed
+            .contains(&metadata.nonce)
+        {
+            return Some(TransitionFailure::ReportReplayed);
         }
 
-        Ok(())
+        None
     }
 
     fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
@@ -190,21 +211,24 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         task_id: &Id,
         batch_selector: &BatchSelector,
     ) -> Result<bool, DapError> {
-        let mut agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref_mut();
+        let guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = if let Some(agg_store) = guard.get(task_id) {
+            agg_store
+        } else {
+            return Ok(false);
+        };
+
         let batch_interval = batch_selector.unwrap_interval();
-        for (inner_bucket_info, agg_store_state) in agg_store.iter() {
-            if task_id == &inner_bucket_info.task_id
-                && batch_interval.start <= inner_bucket_info.window
-                && batch_interval.end() > inner_bucket_info.window
-                && agg_store_state.collected
+        for (inner_selector, inner_agg_store) in agg_store.iter() {
+            let inner_interval = inner_selector.unwrap_interval();
+            if batch_interval.start <= inner_interval.start
+                && batch_interval.end() > inner_interval.start
+                && inner_agg_store.collected
             {
                 return Ok(true);
             }
         }
+
         Ok(false)
     }
 
@@ -217,33 +241,25 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
             .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
+        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+            panic!("TODO(issue #100)");
+        }
 
         let agg_shares =
             DapAggregateShare::batches_from_out_shares(out_shares, task_config.time_precision)?;
 
-        let mut agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref_mut();
-        let mut bucket_info = BucketInfo {
-            task_id: task_id.clone(),
-            window: 0,
-        };
+        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = guard.entry(task_id.clone()).or_default();
         for (window, agg_share_delta) in agg_shares.into_iter() {
-            bucket_info.window = window;
+            let batch_selector = BatchSelector::TimeInterval {
+                batch_interval: Interval {
+                    start: window,
+                    duration: task_config.time_precision,
+                },
+            };
 
-            if let Some(agg_store_state) = agg_store.get_mut(&bucket_info) {
-                agg_store_state.agg_share.merge(agg_share_delta)?;
-            } else {
-                agg_store.insert(
-                    bucket_info.clone(),
-                    AggStoreState {
-                        agg_share: agg_share_delta,
-                        collected: false,
-                    },
-                );
-            }
+            let inner_agg_store = agg_store.entry(batch_selector).or_default();
+            inner_agg_store.agg_share.merge(agg_share_delta)?;
         }
 
         Ok(())
@@ -254,25 +270,21 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         task_id: &Id,
         batch_selector: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
-        // Lock agg_store.
-        let mut agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref_mut();
+        let guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = guard.get(task_id).expect("agg_store: unrecognized task");
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
         let batch_interval = batch_selector.unwrap_interval();
-        for (inner_bucket_info, agg_store_state) in agg_store.iter() {
-            if task_id == &inner_bucket_info.task_id
-                && batch_interval.start <= inner_bucket_info.window
-                && batch_interval.end() > inner_bucket_info.window
+        for (inner_selector, inner_agg_store) in agg_store.iter() {
+            let inner_interval = inner_selector.unwrap_interval();
+            if batch_interval.start <= inner_interval.start
+                && batch_interval.end() > inner_interval.start
             {
-                if agg_store_state.collected {
+                if inner_agg_store.collected {
                     return Err(DapError::Abort(DapAbort::BatchOverlap));
                 } else {
-                    agg_share.merge(agg_store_state.agg_share.clone())?;
+                    agg_share.merge(inner_agg_store.agg_share.clone())?;
                 }
             }
         }
@@ -285,19 +297,16 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         task_id: &Id,
         batch_selector: &BatchSelector,
     ) -> Result<(), DapError> {
-        // Mark aggregate shares as collected.
-        let mut agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref_mut();
+        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = guard.entry(task_id.clone()).or_default();
+
         let batch_interval = batch_selector.unwrap_interval();
-        for (inner_bucket_info, agg_store_state) in agg_store.iter_mut() {
-            if task_id == &inner_bucket_info.task_id
-                && batch_interval.start <= inner_bucket_info.window
-                && batch_interval.end() > inner_bucket_info.window
+        for (inner_selector, inner_agg_store) in agg_store.iter_mut() {
+            let inner_interval = inner_selector.unwrap_interval();
+            if batch_interval.start <= inner_interval.start
+                && batch_interval.end() > inner_interval.start
             {
-                agg_store_state.collected = true;
+                inner_agg_store.collected = true;
             }
         }
 
@@ -312,43 +321,22 @@ impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
         task_id: &Id,
         report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or_else(|| DapError::fatal("task not found"))?;
-        let mut early_fails: HashMap<Nonce, TransitionFailure> = HashMap::new();
-
-        // Lock AggStateStore.
-        let agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref();
-
-        // Lock ReportStore.
-        let mut report_store_mutex_guard = self
-            .report_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let report_store = report_store_mutex_guard.deref_mut();
-        let report_store = report_store
-            .entry(task_id.clone())
-            .or_insert_with(ReportStore::new);
-
+        let mut early_fails = HashMap::new();
         for report_share in report_shares.iter() {
-            let bucket_info = BucketInfo::new(task_config, task_id, report_share.metadata.time);
-
             // Check whether Report has been collected or replayed.
-            if let Err(transition_failure) = self.check_report(
-                &bucket_info,
-                &report_share.metadata.nonce,
-                report_store,
-                agg_store,
-            ) {
+            if let Some(transition_failure) = self
+                .check_report_early_fail(task_id, &report_share.metadata)
+                .await
+            {
                 early_fails.insert(report_share.metadata.nonce.clone(), transition_failure);
             };
 
             // Mark Report processed.
+            let mut guard = self
+                .report_store
+                .lock()
+                .expect("report_store: failed to lock");
+            let report_store = guard.entry(task_id.clone()).or_default();
             report_store
                 .processed
                 .insert(report_share.metadata.nonce.clone());
@@ -427,36 +415,24 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
             .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
-        let bucket_info = BucketInfo::new(task_config, task_id, report.metadata.time);
-
-        // Lock AggStateStore.
-        let agg_store_mutex_guard = self
-            .agg_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let agg_store = agg_store_mutex_guard.deref();
-
-        // Lock ReportStore.
-        let mut report_store_mutex_guard = self
-            .report_store
-            .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let report_store = report_store_mutex_guard.deref_mut();
-        let report_store = report_store
-            .entry(task_id.clone())
-            .or_insert_with(ReportStore::new);
+        if matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+            panic!("TODO(issue #100)");
+        }
 
         // Check whether Report has been collected or replayed.
-        if let Err(transition_failure) = self.check_report(
-            &bucket_info,
-            &report.metadata.nonce,
-            report_store,
-            agg_store,
-        ) {
+        if let Some(transition_failure) = self
+            .check_report_early_fail(task_id, &report.metadata)
+            .await
+        {
             return Err(DapError::Transition(transition_failure));
         };
 
         // Store Report for future processing.
+        let mut guard = self
+            .report_store
+            .lock()
+            .expect("report_store: failed to lock");
+        let report_store = guard.entry(task_id.clone()).or_default();
         report_store.pending.push_back(report.clone());
         Ok(())
     }
@@ -640,37 +616,11 @@ pub(crate) struct HelperStateInfo {
     agg_job_id: Id,
 }
 
-/// Information associated to a certain report for a given task and nonce to decide which bucket it would be put into.
-#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
-pub(crate) struct BucketInfo {
-    task_id: Id,
-    window: Time,
-}
-
-impl BucketInfo {
-    pub(crate) fn new(task_config: &DapTaskConfig, task_id: &Id, time: Time) -> Self {
-        let window = time - (time % task_config.time_precision);
-
-        Self {
-            task_id: task_id.clone(),
-            window,
-        }
-    }
-}
-
 /// Stores the reports received from Clients.
+#[derive(Default)]
 pub(crate) struct ReportStore {
     pub(crate) pending: VecDeque<Report>,
     pub(crate) processed: HashSet<Nonce>,
-}
-
-impl ReportStore {
-    pub(crate) fn new() -> Self {
-        let pending: VecDeque<Report> = VecDeque::new();
-        let processed: HashSet<Nonce> = HashSet::new();
-
-        Self { pending, processed }
-    }
 }
 
 /// Stores the state of the collect job.
@@ -696,10 +646,11 @@ impl LeaderState {
     }
 }
 
-/// AggStoreState keeps track of the following:
+/// AggStore keeps track of the following:
 /// * Aggregate share
 /// * Whether this aggregate share has been collected
-pub(crate) struct AggStoreState {
+#[derive(Default)]
+pub(crate) struct AggStore {
     pub(crate) agg_share: DapAggregateShare,
     pub(crate) collected: bool,
 }
