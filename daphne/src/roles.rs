@@ -12,8 +12,8 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, BatchParameter, BatchSelector, CollectReq,
-        CollectResp, Id, Nonce, Report, ReportShare, Time, TransitionFailure, TransitionVar,
+        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id, Nonce,
+        PartialBatchSelector, Report, ReportShare, Time, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -56,20 +56,25 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
     ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
-    fn get_current_time(&self) -> u64;
+    fn get_current_time(&self) -> Time;
 
     /// Check whether the batch determined by the collect request would overlap with a previous
     /// batch.
     async fn is_batch_overlapping(
         &self,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
     ) -> Result<bool, DapError>;
+
+    /// Check whether the given batch ID has been observed before. This is called by the Leader
+    /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for fixed-size tasks.
+    async fn batch_exists(&self, task_id: &Id, batch_id: &Id) -> Result<bool, DapError>;
 
     /// Store a set of output shares.
     async fn put_out_shares(
         &self,
         task_id: &Id,
+        part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError>;
 
@@ -77,15 +82,12 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
     async fn get_agg_share(
         &self,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError>;
 
     /// Mark a batch as collected.
-    async fn mark_collected(
-        &self,
-        task_id: &Id,
-        batch_selector: &BatchSelector,
-    ) -> Result<(), DapError>;
+    async fn mark_collected(&self, task_id: &Id, batch_sel: &BatchSelector)
+        -> Result<(), DapError>;
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
     async fn http_get_hpke_config(&'a self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
@@ -169,7 +171,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     async fn get_reports(
         &self,
         selector: &Self::ReportSelector,
-    ) -> Result<HashMap<Id, Vec<Report>>, DapError>;
+    ) -> Result<HashMap<Id, (PartialBatchSelector, Vec<Report>)>, DapError>;
 
     /// Create a collect job.
     //
@@ -265,8 +267,6 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
-        //
-        // TODO(issue #100) For "fixed_size" we need to check if we recognize the batch ID.
         check_batch(
             self,
             task_config,
@@ -291,6 +291,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         &self,
         task_id: &Id,
         task_config: &DapTaskConfig,
+        part_batch_sel: PartialBatchSelector,
         reports: Vec<Report>,
     ) -> Result<u64, DapAbort> {
         let mut rng = thread_rng();
@@ -304,6 +305,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
                 &task_config.vdaf_verify_key,
                 task_id,
                 &agg_job_id,
+                &part_batch_sel,
                 reports,
             )
             .await?;
@@ -356,7 +358,8 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .vdaf
             .handle_final_agg_resp(uncommited, agg_resp)?;
         let out_shares_count = out_shares.len() as u64;
-        self.put_out_shares(task_id, out_shares).await?;
+        self.put_out_shares(task_id, &part_batch_sel, out_shares)
+            .await?;
         Ok(out_shares_count)
     }
 
@@ -394,7 +397,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         // Prepare AggregateShareReq.
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_selector: collect_req.query.clone(),
+            batch_sel: collect_req.query.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -413,6 +416,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         // Complete the collect job.
         let collect_resp = CollectResp {
+            part_batch_sel: collect_req.query.clone().into(),
             report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
@@ -420,7 +424,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?;
 
         // Mark reports as collected.
-        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_selector)
+        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_sel)
             .await?;
 
         Ok(agg_share_req.report_count)
@@ -443,7 +447,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         // Fetch reports and run an aggregation job for each task.
         //
         // TODO Handle tasks in parallel.
-        for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
+        for (task_id, (part_batch_sel, reports)) in self.get_reports(selector).await?.into_iter() {
             let task_config = self
                 .get_task_config_for(&task_id)
                 .await?
@@ -452,7 +456,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             telem.reports_processed += reports.len() as u64;
             if !reports.is_empty() {
                 telem.reports_aggregated += self
-                    .run_agg_job(&task_id, task_config.as_ref(), reports)
+                    .run_agg_job(&task_id, task_config.as_ref(), part_batch_sel, reports)
                     .await?;
             }
         }
@@ -487,6 +491,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
+        part_batch_sel: &PartialBatchSelector,
         report_shares: &[ReportShare],
     ) -> Result<HashMap<Nonce, TransitionFailure>, DapError>;
 
@@ -539,13 +544,16 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                 // Ensure we know which batch the request pertains to.
                 check_part_batch(
                     task_config,
-                    &agg_init_req.batch_param,
+                    &agg_init_req.part_batch_sel,
                     &agg_init_req.agg_param,
                 )?;
 
                 // Run mark_aggregated and handle_agg_init_req concurrently.
-                let early_rejects_future =
-                    self.mark_aggregated(&agg_init_req.task_id, &agg_init_req.report_shares);
+                let early_rejects_future = self.mark_aggregated(
+                    &agg_init_req.task_id,
+                    &agg_init_req.part_batch_sel,
+                    &agg_init_req.report_shares,
+                );
 
                 let transition = task_config
                     .vdaf
@@ -619,6 +627,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                     .get_helper_state(&agg_cont_req.task_id, &agg_cont_req.agg_job_id)
                     .await?
                     .ok_or(DapAbort::UnrecognizedAggregationJob)?;
+                let part_batch_sel = state.part_batch_sel.clone();
                 let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_cont_req)?;
 
                 let agg_resp = match transition {
@@ -626,7 +635,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                         return Err(DapError::fatal("unexpected transition (continued)").into());
                     }
                     DapHelperTransition::Finish(out_shares, agg_resp) => {
-                        self.put_out_shares(&agg_cont_req.task_id, out_shares)
+                        self.put_out_shares(&agg_cont_req.task_id, &part_batch_sel, out_shares)
                             .await?;
                         agg_resp
                     }
@@ -675,20 +684,18 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
-        //
-        // TODO(issue #100) For "fixed_size" we need to check if we recognize the batch ID.
         check_batch(
             self,
             task_config,
             &agg_share_req.task_id,
-            &agg_share_req.batch_selector,
+            &agg_share_req.batch_sel,
             &agg_share_req.agg_param,
             now,
         )
         .await?;
 
         let agg_share = self
-            .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_selector)
+            .get_agg_share(&agg_share_req.task_id, &agg_share_req.batch_sel)
             .await?;
 
         // Check that we have aggreagted the same set of reports as the leader.
@@ -708,13 +715,13 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
         }
 
         // Mark each aggregated report as collected.
-        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_selector)
+        self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_sel)
             .await?;
 
         let encrypted_agg_share = task_config.vdaf.produce_helper_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &agg_share_req.task_id,
-            &agg_share_req.batch_selector,
+            &agg_share_req.batch_sel,
             &agg_share,
         )?;
 
@@ -731,14 +738,12 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
 fn check_part_batch(
     task_config: &DapTaskConfig,
-    batch_param: &BatchParameter,
+    part_batch_sel: &PartialBatchSelector,
     agg_param: &[u8],
 ) -> Result<(), DapAbort> {
-    match (&task_config.query, batch_param) {
-        (DapQueryConfig::TimeInterval { .. }, BatchParameter::TimeInterval)
-        | (DapQueryConfig::FixedSize { .. }, BatchParameter::FixedSize { .. }) => (),
-        _ => return Err(DapAbort::QueryMismatch),
-    };
+    if !task_config.query.is_valid_part_batch_sel(part_batch_sel) {
+        return Err(DapAbort::QueryMismatch);
+    }
 
     // Check that the aggreation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
@@ -792,7 +797,17 @@ async fn check_batch<'a, S>(
                 ));
             }
         }
-        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSize { .. }) => (),
+        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSize { batch_id }) => {
+            // TODO(cjpatton) The Helper can avoid this callback by first fetching the aggregate
+            // share and aborting with "batchInvalid" if the report count is 0. Depending on how we
+            // resolve https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/issues/342, this check may
+            // become unnecessary for the Leader.
+            //
+            // Consider removing this callback once we resolve DAP issue #342.
+            if !agg.batch_exists(task_id, batch_id).await? {
+                return Err(DapAbort::BatchInvalid);
+            }
+        }
         _ => return Err(DapAbort::QueryMismatch),
     };
 

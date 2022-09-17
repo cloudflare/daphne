@@ -8,7 +8,7 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        BatchParameter, BatchSelector, HpkeCiphertext, HpkeConfig, Id, Nonce, Report,
+        BatchSelector, HpkeCiphertext, HpkeConfig, Id, Nonce, PartialBatchSelector, Report,
         ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
     vdaf::{
@@ -150,7 +150,6 @@ impl VdafConfig {
             extensions: Vec::new(),
         };
 
-        // TODO(issue #100) Set this to the output of `shard()`.
         let public_share = Vec::new();
         let encoded_input_shares = match self {
             Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
@@ -291,6 +290,7 @@ impl VdafConfig {
         verify_key: &VdafVerifyKey,
         task_id: &Id,
         agg_job_id: &Id,
+        part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
     ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
@@ -361,7 +361,7 @@ impl VdafConfig {
                 task_id: task_id.clone(),
                 agg_job_id: agg_job_id.clone(),
                 agg_param: Vec::default(),
-                batch_param: BatchParameter::TimeInterval, // TODO(issue #100)
+                part_batch_sel: part_batch_sel.clone(),
                 report_shares: seq,
             },
         ))
@@ -443,7 +443,10 @@ impl VdafConfig {
         }
 
         Ok(DapHelperTransition::Continue(
-            DapHelperState { seq: states },
+            DapHelperState {
+                part_batch_sel: agg_init_req.part_batch_sel.clone(),
+                seq: states,
+            },
             AggregateResp { transitions },
         ))
     }
@@ -711,10 +714,10 @@ impl VdafConfig {
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(true, hpke_config, task_id, batch_selector, agg_share)
+        produce_encrypted_agg_share(true, hpke_config, task_id, batch_sel, agg_share)
     }
 
     /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
@@ -723,10 +726,10 @@ impl VdafConfig {
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(false, hpke_config, task_id, batch_selector, agg_share)
+        produce_encrypted_agg_share(false, hpke_config, task_id, batch_sel, agg_share)
     }
 
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -748,7 +751,7 @@ impl VdafConfig {
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         task_id: &Id,
-        batch_selector: &BatchSelector,
+        batch_sel: &BatchSelector,
         report_count: u64,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
     ) -> Result<DapAggregateResult, DapError> {
@@ -759,7 +762,7 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad);
-        batch_selector.encode(&mut aad);
+        batch_sel.encode(&mut aad);
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
@@ -797,7 +800,7 @@ fn produce_encrypted_agg_share(
     is_leader: bool,
     hpke_config: &HpkeConfig,
     task_id: &Id,
-    batch_selector: &BatchSelector,
+    batch_sel: &BatchSelector,
     agg_share: &DapAggregateShare,
 ) -> Result<HpkeCiphertext, DapAbort> {
     let agg_share_data = agg_share
@@ -819,7 +822,7 @@ fn produce_encrypted_agg_share(
     // TODO spec: Consider adding agg param to AAD.
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad);
-    batch_selector.encode(&mut aad);
+    batch_sel.encode(&mut aad);
 
     let (enc, payload) = hpke_config
         .encrypt(&info, &aad, &agg_share_data)

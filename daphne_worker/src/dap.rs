@@ -43,8 +43,8 @@ use daphne::{
     constants,
     hpke::HpkeDecrypter,
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Nonce, Report, ReportShare,
-        TransitionFailure,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Nonce, PartialBatchSelector,
+        Report, ReportShare, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapOutputShare,
@@ -254,7 +254,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         batch_selector: &BatchSelector,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let batch_interval = batch_selector.unwrap_interval();
+        let batch_interval = batch_selector.unwrap_interval(); // TODO(issue #100)
 
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
@@ -290,19 +290,28 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         Ok(false)
     }
 
+    async fn batch_exists(
+        &self,
+        _task_id: &Id,
+        _batch_id: &Id,
+    ) -> std::result::Result<bool, DapError> {
+        panic!("TODO(issue #100)");
+    }
+
     async fn put_out_shares(
         &self,
         task_id: &Id,
+        _part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-
-        let agg_shares =
-            DapAggregateShare::batches_from_out_shares(out_shares, task_config.time_precision)?;
+        let part_batch_sel = PartialBatchSelector::TimeInterval; // TODO(issue #100)
+        let agg_shares = task_config.batch_span_for_out_shares(&part_batch_sel, out_shares)?;
 
         let durable = self.durable();
         let mut requests = Vec::new();
-        for (window, agg_share) in agg_shares.into_iter() {
+        for (bucket, agg_share) in agg_shares.into_iter() {
+            let window = bucket.unwrap_window(); // TODO(issue #100)
             let durable_name =
                 durable_agg_store_name(&task_config.version, &task_id.to_hex(), window);
             requests.push(durable.post::<_, ()>(
@@ -322,7 +331,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         batch_selector: &BatchSelector,
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let batch_interval = batch_selector.unwrap_interval();
+        let batch_interval = batch_selector.unwrap_interval(); // TODO(issue #100)
 
         let durable = self.durable();
         let mut requests = Vec::new();
@@ -358,7 +367,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         batch_selector: &BatchSelector,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
-        let batch_interval = batch_selector.unwrap_interval();
+        let batch_interval = batch_selector.unwrap_interval(); // TODO(issue #100)
 
         // Mark reports collected.
         let durable = self.durable();
@@ -427,7 +436,7 @@ impl<'a, D> DapLeader<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn get_reports(
         &self,
         selector: &InternalAggregateInfo,
-    ) -> std::result::Result<HashMap<Id, Vec<Report>>, DapError> {
+    ) -> std::result::Result<HashMap<Id, (PartialBatchSelector, Vec<Report>)>, DapError> {
         // Read at most `selector.max_buckets` buckets from the agg job queue. The result is ordered
         // from oldest to newest.
         //
@@ -447,7 +456,7 @@ impl<'a, D> DapLeader<'a, BearerToken> for DaphneWorkerConfig<D> {
         // Drain at most `selector.max_reports` from each bucket.
         //
         // TODO Figure out if we can safely handle each bucket in parallel.
-        let mut reports_per_task: HashMap<Id, Vec<Report>> = HashMap::new();
+        let mut reports_per_task: HashMap<Id, (PartialBatchSelector, Vec<Report>)> = HashMap::new();
         for report_store_id_hex in res.into_iter() {
             let reports_from_durable: Vec<String> = self
                 .durable()
@@ -466,15 +475,16 @@ impl<'a, D> DapLeader<'a, BearerToken> for DaphneWorkerConfig<D> {
                         DapError::fatal("response from ReportStore is not valid hex")
                     })?)?;
 
-                if let Some(reports) = reports_per_task.get_mut(&report.task_id) {
+                if let Some((_par_batch_sel, reports)) = reports_per_task.get_mut(&report.task_id) {
                     reports.push(report);
                 } else {
-                    reports_per_task.insert(report.task_id.clone(), vec![report]);
+                    let par_batch_sel = PartialBatchSelector::TimeInterval; // TODO(issue #100)
+                    reports_per_task.insert(report.task_id.clone(), (par_batch_sel, vec![report]));
                 }
             }
         }
 
-        for (task_id, reports) in reports_per_task.iter() {
+        for (task_id, (_par_batch_sel, reports)) in reports_per_task.iter() {
             console_debug!(
                 "got {} reports for task {}",
                 reports.len(),
@@ -659,6 +669,7 @@ impl<'a, D> DapHelper<'a, BearerToken> for DaphneWorkerConfig<D> {
     async fn mark_aggregated(
         &self,
         task_id: &Id,
+        _part_batch_sel: &PartialBatchSelector,
         report_shares: &[ReportShare],
     ) -> std::result::Result<HashMap<Nonce, TransitionFailure>, DapError> {
         let task_config = self.try_get_task_config_for(task_id)?;
