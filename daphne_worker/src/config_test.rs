@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::config::DaphneWorkerConfig;
-use daphne::messages::{Id, Interval, Nonce, ReportMetadata};
+use daphne::messages::{Id, Nonce, ReportMetadata};
 
 pub const GLOBAL_CONFIG: &str = r#"{
+    "report_storage_epoch_duration": 604800,
     "max_batch_duration": 360000,
     "min_batch_interval_start": 259200,
     "max_batch_interval_end": 259200,
@@ -68,7 +69,7 @@ const DAP_TASK_LIST: &str = r#"{
 const DAP_BUCKET_KEY: &str = "773a0e77ffcfa580c11ad031c35cad02";
 
 #[test]
-fn daphne_param() {
+fn parse_static_config() {
     let now = 1637364244;
     let bucket_count = 5;
     let config: DaphneWorkerConfig<String> = DaphneWorkerConfig::from_test_config(
@@ -89,33 +90,9 @@ fn daphne_param() {
         nonce: Nonce([1; 16]),
         extensions: Vec::new(),
     };
+    let durable_name = config.durable_name_report_store(&task_config, &task_id.to_hex(), &metadata);
     assert_eq!(
-        config.durable_report_store_name(&task_config, &task_id, &metadata),
-        "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1"
-    );
-
-    // Try enumerating a sequence of batch names.
-    let interval = Interval {
-        start: now - (now % 3600),
-        duration: 2 * 3600,
-    };
-    let batch_names: Vec<String> = config
-        .iter_report_store_names(&task_config.version, &task_id, &interval)
-        .unwrap()
-        .collect();
-    assert_eq!(
-        batch_names,
-        vec![
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/0",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/0",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/1",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/1",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/2",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/2",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/3",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/3",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637362800/bucket/4",
-            "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/window/1637366400/bucket/4",
-        ]
+        durable_name,
+        "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/epoch/00000000001637193600/shard/1"
     );
 }

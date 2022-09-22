@@ -27,12 +27,12 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 
 /// Durable Object (DO) for storing the Helper's state for a given aggregation job.
 ///
-/// An instance of the [`LeaderStateStore`] DO is named
+/// This object implements the following API endpoints:
 ///
-/// > <version>/task/<task_id>/agg_job/<agg_job_id>
+/// - `DURABLE_HELPER_STATE_PUT`: Stores Helper's hex-encoded state.
+/// - `DURABLE_HELPER_STATE_GET`: Drains the Helper's hex-encoded state.
 ///
-/// where `<version>` is the DAP version, `<task_id>` is the task ID and `<agg_job_id>` is the
-/// aggregation job ID.
+/// The state blob is stored in `helper_state`.
 #[durable_object]
 pub struct HelperStateStore {
     state: State,
@@ -69,23 +69,29 @@ impl DurableObject for HelperStateStore {
         }
 
         match (req.path().as_ref(), req.method()) {
+            // Store the Helper's state.
+            //
+            // Input: `helper_state_hex: String` (hex-encoded state)
             (DURABLE_HELPER_STATE_PUT, Method::Post) => {
                 // The state is handled as an opaque hex string.
-                let mut helper_state: Option<String> =
+                let mut helper_state_hex: Option<String> =
                     state_get(&self.state, "helper_state").await?;
-                if helper_state.is_some() {
+                if helper_state_hex.is_some() {
                     // TODO spec: Handle this as an abort rather than an internal error.
                     return Err(int_err("tried to overwrite helper state"));
                 }
 
-                helper_state = req.json().await?;
+                helper_state_hex = req.json().await?;
                 self.state
                     .storage()
-                    .put("helper_state", helper_state)
+                    .put("helper_state", helper_state_hex)
                     .await?;
                 Response::from_json(&())
             }
 
+            // Drain the Helper's state.
+            //
+            // Output: `String` (hex-encoded state)
             (DURABLE_HELPER_STATE_GET, Method::Post) => {
                 let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;
                 if helper_state.is_some() {

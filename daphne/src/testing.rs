@@ -8,7 +8,7 @@ use crate::{
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Nonce,
-        PartialBatchSelector, Report, ReportMetadata, ReportShare, Time, TransitionFailure,
+        PartialBatchSelector, Report, ReportMetadata, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
@@ -375,6 +375,38 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         Ok(agg_share)
     }
 
+    async fn check_early_reject<'b>(
+        &self,
+        task_id: &Id,
+        part_batch_sel: &'b PartialBatchSelector,
+        report_meta: impl Iterator<Item = &'b ReportMetadata>,
+    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
+        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
+        let span = task_config.batch_span_for_meta(part_batch_sel, report_meta)?;
+        let mut early_fails = HashMap::new();
+        for (bucket, report_meta) in span.iter() {
+            for metadata in report_meta.iter() {
+                // Check whether Report has been collected or replayed.
+                if let Some(transition_failure) = self
+                    .check_report_early_fail(task_id, &bucket.to_owned_bucket(), metadata)
+                    .await
+                {
+                    early_fails.insert(metadata.nonce.clone(), transition_failure);
+                };
+
+                // Mark report processed.
+                let mut guard = self
+                    .report_store
+                    .lock()
+                    .expect("report_store: failed to lock");
+                let report_store = guard.entry(task_id.clone()).or_default();
+                report_store.processed.insert(metadata.nonce.clone());
+            }
+        }
+
+        Ok(early_fails)
+    }
+
     async fn mark_collected(
         &self,
         task_id: &Id,
@@ -396,40 +428,6 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
 
 #[async_trait(?Send)]
 impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
-    async fn mark_aggregated(
-        &self,
-        task_id: &Id,
-        part_batch_sel: &PartialBatchSelector,
-        report_shares: &[ReportShare],
-    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
-        let mut early_fails = HashMap::new();
-        for report_share in report_shares.iter() {
-            let bucket =
-                task_config.batch_bucket_for_meta(&report_share.metadata, part_batch_sel)?;
-
-            // Check whether Report has been collected or replayed.
-            if let Some(transition_failure) = self
-                .check_report_early_fail(task_id, &bucket.to_owned_bucket(), &report_share.metadata)
-                .await
-            {
-                early_fails.insert(report_share.metadata.nonce.clone(), transition_failure);
-            };
-
-            // Mark report processed.
-            let mut guard = self
-                .report_store
-                .lock()
-                .expect("report_store: failed to lock");
-            let report_store = guard.entry(task_id.clone()).or_default();
-            report_store
-                .processed
-                .insert(report_share.metadata.nonce.clone());
-        }
-
-        Ok(early_fails)
-    }
-
     async fn put_helper_state(
         &self,
         task_id: &Id,
@@ -525,7 +523,7 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
     async fn get_reports(
         &self,
         report_sel: &MockAggregatorReportSelector,
-    ) -> Result<HashMap<Id, (PartialBatchSelector, Vec<Report>)>, DapError> {
+    ) -> Result<HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>>, DapError> {
         let mut guard = self
             .report_store
             .lock()
@@ -547,7 +545,7 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
                 }
                 return Ok(HashMap::from([(
                     task_id.clone(),
-                    (PartialBatchSelector::TimeInterval, reports),
+                    HashMap::from([(PartialBatchSelector::TimeInterval, reports)]),
                 )]));
             }
             DapQueryConfig::FixedSize { .. } => {
@@ -563,7 +561,10 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
                     .get_mut(&bucket)
                     .expect("report_store: unknown bucket");
                 let reports = queue.drain(..1).collect();
-                return Ok(HashMap::from([(task_id.clone(), (bucket.into(), reports))]));
+                return Ok(HashMap::from([(
+                    task_id.clone(),
+                    HashMap::from([(bucket.into(), reports)]),
+                )]));
             }
         }
     }

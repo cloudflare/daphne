@@ -20,12 +20,14 @@ type  = "CompiledWasm"
 
 [durable_objects]
 bindings = [
-  { name = "DAP_REPORT_STORE", class_name = "ReportStore" },
   { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
   { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
+  { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
   { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
   { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
   { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+  { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
+  { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
 [[kv_namespaces]]

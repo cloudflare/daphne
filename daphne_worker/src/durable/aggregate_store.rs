@@ -5,43 +5,32 @@ use crate::{
     durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     int_err,
 };
-use daphne::{DapAggregateShare, DapVersion};
-use serde::{Deserialize, Serialize};
+use daphne::DapAggregateShare;
 use worker::*;
-
-pub(crate) fn durable_agg_store_name(
-    version: &DapVersion,
-    task_id_hex: &str,
-    window: u64,
-) -> String {
-    format!(
-        "{}/task/{}/window/{}",
-        version.as_ref(),
-        task_id_hex,
-        window
-    )
-}
 
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
 pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
     "/internal/do/aggregate_store/mark_collected";
+pub(crate) const DURABLE_AGGREGATE_STORE_CHECK_COLLECTED: &str =
+    "/internal/do/aggregate_store/check_collected";
 
-#[derive(Deserialize, Serialize)]
-pub(crate) enum AggregateStoreResult {
-    Ok(DapAggregateShare),
-    ErrBatchOverlap,
-}
-
-/// Durable Object (DO) for storing aggregate shares.
+/// Durable Object (DO) for storing aggregate shares for a bucket of reports.
 ///
-/// The naming conventions for instances of the [`AggregateStore`] DO is as follows:
+/// This object defines the following API endpoints:
 ///
-/// > <version>/task/<task_id>/window/<window>
+/// - `DURABLE_AGGREGATE_STORE_GET`: Return the current value of the aggregate share.
+/// - `DURABLE_AGGREGATE_STORE_MERGE`: Update the aggregate share.
+/// - `DURABLE_AGGREGATE_STORE_MARK_COLLECTED`: Mark the bucket as having been collected.
+/// - `DURABLE_AGGREGATE_STORE_CHECK_COLLECTED`: Return a boolean indicating if the bucket has been
+///   collected.
 ///
-/// where <version> is the DAP version (e.g., "v01"), `<task_id>` is a task ID, `<window>` is a
-/// batch window. A batch window is a UNIX timestamp (in seconds) truncated by the minimum batch
-/// duration.
+/// The schema for the data stored by this DO is as follows:
+///
+/// ```text
+/// [Aggregate share] agg_share -> DapAggregateShare
+/// [Collected flag]  collected -> bool
+/// ```
 #[durable_object]
 pub struct AggregateStore {
     #[allow(dead_code)]
@@ -65,6 +54,9 @@ impl DurableObject for AggregateStore {
         ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_AGGREGATE_STORE);
 
         match (req.path().as_ref(), req.method()) {
+            // Merge an aggregate share into the stored aggregate.
+            //
+            // Input: `agg_share_dellta: DapAggregateShare`
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
                 let agg_share_delta = req.json().await?;
 
@@ -80,22 +72,27 @@ impl DurableObject for AggregateStore {
                 Response::from_json(&())
             }
 
+            // Get the current aggregate share.
+            //
+            // Output: `DapAggregateShare`
             (DURABLE_AGGREGATE_STORE_GET, Method::Get) => {
-                // NOTE: The following logic is correct for `max_batch_lifetime = 1`, but
-                // requires changes when we allow batch lifetime longer than 1.
                 let agg_share: DapAggregateShare =
                     state_get_or_default(&self.state, "agg_share").await?;
-                let collected: bool = state_get_or_default(&self.state, "collected").await?;
-                if !collected {
-                    Response::from_json(&AggregateStoreResult::Ok(agg_share))
-                } else {
-                    Response::from_json(&AggregateStoreResult::ErrBatchOverlap)
-                }
+                Response::from_json(&agg_share)
             }
 
+            // Mark this bucket as collected.
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
                 self.state.storage().put("collected", true).await?;
                 Response::from_json(&())
+            }
+
+            // Get the value of the flag indicating whether this bucket has been collected
+            //
+            // Output: `bool`
+            (DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, Method::Get) => {
+                let collected: bool = state_get_or_default(&self.state, "collected").await?;
+                Response::from_json(&collected)
             }
 
             _ => Err(int_err(format!(

@@ -8,7 +8,9 @@
 use crate::{
     dap_err,
     durable::{
-        report_store::durable_report_store_name, DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR,
+        durable_name_report_store, durable_name_task,
+        leader_batch_queue::{LeaderBatchQueueResult, DURABLE_LEADER_BATCH_QUEUE_CURRENT},
+        DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
     int_err,
@@ -17,8 +19,8 @@ use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{HpkeConfig, Id, Interval, ReportMetadata},
-    DapError, DapGlobalConfig, DapRequest, DapTaskConfig, DapVersion,
+    messages::{HpkeConfig, Id, ReportMetadata},
+    DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
 };
 use matchit::Router;
 use prio::{
@@ -58,9 +60,12 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
     pub(crate) deployment: DaphneWorkerDeployment,
 
-    // TODO(issue#12) Make `bucket_key` and `bucket_count` unique per task.
-    bucket_key: Seed<16>,
-    bucket_count: u64,
+    /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
+    /// to (based on the report ID).
+    report_shard_key: Seed<16>,
+
+    /// Shard count, the number of report storage shards. This should be a power of 2.
+    report_shard_count: u64,
 }
 
 impl<D> DaphneWorkerConfig<D> {
@@ -75,18 +80,18 @@ impl<D> DaphneWorkerConfig<D> {
             serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
                 .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
 
-        let bucket_key = Seed::get_decoded(
-            &hex::decode(ctx.secret("DAP_BUCKET_KEY")?.to_string()).map_err(int_err)?,
+        let report_shard_key = Seed::get_decoded(
+            &hex::decode(ctx.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
         )
         .map_err(int_err)?;
 
-        let bucket_count: u64 =
-            ctx.var("DAP_BUCKET_COUNT")?
-                .to_string()
-                .parse()
-                .map_err(|err| {
-                    Error::RustError(format!("Failed to parse DAP_BUCKET_COUNT: {}", err))
-                })?;
+        let report_shard_count: u64 = ctx
+            .var("DAP_REPORT_SHARD_COUNT")?
+            .to_string()
+            .parse()
+            .map_err(|err| {
+                Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {}", err))
+            })?;
 
         let leader_bearer_tokens: HashMap<Id, BearerToken> = serde_json::from_str(
             ctx.secret("DAP_LEADER_BEARER_TOKEN_LIST")?
@@ -163,8 +168,8 @@ impl<D> DaphneWorkerConfig<D> {
             leader_bearer_tokens,
             collector_bearer_tokens,
             deployment,
-            bucket_key,
-            bucket_count,
+            report_shard_key,
+            report_shard_count,
         })
     }
 
@@ -175,11 +180,12 @@ impl<D> DaphneWorkerConfig<D> {
     pub(crate) fn from_test_config(
         json_global_config: &str,
         json_task_list: &str,
-        json_bucket_key: &str,
-        bucket_count: u64,
+        json_report_shard_key: &str,
+        report_shard_count: u64,
     ) -> Result<Self> {
-        let bucket_key =
-            Seed::get_decoded(&hex::decode(json_bucket_key).map_err(int_err)?).map_err(int_err)?;
+        let report_shard_key =
+            Seed::get_decoded(&hex::decode(json_report_shard_key).map_err(int_err)?)
+                .map_err(int_err)?;
 
         Ok(DaphneWorkerConfig {
             ctx: None,
@@ -190,65 +196,25 @@ impl<D> DaphneWorkerConfig<D> {
             leader_bearer_tokens: HashMap::default(),
             collector_bearer_tokens: None,
             deployment: DaphneWorkerDeployment::default(),
-            bucket_key,
-            bucket_count,
+            report_shard_key,
+            report_shard_count,
         })
     }
 
     /// Derive the batch name for a report for the given task and with the given nonce.
-    pub(crate) fn durable_report_store_name(
+    pub(crate) fn durable_name_report_store(
         &self,
         task_config: &DapTaskConfig,
-        task_id: &Id,
+        task_id_hex: &str,
         metadata: &ReportMetadata,
     ) -> String {
-        let mut bucket_seed = [0; 8];
-        PrgAes128::seed_stream(&self.bucket_key, metadata.nonce.as_ref()).fill(&mut bucket_seed);
-        let bucket = u64::from_be_bytes(bucket_seed) % self.bucket_count;
-        let time = metadata.time - (metadata.time % task_config.time_precision);
-        durable_report_store_name(&task_config.version, &task_id.to_hex(), time, bucket)
-    }
-
-    /// Enumerate the sequence of batch names for a given task ID and batch interval. This method
-    /// returns an error if the task ID isn't recognized or if the batch interval is invalid, e.g.,
-    /// the start and end times doen't align with the minimum batch duration.
-    pub(crate) fn iter_report_store_names(
-        &self,
-        version: &DapVersion,
-        task_id: &Id,
-        interval: &Interval,
-    ) -> Result<DurableNameIterator> {
-        let task_id_hex = task_id.to_hex();
-
-        let time_step = self
-            .tasks
-            .get(task_id)
-            .ok_or_else(|| Error::RustError(format!("Unrecognized task ID: {}", task_id_hex)))?
-            .time_precision;
-
-        if interval.end() <= interval.start {
-            return Err(Error::RustError(
-                "Invalid batch interval: End time must be strictly later than start time"
-                    .to_string(),
-            ));
-        }
-
-        if interval.start % time_step != 0 || interval.end() % time_step != 0 {
-            return Err(Error::RustError(
-                "Batch interval does not align with time_precision".to_string(),
-            ));
-        }
-
-        Ok(DurableNameIterator {
-            version: *version,
-            task_id_hex,
-            time_start: interval.start,
-            time_mod: interval.end() - interval.start,
-            time_step,
-            time_offset: 0,
-            bucket_count: self.bucket_count,
-            bucket: 0,
-        })
+        let mut shard_seed = [0; 8];
+        PrgAes128::seed_stream(&self.report_shard_key, metadata.nonce.as_ref())
+            .fill(&mut shard_seed);
+        let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
+        let epoch =
+            metadata.time - (metadata.time % self.global_config.report_storage_epoch_duration);
+        durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
     }
 
     pub(crate) fn durable(&self) -> DurableConnector<'_> {
@@ -335,6 +301,37 @@ impl<D> DaphneWorkerConfig<D> {
         Ok(())
     }
 
+    /// Get the batch ID for the oldest batch that has not been collected. This method is only
+    /// appliable to fixed-size tasks.
+    pub(crate) async fn internal_current_batch(
+        &self,
+        task_id: &Id,
+    ) -> std::result::Result<Id, DapError> {
+        let task_config = self.try_get_task_config_for(task_id)?;
+        if !matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+            return Err(DapError::fatal("query type mismatch"));
+        }
+
+        let res: LeaderBatchQueueResult = self
+            .durable()
+            .get(
+                BINDING_DAP_LEADER_BATCH_QUEUE,
+                DURABLE_LEADER_BATCH_QUEUE_CURRENT,
+                durable_name_task(&task_config.version, &task_id.to_hex()),
+            )
+            .await
+            .map_err(dap_err)?;
+
+        match res {
+            LeaderBatchQueueResult::Ok(batch_id) => Ok(batch_id),
+
+            // TODO spec: If we end up taking the current batch semantics of
+            // https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/pull/313, then we'll need to
+            // define an error type for this case.
+            LeaderBatchQueueResult::EmptyQueue => Err(DapError::fatal("empty batch queue")),
+        }
+    }
+
     pub(crate) async fn worker_request_to_dap(
         &self,
         mut req: Request,
@@ -412,36 +409,4 @@ pub(crate) enum DaphneWorkerDeployment {
     /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
     #[default]
     Prod,
-}
-
-/// An iterator over a sequence of batch names for a given batch interval.
-pub(crate) struct DurableNameIterator {
-    version: DapVersion,
-    task_id_hex: String,
-    time_start: u64,
-    time_mod: u64,
-    time_step: u64,
-    time_offset: u64,
-    bucket_count: u64,
-    bucket: u64,
-}
-
-impl Iterator for DurableNameIterator {
-    type Item = String;
-
-    fn next(&mut self) -> Option<String> {
-        if self.bucket == self.bucket_count {
-            return None;
-        }
-
-        let window = self.time_start + self.time_offset;
-        let durable_name =
-            durable_report_store_name(&self.version, &self.task_id_hex, window, self.bucket);
-
-        self.time_offset = (self.time_offset + self.time_step) % self.time_mod;
-        if self.time_offset == 0 {
-            self.bucket += 1;
-        }
-        Some(durable_name)
-    }
 }

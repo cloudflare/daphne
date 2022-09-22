@@ -14,7 +14,7 @@ use daphne::{
     },
     DapAggregateResult, DapMeasurement,
 };
-use daphne_worker::InternalAggregateInfo;
+use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_RECEIVER_CONFIG};
@@ -193,8 +193,8 @@ async fn e2e_internal_leader_process() {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
-    let agg_info = InternalAggregateInfo {
-        max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: t.query_config.min_batch_size(),
     };
 
@@ -202,7 +202,7 @@ async fn e2e_internal_leader_process() {
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
-    for _ in 0..agg_info.max_reports + 3 {
+    for _ in 0..report_sel.max_reports + 3 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -216,21 +216,21 @@ async fn e2e_internal_leader_process() {
         .await;
     }
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
         agg_telem.reports_processed,
-        agg_info.max_reports + 3,
+        report_sel.max_reports + 3,
         "reports processed"
     );
     assert_eq!(
         agg_telem.reports_aggregated,
-        agg_info.max_reports + 3,
+        report_sel.max_reports + 3,
         "reports aggregated"
     );
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
     // There should be nothing left to aggregate.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
     assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
@@ -262,18 +262,18 @@ async fn e2e_leader_process_min_agg_rate() {
     }
 
     // One bucket and one report/bucket equal an aggregation rate of one report.
-    let agg_info = InternalAggregateInfo {
-        max_buckets: 1,
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 1,
         max_reports: 1,
     };
 
     for i in 0..7 {
         // Each round should process exactly one report.
-        let agg_telem = t.internal_process(&client, &agg_info).await;
+        let agg_telem = t.internal_process(&client, &report_sel).await;
         assert_eq!(agg_telem.reports_processed, 1, "round {} is empty", i);
     }
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
 }
 
@@ -315,7 +315,7 @@ async fn e2e_leader_collect_ok() {
         .await;
     println!("collect_uri: {}", collect_uri);
 
-    // Poll the collect URI before the ColleectResp is ready.
+    // Poll the collect URI before the CollectResp is ready.
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 202, "response: {:?}", resp);
 
@@ -323,8 +323,8 @@ async fn e2e_leader_collect_ok() {
     let agg_telem = t
         .internal_process(
             &client,
-            &InternalAggregateInfo {
-                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+            &DaphneWorkerReportSelector {
+                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
         )
@@ -376,21 +376,25 @@ async fn e2e_leader_collect_ok() {
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
 
-    // Check that leader properly rejects late arriving reports.
-    let now = rng.gen_range(batch_interval.start..batch_interval.end());
-    t.leader_post_expect_abort(
-        &client,
-        None, // dap_auth_token
-        "upload",
-        constants::MEDIA_TYPE_REPORT,
-        t.vdaf
-            .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
-            .unwrap()
-            .get_encoded(),
-        400,
-        "staleReport",
-    )
-    .await;
+    // NOTE Our Leader doesn't check if a report is stale until it is ready to process it. As such,
+    // It won't tell the Client at this point that its report is stale. Delaying this check allows
+    // to avoid sharding ReportsProcessed by batch bucket, which is not feasilbe for fixed-size
+    // tasks.
+    //
+    //  let now = rng.gen_range(batch_interval.start..batch_interval.end());
+    //  t.leader_post_expect_abort(
+    //      &client,
+    //      None, // dap_auth_token
+    //      "upload",
+    //      constants::MEDIA_TYPE_REPORT,
+    //      t.vdaf
+    //          .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
+    //          .unwrap()
+    //          .get_encoded(),
+    //      400,
+    //      "staleReport",
+    //  )
+    //  .await;
 }
 
 // Test that collect jobs complete even if the request is issued after all reports for the task
@@ -419,13 +423,13 @@ async fn e2e_leader_collect_ok_interleaved() {
         .await;
     }
 
-    let agg_info = InternalAggregateInfo {
-        max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: 100,
     };
 
     // All reports for the task get processed ...
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
         agg_telem.reports_processed,
         t.query_config.min_batch_size(),
@@ -445,7 +449,7 @@ async fn e2e_leader_collect_ok_interleaved() {
         .await;
 
     // ... then the collect job gets completed.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
         agg_telem.reports_collected,
         t.query_config.min_batch_size(),
@@ -494,8 +498,8 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
     let agg_telem = t
         .internal_process(
             &client,
-            &InternalAggregateInfo {
-                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+            &DaphneWorkerReportSelector {
+                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
         )
@@ -510,7 +514,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
     );
     assert_eq!(agg_telem.reports_collected, 0);
 
-    // Poll the collect URI before the ColleectResp is ready.
+    // Poll the collect URI before the CollectResp is ready.
     let resp = client.get(collect_uri).send().await.unwrap();
     assert_eq!(resp.status(), 202);
 }
@@ -649,8 +653,8 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
     let agg_telem = t
         .internal_process(
             &client,
-            &InternalAggregateInfo {
-                max_buckets: 100, // Needs to be sufficiently large to touch each bucket.
+            &DaphneWorkerReportSelector {
+                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
         )
@@ -692,6 +696,156 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         "collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
+        400,
+        "batchOverlap",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_fixed_size() {
+    let t = TestRunner::fixed_size().await;
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
+        max_reports: 100,
+    };
+
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+
+    // Clients: Upload reports.
+    for _ in 0..t.query_config.min_batch_size() {
+        t.leader_post_expect_ok(
+            &client,
+            "upload",
+            constants::MEDIA_TYPE_REPORT,
+            t.vdaf
+                .produce_report(&hpke_config_list, t.now, &t.task_id, DapMeasurement::U64(1))
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    // ... Aggregators run processing loop.
+    let agg_telem = t.internal_process(&client, &report_sel).await;
+    assert_eq!(
+        agg_telem.reports_processed,
+        t.query_config.min_batch_size(),
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated,
+        t.query_config.min_batch_size(),
+        "reports aggregated"
+    );
+    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
+
+    // Get the oldest, not-yet-collected batch ID.
+    //
+    // TODO spec: Decide whether to formalize this (cf.
+    // https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/pull/313).
+    let batch_id = t.internal_current_batch(&t.task_id).await;
+
+    // Collector: Get the collect URI.
+    let collect_req = CollectReq {
+        task_id: t.task_id.clone(),
+        query: Query::FixedSize {
+            batch_id: batch_id.clone(),
+        },
+        agg_param: Vec::new(),
+    };
+    let collect_uri = t
+        .leader_post_collect(&client, collect_req.get_encoded())
+        .await;
+    println!("collect_uri: {}", collect_uri);
+
+    // Collector: Poll the collect URI before the CollectResp is ready.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 202, "response: {:?}", resp);
+
+    // ... Aggregators run processing loop.
+    let agg_telem = t.internal_process(&client, &report_sel).await;
+    assert_eq!(agg_telem.reports_processed, 0, "reports processed");
+    assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
+    assert_eq!(
+        agg_telem.reports_collected,
+        t.query_config.min_batch_size(),
+        "reports collected"
+    );
+
+    // Collector: Poll the collect URI.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let decrypter: HpkeReceiverConfig =
+        serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
+    let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+    let agg_res = t
+        .vdaf
+        .consume_encrypted_agg_shares(
+            &decrypter,
+            &t.task_id,
+            &BatchSelector::FixedSize {
+                batch_id: batch_id.clone(),
+            },
+            collect_resp.report_count,
+            collect_resp.encrypted_agg_shares.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        agg_res,
+        DapAggregateResult::U128(t.query_config.min_batch_size() as u128)
+    );
+
+    // Collector: Poll the collect URI once more. Expect the response to be the same as the first,
+    // per HTTP GET semantics.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
+
+    // Clients: Upload reports.
+    for _ in 0..2 {
+        t.leader_post_expect_ok(
+            &client,
+            "upload",
+            constants::MEDIA_TYPE_REPORT,
+            t.vdaf
+                .produce_report(&hpke_config_list, t.now, &t.task_id, DapMeasurement::U64(1))
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    // ... Aggregators run processing loop.
+    let agg_telem = t.internal_process(&client, &report_sel).await;
+    assert_eq!(agg_telem.reports_processed, 2, "reports processed");
+    assert_eq!(agg_telem.reports_aggregated, 2, "reports aggregated");
+    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
+
+    // Get the oldest, not-yet-collected batch ID. This should be different than the one we got
+    // before, since that batch was collected.
+    let prev_batch_id = batch_id;
+    let batch_id = t.internal_current_batch(&t.task_id).await;
+    assert_ne!(batch_id, prev_batch_id);
+
+    // Collector: Try CollectReq with out-dated batch ID.
+    t.leader_post_expect_abort(
+        &client,
+        Some(COLLECTOR_BEARER_TOKEN),
+        "collect",
+        constants::MEDIA_TYPE_COLLECT_REQ,
+        CollectReq {
+            task_id: t.task_id.clone(),
+            query: Query::FixedSize {
+                batch_id: prev_batch_id.clone(),
+            },
+            agg_param: Vec::new(),
+        }
+        .get_encoded(),
         400,
         "batchOverlap",
     )
