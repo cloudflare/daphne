@@ -36,7 +36,9 @@ macro_rules! get_reports {
     ($leader:expr, $selector:expr) => {{
         let reports_per_task = $leader.get_reports($selector).await.unwrap();
         assert_eq!(reports_per_task.len(), 1);
-        let (task_id, (part_batch_sel, reports)) = reports_per_task.into_iter().next().unwrap();
+        let (task_id, reports_per_part_batch_sel) = reports_per_task.into_iter().next().unwrap();
+        assert_eq!(reports_per_part_batch_sel.len(), 1);
+        let (part_batch_sel, reports) = reports_per_part_batch_sel.into_iter().next().unwrap();
         (task_id, part_batch_sel, reports)
     }};
 }
@@ -61,6 +63,7 @@ impl Test {
         // Global config. In a real deployment, the Leader and Helper may make different choices
         // here.
         let global_config = DapGlobalConfig {
+            report_storage_epoch_duration: 604800, // one week
             max_batch_duration: 360000,
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
@@ -180,7 +183,9 @@ impl Test {
         let task_config = self.leader.tasks.get(task_id).unwrap();
         let part_batch_sel = match task_config.query {
             DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
-            _ => panic!("TODO(issue #100)"),
+            DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSize {
+                batch_id: Id(rng.gen()),
+            },
         };
 
         self.leader_authorized_req(

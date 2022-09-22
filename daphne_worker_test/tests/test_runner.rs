@@ -10,7 +10,7 @@ use daphne::{
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     VdafConfig,
 };
-use daphne_worker::InternalAggregateInfo;
+use daphne_worker::DaphneWorkerReportSelector;
 use futures::channel::oneshot::Sender;
 use janus_prio::codec::Decode as JanusPrioDecode;
 use prio::codec::{Decode, Encode};
@@ -26,10 +26,11 @@ use url::Url;
 const JANUS_HELPER_PORT: u16 = 9788;
 
 const DEFAULT_TASK: &str = "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f";
-
+const FIXED_SIZE_TASK: &str = "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378";
 const JANUS_HELPER_TASK: &str = "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f";
 
 pub const GLOBAL_CONFIG: &str = r#"{
+    "report_storage_epoch_duration": 604800,
     "max_batch_duration": 360000,
     "min_batch_interval_start": 259200,
     "max_batch_interval_end": 259200,
@@ -94,6 +95,33 @@ const LEADER_TASK_LIST: &str = r#"{
             }
         },
         "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
+    },
+    "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://helper:8788/v01/",
+        "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
+        "time_precision": 3600,
+        "query": {
+            "fixed_size": {
+                "min_batch_size": 10,
+                "max_batch_size": 12
+            }
+        },
+        "vdaf": {
+            "prio3": {
+                "sum": {
+                    "bits": 10
+                }
+            }
+        },
+        "vdaf_verify_key": "d4c0fd634e80005dc514eb4c9538fbf7"
     }
 }"#;
 
@@ -129,6 +157,33 @@ const HELPER_TASK_LIST: &str = r#"{
             }
         },
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
+    },
+    "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
+        "version": "v01",
+        "leader_url": "http://leader:8787/v01/",
+        "helper_url": "http://helper:8788/v01/",
+        "collector_hpke_config": {
+            "id": 23,
+            "kem_id": "X25519HkdfSha256",
+            "kdf_id": "HkdfSha256",
+            "aead_id": "Aes128Gcm",
+            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
+        },
+        "time_precision": 3600,
+        "query": {
+            "fixed_size": {
+                "min_batch_size": 10,
+                "max_batch_size": 12
+            }
+        },
+        "vdaf": {
+            "prio3": {
+                "sum": {
+                    "bits": 10
+                }
+            }
+        },
+        "vdaf_verify_key": "d4c0fd634e80005dc514eb4c9538fbf7"
     }
 }"#;
 
@@ -200,6 +255,18 @@ impl TestRunner {
         let t = Self::with(
             GLOBAL_CONFIG,
             DEFAULT_TASK,
+            LEADER_TASK_LIST,
+            HELPER_TASK_LIST,
+        )
+        .await;
+        t.internal_delete_all(&t.batch_interval()).await;
+        t
+    }
+
+    pub async fn fixed_size() -> Self {
+        let t = Self::with(
+            GLOBAL_CONFIG,
+            FIXED_SIZE_TASK,
             LEADER_TASK_LIST,
             HELPER_TASK_LIST,
         )
@@ -402,7 +469,12 @@ impl TestRunner {
             .await
             .expect("request failed");
 
-        assert_eq!(resp.status(), 303);
+        assert_eq!(
+            resp.status(),
+            303,
+            "request failed: {:?}",
+            resp.text().await.unwrap()
+        );
         let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
         collect_uri.parse().unwrap()
     }
@@ -411,7 +483,7 @@ impl TestRunner {
     pub async fn internal_process(
         &self,
         client: &reqwest::Client,
-        agg_info: &InternalAggregateInfo,
+        report_sel: &DaphneWorkerReportSelector,
     ) -> DapLeaderProcessTelemetry {
         // Replace path "/v01" with "/internal/process".
         let mut url = self.leader_url.clone();
@@ -419,7 +491,7 @@ impl TestRunner {
 
         let resp = client
             .post(url.as_str())
-            .body(serde_json::to_string(&agg_info).unwrap())
+            .body(serde_json::to_string(&report_sel).unwrap())
             .send()
             .await
             .expect("request failed");
@@ -437,6 +509,32 @@ impl TestRunner {
         let client = self.http_client();
         post_internal_delete_all(&client, &self.leader_url, batch_interval).await;
         post_internal_delete_all(&client, &self.helper_url, batch_interval).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn internal_current_batch(&self, task_id: &Id) -> Id {
+        let client = self.http_client();
+        let mut url = self.leader_url.clone();
+        url.set_path(&format!(
+            "internal/current_batch/task/{}",
+            task_id.to_base64url()
+        ));
+        let resp = client
+            .get(url.clone())
+            .send()
+            .await
+            .expect("request failed");
+        if resp.status() == 200 {
+            let batch_id_base64url = resp.text().await.unwrap();
+            let batch_id = Id::get_decoded(
+                &base64::decode_config(&batch_id_base64url, base64::URL_SAFE_NO_PAD)
+                    .expect("Failed to parse URL-safe base64 batch ID"),
+            )
+            .expect("Failed to parse batch ID");
+            batch_id
+        } else {
+            panic!("request to {} failed: response: {:?}", url, resp);
+        }
     }
 }
 

@@ -1,8 +1,11 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{durable, int_err, now};
-use rand::prelude::*;
+use crate::{
+    durable,
+    durable::{DurableConnector, DurableOrdered, DurableReference},
+    int_err,
+};
 use worker::*;
 
 pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
@@ -22,16 +25,17 @@ impl DurableObject for GarbageCollector {
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        let durable = durable::DurableConnector::new(&self.env);
-        let mut rng = thread_rng();
+        let durable = DurableConnector::new(&self.env);
         match (req.path().as_ref(), req.method()) {
             // Schedule a durable object (DO) instance for deletion.
             (DURABLE_GARBAGE_COLLECTOR_PUT, Method::Post) => {
-                let durable_ref: durable::DurableReference = req.json().await?;
+                let durable_ref: DurableReference = req.json().await?;
                 match durable_ref.binding.as_ref() {
-                    durable::BINDING_DAP_REPORT_STORE
+                    durable::BINDING_DAP_REPORTS_PENDING
+                    | durable::BINDING_DAP_REPORTS_PROCESSED
                     | durable::BINDING_DAP_AGGREGATE_STORE
                     | durable::BINDING_DAP_LEADER_AGG_JOB_QUEUE
+                    | durable::BINDING_DAP_LEADER_BATCH_QUEUE
                     | durable::BINDING_DAP_LEADER_COL_JOB_QUEUE
                     | durable::BINDING_DAP_HELPER_STATE_STORE => (),
                     s => {
@@ -42,25 +46,12 @@ impl DurableObject for GarbageCollector {
                     }
                 };
 
-                // Reference handle encodes the current time and a random nonce in order to deal
-                // with collisions. This time goes first in order to ensure we can delete the
-                // oldest objects first.
-                let mut rand = [0; 16];
-                rng.fill(&mut rand);
-                let durable_handle = format!(
-                    "object/{}/time/{:020}/rand/{}",
-                    durable_ref.binding,
-                    now(),
-                    hex::encode(rand)
-                );
-                self.state
-                    .storage()
-                    .put(&durable_handle, &durable_ref)
-                    .await?;
+                let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
+                queued.put(&self.state).await?;
                 console_debug!(
                     "GarbageCollector: scheduled {} instance {} for deletion",
-                    durable_ref.binding,
-                    durable_ref.id_hex
+                    queued.as_ref().binding,
+                    queued.as_ref().id_hex
                 );
                 Response::from_json(&())
             }
@@ -77,12 +68,9 @@ impl DurableObject for GarbageCollector {
             //   replay protection. However, for replay protection in particular, it'll be
             //   important to make sure the Leader rejects reports with old timestamps.
             (durable::DURABLE_DELETE_ALL, Method::Post) => {
-                let opt = ListOptions::new().prefix("object/");
-                let iter = self.state.storage().list_with_options(opt).await?.entries();
-                let mut item = iter.next()?;
-                while !item.done() {
-                    let (_durable_handle, durable_ref): (String, durable::DurableReference) =
-                        item.value().into_serde()?;
+                let queued: Vec<DurableOrdered<DurableReference>> =
+                    DurableOrdered::get_all(&self.state, "object").await?;
+                for durable_ref in queued.iter().map(|queued| queued.as_ref()) {
                     durable
                         .post_by_id_hex(
                             &durable_ref.binding,
@@ -96,7 +84,6 @@ impl DurableObject for GarbageCollector {
                         durable_ref.binding,
                         durable_ref.id_hex
                     );
-                    item = iter.next()?;
                 }
 
                 self.state.storage().delete_all().await?;

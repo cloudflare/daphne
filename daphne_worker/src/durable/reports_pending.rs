@@ -3,92 +3,61 @@
 
 use crate::{
     durable::{
-        durable_queue_name,
+        durable_name_queue,
         leader_agg_job_queue::{
-            AggregationJob, DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
+            DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        state_get, state_get_or_default, DurableConnector, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-        BINDING_DAP_REPORT_STORE,
+        nonce_hex_from_report, state_get, state_set_if_not_exists, DurableConnector,
+        DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
     },
-    int_err, now,
+    int_err,
 };
-use daphne::{messages::TransitionFailure, DapVersion};
-use futures::future::try_join_all;
-use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-pub(crate) fn durable_report_store_name(
-    version: &DapVersion,
-    task_id_hex: &str,
-    window: u64,
-    bucket: u64,
-) -> String {
-    format!(
-        "{}/task/{}/window/{}/bucket/{}",
-        version.as_ref(),
-        task_id_hex,
-        window,
-        bucket
-    )
-}
-
-pub(crate) const DURABLE_REPORT_STORE_GET_PENDING: &str = "/internal/do/report_store/get_pending";
-pub(crate) const DURABLE_REPORT_STORE_PUT_PENDING: &str = "/internal/do/report_store/put_pending";
-pub(crate) const DURABLE_REPORT_STORE_PUT_PROCESSED: &str =
-    "/internal/do/report_store/put_processed";
-pub(crate) const DURABLE_REPORT_STORE_MARK_COLLECTED: &str =
-    "/internal/do/report_store/mark_collected";
+pub(crate) const DURABLE_REPORTS_PENDING_GET: &str = "/internal/do/reports_pending/get";
+pub(crate) const DURABLE_REPORTS_PENDING_PUT: &str = "/internal/do/reports_pending/put";
 
 #[derive(Deserialize, Serialize)]
-pub(crate) enum ReportStoreResult {
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReportsPendingResult {
     Ok,
-    Err(TransitionFailure),
+    ErrReportExists,
 }
 
-/// Durable Object (DO) for storing reports and report metadata.
+/// Durable Object (DO) for storing reports waiting to be processed.
 ///
-/// The naming convention for instances of the [`ReportStore`] DO is as follows:
+/// The following API endpoints are defined:
 ///
-/// > <version>/task/<task_id>/window/<window>/bucket/<bucket>
+/// - `DURABLE_REPORTS_PENDING_PUT`: Used to store a report uploaded by a Client. Whenever this
+///   instance becomes non-empty, an aggregate job is created and dispatched to
+///   `LeaderAggregationJobQueue`. If report is found in this instance with the same ID, then an
+///   error is returned.
 ///
-/// where `<version>` is the DAP version, `<task_id>` is a task ID, `<window>` is a batch window,
-/// and `<bucket>` is a non-negative integer. A batch window is a UNIX timestamp (in seconds)
-/// truncated by the minimum batch duration. The instance in which a report is stored is derived
-/// from the task ID and nonce of the report itself.
+/// - `DURABLE_REPORTS_PENDING_GET`: Used to drain reports from storage so that they can be
+///   aggregated. Whenever the instance becomes empty, the aggregation job is removed from
+///   `LeadeerAggregationJobQueue`.
+///
+/// The schema for stored reports is as follows:
+///
+/// ```text
+/// [Pending report]  pending/<report_id> -> String
+/// [Aggregation job] agg_job -> DurableOrdered<String>
+/// ```
+///
+/// where `<report_id>` is the ID of the report. The value is the hex-encoded report. The
+/// aggregation job consists of a reference to the name of this DO instance stored in a queue in
+/// `LeaderAggregationJobQueue`.
 #[durable_object]
-pub struct ReportStore {
+pub struct ReportsPending {
     #[allow(dead_code)]
     state: State,
     env: Env,
     touched: bool,
 }
 
-impl ReportStore {
-    async fn checked_process(&self, nonce_hex: &str) -> Result<ReportStoreResult> {
-        let key = format!("processed/{}", nonce_hex);
-        let collected: bool = state_get_or_default(&self.state, "collected").await?;
-        let observed: bool = state_get_or_default(&self.state, &key).await?;
-        if observed && !collected {
-            return Ok(ReportStoreResult::Err(TransitionFailure::ReportReplayed));
-        } else if !observed && collected {
-            return Ok(ReportStoreResult::Err(TransitionFailure::BatchCollected));
-        }
-        self.state.storage().put(&key, true).await?;
-        Ok(ReportStoreResult::Ok)
-    }
-
-    async fn to_checked(&self, nonce_hex: String) -> Result<Option<(String, TransitionFailure)>> {
-        if let ReportStoreResult::Err(failure_reason) = self.checked_process(&nonce_hex).await? {
-            Ok(Some((nonce_hex, failure_reason)))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 #[durable_object]
-impl DurableObject for ReportStore {
+impl DurableObject for ReportsPending {
     fn new(state: State, env: Env) -> Self {
         Self {
             state,
@@ -99,12 +68,15 @@ impl DurableObject for ReportStore {
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         let durable = DurableConnector::new(&self.env);
-        let mut rng = thread_rng();
         let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORT_STORE);
+        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PENDING);
 
         match (req.path().as_ref(), req.method()) {
-            (DURABLE_REPORT_STORE_GET_PENDING, Method::Post) => {
+            // Drain the requested number of reports from storage.
+            //
+            // Input: `reports_requested: usize`
+            // Output: `Vec<String>` (hex-encoded reports)
+            (DURABLE_REPORTS_PENDING_GET, Method::Post) => {
                 let reports_requested: usize = req.json().await?;
                 let opt = ListOptions::new()
                     .prefix("pending/")
@@ -134,28 +106,28 @@ impl DurableObject for ReportStore {
                     .size()
                     == 0;
 
-                // BUG(issue#73) There is a race condition between DURABLE_REPORT_STORE_GET_PENDING
-                // and DURABLE_REPORT_STORE_PUT_PENDING that could prevent a report from getting
+                // BUG(issue#73) There is a race condition between DURABLE_REPORTS_PENDING_GET_PENDING
+                // and DURABLE_REPORTS_PENDING_PUT_PENDING that could prevent a report from getting
                 // processed.
                 //
-                //   1. DURABLE_REPORT_STORE_PUT_PENDING writes a report to storage and checks if
+                //   1. DURABLE_REPORTS_PENDING_PUT_PENDING writes a report to storage and checks if
                 //      "agg_job" is set. If not, it sets "agg_job" and enqueues the job.
                 //
-                //   2. DURABLE_REPORT_STORE_GET_PENDING drains a number of reports from storage,
+                //   2. DURABLE_REPORTS_PENDING_GET_PENDING drains a number of reports from storage,
                 //      then checks if storage is empty. If so, it deletes "agg_job" if it exists
                 //      and dequeues the job.
                 //
                 // Consider the following sequence of storage transactions (suppose "agg_job" is
                 // set):
                 //
-                //   - DURABLE_REPORT_STORE_GET_PENDING drains all reports from storage
-                //   - DURABLE_REPORT_STORE_GET_PENDING checks if storage is empty
-                //   - DURABLE_REPORT_STORE_PUT_PENDING stores a report
-                //   - DURABLE_REPORT_STORE_GET_PENDING unsets "agg_job"
+                //   - DURABLE_REPORTS_PENDING_GET drains all reports from storage
+                //   - DURABLE_REPORTS_PENDING_GET checks if storage is empty
+                //   - DURABLE_REPORTS_PENDING_PUT stores a report
+                //   - DURABLE_REPORTS_PENDING_GET unsets "agg_job"
                 //
                 // The last step occurs because the emptiness check got scheduled before a new
                 // report was added. This will result in the report not getting processed until
-                // "agg_job" is set by a future call to DURABLE_REPORT_STORE_PUT_PENDING.
+                // "agg_job" is set by a future call to DURABLE_REPORTS_PENDING_PUT_PENDING.
                 //
                 // This bug would be prevented if either (1) the Workers runtime prevents reuquests
                 // to the same DO instance from being handled concurrently or (2) the Workers
@@ -166,7 +138,7 @@ impl DurableObject for ReportStore {
                 //   another DO here (LeaderAggregationJobQueue), there is an opportunity for
                 //   requests to interleave between storage operations. (Where is this documented?)
                 //   In all likelihood, miniflare matches the bahavior of prod here and we'll have
-                //   to figure out a different design. Perhaps DURABLE_REPORT_STORE_PUT_PENDING
+                //   to figure out a different design. Perhaps DURABLE_REPORTS_PENDING_PUT_PENDING
                 //   could queue agg jobs directly? The agg job could have the set of reports to be
                 //   processed. This way we can avoid storing "agg_job" here.
                 //
@@ -181,7 +153,8 @@ impl DurableObject for ReportStore {
                         .to_string()
                         == "true"
                 {
-                    let agg_job: Option<AggregationJob> = state_get(&self.state, "agg_job").await?;
+                    let agg_job: Option<DurableOrdered<String>> =
+                        state_get(&self.state, "agg_job").await?;
                     if let Some(agg_job) = agg_job {
                         // NOTE There is only one agg job queue for now. In the future, work will
                         // be sharded across multiple queues.
@@ -189,7 +162,7 @@ impl DurableObject for ReportStore {
                             .post(
                                 BINDING_DAP_LEADER_AGG_JOB_QUEUE,
                                 DURABLE_LEADER_AGG_JOB_QUEUE_FINISH,
-                                durable_queue_name(0),
+                                durable_name_queue(0),
                                 &agg_job,
                             )
                             .await?;
@@ -205,26 +178,29 @@ impl DurableObject for ReportStore {
                 Response::from_json(&reports)
             }
 
-            (DURABLE_REPORT_STORE_PUT_PENDING, Method::Post) => {
+            // Store a report.
+            //
+            // Input: `report_hex: String` (hex-encoded report)
+            // Output:  `ReportsPendingResult`
+            (DURABLE_REPORTS_PENDING_PUT, Method::Post) => {
                 let report_hex: String = req.json().await?;
                 let nonce_hex = nonce_hex_from_report(&report_hex)
                     .ok_or_else(|| int_err("failed to parse nonce from report"))?;
 
-                let res = self.checked_process(nonce_hex).await?;
-                if matches!(res, ReportStoreResult::Ok) {
-                    let key = format!("pending/{}", nonce_hex);
-                    self.state.storage().put(&key, report_hex).await?;
+                let key = format!("pending/{}", nonce_hex);
+                let exists = state_set_if_not_exists::<String>(&self.state, &key, &report_hex)
+                    .await?
+                    .is_some();
+                if exists {
+                    return Response::from_json(&ReportsPendingResult::ErrReportExists);
                 }
 
                 // Check if processing for this bucket of reports has been scheduled. If so, add
                 // this bucket to the aggregation job queue.
-                let agg_job: Option<AggregationJob> = state_get(&self.state, "agg_job").await?;
+                let agg_job: Option<DurableOrdered<String>> =
+                    state_get(&self.state, "agg_job").await?;
                 if agg_job.is_none() {
-                    let agg_job = AggregationJob {
-                        report_store_id_hex: id_hex,
-                        time: now(),
-                        rand: rng.gen(),
-                    };
+                    let agg_job = DurableOrdered::new_roughly_ordered(id_hex, "agg_job");
 
                     // TODO Shard the work across multiple job queues rather than just one. (See
                     // issue #25.) For now there is jsut one job queue.
@@ -232,53 +208,21 @@ impl DurableObject for ReportStore {
                         .post(
                             BINDING_DAP_LEADER_AGG_JOB_QUEUE,
                             DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
-                            durable_queue_name(0),
+                            durable_name_queue(0),
                             &agg_job,
                         )
                         .await?;
                     self.state.storage().put("agg_job", agg_job).await?;
                 }
-                Response::from_json(&res)
-            }
 
-            (DURABLE_REPORT_STORE_PUT_PROCESSED, Method::Post) => {
-                let nonce_hex_set: Vec<String> = req.json().await?;
-                let mut requests = Vec::new();
-                for nonce_hex in nonce_hex_set.into_iter() {
-                    requests.push(self.to_checked(nonce_hex));
-                }
-
-                let responses: Vec<Option<(String, TransitionFailure)>> =
-                    try_join_all(requests).await?;
-                let res: Vec<(String, TransitionFailure)> =
-                    responses.into_iter().flatten().collect();
-                Response::from_json(&res)
-            }
-
-            (DURABLE_REPORT_STORE_MARK_COLLECTED, Method::Post) => {
-                self.state.storage().put("collected", true).await?;
-                Response::from_json(&ReportStoreResult::Ok)
+                Response::from_json(&ReportsPendingResult::Ok)
             }
 
             _ => Err(int_err(format!(
-                "ReportStore: unexpected request: method={:?}; path={:?}",
+                "ReportsPending: unexpected request: method={:?}; path={:?}",
                 req.method(),
                 req.path()
             ))),
         }
     }
-}
-
-pub(crate) fn nonce_hex_from_report(report_hex: &str) -> Option<&str> {
-    // task_id (32 bytes) + time (8 bytes)
-    if report_hex.len() < 80 {
-        return None;
-    }
-    let report_hex = &report_hex[80..];
-
-    // nonce
-    if report_hex.len() < 32 {
-        return None;
-    }
-    Some(&report_hex[..32])
 }

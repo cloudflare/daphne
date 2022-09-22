@@ -7,7 +7,7 @@ mod test_runner;
 
 use assert_matches::assert_matches;
 use daphne::constants;
-use daphne_worker::InternalAggregateInfo;
+use daphne_worker::DaphneWorkerReportSelector;
 use janus_prio::{codec::Decode as JanusPrioDecode, vdaf::prio3::Prio3 as JanusPrioPrio3};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
@@ -57,11 +57,11 @@ async fn janus_client() {
 
     janus_client.upload(&23).await.unwrap();
 
-    let agg_info = InternalAggregateInfo {
-        max_buckets: 100, // Needs to be large enough to touch each bucket.
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 100, // Needs to be large enough to touch each bucket.
         max_reports: 1,
     };
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(agg_telem.reports_processed, 1);
     assert_eq!(agg_telem.reports_aggregated, 1);
 }
@@ -76,15 +76,15 @@ async fn janus_helper() {
     let (t, janus_helper) = TestRunner::janus_helper().await;
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
-    let agg_info = InternalAggregateInfo {
-        max_buckets: 100, // Needs to be large enough to touch each bucket.
+    let report_sel = DaphneWorkerReportSelector {
+        max_agg_jobs: 100, // Needs to be large enough to touch each bucket.
         max_reports: t.query_config.min_batch_size(),
     };
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
     let batch_interval = t.batch_interval();
-    for _ in 0..agg_info.max_reports + 3 {
+    for _ in 0..report_sel.max_reports + 3 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
@@ -104,9 +104,9 @@ async fn janus_helper() {
     }
 
     // Aggregate first.
-    let agg_telem = t.internal_process(&client, &agg_info).await;
-    assert_eq!(agg_telem.reports_processed, agg_info.max_reports + 3);
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
+    assert_eq!(agg_telem.reports_processed, report_sel.max_reports + 3);
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(agg_telem.reports_aggregated, 0);
 
     // Get the collect URI.
@@ -121,7 +121,7 @@ async fn janus_helper() {
         .leader_post_collect(&client, collect_req.get_encoded())
         .await;
 
-    let agg_telem = t.internal_process(&client, &agg_info).await;
+    let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(agg_telem.reports_collected, 13, "reports collected");
 
     // Poll the collect URI before the ColleectResp is ready.

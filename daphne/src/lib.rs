@@ -46,7 +46,11 @@ use prio::{
     vdaf::Aggregatable as AggregatableTrait,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, convert::TryFrom, fmt::Debug};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt::Debug,
+};
 use url::Url;
 
 /// DAP errors.
@@ -130,7 +134,7 @@ pub enum DapAbort {
     BatchOverlap,
 
     /// Internal error.
-    #[error("internalError: {0}")]
+    #[error("{0}")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
     /// Invalid DAP version. Sent in response to requests for an unsupported (or unknown) DAP version.
@@ -289,24 +293,51 @@ impl AsRef<str> for DapVersion {
 }
 
 /// Global DAP parameters common across tasks.
-//
-// NOTE: Consider whether the following parameters should be included
-// in the spec.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DapGlobalConfig {
+    /// The report storage epoch duration. This value is used to control the period of time for
+    /// which an Aggregator guarantees storage of reports and/or report metadata:
+    ///
+    /// 1. Once an epoch has elapsed, all reports and metadata corresponding to the epoch may be
+    ///    deleted in order to reduce storage costs. In addition, all reports for this epoch will
+    ///    be rejected.
+    /// 2. Reports pertaining to epochs that have not yet begun may be rejected.
+    ///
+    /// Let `now` be the current time truncated by the report storage epoch duration. All epochs
+    /// preceeding the previous are subject to deletion; for all epochs following the next, reports
+    /// will be rejected:
+    ///
+    /// ```text
+    ///     now-2 <- reports rejected, data subject to deletion
+    ///     now-1 <- start of previous epoch
+    ///     now   <- start of current epoch
+    ///     now+1 <- start of next epoch
+    ///     now+2 <- reports rejected
+    /// ```
+    ///
+    /// Thus, storage is only guaranteed for the previous epoch, the current epoch, and the next
+    /// epoch.
+    //
+    // TODO(issue #100) Implement the rejection mechanism described here.
+    pub report_storage_epoch_duration: Duration,
+
     /// Maximum interval duration permitted in CollectReq.
     /// Prevents Collectors from requesting wide range or reports.
-    pub max_batch_duration: u64,
+    pub max_batch_duration: Duration,
 
     /// Lower bound of an acceptable batch interval for collect requests.
     /// Batch intervals cannot start more than `min_batch_interval_start`
     /// apart from the current batch interval.
-    pub min_batch_interval_start: u64,
+    //
+    // TODO(cjpatton) Rename this and clarify semantics.
+    pub min_batch_interval_start: Duration,
 
-    /// Higher bound of an acceptable batch interval for collect requests.
+    /// Upper bound of an acceptable batch interval for collect requests.
     /// Batch intervals cannot end more than `max_batch_interval_end`
     /// apart from the current batch interval.
-    pub max_batch_interval_end: u64,
+    //
+    // TODO(cjpatton) Rename this and clarify semantics.
+    pub max_batch_interval_end: Duration,
 
     /// HPKE KEM types that are supported. Used when generating HPKE
     /// receiver config.
@@ -411,17 +442,6 @@ pub enum DapBatchBucket<'a> {
     TimeInterval { batch_window: Time },
 }
 
-impl<'a> DapBatchBucket<'a> {
-    /// TODO(issue #100) Deprecate this once "fixed_size" support is added.
-    pub fn unwrap_window(&self) -> Time {
-        if let Self::TimeInterval { batch_window } = self {
-            *batch_window
-        } else {
-            panic!("TODO(issue #100)");
-        }
-    }
-}
-
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(try_from = "ShadowDapTaskConfig")]
@@ -484,7 +504,7 @@ impl DapTaskConfig {
             ));
         }
 
-        let mut agg_shares: HashMap<DapBatchBucket<'a>, DapAggregateShare> = HashMap::new();
+        let mut span: HashMap<DapBatchBucket<'a>, DapAggregateShare> = HashMap::new();
         for out_share in out_shares.into_iter() {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
@@ -495,7 +515,7 @@ impl DapTaskConfig {
                 }
             };
 
-            let agg_share = agg_shares.entry(bucket).or_default();
+            let agg_share = span.entry(bucket).or_default();
             agg_share.merge(DapAggregateShare {
                 report_count: 1,
                 checksum: out_share.checksum,
@@ -503,14 +523,15 @@ impl DapTaskConfig {
             })?;
         }
 
-        Ok(agg_shares)
+        Ok(span)
     }
 
-    /// Return the batch span determined by the given batch selector.
+    /// Return the batch span determined by the given batch selector. The span includes every
+    /// bucket to which a report that matches the batch selector could be assigned.
     pub fn batch_span_for_sel<'a>(
         &self,
         batch_sel: &'a BatchSelector,
-    ) -> Result<Vec<DapBatchBucket<'a>>, DapError> {
+    ) -> Result<HashSet<DapBatchBucket<'a>>, DapError> {
         if !self.query.is_valid_batch_sel(batch_sel) {
             return Err(DapError::fatal("batch selector not compatible with task"));
         }
@@ -520,36 +541,48 @@ impl DapTaskConfig {
                 batch_interval: Interval { start, duration },
             } => {
                 let windows = duration / self.time_precision;
-                Ok((0..windows)
-                    .map(|i| DapBatchBucket::TimeInterval {
+                let mut span = HashSet::with_capacity(windows as usize);
+                for i in 0..windows {
+                    span.insert(DapBatchBucket::TimeInterval {
                         batch_window: start + i * self.time_precision,
-                    })
-                    .collect())
+                    });
+                }
+                Ok(span)
             }
             BatchSelector::FixedSize { batch_id } => {
-                Ok(vec![DapBatchBucket::FixedSize { batch_id }])
+                Ok(HashSet::from([DapBatchBucket::FixedSize { batch_id }]))
             }
         }
     }
 
-    /// Return the batch bucket for a report with the given metadata.
-    pub fn batch_bucket_for_meta<'a>(
+    /// Return the batch span of a set of reports with the given metadata.
+    pub fn batch_span_for_meta<'a>(
         &self,
-        metadata: &'a ReportMetadata,
         part_batch_sel: &'a PartialBatchSelector,
-    ) -> Result<DapBatchBucket<'a>, DapError> {
+        report_meta: impl Iterator<Item = &'a ReportMetadata>,
+    ) -> Result<HashMap<DapBatchBucket<'a>, Vec<&'a ReportMetadata>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(DapError::fatal(
                 "partial batch selector not compatible with task",
             ));
         }
 
-        Ok(match part_batch_sel {
-            PartialBatchSelector::FixedSize { batch_id } => DapBatchBucket::FixedSize { batch_id },
-            PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                batch_window: self.truncate_time(metadata.time),
-            },
-        })
+        let mut span: HashMap<_, Vec<_>> = HashMap::new();
+        for metadata in report_meta {
+            let bucket = match part_batch_sel {
+                PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
+                    batch_window: self.truncate_time(metadata.time),
+                },
+                PartialBatchSelector::FixedSize { batch_id } => {
+                    DapBatchBucket::FixedSize { batch_id }
+                }
+            };
+
+            let nonces = span.entry(bucket).or_default();
+            nonces.push(metadata);
+        }
+
+        Ok(span)
     }
 }
 
@@ -737,6 +770,11 @@ impl DapAggregateShare {
             *x ^= y;
         }
         Ok(())
+    }
+
+    /// Return `true` if the aggregate share contains no reports.
+    pub fn empty(&self) -> bool {
+        self.report_count == 0
     }
 
     /// Set the aggregate share to zero.

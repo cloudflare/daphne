@@ -13,7 +13,7 @@ use crate::{
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
         AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id, Nonce,
-        PartialBatchSelector, Report, ReportShare, Time, TransitionFailure, TransitionVar,
+        PartialBatchSelector, Report, ReportMetadata, Time, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -84,6 +84,16 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
         task_id: &Id,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError>;
+
+    /// Ensure a set of reorts can be aggregated. Return a transition failure for each report
+    /// that must be rejected early, due to the repot being replayed, the bucket that contains the
+    /// report being collected, etc.
+    async fn check_early_reject<'b>(
+        &self,
+        task_id: &Id,
+        part_batch_sel: &'b PartialBatchSelector,
+        report_meta: impl Iterator<Item = &'b ReportMetadata>,
+    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError>;
 
     /// Mark a batch as collected.
     async fn mark_collected(&self, task_id: &Id, batch_sel: &BatchSelector)
@@ -166,12 +176,12 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report) -> Result<(), DapError>;
 
-    /// Fetch a sequence of reports to aggregate, grouped by task ID. The reports returned are
-    /// removed from persistent storage.
+    /// Fetch a sequence of reports to aggregate, grouped by task ID, then by partial batch
+    /// selector. The reports returned are removed from persistent storage.
     async fn get_reports(
         &self,
         selector: &Self::ReportSelector,
-    ) -> Result<HashMap<Id, (PartialBatchSelector, Vec<Report>)>, DapError>;
+    ) -> Result<HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>>, DapError>;
 
     /// Create a collect job.
     //
@@ -234,7 +244,9 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             return Err(DapAbort::UnrecognizedHpkeConfig);
         }
 
-        // NOTE spec: Currently it is up to the backend to reject or accept a report.
+        // Store the report for future processing. At this point, the report may be rejected if
+        // the Leader detects that the report was replayed or pertains to a batch that has already
+        // been collected.
         Ok(self.put_report(&report).await?)
     }
 
@@ -291,10 +303,25 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         &self,
         task_id: &Id,
         task_config: &DapTaskConfig,
-        part_batch_sel: PartialBatchSelector,
+        part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
     ) -> Result<u64, DapAbort> {
         let mut rng = thread_rng();
+
+        // Filter out early rejected reports.
+        //
+        // TODO Add metrics for early rejects.
+        let early_rejects = self
+            .check_early_reject(
+                task_id,
+                part_batch_sel,
+                reports.iter().map(|report| &report.metadata),
+            )
+            .await?;
+        let reports = reports
+            .into_iter()
+            .filter(|report| early_rejects.get(&report.metadata.nonce).is_none())
+            .collect();
 
         // Prepare AggregateInitializeReq.
         let agg_job_id = Id(rng.gen());
@@ -305,7 +332,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
                 &task_config.vdaf_verify_key,
                 task_id,
                 &agg_job_id,
-                &part_batch_sel,
+                part_batch_sel,
                 reports,
             )
             .await?;
@@ -358,7 +385,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .vdaf
             .handle_final_agg_resp(uncommited, agg_resp)?;
         let out_shares_count = out_shares.len() as u64;
-        self.put_out_shares(task_id, &part_batch_sel, out_shares)
+        self.put_out_shares(task_id, part_batch_sel, out_shares)
             .await?;
         Ok(out_shares_count)
     }
@@ -445,19 +472,21 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         let mut telem = DapLeaderProcessTelemetry::default();
 
         // Fetch reports and run an aggregation job for each task.
-        //
-        // TODO Handle tasks in parallel.
-        for (task_id, (part_batch_sel, reports)) in self.get_reports(selector).await?.into_iter() {
+        for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
             let task_config = self
                 .get_task_config_for(&task_id)
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
-            telem.reports_processed += reports.len() as u64;
-            if !reports.is_empty() {
-                telem.reports_aggregated += self
-                    .run_agg_job(&task_id, task_config.as_ref(), part_batch_sel, reports)
-                    .await?;
+            for (part_batch_sel, reports) in reports.into_iter() {
+                // TODO Consider splitting reports into smaller chunks.
+                // TODO Consider handling tasks in parallel.
+                telem.reports_processed += reports.len() as u64;
+                if !reports.is_empty() {
+                    telem.reports_aggregated += self
+                        .run_agg_job(&task_id, task_config.as_ref(), &part_batch_sel, reports)
+                        .await?;
+                }
             }
         }
 
@@ -483,18 +512,6 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 /// DAP Helper functionality.
 #[async_trait(?Send)]
 pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
-    /// Update the metadata for the given set of report shares, marking them as aggregated. The
-    /// return value is the subset of the report shares that will not be aggregated due to a
-    /// transition failure. This occurs if, for example, the report was previously aggregated, but
-    /// not collected, or the report has not been aggregated but pertains to a batch that was
-    /// previously collected.
-    async fn mark_aggregated(
-        &self,
-        task_id: &Id,
-        part_batch_sel: &PartialBatchSelector,
-        report_shares: &[ReportShare],
-    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError>;
-
     /// Store the Helper's aggregation-flow state.
     async fn put_helper_state(
         &self,
@@ -548,11 +565,13 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                     &agg_init_req.agg_param,
                 )?;
 
-                // Run mark_aggregated and handle_agg_init_req concurrently.
-                let early_rejects_future = self.mark_aggregated(
+                let early_rejects_future = self.check_early_reject(
                     &agg_init_req.task_id,
                     &agg_init_req.part_batch_sel,
-                    &agg_init_req.report_shares,
+                    agg_init_req
+                        .report_shares
+                        .iter()
+                        .map(|report_share| &report_share.metadata),
                 );
 
                 let transition = task_config

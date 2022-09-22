@@ -201,7 +201,7 @@ impl Decode for ReportShare {
 
 /// Batch parameter conveyed to the Helper by the Leader in the aggreagtion sub-protocol. Used to
 /// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
-#[derive(Clone, Debug, Eq, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, Deserialize, Hash, PartialEq, Serialize)]
 pub enum PartialBatchSelector {
     TimeInterval,
     FixedSize { batch_id: Id },
@@ -475,20 +475,6 @@ impl Decode for Interval {
 pub enum Query {
     TimeInterval { batch_interval: Interval },
     FixedSize { batch_id: Id },
-}
-
-impl Query {
-    /// Return a reference to the query batch interval. Panics if the query type is not
-    /// "time_interval".
-    ///
-    /// TODO(issue #100) Deprecate this once "fixed_size" support is added.
-    pub fn unwrap_interval(&self) -> &Interval {
-        if let BatchSelector::TimeInterval { ref batch_interval } = self {
-            batch_interval
-        } else {
-            panic!("TODO(issue #100)");
-        }
-    }
 }
 
 impl Encode for Query {
