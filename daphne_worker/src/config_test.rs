@@ -25,6 +25,7 @@ const DAP_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 1665520657,
         "query": {
             "time_interval": {
                 "min_batch_size": 100
@@ -51,6 +52,7 @@ const DAP_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 1665520657,
         "query": {
             "fixed_size": {
                 "min_batch_size": 100,

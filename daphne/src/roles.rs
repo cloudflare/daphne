@@ -245,6 +245,11 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             return Err(DapAbort::UnrecognizedHpkeConfig);
         }
 
+        // Check that the task has not expired.
+        if report.metadata.time >= task_config.as_ref().expiration {
+            return Err(DapAbort::ReportTooLate);
+        }
+
         // Store the report for future processing. At this point, the report may be rejected if
         // the Leader detects that the report was replayed or pertains to a batch that has already
         // been collected.
@@ -312,6 +317,10 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         // Filter out early rejected reports.
         //
         // TODO Add metrics for early rejects.
+        //
+        // TODO Add a test similar to http_post_aggregate_init_expired_task() in roles_test.rs that
+        // verifies that the Leader properly checks for expiration. This will require extending the
+        // test framework to run run_agg_job() directly.
         let early_rejects = self
             .check_early_reject(
                 task_id,
@@ -321,7 +330,12 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?;
         let reports = reports
             .into_iter()
-            .filter(|report| early_rejects.get(&report.metadata.id).is_none())
+            .filter(|report| {
+                // Filter the reports, removing any with a timestamps beyond the expiry or that was
+                // early rejected.
+                report.metadata.time < task_config.expiration
+                    && early_rejects.get(&report.metadata.id).is_none()
+            })
             .collect();
 
         // Prepare AggregateInitializeReq.
@@ -594,14 +608,23 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                     DapHelperTransition::Continue(mut state, mut agg_resp) => {
                         let mut i = 0;
                         while i < state.seq.len() {
-                            if let Some(failure) =
-                                early_rejects.get(&agg_resp.transitions[i].report_id)
-                            {
+                            let (_vdaf_state, time, report_id) = &state.seq[i];
+
+                            let early_result =
+                                early_rejects.get(&agg_resp.transitions[i].report_id);
+                            let result = if time >= &task_config.expiration {
+                                Some(&TransitionFailure::TaskExpired)
+                            } else {
+                                early_result
+                            };
+
+                            // TODO Emit metrics for failure reasons.
+                            if let Some(failure) = result {
                                 // Mark reports that were rejected early as TransitionVar::Failed.
                                 agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
 
                                 // Remove VDAF preparation state of reports that were rejected early.
-                                if state.seq[i].2 == agg_resp.transitions[i].report_id {
+                                if report_id == &agg_resp.transitions[i].report_id {
                                     let _val = state.seq.remove(i);
                                 } else {
                                     // The report ID in the Helper state and Aggregate response
