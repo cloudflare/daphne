@@ -201,7 +201,7 @@ impl<D> DaphneWorkerConfig<D> {
         })
     }
 
-    /// Derive the batch name for a report for the given task and with the given nonce.
+    /// Derive the batch name for a report for the given task and with the given report ID.
     pub(crate) fn durable_name_report_store(
         &self,
         task_config: &DapTaskConfig,
@@ -209,8 +209,7 @@ impl<D> DaphneWorkerConfig<D> {
         metadata: &ReportMetadata,
     ) -> String {
         let mut shard_seed = [0; 8];
-        PrgAes128::seed_stream(&self.report_shard_key, metadata.nonce.as_ref())
-            .fill(&mut shard_seed);
+        PrgAes128::seed_stream(&self.report_shard_key, metadata.id.as_ref()).fill(&mut shard_seed);
         let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
         let epoch =
             metadata.time - (metadata.time % self.global_config.report_storage_epoch_duration);

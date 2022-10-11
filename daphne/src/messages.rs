@@ -18,8 +18,8 @@ const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
 const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
 const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
-const QUERY_TYPE_TIME_INTERVAL: u16 = 0x0001;
-const QUERY_TYPE_FIXED_SIZE: u16 = 0x0002;
+const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
+const QUERY_TYPE_FIXED_SIZE: u8 = 0x02;
 
 /// The identifier for a DAP task.
 #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
@@ -63,26 +63,26 @@ pub type Duration = u64;
 /// The timestamp sent in a [`Report`].
 pub type Time = u64;
 
-/// The nonce sent in a [`Report`].
+/// A report ID.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[allow(missing_docs)]
-pub struct Nonce(pub [u8; 16]);
+pub struct ReportId(pub [u8; 16]);
 
-impl Encode for Nonce {
+impl Encode for ReportId {
     fn encode(&self, bytes: &mut Vec<u8>) {
         bytes.extend_from_slice(&self.0);
     }
 }
 
-impl Decode for Nonce {
+impl Decode for ReportId {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let mut nonce = [0; 16];
-        bytes.read_exact(&mut nonce)?;
-        Ok(Nonce(nonce))
+        let mut id = [0; 16];
+        bytes.read_exact(&mut id)?;
+        Ok(ReportId(id))
     }
 }
 
-impl AsRef<[u8]> for Nonce {
+impl AsRef<[u8]> for ReportId {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
@@ -118,15 +118,15 @@ impl Decode for Extension {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[allow(missing_docs)]
 pub struct ReportMetadata {
+    pub id: ReportId,
     pub time: Time,
-    pub nonce: Nonce,
     pub extensions: Vec<Extension>,
 }
 
 impl Encode for ReportMetadata {
     fn encode(&self, bytes: &mut Vec<u8>) {
+        self.id.encode(bytes);
         self.time.encode(bytes);
-        self.nonce.encode(bytes);
         encode_u16_items(bytes, &(), &self.extensions);
     }
 }
@@ -134,8 +134,8 @@ impl Encode for ReportMetadata {
 impl Decode for ReportMetadata {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
+            id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
-            nonce: Nonce::decode(bytes)?,
             extensions: decode_u16_items(&(), bytes)?,
         })
     }
@@ -230,7 +230,7 @@ impl Encode for PartialBatchSelector {
 
 impl Decode for PartialBatchSelector {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u16::decode(bytes)? {
+        match u8::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
             QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSize {
                 batch_id: Id::decode(bytes)?,
@@ -305,13 +305,13 @@ impl Decode for AggregateContinueReq {
 // overloads a term used in draft-irtf-cfrg-draft-02.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transition {
-    pub nonce: Nonce,
+    pub report_id: ReportId,
     pub var: TransitionVar,
 }
 
 impl Encode for Transition {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        self.nonce.encode(bytes);
+        self.report_id.encode(bytes);
         self.var.encode(bytes);
     }
 }
@@ -319,7 +319,7 @@ impl Encode for Transition {
 impl Decode for Transition {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
-            nonce: Nonce::decode(bytes)?,
+            report_id: ReportId::decode(bytes)?,
             var: TransitionVar::decode(bytes)?,
         })
     }
@@ -372,6 +372,7 @@ pub enum TransitionFailure {
     HpkeDecryptError = 4,
     VdafPrepError = 5,
     BatchSaturated = 6,
+    TaskExpired = 7,
 }
 
 impl TryFrom<u8> for TransitionFailure {
@@ -386,6 +387,7 @@ impl TryFrom<u8> for TransitionFailure {
             b if b == Self::HpkeDecryptError as u8 => Ok(Self::HpkeDecryptError),
             b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
             b if b == Self::BatchSaturated as u8 => Ok(Self::BatchSaturated),
+            b if b == Self::TaskExpired as u8 => Ok(Self::TaskExpired),
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -413,6 +415,7 @@ impl std::fmt::Display for TransitionFailure {
             Self::HpkeDecryptError => write!(f, "hpke-decrypt-error({})", *self as u8),
             Self::VdafPrepError => write!(f, "vdaf-prep-error({})", *self as u8),
             Self::BatchSaturated => write!(f, "batch-saturated({})", *self as u8),
+            Self::TaskExpired => write!(f, "task-expired({})", *self as u8),
         }
     }
 }
@@ -494,7 +497,7 @@ impl Encode for Query {
 
 impl Decode for Query {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u16::decode(bytes)? {
+        match u8::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
                 batch_interval: Interval::decode(bytes)?,
             }),

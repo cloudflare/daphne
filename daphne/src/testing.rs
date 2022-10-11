@@ -7,8 +7,8 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id, Nonce,
-        PartialBatchSelector, Report, ReportMetadata, Time, TransitionFailure,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id,
+        PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
@@ -100,7 +100,7 @@ impl MockAggregator {
             .lock()
             .expect("report_store: failed to lock");
         let report_store = guard.entry(task_id.clone()).or_default();
-        if report_store.processed.contains(&metadata.nonce) {
+        if report_store.processed.contains(&metadata.id) {
             return Some(TransitionFailure::ReportReplayed);
         }
 
@@ -380,7 +380,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         task_id: &Id,
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
-    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError> {
+    ) -> Result<HashMap<ReportId, TransitionFailure>, DapError> {
         let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         let span = task_config.batch_span_for_meta(part_batch_sel, report_meta)?;
         let mut early_fails = HashMap::new();
@@ -391,7 +391,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
                     .check_report_early_fail(task_id, &bucket.to_owned_bucket(), metadata)
                     .await
                 {
-                    early_fails.insert(metadata.nonce.clone(), transition_failure);
+                    early_fails.insert(metadata.id.clone(), transition_failure);
                 };
 
                 // Mark report processed.
@@ -400,7 +400,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
                     .lock()
                     .expect("report_store: failed to lock");
                 let report_store = guard.entry(task_id.clone()).or_default();
-                report_store.processed.insert(metadata.nonce.clone());
+                report_store.processed.insert(metadata.id.clone());
             }
         }
 
@@ -718,7 +718,7 @@ pub(crate) struct HelperStateInfo {
 #[derive(Default)]
 pub(crate) struct ReportStore {
     pub(crate) pending: HashMap<DapBatchBucketOwned, VecDeque<Report>>,
-    pub(crate) processed: HashSet<Nonce>,
+    pub(crate) processed: HashSet<ReportId>,
 }
 
 /// Stores the state of the collect job.

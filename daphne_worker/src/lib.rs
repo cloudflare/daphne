@@ -85,7 +85,7 @@
 //!
 //! Jobs are handled roughly in order of creation (oldest jobs are handled first). The time at
 //! which an aggregation job was created is used determine the order in which it was processed.
-//! Timestamps are truncated to the second; ties are broken by a nonce genearted at cration time.
+//! Timestamps are truncated to the second; ties are broken by a nonce generated at creation time.
 //!
 //! ## Collection Jobs (Leader-only)
 //!

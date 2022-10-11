@@ -5,8 +5,8 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
-        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, Nonce,
-        PartialBatchSelector, Report, Transition, TransitionFailure, TransitionVar,
+        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, PartialBatchSelector,
+        Report, ReportId, Transition, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -181,14 +181,14 @@ async fn agg_init_req() {
     assert_eq!(agg_init_req.agg_param.len(), 0);
     assert_eq!(agg_init_req.report_shares.len(), 3);
     for (report_shares, report) in agg_init_req.report_shares.iter().zip(reports.iter()) {
-        assert_eq!(report_shares.metadata.nonce, report.metadata.nonce);
+        assert_eq!(report_shares.metadata.id, report.metadata.id);
     }
 
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
     assert_eq!(agg_resp.transitions.len(), 3);
     for (sub, report) in agg_resp.transitions.iter().zip(reports.iter()) {
-        assert_eq!(sub.nonce, report.metadata.nonce);
+        assert_eq!(sub.report_id, report.metadata.id);
     }
 }
 
@@ -281,7 +281,7 @@ async fn agg_resp_abort_transition_out_of_order() {
 }
 
 #[tokio::test]
-async fn agg_resp_abort_nonce_repeated() {
+async fn agg_resp_abort_report_id_repeated() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
@@ -298,16 +298,16 @@ async fn agg_resp_abort_nonce_repeated() {
 }
 
 #[tokio::test]
-async fn agg_resp_abort_unrecognized_nonce() {
+async fn agg_resp_abort_unrecognized_report_id() {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
-    // Helper sent a transition with an unrecognized Nonce.
+    // Helper sent a transition with an unrecognized report ID.
     agg_resp.transitions.push(Transition {
-        nonce: Nonce(rng.gen()),
+        report_id: ReportId(rng.gen()),
         var: TransitionVar::Continued(b"whatever".to_vec()),
     });
 
@@ -324,7 +324,7 @@ async fn agg_resp_abort_invalid_transition() {
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
 
-    // Helper sent a transition with an unrecognized Nonce.
+    // Helper sent a transition with an unrecognized report ID.
     agg_resp.transitions[0].var = TransitionVar::Finished;
 
     assert_matches!(
@@ -420,17 +420,17 @@ async fn agg_cont_req_skip_vdaf_prep_error() {
     assert_eq!(2, helper_output_shares.len());
     assert_eq!(2, agg_resp.transitions.len());
     assert_eq!(
-        agg_resp.transitions[0].nonce,
-        agg_init_req.report_shares[0].metadata.nonce
+        agg_resp.transitions[0].report_id,
+        agg_init_req.report_shares[0].metadata.id
     );
     assert_eq!(
-        agg_resp.transitions[1].nonce,
-        agg_init_req.report_shares[2].metadata.nonce
+        agg_resp.transitions[1].report_id,
+        agg_init_req.report_shares[2].metadata.id
     );
 }
 
 #[tokio::test]
-async fn agg_cont_abort_unrecognized_nonce() {
+async fn agg_cont_abort_unrecognized_report_id() {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
@@ -440,11 +440,11 @@ async fn agg_cont_abort_unrecognized_nonce() {
     let (_, mut agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    // Leader sends a Transition with an unrecognized nonce.
+    // Leader sends a Transition with an unrecognized report_id.
     agg_cont_req.transitions.insert(
         1,
         Transition {
-            nonce: Nonce(rng.gen()),
+            report_id: ReportId(rng.gen()),
             var: TransitionVar::Finished, // Expected transition type for Prio3 at this stage
         },
     );
@@ -477,7 +477,7 @@ async fn agg_cont_req_abort_transition_out_of_order() {
 }
 
 #[tokio::test]
-async fn agg_cont_req_abort_nonce_repeated() {
+async fn agg_cont_req_abort_report_id_repeated() {
     let mut t = Test::new(TEST_VDAF);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
@@ -559,7 +559,7 @@ pub(crate) struct Test<'a> {
     vdaf_verify_key: VdafVerifyKey,
     leader_hpke_receiver_config: HpkeReceiverConfig,
     helper_hpke_receiver_config: HpkeReceiverConfig,
-    early_rejects: HashMap<Nonce, TransitionFailure>,
+    early_rejects: HashMap<ReportId, TransitionFailure>,
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_config: HpkeConfig,
     collector_hpke_receiver_config: HpkeReceiverConfig,
@@ -652,7 +652,7 @@ impl<'a> Test<'a> {
         for report_share in agg_init_req.report_shares {
             // Make sure the Leader doesn't try to aggregate these reports again.
             self.early_rejects.insert(
-                report_share.metadata.nonce.clone(),
+                report_share.metadata.id.clone(),
                 TransitionFailure::ReportReplayed,
             );
         }

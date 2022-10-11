@@ -3,7 +3,7 @@
 
 use crate::messages::{
     AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
-    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Nonce, PartialBatchSelector, Report,
+    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, PartialBatchSelector, Report, ReportId,
     ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use prio::codec::{Decode, Encode};
@@ -16,8 +16,8 @@ fn read_report() {
             11, 12, 13, 14, 15, 16,
         ]),
         metadata: ReportMetadata {
+            id: ReportId([23; 16]),
             time: 1637364244,
-            nonce: Nonce([23; 16]),
             extensions: vec![Extension::Unhandled {
                 typ: 0xfff,
                 payload: b"some extension".to_vec(),
@@ -53,8 +53,8 @@ fn read_agg_init_req() {
         report_shares: vec![
             ReportShare {
                 metadata: ReportMetadata {
+                    id: ReportId([99; 16]),
                     time: 1637361337,
-                    nonce: Nonce([99; 16]),
                     extensions: Vec::default(),
                 },
                 public_share: b"public share".to_vec(),
@@ -66,8 +66,8 @@ fn read_agg_init_req() {
             },
             ReportShare {
                 metadata: ReportMetadata {
+                    id: ReportId([17; 16]),
                     time: 163736423,
-                    nonce: Nonce([17; 16]),
                     extensions: Vec::default(),
                 },
                 public_share: b"public share".to_vec(),
@@ -91,11 +91,11 @@ fn read_agg_cont_req() {
         agg_job_id: Id([1; 32]),
         transitions: vec![
             Transition {
-                nonce: Nonce([0; 16]),
+                report_id: ReportId([0; 16]),
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
-                nonce: Nonce([1; 16]),
+                report_id: ReportId([1; 16]),
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                 ),
@@ -112,11 +112,11 @@ fn read_agg_resp() {
     let want = AggregateResp {
         transitions: vec![
             Transition {
-                nonce: Nonce([22; 16]),
+                report_id: ReportId([22; 16]),
                 var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
             },
             Transition {
-                nonce: Nonce([255; 16]),
+                report_id: ReportId([255; 16]),
                 var: TransitionVar::Continued(
                     b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                 ),
