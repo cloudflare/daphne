@@ -9,8 +9,8 @@ use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Nonce, Query, Report,
-        ReportMetadata,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Query, Report,
+        ReportId, ReportMetadata,
     },
     DapAggregateResult, DapMeasurement,
 };
@@ -78,7 +78,7 @@ async fn e2e_leader_upload() {
     )
     .await;
 
-    // Try uploading the same report a second time (expect failure due to repeated nonce).
+    // Try uploading the same report a second time (expect failure due to repeated ID.
     t.leader_post_expect_abort(
         &client,
         None, // dap_auth_token
@@ -146,7 +146,7 @@ async fn e2e_leader_upload() {
 
     // Upload a fixed report. This is a sanity check to make sure that the test resets the Leader's
     // state each time the test is run. If it didn't, this would result in an error due to the
-    // nonce being repeated.
+    // report ID being repeated.
     let url = t.leader_url.join(path).unwrap();
     let resp = client
         .post(url.as_str())
@@ -154,8 +154,8 @@ async fn e2e_leader_upload() {
             Report {
                 task_id: t.task_id.clone(),
                 metadata: ReportMetadata {
+                    id: ReportId([1; 16]),
                     time: t.now,
-                    nonce: Nonce([1; 16]),
                     extensions: Vec::default(),
                 },
                 public_share: b"public share".to_vec(),

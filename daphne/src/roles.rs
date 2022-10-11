@@ -12,8 +12,9 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id, Nonce,
-        PartialBatchSelector, Report, ReportMetadata, Time, TransitionFailure, TransitionVar,
+        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id,
+        PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
+        TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -93,7 +94,7 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
         task_id: &Id,
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
-    ) -> Result<HashMap<Nonce, TransitionFailure>, DapError>;
+    ) -> Result<HashMap<ReportId, TransitionFailure>, DapError>;
 
     /// Mark a batch as collected.
     async fn mark_collected(&self, task_id: &Id, batch_sel: &BatchSelector)
@@ -320,7 +321,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
             .await?;
         let reports = reports
             .into_iter()
-            .filter(|report| early_rejects.get(&report.metadata.nonce).is_none())
+            .filter(|report| early_rejects.get(&report.metadata.id).is_none())
             .collect();
 
         // Prepare AggregateInitializeReq.
@@ -593,18 +594,20 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                     DapHelperTransition::Continue(mut state, mut agg_resp) => {
                         let mut i = 0;
                         while i < state.seq.len() {
-                            if let Some(failure) = early_rejects.get(&agg_resp.transitions[i].nonce)
+                            if let Some(failure) =
+                                early_rejects.get(&agg_resp.transitions[i].report_id)
                             {
                                 // Mark reports that were rejected early as TransitionVar::Failed.
                                 agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
 
                                 // Remove VDAF preparation state of reports that were rejected early.
-                                if state.seq[i].2 == agg_resp.transitions[i].nonce {
+                                if state.seq[i].2 == agg_resp.transitions[i].report_id {
                                     let _val = state.seq.remove(i);
                                 } else {
-                                    // The nonce in the Helper state and Aggregate response must be aligned.
-                                    // Abort with an internal error if this is not the case.
-                                    return Err(DapError::fatal("nonces not aligned").into());
+                                    // The report ID in the Helper state and Aggregate response
+                                    // must be aligned. Abort with an internal error if this is not
+                                    // the case.
+                                    return Err(DapError::fatal("report IDs not aligned").into());
                                 }
                             } else {
                                 i += 1;

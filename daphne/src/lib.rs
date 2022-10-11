@@ -31,8 +31,8 @@
 use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
-        BatchSelector, CollectResp, Duration, HpkeConfig, Id, Interval, Nonce,
-        PartialBatchSelector, ReportMetadata, Time, TransitionFailure,
+        BatchSelector, CollectResp, Duration, HpkeConfig, Id, Interval, PartialBatchSelector,
+        ReportId, ReportMetadata, Time, TransitionFailure,
     },
     vdaf::{
         prio2::prio2_decode_prepare_state,
@@ -578,8 +578,8 @@ impl DapTaskConfig {
                 }
             };
 
-            let nonces = span.entry(bucket).or_default();
-            nonces.push(metadata);
+            let report_ids = span.entry(bucket).or_default();
+            report_ids.push(metadata);
         }
 
         Ok(span)
@@ -647,20 +647,20 @@ pub enum DapAggregateResult {
 /// The Leader's state after sending an AggregateInitReq.
 #[derive(Debug)]
 pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafState, VdafMessage, Time, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, VdafMessage, Time, ReportId)>,
 }
 
 /// The Leader's state after sending an AggregateContReq.
 #[derive(Debug)]
 pub struct DapLeaderUncommitted {
-    pub(crate) seq: Vec<(DapOutputShare, Nonce)>,
+    pub(crate) seq: Vec<(DapOutputShare, ReportId)>,
 }
 
 /// The Helper's state during the aggregation flow.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DapHelperState {
     pub(crate) part_batch_sel: PartialBatchSelector,
-    pub(crate) seq: Vec<(VdafState, Time, Nonce)>,
+    pub(crate) seq: Vec<(VdafState, Time, ReportId)>,
 }
 
 impl DapHelperState {
@@ -674,7 +674,7 @@ impl DapHelperState {
     pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
         let mut bytes = vec![];
         self.part_batch_sel.encode(&mut bytes);
-        for (state, time, nonce) in self.seq.iter() {
+        for (state, time, report_id) in self.seq.iter() {
             match (vdaf_config, state) {
                 (VdafConfig::Prio3(prio3_config), _) => {
                     prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
@@ -685,7 +685,7 @@ impl DapHelperState {
                 _ => return Err(DapError::fatal("VDAF config and prep state mismatch")),
             }
             time.encode(&mut bytes);
-            nonce.encode(&mut bytes);
+            report_id.encode(&mut bytes);
         }
         Ok(bytes)
     }
@@ -705,8 +705,8 @@ impl DapHelperState {
                 }
             };
             let time = Time::decode(&mut r)?;
-            let nonce = Nonce::decode(&mut r)?;
-            seq.push((state, time, nonce))
+            let report_id = ReportId::decode(&mut r)?;
+            seq.push((state, time, report_id))
         }
 
         Ok(DapHelperState {
@@ -719,7 +719,7 @@ impl DapHelperState {
 #[derive(Debug)]
 /// An ouptut share produced by an Aggregator for a single report.
 pub struct DapOutputShare {
-    pub(crate) time: u64, // Value from the report nonce
+    pub(crate) time: u64, // Value from the report
     pub(crate) checksum: [u8; 32],
     pub(crate) data: VdafAggregateShare,
 }

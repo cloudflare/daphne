@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::config::DaphneWorkerConfig;
-use daphne::messages::{Id, Nonce, ReportMetadata};
+use daphne::messages::{Id, ReportId, ReportMetadata};
 
 pub const GLOBAL_CONFIG: &str = r#"{
     "report_storage_epoch_duration": 604800,
@@ -86,8 +86,8 @@ fn parse_static_config() {
 
     // Try computing a batch name.
     let metadata = ReportMetadata {
+        id: ReportId([1; 16]),
         time: now,
-        nonce: Nonce([1; 16]),
         extensions: Vec::new(),
     };
     let durable_name = config.durable_name_report_store(&task_config, &task_id.to_hex(), &metadata);

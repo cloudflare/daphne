@@ -222,14 +222,14 @@ fn durable_name_bucket(bucket: &DapBatchBucket<'_>) -> String {
     }
 }
 
-pub(crate) fn nonce_hex_from_report(report_hex: &str) -> Option<&str> {
-    // task_id (32 bytes) + time (8 bytes)
-    if report_hex.len() < 80 {
+pub(crate) fn report_id_hex_from_report(report_hex: &str) -> Option<&str> {
+    // task_id (32 bytes)
+    if report_hex.len() < 64 {
         return None;
     }
-    let report_hex = &report_hex[80..];
+    let report_hex = &report_hex[64..];
 
-    // nonce
+    // metadata.id
     if report_hex.len() < 32 {
         return None;
     }

@@ -7,7 +7,7 @@ use crate::{
         leader_agg_job_queue::{
             DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        nonce_hex_from_report, state_get, state_set_if_not_exists, DurableConnector,
+        report_id_hex_from_report, state_get, state_set_if_not_exists, DurableConnector,
         DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
     },
     int_err,
@@ -184,10 +184,10 @@ impl DurableObject for ReportsPending {
             // Output:  `ReportsPendingResult`
             (DURABLE_REPORTS_PENDING_PUT, Method::Post) => {
                 let report_hex: String = req.json().await?;
-                let nonce_hex = nonce_hex_from_report(&report_hex)
-                    .ok_or_else(|| int_err("failed to parse nonce from report"))?;
+                let report_id_hex = report_id_hex_from_report(&report_hex)
+                    .ok_or_else(|| int_err("failed to parse report_id from report"))?;
 
-                let key = format!("pending/{}", nonce_hex);
+                let key = format!("pending/{}", report_id_hex);
                 let exists = state_set_if_not_exists::<String>(&self.state, &key, &report_hex)
                     .await?
                     .is_some();

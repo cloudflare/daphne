@@ -770,7 +770,7 @@ async fn http_post_aggregate_failure_report_replayed() {
             .lock()
             .expect("report_store: failed to lock");
         let report_store = guard.entry(task_id.clone()).or_default();
-        report_store.processed.insert(report.metadata.nonce.clone());
+        report_store.processed.insert(report.metadata.id.clone());
     }
 
     // Get AggregateResp and then extract the transition data from inside.

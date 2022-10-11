@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::durable::{
-    durable_name_agg_store, durable_name_queue, durable_name_report_store, nonce_hex_from_report,
+    durable_name_agg_store, durable_name_queue, durable_name_report_store,
+    report_id_hex_from_report,
 };
 use daphne::{
-    messages::{Id, Nonce, Report, ReportMetadata},
+    messages::{Id, Report, ReportId, ReportMetadata},
     DapBatchBucket, DapVersion,
 };
 use prio::codec::{Decode, Encode};
@@ -36,17 +37,17 @@ fn durable_name() {
     );
 }
 
-// Test that the `report_id_from_report()` method properly extracts the nonce from the hex-encoded
-// report. This helps ensure that changes to the `Report` wire format don't cause any regressions
-// to `ReportStore`.
+// Test that the `report_id_from_report()` method properly extracts the report ID from the
+// hex-encoded report. This helps ensure that changes to the `Report` wire format don't cause any
+// regressions to `ReportStore`.
 #[test]
-fn parse_nonce_hex_from_report() {
+fn parse_report_id_hex_from_report() {
     let mut rng = thread_rng();
     let report = Report {
         task_id: Id(rng.gen()),
         metadata: ReportMetadata {
+            id: ReportId(rng.gen()),
             time: rng.gen(),
-            nonce: Nonce(rng.gen()),
             extensions: Vec::default(),
         },
         public_share: Vec::default(),
@@ -54,9 +55,9 @@ fn parse_nonce_hex_from_report() {
     };
 
     let report_hex = hex::encode(report.get_encoded());
-    let key = nonce_hex_from_report(&report_hex).unwrap();
+    let key = report_id_hex_from_report(&report_hex).unwrap();
     assert_eq!(
-        Nonce::get_decoded(&hex::decode(key).unwrap()).unwrap(),
-        report.metadata.nonce
+        ReportId::get_decoded(&hex::decode(key).unwrap()).unwrap(),
+        report.metadata.id
     );
 }

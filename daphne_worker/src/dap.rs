@@ -46,8 +46,8 @@ use daphne::{
     constants,
     hpke::HpkeDecrypter,
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Nonce, PartialBatchSelector,
-        Report, ReportMetadata, TransitionFailure,
+        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, PartialBatchSelector, Report,
+        ReportId, ReportMetadata, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
@@ -366,7 +366,7 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
         task_id: &Id,
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
-    ) -> std::result::Result<HashMap<Nonce, TransitionFailure>, DapError> {
+    ) -> std::result::Result<HashMap<ReportId, TransitionFailure>, DapError> {
         let durable = self.durable();
         let task_config = self.try_get_task_config_for(task_id)?;
         let task_id_hex = task_id.to_hex();
@@ -386,22 +386,22 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
             for metadata in report_meta {
                 let durable_name =
                     self.durable_name_report_store(task_config, &task_id_hex, metadata);
-                let nonce_hex = hex::encode(metadata.nonce.get_encoded());
-                let nonce_hex_set = reports_processed_request_data
+                let report_id_hex = hex::encode(metadata.id.get_encoded());
+                let report_id_hex_set = reports_processed_request_data
                     .entry(durable_name)
                     .or_default();
-                nonce_hex_set.push(nonce_hex);
+                report_id_hex_set.push(report_id_hex);
             }
         }
 
         // Send ReportsProcessed requests.
         let mut reports_processed_requests = Vec::new();
-        for (durable_name, nonce_hex_set) in reports_processed_request_data.into_iter() {
+        for (durable_name, report_id_hex_set) in reports_processed_request_data.into_iter() {
             reports_processed_requests.push(durable.post(
                 BINDING_DAP_REPORTS_PROCESSED,
                 DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
                 durable_name,
-                nonce_hex_set,
+                report_id_hex_set,
             ));
         }
 
@@ -422,9 +422,9 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
                 .map_err(dap_err)?;
         let mut reports_processed = HashSet::new();
         for response in reports_processed_responses.into_iter() {
-            for nonce_hex in response.into_iter() {
-                let nonce = Nonce::get_decoded(&hex::decode(&nonce_hex)?)?;
-                reports_processed.insert(nonce);
+            for report_id_hex in response.into_iter() {
+                let report_id = ReportId::get_decoded(&hex::decode(&report_id_hex)?)?;
+                reports_processed.insert(report_id);
             }
         }
 
@@ -440,11 +440,11 @@ impl<'a, D> DapAggregator<'a, BearerToken> for DaphneWorkerConfig<D> {
             .zip(agg_store_responses.into_iter())
         {
             for metadata in span.get(bucket).unwrap() {
-                let processed = reports_processed.contains(&metadata.nonce);
+                let processed = reports_processed.contains(&metadata.id);
                 if processed && !collected {
-                    early_fails.insert(metadata.nonce.clone(), TransitionFailure::ReportReplayed);
+                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportReplayed);
                 } else if !processed && collected {
-                    early_fails.insert(metadata.nonce.clone(), TransitionFailure::BatchCollected);
+                    early_fails.insert(metadata.id.clone(), TransitionFailure::BatchCollected);
                 }
             }
         }

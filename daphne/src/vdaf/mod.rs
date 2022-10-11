@@ -8,7 +8,7 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        BatchSelector, HpkeCiphertext, HpkeConfig, Id, Nonce, PartialBatchSelector, Report,
+        BatchSelector, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector, Report, ReportId,
         ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
     vdaf::{
@@ -145,7 +145,7 @@ impl VdafConfig {
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
         let metadata = ReportMetadata {
-            nonce: Nonce(rng.gen()),
+            id: ReportId(rng.gen()),
             time,
             extensions: Vec::new(),
         };
@@ -210,7 +210,7 @@ impl VdafConfig {
     ///
     /// * `task_id` is the DAP task ID indicated by the report.
     ///
-    /// * `nonce` is the report nonce.
+    /// * `report_id` is the report ID.
     ///
     /// * `encrypted_input_share` is the encrypted input share.
     #[allow(clippy::too_many_arguments)]
@@ -251,7 +251,7 @@ impl VdafConfig {
                     prio3_config,
                     verify_key,
                     agg_id,
-                    metadata.nonce.as_ref(),
+                    metadata.id.as_ref(),
                     &input_share_data,
                 )?)
             }
@@ -260,7 +260,7 @@ impl VdafConfig {
                     *dimension,
                     verify_key,
                     agg_id,
-                    metadata.nonce.as_ref(),
+                    metadata.id.as_ref(),
                     &input_share_data,
                 )?)
             }
@@ -297,13 +297,13 @@ impl VdafConfig {
         let mut states = Vec::with_capacity(reports.len());
         let mut seq = Vec::with_capacity(reports.len());
         for report in reports.into_iter() {
-            if processed.contains(&report.metadata.nonce) {
+            if processed.contains(&report.metadata.id) {
                 return Err(DapError::fatal(
-                    "tried to process report sequence with non-unique nonces",
+                    "tried to process report sequence with non-unique report IDs",
                 )
                 .into());
             }
-            processed.insert(report.metadata.nonce.clone());
+            processed.insert(report.metadata.id.clone());
 
             if &report.task_id != task_id || report.encrypted_input_shares.len() != 2 {
                 return Err(
@@ -333,7 +333,7 @@ impl VdafConfig {
                         step,
                         message,
                         report.metadata.time,
-                        report.metadata.nonce.clone(),
+                        report.metadata.id.clone(),
                     ));
                     seq.push(ReportShare {
                         metadata: report.metadata,
@@ -388,8 +388,8 @@ impl VdafConfig {
     /// * `agg_init_req` is the request sent by the Leader.
     ///
     /// * `early_rejects` is a tableindicating the set of reports in `agg_init_req` that the Helper
-    /// knows in advance it must reject. Each key is the report's nonce and the corresponding value
-    /// is the transition failure the Helper is to transmit.
+    /// knows in advance it must reject. Each key is the report ID and the corresponding value is
+    /// the transition failure the Helper is to transmit.
     pub(crate) async fn handle_agg_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
@@ -401,10 +401,10 @@ impl VdafConfig {
         let mut states = Vec::with_capacity(num_reports);
         let mut transitions = Vec::with_capacity(num_reports);
         for report_share in agg_init_req.report_shares.iter() {
-            if processed.contains(&report_share.metadata.nonce) {
+            if processed.contains(&report_share.metadata.id) {
                 return Err(DapAbort::UnrecognizedMessage);
             }
-            processed.insert(report_share.metadata.nonce.clone());
+            processed.insert(report_share.metadata.id.clone());
 
             let var = match self
                 .consume_report_share(
@@ -426,7 +426,7 @@ impl VdafConfig {
                     states.push((
                         step,
                         report_share.metadata.time,
-                        report_share.metadata.nonce.clone(),
+                        report_share.metadata.id.clone(),
                     ));
                     TransitionVar::Continued(message_data)
                 }
@@ -437,7 +437,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                nonce: report_share.metadata.nonce.clone(),
+                report_id: report_share.metadata.id.clone(),
                 var,
             });
         }
@@ -476,11 +476,11 @@ impl VdafConfig {
 
         let mut seq = Vec::with_capacity(state.seq.len());
         let mut states = Vec::with_capacity(state.seq.len());
-        for (helper, (leader_step, leader_message, leader_time, leader_nonce)) in
+        for (helper, (leader_step, leader_message, leader_time, leader_report_id)) in
             agg_resp.transitions.into_iter().zip(state.seq.into_iter())
         {
-            // TODO spec: Consider removing the nonce from the AggregateResp.
-            if helper.nonce != leader_nonce {
+            // TODO spec: Consider removing the report ID from the AggregateResp.
+            if helper.report_id != leader_report_id {
                 return Err(DapAbort::UnrecognizedMessage);
             }
 
@@ -513,8 +513,10 @@ impl VdafConfig {
 
             match res {
                 Ok((data, message)) => {
-                    let checksum =
-                        ring::digest::digest(&ring::digest::SHA256, &leader_nonce.get_encoded());
+                    let checksum = ring::digest::digest(
+                        &ring::digest::SHA256,
+                        &leader_report_id.get_encoded(),
+                    );
 
                     states.push((
                         DapOutputShare {
@@ -522,11 +524,11 @@ impl VdafConfig {
                             checksum: checksum.as_ref().try_into().unwrap(),
                             data,
                         },
-                        leader_nonce.clone(),
+                        leader_report_id.clone(),
                     ));
 
                     seq.push(Transition {
-                        nonce: leader_nonce,
+                        report_id: leader_report_id,
                         var: TransitionVar::Continued(message),
                     });
                 }
@@ -569,8 +571,8 @@ impl VdafConfig {
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let mut processed = HashSet::with_capacity(state.seq.len());
         let mut recognized = HashSet::with_capacity(state.seq.len());
-        for (_, _, nonce) in state.seq.iter() {
-            recognized.insert(nonce.clone());
+        for (_, _, report_id) in state.seq.iter() {
+            recognized.insert(report_id.clone());
         }
 
         let num_reports = state.seq.len();
@@ -579,21 +581,21 @@ impl VdafConfig {
         let mut leader_iter = agg_cont_req.transitions.iter();
         let mut helper_iter = state.seq.into_iter();
         for leader in &mut leader_iter {
-            // If the nonce is not recognized, then respond with a transition failure.
+            // If the report ID is not recognized, then respond with a transition failure.
             //
             // TODO spec: Having to enforce this is awkward because, in order to disambiguate the
             // trigger condition from the leader skipping a report that can't be processed, we have
             // to make two passes of the request. (The first step is to compute `recognized`). It
             // would be nice if we didn't have to keep track of the set of processed reports. One
             // way to avoid this would be to require the leader to send the reports in a well-known
-            // order, say, in ascending order by nonce.
-            if !recognized.contains(&leader.nonce) || processed.contains(&leader.nonce) {
+            // order, say, in ascending order by ID.
+            if !recognized.contains(&leader.report_id) || processed.contains(&leader.report_id) {
                 return Err(DapAbort::UnrecognizedMessage);
             }
 
-            for (helper_step, helper_time, helper_nonce) in &mut helper_iter {
-                processed.insert(helper_nonce.clone());
-                if helper_nonce != leader.nonce {
+            for (helper_step, helper_time, helper_report_id) in &mut helper_iter {
+                processed.insert(helper_report_id.clone());
+                if helper_report_id != leader.report_id {
                     // Presumably the leader has skipped this report.
                     continue;
                 }
@@ -618,7 +620,7 @@ impl VdafConfig {
                     Ok(data) => {
                         let checksum = ring::digest::digest(
                             &ring::digest::SHA256,
-                            &helper_nonce.get_encoded(),
+                            &helper_report_id.get_encoded(),
                         );
 
                         out_shares.push(DapOutputShare {
@@ -635,7 +637,7 @@ impl VdafConfig {
                 };
 
                 transitions.push(Transition {
-                    nonce: helper_nonce,
+                    report_id: helper_report_id,
                     var,
                 });
 
@@ -672,13 +674,13 @@ impl VdafConfig {
         }
 
         let mut out_shares = Vec::with_capacity(uncommitted.seq.len());
-        for (helper, (out_share, leader_nonce)) in agg_resp
+        for (helper, (out_share, leader_report_id)) in agg_resp
             .transitions
             .into_iter()
             .zip(uncommitted.seq.into_iter())
         {
-            // TODO spec: Consider removing the nonce from the AggregateResp.
-            if helper.nonce != leader_nonce {
+            // TODO spec: Consider removing the report ID from the AggregateResp.
+            if helper.report_id != leader_report_id {
                 return Err(DapAbort::UnrecognizedMessage);
             }
 
