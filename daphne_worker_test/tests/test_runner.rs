@@ -56,6 +56,7 @@ const LEADER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "time_interval": {
                 "min_batch_size": 10
@@ -82,6 +83,7 @@ const LEADER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "time_interval": {
                 "min_batch_size": 10
@@ -108,6 +110,7 @@ const LEADER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "fixed_size": {
                 "min_batch_size": 10,
@@ -144,6 +147,7 @@ const HELPER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "time_interval": {
                 "min_batch_size": 10
@@ -170,6 +174,7 @@ const HELPER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "fixed_size": {
                 "min_batch_size": 10,
@@ -200,6 +205,7 @@ pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
             "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
         },
         "time_precision": 3600,
+        "expiration": 30695925405,
         "query": {
             "time_interval": {
                 "min_batch_size": 10

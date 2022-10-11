@@ -160,6 +160,11 @@ pub enum DapAbort {
     #[error("replayedReport")]
     ReplayedReport,
 
+    /// Report too late. Sent in response to an upload request for a task that is known to have
+    /// expired.
+    #[error("reportTooLate")]
+    ReportTooLate,
+
     /// Stale report. Sent in response to an upload request containing a report pertaining to a
     /// batch that has already been collected.
     #[error("staleReport")]
@@ -203,6 +208,7 @@ impl DapAbort {
             | Self::QueryMismatch
             | Self::MissingTaskId
             | Self::ReplayedReport
+            | Self::ReportTooLate
             | Self::StaleReport
             | Self::UnauthorizedRequest
             | Self::UnrecognizedAggregationJob
@@ -459,6 +465,9 @@ pub struct DapTaskConfig {
     /// constrain the batch interval of time=interval queries.
     pub time_precision: Duration,
 
+    /// The time at which the task expires.
+    pub expiration: Time,
+
     /// The query configuration for this task.
     pub query: DapQueryConfig,
 
@@ -598,6 +607,7 @@ struct ShadowDapTaskConfig {
     leader_url: Url,
     helper_url: Url,
     time_precision: Duration,
+    expiration: Time,
     query: DapQueryConfig,
     vdaf: VdafConfig,
     #[serde(with = "hex")]
@@ -618,6 +628,7 @@ impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
             leader_url: shadow.leader_url,
             helper_url: shadow.helper_url,
             time_precision: shadow.time_precision,
+            expiration: shadow.expiration,
             query: shadow.query,
             vdaf: shadow.vdaf,
             vdaf_verify_key,

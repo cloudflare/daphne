@@ -50,6 +50,7 @@ struct Test {
     collector_token: BearerToken,
     time_interval_task_id: Id,
     fixed_size_task_id: Id,
+    expired_task_id: Id,
 }
 
 impl Test {
@@ -82,6 +83,7 @@ impl Test {
         // Create the task list.
         let time_interval_task_id = Id(rng.gen());
         let fixed_size_task_id = Id(rng.gen());
+        let expired_task_id = Id(rng.gen());
         let mut tasks = HashMap::new();
         tasks.insert(
             time_interval_task_id.clone(),
@@ -91,6 +93,7 @@ impl Test {
                 leader_url: leader_url.clone(),
                 helper_url: helper_url.clone(),
                 time_precision,
+                expiration: now + 3600,
                 query: DapQueryConfig::TimeInterval { min_batch_size: 1 },
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
@@ -104,10 +107,25 @@ impl Test {
                 leader_url: leader_url.clone(),
                 helper_url: helper_url.clone(),
                 time_precision,
+                expiration: now + 3600,
                 query: DapQueryConfig::FixedSize {
                     min_batch_size: 1,
                     max_batch_size: 2,
                 },
+                vdaf: vdaf_config.clone(),
+                vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+            },
+        );
+        tasks.insert(
+            expired_task_id.clone(),
+            DapTaskConfig {
+                version,
+                collector_hpke_config: collector_hpke_receiver_config.config.clone(),
+                leader_url: leader_url.clone(),
+                helper_url: helper_url.clone(),
+                time_precision,
+                expiration: now, // Expires this second
+                query: DapQueryConfig::TimeInterval { min_batch_size: 1 },
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
             },
@@ -158,6 +176,7 @@ impl Test {
             collector_token,
             time_interval_task_id,
             fixed_size_task_id,
+            expired_task_id,
         }
     }
 
@@ -276,6 +295,9 @@ impl Test {
         report
     }
 
+    // TODO Rework the test framework to call DapLeader::run_agg_job() directly. The method here is
+    // basically a re-implementration that allows us to avoid having to mock the HTTP connection.
+    // The (major) downside is that we have to keep the code in-sync.
     async fn run_agg_job(&self, task_id: &Id) -> Result<(), DapAbort> {
         let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
         let task_config = wrapped.as_ref().unwrap();
@@ -517,6 +539,30 @@ async fn http_post_aggregate_init_unauthorized_request() {
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest)
+    );
+}
+
+// Test that the Helper rejects reports past the expiration date.
+#[tokio::test]
+async fn http_post_aggregate_init_expired_task() {
+    let t = Test::new();
+
+    let report = t.gen_test_report(&t.expired_task_id).await;
+    let report_share = ReportShare {
+        metadata: report.metadata,
+        public_share: report.public_share,
+        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    };
+    let req = t
+        .gen_test_agg_init_req(&t.expired_task_id, vec![report_share])
+        .await;
+
+    let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+    let agg_resp = AggregateResp::get_decoded(&resp.payload).unwrap();
+    assert_eq!(agg_resp.transitions.len(), 1);
+    assert_matches!(
+        agg_resp.transitions[0].var,
+        TransitionVar::Failed(TransitionFailure::TaskExpired)
     );
 }
 
@@ -933,6 +979,28 @@ async fn http_post_upload_fail_send_invalid_report() {
     );
 }
 
+// Test that the Leader rejects reports past the expiration date.
+#[tokio::test]
+async fn http_post_upload_task_expired() {
+    let t = Test::new();
+    let task_id = &t.expired_task_id;
+    let task_config = t.leader.tasks.get(task_id).unwrap();
+
+    let report = t.gen_test_report(task_id).await;
+    let req = DapRequest {
+        version: task_config.version,
+        media_type: Some(MEDIA_TYPE_REPORT),
+        payload: report.get_encoded(),
+        url: task_config.leader_url.join("upload").unwrap(),
+        sender_auth: None,
+    };
+
+    assert_matches!(
+        t.leader.http_post_upload(&req).await.unwrap_err(),
+        DapAbort::ReportTooLate
+    );
+}
+
 #[tokio::test]
 async fn get_reports_empty_response() {
     let t = Test::new();
@@ -1289,9 +1357,8 @@ async fn http_post_fail_wrong_dap_version() {
     assert_matches!(err, DapAbort::InvalidProtocolVersion);
 }
 
-// Test the upload sub-protocol.
 #[tokio::test]
-async fn successful_http_post_upload() {
+async fn http_post_upload() {
     let t = Test::new();
     let task_id = &t.time_interval_task_id;
 
