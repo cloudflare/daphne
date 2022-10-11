@@ -6,7 +6,7 @@
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
 //! [VDAFs](https://github.com/cfrg/draft-irtf-cfrg-vdaf).
 //!
-//! Daphne implements draft-ietf-ppm-dap-01.
+//! Daphne implements draft-ietf-ppm-dap-02.
 //!
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
@@ -267,8 +267,8 @@ pub struct ProblemDetails {
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum DapVersion {
-    #[serde(rename = "v01")]
-    Draft01,
+    #[serde(rename = "v02")]
+    Draft02,
 
     #[serde(other)]
     Unknown,
@@ -277,7 +277,7 @@ pub enum DapVersion {
 impl From<&str> for DapVersion {
     fn from(version: &str) -> Self {
         match version {
-            "v01" => DapVersion::Draft01,
+            "v02" => DapVersion::Draft02,
             _ => DapVersion::Unknown,
         }
     }
@@ -286,7 +286,7 @@ impl From<&str> for DapVersion {
 impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
-            DapVersion::Draft01 => "v01",
+            DapVersion::Draft02 => "v02",
             _ => panic!("tried to construct string from unknown DAP version"),
         }
     }

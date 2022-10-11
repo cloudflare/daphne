@@ -14,9 +14,9 @@ pub const GLOBAL_CONFIG: &str = r#"{
 
 const DAP_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v01",
-        "leader_url": "https://leader.biz/v01/",
-        "helper_url": "http://helper.com:8788/v01/",
+        "version": "v02",
+        "leader_url": "https://leader.biz/v02/",
+        "helper_url": "http://helper.com:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -40,9 +40,9 @@ const DAP_TASK_LIST: &str = r#"{
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
 },
     "aaaabe3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
-        "helper_url": "http://helper:8788/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
+        "helper_url": "http://helper:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -93,6 +93,6 @@ fn parse_static_config() {
     let durable_name = config.durable_name_report_store(&task_config, &task_id.to_hex(), &metadata);
     assert_eq!(
         durable_name,
-        "v01/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/epoch/00000000001637193600/shard/1"
+        "v02/task/f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f/epoch/00000000001637193600/shard/1"
     );
 }

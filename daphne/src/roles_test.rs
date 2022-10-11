@@ -72,10 +72,10 @@ impl Test {
 
         // Task Parameters that the Leader and Helper must agree on.
         let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
-        let leader_url = Url::parse("https://leader.biz/v01/").unwrap();
-        let helper_url = Url::parse("http://helper.com:8788/v01/").unwrap();
+        let leader_url = Url::parse("https://leader.biz/v02/").unwrap();
+        let helper_url = Url::parse("http://helper.com:8788/v02/").unwrap();
         let time_precision = 3600;
-        let version = DapVersion::Draft01;
+        let version = DapVersion::Draft02;
         let collector_hpke_receiver_config =
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
 
@@ -526,11 +526,11 @@ async fn http_get_hpke_config_unrecognized_task() {
     let mut rng = thread_rng();
     let task_id = Id(rng.gen());
     let req = DapRequest {
-        version: DapVersion::Draft01,
+        version: DapVersion::Draft02,
         media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
         payload: Vec::new(),
         url: Url::parse(&format!(
-            "http://aggregator.biz/v01/hpke_config?task_id={}",
+            "http://aggregator.biz/v02/hpke_config?task_id={}",
             task_id.to_base64url()
         ))
         .unwrap(),
@@ -547,10 +547,10 @@ async fn http_get_hpke_config_unrecognized_task() {
 async fn http_get_hpke_config_missing_task_id() {
     let t = Test::new();
     let req = DapRequest {
-        version: DapVersion::Draft01,
+        version: DapVersion::Draft02,
         media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
         payload: Vec::new(),
-        url: Url::parse("http://aggregator.biz/v01/hpke_config").unwrap(),
+        url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),
         sender_auth: None,
     };
 

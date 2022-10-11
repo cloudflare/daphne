@@ -16,7 +16,7 @@ use prio::codec::Decode;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
-/// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-01.
+/// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-02.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BearerToken(String);
 

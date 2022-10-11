@@ -301,8 +301,8 @@ impl Decode for AggregateContinueReq {
 /// Transition message. This conveyes a message sent from one Aggregator to another during the
 /// preparation phase of VDAF evaluation.
 //
-// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-01. This is confusing because it
-// overloads a term used in draft-irtf-cfrg-draft-01.
+// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-02. This is confusing because it
+// overloads a term used in draft-irtf-cfrg-draft-02.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transition {
     pub nonce: Nonce,
@@ -745,7 +745,7 @@ pub struct HpkeConfig {
     // doesn't implement Debug. Eventually we'll replace rust-hpke with a more ergonomic
     // implementation that does. For now we'll eat the copy.
     #[serde(with = "hex")]
-    pub(crate) public_key: Vec<u8>,
+    pub public_key: Vec<u8>,
 }
 
 impl AsRef<HpkeConfig> for HpkeConfig {

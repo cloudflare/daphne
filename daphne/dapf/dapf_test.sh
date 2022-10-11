@@ -70,8 +70,8 @@ for i in {1..10}; do
         dapf \
             --task-id "$TASK_ID" \
             upload \
-                --leader-url "$LEADER_BASE_URL/v01/" \
-                --helper-url "$HELPER_BASE_URL/v01/" \
+                --leader-url "$LEADER_BASE_URL/v02/" \
+                --helper-url "$HELPER_BASE_URL/v02/" \
                 --vdaf "$VDAF_CONFIG"
 done
 
@@ -81,7 +81,7 @@ collect_uri=$(echo $batch_interval | \
         --task-id "$TASK_ID" \
         --bearer-token "$COLLECTOR_BEARER_TOKEN" \
         collect \
-            --leader-url "$LEADER_BASE_URL/v01/"
+            --leader-url "$LEADER_BASE_URL/v02/"
 :)
 
 # TODO(cjpatton) Remove this once aggregation jobs are scheduled automatically
