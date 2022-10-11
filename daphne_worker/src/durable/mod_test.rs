@@ -21,18 +21,18 @@ fn durable_name() {
     assert_eq!(durable_name_queue(shard), "queue/1234");
 
     assert_eq!(
-        durable_name_report_store(&DapVersion::Draft01, &id1.to_hex(), time, shard),
-        "v01/task/1111111111111111111111111111111111111111111111111111111111111111/epoch/00000000001664850074/shard/1234",
+        durable_name_report_store(&DapVersion::Draft02, &id1.to_hex(), time, shard),
+        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/epoch/00000000001664850074/shard/1234",
     );
 
     assert_eq!(
-        durable_name_agg_store(&DapVersion::Draft01, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: &id2 }),
-        "v01/task/1111111111111111111111111111111111111111111111111111111111111111/batch/2222222222222222222222222222222222222222222222222222222222222222",
+        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: &id2 }),
+        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/batch/2222222222222222222222222222222222222222222222222222222222222222",
     );
 
     assert_eq!(
-        durable_name_agg_store(&DapVersion::Draft01, &id1.to_hex(), &DapBatchBucket::TimeInterval{ batch_window: time }),
-        "v01/task/1111111111111111111111111111111111111111111111111111111111111111/window/1664850074",
+        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::TimeInterval{ batch_window: time }),
+        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/window/1664850074",
     );
 }
 

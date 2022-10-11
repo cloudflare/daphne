@@ -4,7 +4,7 @@
 //! Implementation of DAP Aggregator roles for Daphne-Worker.
 //!
 //! Daphne-Worker uses bearer tokens for DAP request authorization as specified in
-//! draft-ietf-ppm-dap-01.
+//! draft-ietf-ppm-dap-02.
 
 use crate::{
     config::{

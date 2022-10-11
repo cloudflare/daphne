@@ -45,9 +45,9 @@ pub const GLOBAL_CONFIG: &str = r#"{
 // When adding paths, they must not start with a "/".
 const LEADER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
-        "helper_url": "http://helper:8788/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
+        "helper_url": "http://helper:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -71,8 +71,8 @@ const LEADER_TASK_LIST: &str = r#"{
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     },
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
         "helper_url": "http://127.0.0.1:9788/",
         "collector_hpke_config": {
             "id": 23,
@@ -97,9 +97,9 @@ const LEADER_TASK_LIST: &str = r#"{
         "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
     },
     "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
-        "helper_url": "http://helper:8788/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
+        "helper_url": "http://helper:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -133,9 +133,9 @@ const LEADER_TASK_LIST: &str = r#"{
 // When adding paths, they must not start with a "/".
 const HELPER_TASK_LIST: &str = r#"{
     "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
-        "helper_url": "http://helper:8788/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
+        "helper_url": "http://helper:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -159,9 +159,9 @@ const HELPER_TASK_LIST: &str = r#"{
         "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
     },
     "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
-        "helper_url": "http://helper:8788/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
+        "helper_url": "http://helper:8788/v02/",
         "collector_hpke_config": {
             "id": 23,
             "kem_id": "X25519HkdfSha256",
@@ -189,8 +189,8 @@ const HELPER_TASK_LIST: &str = r#"{
 
 pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
     "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "version": "v01",
-        "leader_url": "http://leader:8787/v01/",
+        "version": "v02",
+        "leader_url": "http://leader:8787/v02/",
         "helper_url": "http://127.0.0.1:9788/",
          "collector_hpke_config": {
             "id": 23,
@@ -485,7 +485,7 @@ impl TestRunner {
         client: &reqwest::Client,
         report_sel: &DaphneWorkerReportSelector,
     ) -> DapLeaderProcessTelemetry {
-        // Replace path "/v01" with "/internal/process".
+        // Replace path "/v02" with "/internal/process".
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
 
@@ -705,7 +705,7 @@ async fn post_internal_delete_all(
     base_url: &Url,
     batch_interval: &Interval,
 ) {
-    // Replace path "/v01" with "/internal/delete_all".
+    // Replace path "/v02" with "/internal/delete_all".
     let mut url = base_url.clone();
     url.set_path("internal/delete_all");
 
