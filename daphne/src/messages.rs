@@ -57,6 +57,12 @@ impl AsRef<[u8]> for Id {
     }
 }
 
+impl ToString for Id {
+    fn to_string(&self) -> String {
+        self.to_hex()
+    }
+}
+
 /// A duration.
 pub type Duration = u64;
 

@@ -187,6 +187,7 @@ impl Test {
         DapRequest {
             version,
             media_type: Some(MEDIA_TYPE_REPORT),
+            task_id: Some(report.task_id.clone()),
             payload: report.get_encoded(),
             url: task_config.leader_url.join("upload").unwrap(),
             sender_auth: None,
@@ -379,6 +380,7 @@ impl Test {
             .collector_authorized_req(
                 task_config.version,
                 MEDIA_TYPE_COLLECT_REQ,
+                task_id,
                 CollectReq {
                     task_id: task_id.clone(),
                     query: query.clone(),
@@ -465,6 +467,7 @@ impl Test {
         DapRequest {
             version,
             media_type: Some(media_type),
+            task_id: Some(task_id.clone()),
             payload,
             url,
             sender_auth,
@@ -475,12 +478,14 @@ impl Test {
         &self,
         version: DapVersion,
         media_type: &'static str,
+        task_id: &Id,
         msg: M,
         url: Url,
     ) -> DapRequest<BearerToken> {
         DapRequest {
             version,
             media_type: Some(media_type),
+            task_id: Some(task_id.clone()),
             payload: msg.get_encoded(),
             url,
             sender_auth: Some(self.collector_token.clone()),
@@ -575,6 +580,7 @@ async fn http_get_hpke_config_unrecognized_task() {
         version: DapVersion::Draft02,
         media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
         payload: Vec::new(),
+        task_id: Some(task_id.clone()),
         url: Url::parse(&format!(
             "http://aggregator.biz/v02/hpke_config?task_id={}",
             task_id.to_base64url()
@@ -595,6 +601,7 @@ async fn http_get_hpke_config_missing_task_id() {
     let req = DapRequest {
         version: DapVersion::Draft02,
         media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+        task_id: Some(t.time_interval_task_id.clone()),
         payload: Vec::new(),
         url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),
         sender_auth: None,
@@ -713,6 +720,7 @@ async fn http_post_collect_unauthorized_request() {
     let mut req = DapRequest {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_COLLECT_REQ),
+        task_id: Some(task_id.clone()),
         payload: CollectReq {
             task_id: task_id.clone(),
             query: Query::default(),
@@ -932,6 +940,7 @@ async fn http_post_upload_fail_send_invalid_report() {
     let req = DapRequest {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_REPORT),
+        task_id: Some(task_id.clone()),
         payload: report_empty_task_id.get_encoded(),
         url: task_config.leader_url.join("upload").unwrap(),
         sender_auth: None,
@@ -990,6 +999,7 @@ async fn http_post_upload_task_expired() {
     let req = DapRequest {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_REPORT),
+        task_id: Some(task_id.clone()),
         payload: report.get_encoded(),
         url: task_config.leader_url.join("upload").unwrap(),
         sender_auth: None,
@@ -1043,6 +1053,7 @@ async fn poll_collect_job_test_results() {
         .collector_authorized_req(
             version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             CollectReq {
                 task_id: task_id.clone(),
                 query: task_config.query_for_current_batch_window(t.now),
@@ -1109,6 +1120,7 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             CollectReq {
                 task_id: task_id.clone(),
                 query: Query::TimeInterval {
@@ -1135,6 +1147,7 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             CollectReq {
                 task_id: task_id.clone(),
                 query: Query::TimeInterval {
@@ -1163,6 +1176,7 @@ async fn http_post_collect_fail_invalid_batch_interval() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             CollectReq {
                 task_id: task_id.clone(),
                 query: Query::TimeInterval {
@@ -1197,6 +1211,7 @@ async fn http_post_collect_succeed_max_batch_interval() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             CollectReq {
                 task_id: task_id.clone(),
                 query: Query::TimeInterval {
@@ -1263,6 +1278,7 @@ async fn http_post_collect_success() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            task_id,
             collector_collect_req.clone(),
             task_config.leader_url.join("collect").unwrap(),
         )
@@ -1303,6 +1319,7 @@ async fn http_post_collect_invalid_query() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            &t.time_interval_task_id,
             CollectReq {
                 task_id: t.time_interval_task_id.clone(),
                 query: Query::FixedSize {
@@ -1324,6 +1341,7 @@ async fn http_post_collect_invalid_query() {
         .collector_authorized_req(
             task_config.version,
             MEDIA_TYPE_COLLECT_REQ,
+            &t.fixed_size_task_id,
             CollectReq {
                 task_id: t.fixed_size_task_id.clone(),
                 query: Query::FixedSize {

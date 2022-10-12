@@ -185,20 +185,22 @@ impl MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl BearerTokenProvider for MockAggregator {
+impl<'a> BearerTokenProvider<'a> for MockAggregator {
+    type WrappedBearerToken = &'a BearerToken;
+
     async fn get_leader_bearer_token_for(
-        &self,
-        _task_id: &Id,
-    ) -> Result<Option<BearerToken>, DapError> {
-        Ok(Some(self.leader_token.clone()))
+        &'a self,
+        _task_id: &'a Id,
+    ) -> Result<Option<&'a BearerToken>, DapError> {
+        Ok(Some(&self.leader_token))
     }
 
     async fn get_collector_bearer_token_for(
-        &self,
-        _task_id: &Id,
-    ) -> Result<Option<BearerToken>, DapError> {
+        &'a self,
+        _task_id: &'a Id,
+    ) -> Result<Option<&'a BearerToken>, DapError> {
         if let Some(ref collector_token) = self.collector_token {
-            Ok(Some(collector_token.clone()))
+            Ok(Some(collector_token))
         } else {
             Err(DapError::fatal(
                 "MockAggregator not configured with Collector bearer token",
@@ -260,7 +262,10 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
         media_type: &'static str,
         _payload: &[u8],
     ) -> Result<BearerToken, DapError> {
-        self.authorize_with_bearer_token(task_id, media_type).await
+        Ok(self
+            .authorize_with_bearer_token(task_id, media_type)
+            .await?
+            .clone())
     }
 }
 

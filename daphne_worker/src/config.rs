@@ -13,7 +13,7 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
-    int_err,
+    int_err, InternalAddAuthenticationToken, InternalRole,
 };
 use daphne::{
     auth::BearerToken,
@@ -27,15 +27,18 @@ use prio::{
     codec::Decode,
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::HashMap,
+    io::Cursor,
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
+pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_LEADER: &str = "bearer_token/leader";
+pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/collector";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 /// Long-lived parameters used a daphne across DAP tasks.
@@ -51,14 +54,13 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
-    pub(crate) hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
+    hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
 
-    /// Leader's bearer token for each task.
-    pub(crate) leader_bearer_tokens: HashMap<Id, BearerToken>,
+    /// Laeder bearer token per task.
+    leader_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
 
-    /// Collector's bearer token for each task. This is only populated if Daphne-Worker is
-    /// configured as the DAP Leader, i.e., if `DAP_AGGREGATOR_ROLE == "leader"`.
-    pub(crate) collector_bearer_tokens: Option<HashMap<Id, BearerToken>>,
+    /// Collector bearer token per task.
+    collector_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
 
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
     pub(crate) deployment: DaphneWorkerDeployment,
@@ -95,18 +97,6 @@ impl<D> DaphneWorkerConfig<D> {
             .map_err(|err| {
                 Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {}", err))
             })?;
-
-        let leader_bearer_tokens: HashMap<Id, BearerToken> = serde_json::from_str(
-            ctx.secret("DAP_LEADER_BEARER_TOKEN_LIST")?
-                .to_string()
-                .as_ref(),
-        )
-        .map_err(|e| {
-            Error::RustError(format!(
-                "Failed to parse DAP_LEADER_BEARER_TOKEN_LIST: {}",
-                e
-            ))
-        })?;
 
         let is_leader = match ctx.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
             "leader" => true,
@@ -145,31 +135,14 @@ impl<D> DaphneWorkerConfig<D> {
             None
         };
 
-        let collector_bearer_tokens = if is_leader {
-            let tokens: HashMap<Id, BearerToken> = serde_json::from_str(
-                ctx.secret("DAP_COLLECTOR_BEARER_TOKEN_LIST")?
-                    .to_string()
-                    .as_ref(),
-            )
-            .map_err(|e| {
-                Error::RustError(format!(
-                    "Failed to parse DAP_COLLECTOR_BEARER_TOKEN_LIST: {}",
-                    e
-                ))
-            })?;
-            Some(tokens)
-        } else {
-            None
-        };
-
         Ok(Self {
             ctx: Some(ctx),
             client,
             global_config,
             tasks,
             hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
-            leader_bearer_tokens,
-            collector_bearer_tokens,
+            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             deployment,
             report_shard_key,
             report_shard_count,
@@ -196,8 +169,8 @@ impl<D> DaphneWorkerConfig<D> {
             global_config: serde_json::from_str(json_global_config)?,
             tasks: serde_json::from_str(json_task_list)?,
             hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
-            leader_bearer_tokens: HashMap::default(),
-            collector_bearer_tokens: None,
+            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             deployment: DaphneWorkerDeployment::default(),
             report_shard_key,
             report_shard_count,
@@ -230,15 +203,39 @@ impl<D> DaphneWorkerConfig<D> {
             .kv(KV_BINDING_DAP_CONFIG)
     }
 
-    async fn get_kv_cached<'a, K, V>(
+    /// Set a key/value pair unless the key already exists. If the key exists, then return the current
+    /// value. Otherwise return nothing.
+    async fn kv_set_if_not_exists<K, V>(
+        &self,
+        kv_key_prefix: &str,
+        kv_key_suffix: &K,
+        kv_value: V,
+    ) -> Result<Option<V>>
+    where
+        K: ToString,
+        V: for<'de> Deserialize<'de> + Serialize,
+    {
+        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix.to_string());
+        let kv_store = self.kv()?;
+        let builder = kv_store.get(&kv_key);
+        let res: Option<V> = builder.json().await?;
+        if res.is_some() {
+            return Ok(res);
+        }
+
+        kv_store.put(&kv_key, kv_value)?.execute().await?;
+        Ok(None)
+    }
+
+    async fn kv_get_cached<'a, K, V>(
         &self,
         map: &'a Arc<RwLock<HashMap<K, V>>>,
-        kv_key: Cow<'a, K>,
         kv_key_prefix: &str,
+        kv_key_suffix: Cow<'a, K>,
     ) -> Result<Option<Guarded<'a, K, V>>>
     where
         K: Clone + Eq + std::hash::Hash + ToString,
-        V: for<'b> Deserialize<'b>,
+        V: for<'de> Deserialize<'de>,
     {
         // If the value is cached, then return immediately.
         {
@@ -246,18 +243,18 @@ impl<D> DaphneWorkerConfig<D> {
                 .read()
                 .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
 
-            if guarded_map.get(&kv_key).is_some() {
+            if guarded_map.get(&kv_key_suffix).is_some() {
                 return Ok(Some(Guarded {
                     guarded_map,
-                    key: kv_key,
+                    key: kv_key_suffix,
                 }));
             }
         }
 
         // If the value is not cached, try to populate it from KV before returning.
-        let new_kv_key = format!("{}/{}", kv_key_prefix, kv_key.to_string());
+        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix.to_string());
         let kv_store = self.kv()?;
-        let builder = kv_store.get(&new_kv_key);
+        let builder = kv_store.get(&kv_key);
         if let Some(kv_value) = builder.json::<V>().await? {
             // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE
             // configs, this would avoid hitting KV multiple times when the same expired config is
@@ -265,17 +262,17 @@ impl<D> DaphneWorkerConfig<D> {
             let mut guarded_map = map
                 .write()
                 .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {}", e)))?;
-            guarded_map.insert(kv_key.clone().into_owned(), kv_value);
+            guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
         }
 
         let guarded_map = map
             .read()
             .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
 
-        if guarded_map.get(kv_key.as_ref()).is_some() {
+        if guarded_map.get(kv_key_suffix.as_ref()).is_some() {
             Ok(Some(Guarded {
                 guarded_map,
-                key: kv_key,
+                key: kv_key_suffix,
             }))
         } else {
             Ok(None)
@@ -288,10 +285,36 @@ impl<D> DaphneWorkerConfig<D> {
         &self,
         hpke_config_id: u8,
     ) -> Result<Option<GuardedHpkeReceiverConfig>> {
-        self.get_kv_cached(
+        self.kv_get_cached(
             &self.hpke_receiver_configs,
-            Cow::Owned(hpke_config_id),
             KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+            Cow::Owned(hpke_config_id),
+        )
+        .await
+    }
+
+    /// Retrieve from KV the Leader's bearer token for the given task.
+    pub(crate) async fn get_leader_bearer_token<'a>(
+        &'a self,
+        task_id: &'a Id,
+    ) -> Result<Option<GuardedBearerToken>> {
+        self.kv_get_cached(
+            &self.leader_bearer_tokens,
+            KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
+            Cow::Borrowed(task_id),
+        )
+        .await
+    }
+
+    /// Retrieve from KV the Collector's bearer token for the given task.
+    pub(crate) async fn get_collector_bearer_token<'a>(
+        &'a self,
+        task_id: &'a Id,
+    ) -> Result<Option<GuardedBearerToken>> {
+        self.kv_get_cached(
+            &self.collector_bearer_tokens,
+            KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
+            Cow::Borrowed(task_id),
         )
         .await
     }
@@ -300,20 +323,35 @@ impl<D> DaphneWorkerConfig<D> {
     ///
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
     pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
-        self.durable()
-            .post(
-                BINDING_DAP_GARBAGE_COLLECTOR,
-                DURABLE_DELETE_ALL,
-                "garbage_collector".to_string(),
-                &(),
-            )
+        let durable = self.durable();
+        let future_delete_durable = durable.post(
+            BINDING_DAP_GARBAGE_COLLECTOR,
+            DURABLE_DELETE_ALL,
+            "garbage_collector".to_string(),
+            &(),
+        );
+
+        let kv_store = self.kv().map_err(dap_err)?;
+        for kv_key in kv_store
+            .list()
+            .execute()
             .await
-            .map_err(dap_err)?;
+            .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+            .keys
+        {
+            kv_store
+                .delete(kv_key.name.as_str())
+                .await
+                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+            console_debug!("deleted KV item {}", kv_key.name);
+        }
+
+        future_delete_durable.await.map_err(dap_err)?;
         Ok(())
     }
 
     /// Get the batch ID for the oldest batch that has not been collected. This method is only
-    /// appliable to fixed-size tasks.
+    /// applicable to fixed-size tasks.
     pub(crate) async fn internal_current_batch(
         &self,
         task_id: &Id,
@@ -343,6 +381,34 @@ impl<D> DaphneWorkerConfig<D> {
         }
     }
 
+    /// Configure Daphne-Worker a bearer token (i.e., authentication token) for the given task.
+    pub(crate) async fn internal_add_authentication_token(
+        &self,
+        cmd: InternalAddAuthenticationToken,
+    ) -> Result<()> {
+        let task_id_data =
+            base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
+        let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
+        let token = BearerToken::from(cmd.token);
+        let kv_key_prefix = match cmd.role {
+            InternalRole::Leader => KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
+            InternalRole::Collector => KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
+        };
+
+        if self
+            .kv_set_if_not_exists(kv_key_prefix, &task_id, token)
+            .await?
+            .is_some()
+        {
+            Err(int_err(format!(
+                "command failed: token already exists for the given task ({}) and bearer role ({:?})",
+                task_id.to_base64url(), cmd.role
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) async fn worker_request_to_dap(
         &self,
         mut req: Request,
@@ -366,8 +432,21 @@ impl<D> DaphneWorkerConfig<D> {
             .ok_or_else(|| Error::RustError(format!("Failed to parse path: {}", path)))?;
 
         let payload = req.bytes().await?;
+
+        // Parse the task ID from the front of the request payload and use it to look up the
+        // expected bearer token.
+        //
+        // TODO(cjpatton) Add regression tests that ensure each protocol message is prefixed by the
+        // task ID.
+        //
+        // TODO spec: Consider moving the task ID out of the payload. Right now we're parsing it
+        // twice so that we have a reference to the task ID before parsing the entire message.
+        let mut r = Cursor::new(payload.as_ref());
+        let task_id = Id::decode(&mut r).ok();
+
         Ok(DapRequest {
             version: DapVersion::from(version),
+            task_id,
             payload,
             url: req.url()?,
             media_type,
@@ -394,6 +473,14 @@ pub(crate) struct Guarded<'a, K: Clone, V> {
 impl<K: Clone + Eq + std::hash::Hash, V> Guarded<'_, K, V> {
     pub(crate) fn value(&self) -> &V {
         self.guarded_map.get(self.key.as_ref()).unwrap()
+    }
+}
+
+pub(crate) type GuardedBearerToken<'a> = Guarded<'a, Id, BearerToken>;
+
+impl AsRef<BearerToken> for GuardedBearerToken<'_> {
+    fn as_ref(&self) -> &BearerToken {
+        self.value()
     }
 }
 

@@ -335,13 +335,23 @@ impl DaphneWorkerRouter {
         };
 
         let router = if self.enable_internal_test {
-            router.post_async("/internal/delete_all", |_req, ctx| async move {
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                match config.internal_delete_all().await {
-                    Ok(()) => Response::empty(),
-                    Err(e) => abort(e.into()),
-                }
-            })
+            router
+                .post_async("/internal/delete_all", |_req, ctx| async move {
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    match config.internal_delete_all().await {
+                        Ok(()) => Response::empty(),
+                        Err(e) => abort(e.into()),
+                    }
+                })
+                .post_async(
+                    "/internal/test/add_authentication_token",
+                    |mut req, ctx| async move {
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let cmd: InternalAddAuthenticationToken = req.json().await?;
+                        config.internal_add_authentication_token(cmd).await?;
+                        Response::from_json(&())
+                    },
+                )
         } else {
             router
         };
@@ -388,6 +398,20 @@ fn abort(e: DapAbort) -> Result<Response> {
                 .with_headers(headers))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InternalRole {
+    Leader,
+    Collector,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct InternalAddAuthenticationToken {
+    pub task_id: String, // base64url
+    pub role: InternalRole,
+    pub token: String,
 }
 
 mod config;

@@ -14,6 +14,9 @@ use daphne_worker::DaphneWorkerReportSelector;
 use futures::channel::oneshot::Sender;
 use janus_prio::codec::Decode as JanusPrioDecode;
 use prio::codec::{Decode, Encode};
+use rand::prelude::*;
+use serde::Serialize;
+use serde_json::json;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -226,9 +229,6 @@ const JANUS_HELPER_TASK_LEADER_BEARER_TOKEN: &str =
     "This is a differnt token 72938088f14b7ef318ef42ba72395a22";
 
 #[allow(dead_code)]
-pub(crate) const COLLECTOR_BEARER_TOKEN: &str = "this is the bearer token of the Collector";
-
-#[allow(dead_code)]
 pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#" {
     "config": {
         "id": 23,
@@ -253,6 +253,8 @@ pub struct TestRunner {
     pub vdaf: VdafConfig,
     pub leader_url: Url,
     pub helper_url: Url,
+    pub leader_bearer_token: String,
+    pub collector_bearer_token: String,
 }
 
 #[allow(dead_code)]
@@ -265,7 +267,6 @@ impl TestRunner {
             HELPER_TASK_LIST,
         )
         .await;
-        t.internal_delete_all(&t.batch_interval()).await;
         t
     }
 
@@ -277,7 +278,6 @@ impl TestRunner {
             HELPER_TASK_LIST,
         )
         .await;
-        t.internal_delete_all(&t.batch_interval()).await;
         t
     }
 
@@ -287,6 +287,7 @@ impl TestRunner {
         leader_task_list_obj: &str,
         helper_task_list_obj: &str,
     ) -> Self {
+        let mut rng = thread_rng();
         let global_config: DapGlobalConfig = serde_json::from_str(global_config_obj).unwrap();
 
         let task_id = Id::get_decoded(&hex::decode(task_id_hex).unwrap()).unwrap();
@@ -317,6 +318,9 @@ impl TestRunner {
             .unwrap()
             .as_secs();
 
+        let leader_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
+        let collector_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
+
         let t = Self {
             version: task_config.version.clone(),
             task_id: task_id.clone(),
@@ -329,6 +333,8 @@ impl TestRunner {
             vdaf: task_config.vdaf.clone(),
             leader_url,
             helper_url,
+            leader_bearer_token,
+            collector_bearer_token,
         };
 
         // Ensure the helper has a matching task config.
@@ -346,6 +352,44 @@ impl TestRunner {
         // Ensure that the VDAF for this test case is Prio3Aes128Sum.
         assert_matches!(task_config.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
             assert_matches!(prio3_config, daphne::Prio3Config::Sum{..})});
+
+        // Configure the endpoints
+        //
+        // First, delete the data from the previous test.
+        t.internal_delete_all(&t.batch_interval()).await;
+
+        // Configure the Leader with the Collector's bearer token.
+        t.leader_post_internal(
+            "/internal/test/add_authentication_token",
+            &json!({
+                "role": "collector",
+                "task_id": t.task_id.to_base64url(),
+                "token": t.collector_bearer_token.clone()
+            }),
+        )
+        .await;
+
+        // Configure the Leader with the Leader's bearer token.
+        t.leader_post_internal(
+            "/internal/test/add_authentication_token",
+            &json!({
+                "role": "leader",
+                "task_id": t.task_id.to_base64url(),
+                "token": t.leader_bearer_token.clone()
+            }),
+        )
+        .await;
+
+        // Configure the Helper with the Leader's bearer token.
+        t.helper_post_internal(
+            "/internal/test/add_authentication_token",
+            &json!({
+                "role": "leader",
+                "task_id": t.task_id.to_base64url(),
+                "token": t.leader_bearer_token.clone()
+            }),
+        )
+        .await;
 
         t
     }
@@ -465,7 +509,7 @@ impl TestRunner {
         );
         headers.insert(
             reqwest::header::HeaderName::from_static("dap-auth-token"),
-            reqwest::header::HeaderValue::from_static(COLLECTOR_BEARER_TOKEN),
+            reqwest::header::HeaderValue::from_str(&self.collector_bearer_token).unwrap(),
         );
         let resp = client
             .post(url.as_str())
@@ -508,6 +552,35 @@ impl TestRunner {
             resp.text().await.unwrap()
         );
         resp.json().await.unwrap()
+    }
+
+    async fn post_internal<I: Serialize>(&self, is_leader: bool, path: &str, data: &I) {
+        let client = self.http_client();
+        let mut url = if is_leader {
+            self.leader_url.clone()
+        } else {
+            self.helper_url.clone()
+        };
+        url.set_path(path); // Overwrites the version path (i.e., "/v02")
+        let resp = client
+            .post(url.clone())
+            .json(data)
+            .send()
+            .await
+            .expect("request failed");
+        if resp.status() != 200 {
+            panic!("request to {} failed: response: {:?}", url, resp);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn leader_post_internal<I: Serialize>(&self, path: &str, data: &I) {
+        self.post_internal(true /* is_leader */, path, data).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn helper_post_internal<I: Serialize>(&self, path: &str, data: &I) {
+        self.post_internal(false /* is_leader */, path, data).await
     }
 
     #[allow(dead_code)]

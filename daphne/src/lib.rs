@@ -877,6 +877,7 @@ pub enum Prio3Config {
 pub struct DapRequest<S> {
     pub version: DapVersion,
     pub media_type: Option<&'static str>,
+    pub task_id: Option<Id>,
     pub payload: Vec<u8>,
     pub url: Url,
     pub sender_auth: Option<S>,

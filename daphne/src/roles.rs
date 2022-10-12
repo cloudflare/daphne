@@ -160,6 +160,7 @@ macro_rules! leader_post {
         let req = DapRequest {
             version: $task_config.version.clone(),
             media_type: Some($media_type),
+            task_id: Some($task_id.clone()),
             payload: $req_data,
             url,
             sender_auth: Some($role.authorize(&$task_id, $media_type, &$req_data).await?),
@@ -656,6 +657,10 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
                 })
             }
             Some(MEDIA_TYPE_AGG_CONT_REQ) => {
+                if !self.authorized(req).await? {
+                    return Err(DapAbort::UnauthorizedRequest);
+                }
+
                 let agg_cont_req = AggregateContinueReq::get_decoded(&req.payload)?;
                 let wrapped_task_config = self
                     .get_task_config_for(&agg_cont_req.task_id)
