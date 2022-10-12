@@ -31,7 +31,7 @@ bindings = [
 ]
 
 [[kv_namespaces]]
-  binding = "DAP_HPKE_RECEIVER_CONFIG_STORE"
+  binding = "DAP_CONFIG"
   id = "<ignored>"
   preview_id = "<ignored>"
 

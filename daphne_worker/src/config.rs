@@ -27,13 +27,16 @@ use prio::{
     codec::Decode,
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
+use serde::Deserialize;
 use std::{
+    borrow::Cow,
     collections::HashMap,
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
+pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 /// Long-lived parameters used a daphne across DAP tasks.
 pub(crate) struct DaphneWorkerConfig<D> {
@@ -220,68 +223,77 @@ impl<D> DaphneWorkerConfig<D> {
         DurableConnector::new(&self.ctx.as_ref().expect("no route context configured").env)
     }
 
-    pub(crate) fn kv(&self, binding: &str) -> Result<KvStore> {
+    pub(crate) fn kv(&self) -> Result<KvStore> {
         self.ctx
             .as_ref()
             .ok_or_else(|| Error::RustError("route context does not exist".to_string()))?
-            .kv(binding)
+            .kv(KV_BINDING_DAP_CONFIG)
     }
 
-    // Get a reference to the HPKE receiver configs, ensuring that the config indicated by
-    // `hpke_config_id` is cached (if it exists).
-    pub(crate) async fn hpke_receiver_config(
+    async fn get_kv_cached<'a, K, V>(
         &self,
-        hpke_config_id: u8,
-    ) -> Result<Option<GuardedHpkeReceiverConfig>> {
-        // If the config is cached, then return immediately.
+        map: &'a Arc<RwLock<HashMap<K, V>>>,
+        kv_key: Cow<'a, K>,
+        kv_key_prefix: &str,
+    ) -> Result<Option<Guarded<'a, K, V>>>
+    where
+        K: Clone + Eq + std::hash::Hash + ToString,
+        V: for<'b> Deserialize<'b>,
+    {
+        // If the value is cached, then return immediately.
         {
-            let hpke_receiver_configs = self.hpke_receiver_configs.read().map_err(|e| {
-                Error::RustError(format!(
-                    "Failed to lock hpke_receiver_configs for reading: {}",
-                    e
-                ))
-            })?;
+            let guarded_map = map
+                .read()
+                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
 
-            if hpke_receiver_configs.get(&hpke_config_id).is_some() {
-                return Ok(Some(GuardedHpkeReceiverConfig {
-                    hpke_receiver_configs,
-                    hpke_config_id,
+            if guarded_map.get(&kv_key).is_some() {
+                return Ok(Some(Guarded {
+                    guarded_map,
+                    key: kv_key,
                 }));
             }
         }
 
-        // If the config is not cached, try to populate it from KV before returning.
-        let new_key = format!("{}/{}", KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_config_id);
-        let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE")?;
-        let builder = kv_store.get(&new_key);
-        if let Some(hpke_receiver_config) = builder.json::<HpkeReceiverConfig>().await? {
-            // TODO(cjpatton) Consider indicating whether a config is known to not exist. This
-            // would avoid hitting KV multiple times when the same expired config is used for
-            // multiple reports.
-            let mut hpke_receiver_configs = self.hpke_receiver_configs.write().map_err(|e| {
-                Error::RustError(format!(
-                    "Failed to lock hpke_receiver_configs for writing: {}",
-                    e
-                ))
-            })?;
-            hpke_receiver_configs.insert(hpke_config_id, hpke_receiver_config);
+        // If the value is not cached, try to populate it from KV before returning.
+        let new_kv_key = format!("{}/{}", kv_key_prefix, kv_key.to_string());
+        let kv_store = self.kv()?;
+        let builder = kv_store.get(&new_kv_key);
+        if let Some(kv_value) = builder.json::<V>().await? {
+            // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE
+            // configs, this would avoid hitting KV multiple times when the same expired config is
+            // used for multiple reports.
+            let mut guarded_map = map
+                .write()
+                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {}", e)))?;
+            guarded_map.insert(kv_key.clone().into_owned(), kv_value);
         }
 
-        let hpke_receiver_configs = self.hpke_receiver_configs.read().map_err(|e| {
-            Error::RustError(format!(
-                "Failed to lock hpke_receiver_configs for reading: {}",
-                e
-            ))
-        })?;
+        let guarded_map = map
+            .read()
+            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
 
-        if hpke_receiver_configs.get(&hpke_config_id).is_some() {
-            Ok(Some(GuardedHpkeReceiverConfig {
-                hpke_receiver_configs,
-                hpke_config_id,
+        if guarded_map.get(kv_key.as_ref()).is_some() {
+            Ok(Some(Guarded {
+                guarded_map,
+                key: kv_key,
             }))
         } else {
             Ok(None)
         }
+    }
+
+    /// Get a reference to the HPKE receiver configs, ensuring that the config indicated by
+    /// `hpke_config_id` is cached (if it exists).
+    pub(crate) async fn get_hpke_receiver_config(
+        &self,
+        hpke_config_id: u8,
+    ) -> Result<Option<GuardedHpkeReceiverConfig>> {
+        self.get_kv_cached(
+            &self.hpke_receiver_configs,
+            Cow::Owned(hpke_config_id),
+            KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+        )
+        .await
     }
 
     /// Clear all persistant durable objects storage.
@@ -373,27 +385,23 @@ impl<D> DaphneWorkerConfig<D> {
     }
 }
 
-/// RwLockReadGuard'ed HPKE receiver config.
-pub(crate) struct GuardedHpkeReceiverConfig<'a> {
-    hpke_receiver_configs: RwLockReadGuard<'a, HashMap<u8, HpkeReceiverConfig>>,
-    hpke_config_id: u8,
+/// RwLockReadGuard'ed object, used to catch items fetched from KV.
+pub(crate) struct Guarded<'a, K: Clone, V> {
+    guarded_map: RwLockReadGuard<'a, HashMap<K, V>>,
+    key: Cow<'a, K>,
 }
 
-impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
-    fn as_ref(&self) -> &HpkeConfig {
-        &self
-            .hpke_receiver_configs
-            .get(&self.hpke_config_id)
-            .unwrap()
-            .config
+impl<K: Clone + Eq + std::hash::Hash, V> Guarded<'_, K, V> {
+    pub(crate) fn value(&self) -> &V {
+        self.guarded_map.get(self.key.as_ref()).unwrap()
     }
 }
 
-impl GuardedHpkeReceiverConfig<'_> {
-    pub(crate) fn decryptor(&self) -> &HpkeReceiverConfig {
-        self.hpke_receiver_configs
-            .get(&self.hpke_config_id)
-            .unwrap()
+pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, u8, HpkeReceiverConfig>;
+
+impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
+    fn as_ref(&self) -> &HpkeConfig {
+        &self.value().config
     }
 }
 

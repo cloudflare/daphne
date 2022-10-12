@@ -78,7 +78,7 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
         &'a self,
         _task_id: Option<&Id>,
     ) -> std::result::Result<GuardedHpkeReceiverConfig<'a>, DapError> {
-        let kv_store = self.kv("DAP_HPKE_RECEIVER_CONFIG_STORE").map_err(dap_err)?;
+        let kv_store = self.kv().map_err(dap_err)?;
         let keys = kv_store
             .list()
             .limit(1)
@@ -131,7 +131,7 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
         // TODO(cjpatton) Figure out how likely this is to fail if we had to generate a new key
         // pair and write it to KV during this call.
         Ok(self
-            .hpke_receiver_config(hpke_config_id)
+            .get_hpke_receiver_config(hpke_config_id)
             .await
             .map_err(dap_err)?
             .ok_or_else(|| DapError::fatal("empty HPKE receiver config list"))?)
@@ -143,7 +143,7 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
         config_id: u8,
     ) -> std::result::Result<bool, DapError> {
         Ok(self
-            .hpke_receiver_config(config_id)
+            .get_hpke_receiver_config(config_id)
             .await
             .map_err(dap_err)?
             .is_some())
@@ -157,11 +157,11 @@ impl<'a, D> HpkeDecrypter<'a> for DaphneWorkerConfig<D> {
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
         if let Some(hpke_receiver_config) = self
-            .hpke_receiver_config(ciphertext.config_id)
+            .get_hpke_receiver_config(ciphertext.config_id)
             .await
             .map_err(dap_err)?
         {
-            Ok(hpke_receiver_config.decryptor().decrypt(
+            Ok(hpke_receiver_config.value().decrypt(
                 info,
                 aad,
                 &ciphertext.enc,
