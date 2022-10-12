@@ -8,7 +8,7 @@
 
 use crate::{
     config::{
-        DaphneWorkerConfig, DaphneWorkerDeployment, GuardedHpkeReceiverConfig,
+        DaphneWorkerConfig, DaphneWorkerDeployment, GuardedBearerToken, GuardedHpkeReceiverConfig,
         KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
     },
     dap_err,
@@ -194,22 +194,23 @@ fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, 
 }
 
 #[async_trait(?Send)]
-impl<D> BearerTokenProvider for DaphneWorkerConfig<D> {
+impl<'a, D> BearerTokenProvider<'a> for DaphneWorkerConfig<D> {
+    type WrappedBearerToken = GuardedBearerToken<'a>;
+
     async fn get_leader_bearer_token_for(
-        &self,
-        task_id: &Id,
-    ) -> std::result::Result<Option<BearerToken>, DapError> {
-        Ok(self.leader_bearer_tokens.get(task_id).cloned())
+        &'a self,
+        task_id: &'a Id,
+    ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
+        self.get_leader_bearer_token(task_id).await.map_err(dap_err)
     }
 
     async fn get_collector_bearer_token_for(
-        &self,
-        task_id: &Id,
-    ) -> std::result::Result<Option<BearerToken>, DapError> {
-        let tokens = self.collector_bearer_tokens.as_ref().ok_or_else(|| {
-            DapError::Fatal("helper cannot authorize requests from collector".into())
-        })?;
-        Ok(tokens.get(task_id).cloned())
+        &'a self,
+        task_id: &'a Id,
+    ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
+        self.get_collector_bearer_token(task_id)
+            .await
+            .map_err(dap_err)
     }
 }
 
@@ -221,7 +222,11 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
         media_type: &'static str,
         _payload: &[u8],
     ) -> std::result::Result<BearerToken, DapError> {
-        self.authorize_with_bearer_token(task_id, media_type).await
+        Ok(self
+            .authorize_with_bearer_token(task_id, media_type)
+            .await?
+            .value()
+            .clone())
     }
 }
 

@@ -12,60 +12,71 @@ use crate::{
     DapError, DapRequest,
 };
 use async_trait::async_trait;
-use prio::codec::Decode;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
 
 /// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-02.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BearerToken(String);
+pub struct BearerToken {
+    raw: String,
+}
 
 impl AsRef<str> for BearerToken {
     fn as_ref(&self) -> &str {
-        self.0.as_str()
+        self.raw.as_str()
     }
 }
 
 impl PartialEq for BearerToken {
     fn eq(&self, other: &Self) -> bool {
-        constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
+        constant_time_eq(self.raw.as_bytes(), other.raw.as_bytes())
     }
 }
 
 impl From<String> for BearerToken {
-    fn from(token: String) -> Self {
-        Self(token)
+    fn from(raw: String) -> Self {
+        Self { raw }
     }
 }
 
 impl From<&str> for BearerToken {
-    fn from(token: &str) -> Self {
-        Self(token.to_string())
+    fn from(raw: &str) -> Self {
+        Self {
+            raw: raw.to_string(),
+        }
+    }
+}
+
+impl AsRef<BearerToken> for BearerToken {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
 /// A source of bearer tokens used for authorizing DAP requests.
 #[async_trait(?Send)]
-pub trait BearerTokenProvider {
+pub trait BearerTokenProvider<'a> {
+    /// A reference to a bearer token owned by the provider.
+    type WrappedBearerToken: AsRef<BearerToken>;
+
     /// Fetch the Leader's bearer token for the given task, if the task is recognized.
     async fn get_leader_bearer_token_for(
-        &self,
-        task_id: &Id,
-    ) -> Result<Option<BearerToken>, DapError>;
+        &'a self,
+        task_id: &'a Id,
+    ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
 
     /// Fetch the Collector's bearer token for the given task, if the task is recognized.
     async fn get_collector_bearer_token_for(
-        &self,
-        task_id: &Id,
-    ) -> Result<Option<BearerToken>, DapError>;
+        &'a self,
+        task_id: &'a Id,
+    ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
 
     /// Return a bearer token that can be used to authorize a request with the given task ID and
     /// media type.
     async fn authorize_with_bearer_token(
-        &self,
-        task_id: &Id,
+        &'a self,
+        task_id: &'a Id,
         media_type: &'static str,
-    ) -> Result<BearerToken, DapError> {
+    ) -> Result<Self::WrappedBearerToken, DapError> {
         if media_type_from_leader(media_type) {
             let token = self
                 .get_leader_bearer_token_for(task_id)
@@ -84,13 +95,14 @@ pub trait BearerTokenProvider {
 
     /// Check that the bearer token carried by a request can be used to authorize that request.
     async fn bearer_token_authorized(
-        &self,
-        req: &DapRequest<BearerToken>,
+        &'a self,
+        req: &'a DapRequest<BearerToken>,
     ) -> Result<bool, DapError> {
-        // Parse the task ID from the front of the request payload and use it to look up
-        // the epxected bearer token.
-        let mut r = Cursor::new(req.payload.as_ref());
-        let option_task_id = Id::decode(&mut r);
+        if req.task_id.is_none() {
+            // Can't authorize request with missing task ID.
+            return Ok(false);
+        }
+        let task_id = req.task_id.as_ref().unwrap();
 
         // TODO spec: Decide whether to check that the bearer token has the right format, say,
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
@@ -103,20 +115,16 @@ pub trait BearerTokenProvider {
                 | Some(MEDIA_TYPE_AGG_SHARE_REQ)
         ) {
             if let Some(ref got) = req.sender_auth {
-                if let Ok(ref task_id) = option_task_id {
-                    if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
-                        return Ok(got == &expected);
-                    }
+                if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
+                    return Ok(got == expected.as_ref());
                 }
             }
         }
 
         if matches!(req.media_type, Some(MEDIA_TYPE_COLLECT_REQ)) {
             if let Some(ref got) = req.sender_auth {
-                if let Ok(ref task_id) = option_task_id {
-                    if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
-                        return Ok(got == &expected);
-                    }
+                if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
+                    return Ok(got == expected.as_ref());
                 }
             }
         }

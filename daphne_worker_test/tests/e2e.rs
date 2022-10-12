@@ -17,7 +17,7 @@ use daphne::{
 use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
-use test_runner::{TestRunner, COLLECTOR_BEARER_TOKEN, COLLECTOR_HPKE_RECEIVER_CONFIG};
+use test_runner::{TestRunner, COLLECTOR_HPKE_RECEIVER_CONFIG};
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
@@ -581,7 +581,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     };
     t.leader_post_expect_abort(
         &client,
-        Some(COLLECTOR_BEARER_TOKEN),
+        Some(&t.collector_bearer_token),
         path,
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
@@ -603,7 +603,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
     };
     t.leader_post_expect_abort(
         &client,
-        Some(COLLECTOR_BEARER_TOKEN),
+        Some(&t.collector_bearer_token),
         path,
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
@@ -692,7 +692,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
     };
     t.leader_post_expect_abort(
         &client,
-        Some(COLLECTOR_BEARER_TOKEN),
+        Some(&t.collector_bearer_token),
         "collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         collect_req.get_encoded(),
@@ -835,7 +835,7 @@ async fn e2e_fixed_size() {
     // Collector: Try CollectReq with out-dated batch ID.
     t.leader_post_expect_abort(
         &client,
-        Some(COLLECTOR_BEARER_TOKEN),
+        Some(&t.collector_bearer_token),
         "collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
         CollectReq {
