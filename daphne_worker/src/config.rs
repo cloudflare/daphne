@@ -13,7 +13,7 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
-    int_err, InternalAddAuthenticationToken, InternalRole,
+    int_err, InternalAddAuthenticationToken, InternalAddTask, InternalRole,
 };
 use daphne::{
     auth::BearerToken,
@@ -37,12 +37,14 @@ use std::{
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
-pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_LEADER: &str = "bearer_token/leader";
-pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/collector";
+pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_LEADER: &str = "bearer_token/leader/task";
+pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/collector/task";
+pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 /// Long-lived parameters used a daphne across DAP tasks.
 pub(crate) struct DaphneWorkerConfig<D> {
+    // TODO Determine if we actually need the route countext, and if not, replace it with `Env`.
     ctx: Option<RouteContext<D>>,
 
     /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
@@ -50,7 +52,6 @@ pub(crate) struct DaphneWorkerConfig<D> {
     pub(crate) client: Option<reqwest_wasm::Client>,
 
     pub(crate) global_config: DapGlobalConfig,
-    pub(crate) tasks: HashMap<Id, DapTaskConfig>,
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
@@ -61,6 +62,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// Collector bearer token per task.
     collector_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
+
+    /// Task list.
+    tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
 
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
     pub(crate) deployment: DaphneWorkerDeployment,
@@ -80,10 +84,6 @@ impl<D> DaphneWorkerConfig<D> {
             ctx.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
         .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
-
-        let tasks: HashMap<Id, DapTaskConfig> =
-            serde_json::from_str(ctx.secret("DAP_TASK_LIST")?.to_string().as_ref())
-                .map_err(|e| Error::RustError(format!("Failed to parse DAP_TASK_LIST: {}", e)))?;
 
         let report_shard_key = Seed::get_decoded(
             &hex::decode(ctx.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
@@ -139,39 +139,11 @@ impl<D> DaphneWorkerConfig<D> {
             ctx: Some(ctx),
             client,
             global_config,
-            tasks,
             hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
             leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(RwLock::new(HashMap::new())),
             deployment,
-            report_shard_key,
-            report_shard_count,
-        })
-    }
-
-    // TODO This method is at the wrong level of abstraction. To construct a DaphneWorkerConfig we
-    // need an HTTP client and a Worker context, neither of which is necessary for the unit tests
-    // for which this method is used.
-    #[cfg(test)]
-    pub(crate) fn from_test_config(
-        json_global_config: &str,
-        json_task_list: &str,
-        json_report_shard_key: &str,
-        report_shard_count: u64,
-    ) -> Result<Self> {
-        let report_shard_key =
-            Seed::get_decoded(&hex::decode(json_report_shard_key).map_err(int_err)?)
-                .map_err(int_err)?;
-
-        Ok(DaphneWorkerConfig {
-            ctx: None,
-            client: None,
-            global_config: serde_json::from_str(json_global_config)?,
-            tasks: serde_json::from_str(json_task_list)?,
-            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
-            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            deployment: DaphneWorkerDeployment::default(),
             report_shard_key,
             report_shard_count,
         })
@@ -227,15 +199,16 @@ impl<D> DaphneWorkerConfig<D> {
         Ok(None)
     }
 
-    async fn kv_get_cached<'a, K, V>(
+    async fn kv_get_cached<'srv, 'req, K, V>(
         &self,
-        map: &'a Arc<RwLock<HashMap<K, V>>>,
+        map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
-        kv_key_suffix: Cow<'a, K>,
-    ) -> Result<Option<Guarded<'a, K, V>>>
+        kv_key_suffix: Cow<'req, K>,
+    ) -> Result<Option<Guarded<'req, K, V>>>
     where
         K: Clone + Eq + std::hash::Hash + ToString,
         V: for<'de> Deserialize<'de>,
+        'srv: 'req,
     {
         // If the value is cached, then return immediately.
         {
@@ -319,6 +292,33 @@ impl<D> DaphneWorkerConfig<D> {
         .await
     }
 
+    /// Retrieve from KV the configuration for the given task.
+    pub(crate) async fn get_task_config<'srv, 'req>(
+        &'srv self,
+        task_id: Cow<'req, Id>,
+    ) -> Result<Option<GuardedDapTaskConfig<'req>>>
+    where
+        'srv: 'req,
+    {
+        self.kv_get_cached(&self.tasks, KV_KEY_PREFIX_TASK_CONFIG, task_id)
+            .await
+    }
+
+    /// Try retrieving from KV the configuration for the given task. Return an error if the
+    /// indicated task is not recognized.
+    pub(crate) async fn try_get_task_config<'srv, 'req>(
+        &'srv self,
+        task_id: &'req Id,
+    ) -> std::result::Result<GuardedDapTaskConfig<'req>, DapError>
+    where
+        'srv: 'req,
+    {
+        self.get_task_config(Cow::Borrowed(task_id))
+            .await
+            .map_err(dap_err)?
+            .ok_or_else(|| DapError::fatal("unrecognized task"))
+    }
+
     /// Clear all persistant durable objects storage.
     ///
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
@@ -356,8 +356,8 @@ impl<D> DaphneWorkerConfig<D> {
         &self,
         task_id: &Id,
     ) -> std::result::Result<Id, DapError> {
-        let task_config = self.try_get_task_config_for(task_id)?;
-        if !matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+        let task_config = self.try_get_task_config(task_id).await?;
+        if !matches!(task_config.as_ref().query, DapQueryConfig::FixedSize { .. }) {
             return Err(DapError::fatal("query type mismatch"));
         }
 
@@ -366,7 +366,7 @@ impl<D> DaphneWorkerConfig<D> {
             .get(
                 BINDING_DAP_LEADER_BATCH_QUEUE,
                 DURABLE_LEADER_BATCH_QUEUE_CURRENT,
-                durable_name_task(&task_config.version, &task_id.to_hex()),
+                durable_name_task(&task_config.as_ref().version, &task_id.to_hex()),
             )
             .await
             .map_err(dap_err)?;
@@ -381,7 +381,8 @@ impl<D> DaphneWorkerConfig<D> {
         }
     }
 
-    /// Configure Daphne-Worker a bearer token (i.e., authentication token) for the given task.
+    /// Configure Daphne-Worker with a bearer token (i.e., authentication token) for the given
+    /// task.
     pub(crate) async fn internal_add_authentication_token(
         &self,
         cmd: InternalAddAuthenticationToken,
@@ -402,7 +403,50 @@ impl<D> DaphneWorkerConfig<D> {
         {
             Err(int_err(format!(
                 "command failed: token already exists for the given task ({}) and bearer role ({:?})",
-                task_id.to_base64url(), cmd.role
+                cmd.task_id, cmd.role
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Configure Daphne-Worker a task.
+    pub(crate) async fn internal_add_task(&self, cmd: InternalAddTask) -> Result<()> {
+        let task_id_data =
+            base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
+        let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
+
+        let vdaf_verify_key_data =
+            base64::decode_config(&cmd.vdaf_verify_key, base64::URL_SAFE_NO_PAD)
+                .map_err(int_err)?;
+        let vdaf_verify_key = cmd
+            .vdaf
+            .get_decoded_verify_key(&vdaf_verify_key_data)
+            .map_err(int_err)?;
+
+        if self
+            .kv_set_if_not_exists(
+                KV_KEY_PREFIX_TASK_CONFIG,
+                &task_id,
+                DapTaskConfig {
+                    version: DapVersion::Draft02,
+                    leader_url: cmd.leader_url,
+                    helper_url: cmd.helper_url,
+                    time_precision: cmd.time_precision,
+                    expiration: cmd.expiration,
+                    min_batch_size: cmd.min_batch_size,
+                    query: cmd.query,
+                    vdaf: cmd.vdaf,
+                    vdaf_verify_key,
+                    collector_hpke_config: cmd.collector_hpke_config,
+                },
+            )
+            .await?
+            .is_some()
+        {
+            Err(int_err(format!(
+                "command failed: config already exists for the given task ({})",
+                cmd.task_id
             )))
         } else {
             Ok(())
@@ -453,15 +497,6 @@ impl<D> DaphneWorkerConfig<D> {
             sender_auth,
         })
     }
-
-    pub(crate) fn try_get_task_config_for(
-        &self,
-        task_id: &Id,
-    ) -> std::result::Result<&DapTaskConfig, DapError> {
-        self.tasks
-            .get(task_id)
-            .ok_or_else(|| DapError::fatal("unrecognized task"))
-    }
 }
 
 /// RwLockReadGuard'ed object, used to catch items fetched from KV.
@@ -471,8 +506,20 @@ pub(crate) struct Guarded<'a, K: Clone, V> {
 }
 
 impl<K: Clone + Eq + std::hash::Hash, V> Guarded<'_, K, V> {
+    pub(crate) fn key(&self) -> &K {
+        self.key.as_ref()
+    }
+
     pub(crate) fn value(&self) -> &V {
         self.guarded_map.get(self.key.as_ref()).unwrap()
+    }
+}
+
+pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, u8, HpkeReceiverConfig>;
+
+impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
+    fn as_ref(&self) -> &HpkeConfig {
+        &self.value().config
     }
 }
 
@@ -484,11 +531,11 @@ impl AsRef<BearerToken> for GuardedBearerToken<'_> {
     }
 }
 
-pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, u8, HpkeReceiverConfig>;
+pub(crate) type GuardedDapTaskConfig<'a> = Guarded<'a, Id, DapTaskConfig>;
 
-impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
-    fn as_ref(&self) -> &HpkeConfig {
-        &self.value().config
+impl AsRef<DapTaskConfig> for GuardedDapTaskConfig<'_> {
+    fn as_ref(&self) -> &DapTaskConfig {
+        self.value()
     }
 }
 

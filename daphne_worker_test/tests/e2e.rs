@@ -7,7 +7,6 @@ mod test_runner;
 
 use daphne::{
     constants,
-    hpke::HpkeReceiverConfig,
     messages::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Query, Report,
         ReportId, ReportMetadata,
@@ -17,7 +16,7 @@ use daphne::{
 use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
-use test_runner::{TestRunner, COLLECTOR_HPKE_RECEIVER_CONFIG};
+use test_runner::TestRunner;
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
@@ -62,6 +61,7 @@ async fn e2e_leader_upload() {
 
     // Generate and upload a report.
     let report = t
+        .task_config
         .vdaf
         .produce_report(
             &hpke_config_list,
@@ -96,7 +96,8 @@ async fn e2e_leader_upload() {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        t.vdaf
+        t.task_config
+            .vdaf
             .produce_report(
                 &hpke_config_list,
                 t.now,
@@ -112,6 +113,7 @@ async fn e2e_leader_upload() {
 
     // Try uploading a report for which the leader's share is encrypted under the wrong public key.
     let mut report = t
+        .task_config
         .vdaf
         .produce_report(
             &hpke_config_list,
@@ -195,7 +197,7 @@ async fn e2e_internal_leader_process() {
 
     let report_sel = DaphneWorkerReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-        max_reports: t.query_config.min_batch_size(),
+        max_reports: t.task_config.min_batch_size,
     };
 
     let batch_interval = t.batch_interval();
@@ -208,7 +210,8 @@ async fn e2e_internal_leader_process() {
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -253,7 +256,8 @@ async fn e2e_leader_process_min_agg_rate() {
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -288,13 +292,14 @@ async fn e2e_leader_collect_ok() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.query_config.min_batch_size() {
+    for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -330,18 +335,15 @@ async fn e2e_leader_collect_ok() {
         )
         .await;
     assert_eq!(
-        agg_telem.reports_processed,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
     );
     assert_eq!(
-        agg_telem.reports_aggregated,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_aggregated, t.task_config.min_batch_size,
         "reports aggregated"
     );
     assert_eq!(
-        agg_telem.reports_collected,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
     );
 
@@ -349,13 +351,12 @@ async fn e2e_leader_collect_ok() {
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let decrypter: HpkeReceiverConfig =
-        serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
     let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
+        .task_config
         .vdaf
         .consume_encrypted_agg_shares(
-            &decrypter,
+            &t.collector_hpke_receiver,
             &t.task_id,
             &BatchSelector::TimeInterval {
                 batch_interval: batch_interval.clone(),
@@ -367,7 +368,7 @@ async fn e2e_leader_collect_ok() {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(t.query_config.min_batch_size() as u128)
+        DapAggregateResult::U128(t.task_config.min_batch_size as u128)
     );
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
@@ -387,7 +388,7 @@ async fn e2e_leader_collect_ok() {
     //      None, // dap_auth_token
     //      "upload",
     //      constants::MEDIA_TYPE_REPORT,
-    //      t.vdaf
+    //      t.task_config.vdaf
     //          .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
     //          .unwrap()
     //          .get_encoded(),
@@ -409,13 +410,14 @@ async fn e2e_leader_collect_ok_interleaved() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.query_config.min_batch_size() {
+    for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -431,8 +433,7 @@ async fn e2e_leader_collect_ok_interleaved() {
     // All reports for the task get processed ...
     let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
-        agg_telem.reports_processed,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
     );
 
@@ -451,8 +452,7 @@ async fn e2e_leader_collect_ok_interleaved() {
     // ... then the collect job gets completed.
     let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
-        agg_telem.reports_collected,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
     );
 }
@@ -467,13 +467,14 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
-    for _ in 0..t.query_config.min_batch_size() - 1 {
+    for _ in 0..t.task_config.min_batch_size - 1 {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -506,11 +507,11 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         .await;
     assert_eq!(
         agg_telem.reports_processed,
-        t.query_config.min_batch_size() - 1
+        t.task_config.min_batch_size - 1
     );
     assert_eq!(
         agg_telem.reports_aggregated,
-        t.query_config.min_batch_size() - 1
+        t.task_config.min_batch_size - 1
     );
     assert_eq!(agg_telem.reports_collected, 0);
 
@@ -541,12 +542,14 @@ async fn e2e_leader_collect_abort_unknown_request() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_collect_accept_max_batch_duration() {
+async fn e2e_leader_collect_accept_global_config_max_batch_duration() {
     let t = TestRunner::default().await;
     let client = t.http_client();
     let batch_interval = Interval {
-        start: t.now - (t.now % t.time_precision) - t.max_batch_duration / 2,
-        duration: t.max_batch_duration,
+        start: t.now
+            - (t.now % t.task_config.time_precision)
+            - t.global_config.max_batch_duration / 2,
+        duration: t.global_config.max_batch_duration,
     };
 
     // Maximum allowed batch duration.
@@ -623,13 +626,14 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
-    for _ in 0..t.query_config.min_batch_size() {
+    for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(batch_interval.start..batch_interval.end());
         t.leader_post_expect_ok(
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -660,18 +664,15 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         )
         .await;
     assert_eq!(
-        agg_telem.reports_processed,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
     );
     assert_eq!(
-        agg_telem.reports_aggregated,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_aggregated, t.task_config.min_batch_size,
         "reports aggregated"
     );
     assert_eq!(
-        agg_telem.reports_collected,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
     );
 
@@ -715,12 +716,13 @@ async fn e2e_fixed_size() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
 
     // Clients: Upload reports.
-    for _ in 0..t.query_config.min_batch_size() {
+    for _ in 0..t.task_config.min_batch_size {
         t.leader_post_expect_ok(
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, t.now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),
@@ -731,13 +733,11 @@ async fn e2e_fixed_size() {
     // ... Aggregators run processing loop.
     let agg_telem = t.internal_process(&client, &report_sel).await;
     assert_eq!(
-        agg_telem.reports_processed,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
     );
     assert_eq!(
-        agg_telem.reports_aggregated,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_aggregated, t.task_config.min_batch_size,
         "reports aggregated"
     );
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
@@ -770,8 +770,7 @@ async fn e2e_fixed_size() {
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
     assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
     assert_eq!(
-        agg_telem.reports_collected,
-        t.query_config.min_batch_size(),
+        agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
     );
 
@@ -779,13 +778,12 @@ async fn e2e_fixed_size() {
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let decrypter: HpkeReceiverConfig =
-        serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
     let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
+        .task_config
         .vdaf
         .consume_encrypted_agg_shares(
-            &decrypter,
+            &t.collector_hpke_receiver,
             &t.task_id,
             &BatchSelector::FixedSize {
                 batch_id: batch_id.clone(),
@@ -797,7 +795,7 @@ async fn e2e_fixed_size() {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(t.query_config.min_batch_size() as u128)
+        DapAggregateResult::U128(t.task_config.min_batch_size as u128)
     );
 
     // Collector: Poll the collect URI once more. Expect the response to be the same as the first,
@@ -812,7 +810,8 @@ async fn e2e_fixed_size() {
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(&hpke_config_list, t.now, &t.task_id, DapMeasurement::U64(1))
                 .unwrap()
                 .get_encoded(),

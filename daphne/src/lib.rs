@@ -48,7 +48,6 @@ use prio::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryFrom,
     fmt::Debug,
 };
 use url::Url;
@@ -375,35 +374,14 @@ impl DapGlobalConfig {
 pub enum DapQueryConfig {
     /// The "time-interval" query type. Each report in the batch must fall into the time interval
     /// specified by the query.
-    TimeInterval { min_batch_size: u64 },
+    TimeInterval,
 
     /// The "fixed-size" query type. The Leader partitions the reports into arbitary batches of
     /// roughly the same size.
-    FixedSize {
-        min_batch_size: u64,
-        max_batch_size: u64,
-    },
+    FixedSize { max_batch_size: u64 },
 }
 
 impl DapQueryConfig {
-    /// Check if the batch is ready to aggregate based on the report count. Returns an error if the
-    /// report count is too large.
-    pub(crate) fn check_batch_size(&self, report_count: u64) -> Result<bool, DapAbort> {
-        match self {
-            Self::TimeInterval { .. } => (),
-            Self::FixedSize {
-                min_batch_size: _,
-                max_batch_size,
-            } => {
-                if report_count > *max_batch_size {
-                    return Err(DapAbort::InvalidBatchSize);
-                }
-            }
-        };
-
-        Ok(report_count >= self.min_batch_size())
-    }
-
     pub(crate) fn is_valid_part_batch_sel(&self, part_batch_sel: &PartialBatchSelector) -> bool {
         matches!(
             (&self, part_batch_sel),
@@ -426,14 +404,6 @@ impl DapQueryConfig {
             ) | (Self::FixedSize { .. }, BatchSelector::FixedSize { .. })
         )
     }
-
-    /// Return the minimum batch size determined by the query configuration.
-    pub fn min_batch_size(&self) -> u64 {
-        match self {
-            Self::TimeInterval { min_batch_size } => *min_batch_size,
-            Self::FixedSize { min_batch_size, .. } => *min_batch_size,
-        }
-    }
 }
 
 /// A batch bucket.
@@ -450,7 +420,6 @@ pub enum DapBatchBucket<'a> {
 
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
     /// The protocol version (i.e., which draft).
     pub version: DapVersion,
@@ -468,6 +437,9 @@ pub struct DapTaskConfig {
     /// The time at which the task expires.
     pub expiration: Time,
 
+    /// The smallest batch permitted for this task.
+    pub min_batch_size: u64,
+
     /// The query configuration for this task.
     pub query: DapQueryConfig,
 
@@ -475,11 +447,10 @@ pub struct DapTaskConfig {
     pub vdaf: VdafConfig,
 
     /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
-    #[serde(skip_serializing)]
-    pub(crate) vdaf_verify_key: VdafVerifyKey,
+    pub vdaf_verify_key: VdafVerifyKey,
 
     /// The Collector's HPKE configuration for this task.
-    pub(crate) collector_hpke_config: HpkeConfig,
+    pub collector_hpke_config: HpkeConfig,
 }
 
 impl DapTaskConfig {
@@ -593,47 +564,26 @@ impl DapTaskConfig {
 
         Ok(span)
     }
+
+    /// Check if the batch is ready to aggregate based on the report count. Returns an error if the
+    /// report count is too large.
+    pub(crate) fn is_report_count_compatible(&self, report_count: u64) -> Result<bool, DapAbort> {
+        match self.query {
+            DapQueryConfig::TimeInterval => (),
+            DapQueryConfig::FixedSize { max_batch_size } => {
+                if report_count > max_batch_size {
+                    return Err(DapAbort::InvalidBatchSize);
+                }
+            }
+        };
+
+        Ok(report_count >= self.min_batch_size)
+    }
 }
 
 impl AsRef<DapTaskConfig> for DapTaskConfig {
     fn as_ref(&self) -> &Self {
         self
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-struct ShadowDapTaskConfig {
-    version: DapVersion,
-    leader_url: Url,
-    helper_url: Url,
-    time_precision: Duration,
-    expiration: Time,
-    query: DapQueryConfig,
-    vdaf: VdafConfig,
-    #[serde(with = "hex")]
-    vdaf_verify_key: Vec<u8>,
-    collector_hpke_config: HpkeConfig,
-}
-
-impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
-    type Error = DapAbort;
-
-    fn try_from(shadow: ShadowDapTaskConfig) -> std::result::Result<Self, Self::Error> {
-        let vdaf_verify_key = shadow
-            .vdaf
-            .get_decoded_verify_key(&shadow.vdaf_verify_key)?;
-
-        Ok(Self {
-            version: shadow.version,
-            leader_url: shadow.leader_url,
-            helper_url: shadow.helper_url,
-            time_precision: shadow.time_precision,
-            expiration: shadow.expiration,
-            query: shadow.query,
-            vdaf: shadow.vdaf,
-            vdaf_verify_key,
-            collector_hpke_config: shadow.collector_hpke_config,
-        })
     }
 }
 
@@ -881,6 +831,17 @@ pub struct DapRequest<S> {
     pub payload: Vec<u8>,
     pub url: Url,
     pub sender_auth: Option<S>,
+}
+
+impl<S> DapRequest<S> {
+    pub(crate) fn task_id(&self) -> Result<&Id, DapAbort> {
+        if let Some(ref id) = self.task_id {
+            Ok(id)
+        } else {
+            // Handle missing task ID as decoding failure.
+            Err(DapAbort::UnrecognizedMessage)
+        }
+    }
 }
 
 /// DAP response.

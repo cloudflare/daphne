@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Borrow,
+    borrow::{Borrow, Cow},
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     ops::DerefMut,
@@ -125,10 +125,7 @@ impl MockAggregator {
 
         match task_config.query {
             // For fixed-size queries, the bucket corresponds to a single batch.
-            DapQueryConfig::FixedSize {
-                min_batch_size,
-                max_batch_size: _,
-            } => {
+            DapQueryConfig::FixedSize { .. } => {
                 let mut guard = self
                     .leader_state_store
                     .lock()
@@ -137,7 +134,7 @@ impl MockAggregator {
 
                 // Assign the report to the first unsaturated batch.
                 for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
-                    if *report_count < min_batch_size {
+                    if *report_count < task_config.min_batch_size {
                         *report_count += 1;
                         return Some(DapBatchBucketOwned::FixedSize {
                             batch_id: batch_id.clone(),
@@ -155,7 +152,7 @@ impl MockAggregator {
 
             // For time-interval queries, the bucket is the batch window computed by truncating the
             // report timestamp.
-            DapQueryConfig::TimeInterval { .. } => Some(DapBatchBucketOwned::TimeInterval {
+            DapQueryConfig::TimeInterval => Some(DapBatchBucketOwned::TimeInterval {
                 batch_window: task_config.truncate_time(report.metadata.time),
             }),
         }
@@ -270,8 +267,11 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
-    type WrappedDapTaskConfig = &'a DapTaskConfig;
+impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for MockAggregator
+where
+    'srv: 'req,
+{
+    type WrappedDapTaskConfig = &'req DapTaskConfig;
 
     async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
         self.bearer_token_authorized(req).await
@@ -282,10 +282,10 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
     }
 
     async fn get_task_config_for(
-        &'a self,
-        task_id: &Id,
-    ) -> Result<Option<&'a DapTaskConfig>, DapError> {
-        Ok(self.tasks.get(task_id))
+        &'srv self,
+        task_id: Cow<'req, Id>,
+    ) -> Result<Option<&'req DapTaskConfig>, DapError> {
+        Ok(self.tasks.get(task_id.as_ref()))
     }
 
     fn get_current_time(&self) -> Time {
@@ -339,7 +339,7 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
         out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError> {
         let task_config = self
-            .get_task_config_for(task_id)
+            .get_task_config_for(Cow::Borrowed(task_id))
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
@@ -432,7 +432,10 @@ impl<'a> DapAggregator<'a, BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
+impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for MockAggregator
+where
+    'srv: 'req,
+{
     async fn put_helper_state(
         &self,
         task_id: &Id,
@@ -494,7 +497,10 @@ impl<'a> DapHelper<'a, BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
+impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for MockAggregator
+where
+    'srv: 'req,
+{
     type ReportSelector = MockAggregatorReportSelector;
 
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
@@ -578,7 +584,7 @@ impl<'a> DapLeader<'a, BearerToken> for MockAggregator {
     async fn init_collect_job(&self, collect_req: &CollectReq) -> Result<Url, DapError> {
         let mut rng = thread_rng();
         let task_config = self
-            .get_task_config_for(&collect_req.task_id)
+            .get_task_config_for(Cow::Borrowed(&collect_req.task_id))
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
 

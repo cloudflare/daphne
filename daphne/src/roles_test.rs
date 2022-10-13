@@ -10,9 +10,9 @@ use crate::{
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
-        AggregateShareResp, BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeKemId, Id,
-        Interval, PartialBatchSelector, Query, Report, ReportShare, Time, Transition,
-        TransitionFailure, TransitionVar,
+        AggregateShareResp, BatchSelector, CollectReq, CollectResp, HpkeKemId, Id, Interval,
+        PartialBatchSelector, Query, Report, ReportShare, Time, Transition, TransitionFailure,
+        TransitionVar,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
@@ -25,6 +25,7 @@ use matchit::Router;
 use prio::codec::{Decode, Encode};
 use rand::{thread_rng, Rng};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -94,7 +95,8 @@ impl Test {
                 helper_url: helper_url.clone(),
                 time_precision,
                 expiration: now + 3600,
-                query: DapQueryConfig::TimeInterval { min_batch_size: 1 },
+                min_batch_size: 1,
+                query: DapQueryConfig::TimeInterval,
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
             },
@@ -108,10 +110,8 @@ impl Test {
                 helper_url: helper_url.clone(),
                 time_precision,
                 expiration: now + 3600,
-                query: DapQueryConfig::FixedSize {
-                    min_batch_size: 1,
-                    max_batch_size: 2,
-                },
+                min_batch_size: 1,
+                query: DapQueryConfig::FixedSize { max_batch_size: 2 },
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
             },
@@ -125,7 +125,8 @@ impl Test {
                 helper_url: helper_url.clone(),
                 time_precision,
                 expiration: now, // Expires this second
-                query: DapQueryConfig::TimeInterval { min_batch_size: 1 },
+                min_batch_size: 1,
+                query: DapQueryConfig::TimeInterval,
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
             },
@@ -300,7 +301,11 @@ impl Test {
     // basically a re-implementration that allows us to avoid having to mock the HTTP connection.
     // The (major) downside is that we have to keep the code in-sync.
     async fn run_agg_job(&self, task_id: &Id) -> Result<(), DapAbort> {
-        let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
+        let wrapped = self
+            .leader
+            .get_task_config_for(Cow::Owned(task_id.clone()))
+            .await
+            .unwrap();
         let task_config = wrapped.as_ref().unwrap();
 
         // Leader: Store received report to ReportStore.
@@ -372,7 +377,11 @@ impl Test {
     }
 
     async fn run_col_job(&self, task_id: &Id, query: &Query) -> Result<(), DapAbort> {
-        let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
+        let wrapped = self
+            .leader
+            .get_task_config_for(Cow::Owned(task_id.clone()))
+            .await
+            .unwrap();
         let task_config = wrapped.as_ref().unwrap();
 
         // Collector->Leader: HTTP POST /collect
@@ -935,13 +944,13 @@ async fn http_post_upload_fail_send_invalid_report() {
     let task_config = t.leader.tasks.get(task_id).unwrap();
 
     // Construct a report payload with an invalid task ID.
-    let mut report_empty_task_id = t.gen_test_report(task_id).await;
-    report_empty_task_id.task_id = Id([0; 32]);
+    let mut report_invalid_task_id = t.gen_test_report(task_id).await;
+    report_invalid_task_id.task_id = Id([0; 32]);
     let req = DapRequest {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_REPORT),
-        task_id: Some(task_id.clone()),
-        payload: report_empty_task_id.get_encoded(),
+        task_id: Some(report_invalid_task_id.task_id.clone()),
+        payload: report_invalid_task_id.get_encoded(),
         url: task_config.leader_url.join("upload").unwrap(),
         sender_auth: None,
     };
@@ -962,29 +971,6 @@ async fn http_post_upload_fail_send_invalid_report() {
     assert_matches!(
         t.leader.http_post_upload(&req).await,
         Err(DapAbort::UnrecognizedMessage)
-    );
-
-    // Construct an invalid report payload that has an incorrect order of input shares.
-    let mut report_incorrect_share_order = t.gen_test_report(task_id).await;
-    report_incorrect_share_order.encrypted_input_shares = vec![
-        HpkeCiphertext {
-            config_id: 1,
-            enc: b"invalid encapsulated key".to_vec(),
-            payload: b"invalid ciphertext".to_vec(),
-        },
-        HpkeCiphertext {
-            config_id: 0,
-            enc: b"another invalid encapsulated key".to_vec(),
-            payload: b"another invalid ciphertext".to_vec(),
-        },
-    ];
-
-    let req = t.gen_test_upload_req(report_incorrect_share_order);
-
-    // Expect failure due to incorrect number of input shares
-    assert_matches!(
-        t.leader.http_post_upload(&req).await,
-        Err(DapAbort::UnrecognizedHpkeConfig)
     );
 }
 

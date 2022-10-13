@@ -5,17 +5,9 @@
 
 mod test_runner;
 
-use assert_matches::assert_matches;
-use daphne::constants;
-use daphne_worker::DaphneWorkerReportSelector;
-use janus_prio::{codec::Decode as JanusPrioDecode, vdaf::prio3::Prio3 as JanusPrioPrio3};
-use prio::codec::{Decode, Encode};
-use rand::prelude::*;
-use test_runner::{TestRunner, COLLECTOR_HPKE_RECEIVER_CONFIG};
-
 // Test that daphne can aggregate a report from a Janus client.
 #[tokio::test]
-#[cfg_attr(not(feature = "test_janus"), ignore)]
+#[cfg(feature = "test_janus")]
 async fn janus_client() {
     let t = TestRunner::default().await;
     let client = reqwest::Client::new();
@@ -28,7 +20,7 @@ async fn janus_client() {
     let helper_hpke_config =
         janus_core::message::HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap();
 
-    let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
+    let vdaf = assert_matches!(t.task_config.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
         assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
             JanusPrioPrio3::new_aes128_sum(2, *bits).unwrap()
         )
@@ -39,7 +31,7 @@ async fn janus_client() {
     let janus_client_parameters = janus_client::ClientParameters::new(
         task_id,
         vec![t.leader_url.clone(), t.helper_url.clone()],
-        janus_core::message::Duration::from_seconds(t.time_precision),
+        janus_core::message::Duration::from_seconds(t.task_config.time_precision),
     );
 
     let client_clock = janus_core::time::test_util::MockClock::new(
@@ -70,7 +62,7 @@ async fn janus_client() {
 //
 // For tracing, run `cargo test` with RUST_LOG=aggregator=trace,janus=trace,warning.
 #[tokio::test]
-#[cfg_attr(not(feature = "test_janus"), ignore)]
+#[cfg(feature = "test_janus")]
 async fn janus_helper() {
     janus_core::test_util::install_test_trace_subscriber();
     let (t, janus_helper) = TestRunner::janus_helper().await;
@@ -78,7 +70,7 @@ async fn janus_helper() {
     let hpke_config_list = t.get_hpke_configs(&client).await;
     let report_sel = DaphneWorkerReportSelector {
         max_agg_jobs: 100, // Needs to be large enough to touch each bucket.
-        max_reports: t.query_config.min_batch_size(),
+        max_reports: t.task_config.min_batch_size,
     };
 
     // Upload a number of reports (a few more than the aggregation rate).
@@ -90,7 +82,8 @@ async fn janus_helper() {
             &client,
             "upload",
             constants::MEDIA_TYPE_REPORT,
-            t.vdaf
+            t.task_config
+                .vdaf
                 .produce_report(
                     &hpke_config_list,
                     now,
@@ -133,6 +126,7 @@ async fn janus_helper() {
     let collect_resp =
         daphne::messages::CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
+        .task_config
         .vdaf
         .consume_encrypted_agg_shares(
             &decrypter,

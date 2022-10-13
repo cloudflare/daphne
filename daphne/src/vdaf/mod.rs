@@ -52,10 +52,20 @@ pub(crate) enum VdafError {
     Vdaf(#[from] prio::vdaf::VdafError),
 }
 
-#[derive(Clone)]
-pub(crate) enum VdafVerifyKey {
-    Prio3([u8; 16]),
-    Prio2([u8; 32]),
+/// A VDAF verification key.
+#[derive(Clone, Deserialize, Serialize)]
+pub enum VdafVerifyKey {
+    Prio3(#[serde(with = "hex")] [u8; 16]),
+    Prio2(#[serde(with = "hex")] [u8; 32]),
+}
+
+impl AsRef<[u8]> for VdafVerifyKey {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Self::Prio3(ref bytes) => &bytes[..],
+            Self::Prio2(ref bytes) => &bytes[..],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,7 +100,8 @@ impl Encode for VdafAggregateShare {
 }
 
 impl VdafConfig {
-    pub(crate) fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
+    /// Parse a verification key from raw bytes.
+    pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
             Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(
                 <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
@@ -110,8 +121,7 @@ impl VdafConfig {
     }
 
     /// Generate the Aggregators' shared verification parameters.
-    #[cfg(test)]
-    pub(crate) fn gen_verify_key(&self) -> VdafVerifyKey {
+    pub fn gen_verify_key(&self) -> VdafVerifyKey {
         let mut rng = thread_rng();
         match self {
             Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
