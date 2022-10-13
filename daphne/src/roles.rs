@@ -23,6 +23,7 @@ use crate::{
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use url::Url;
 
@@ -40,8 +41,11 @@ pub trait DapAuthorizedSender<S> {
 
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
-pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
-    /// Return type of `get_task_config_for()`, wraps a reference to task configuration.
+pub trait DapAggregator<'srv, 'req, S>: HpkeDecrypter<'srv> + Sized
+where
+    'srv: 'req,
+{
+    /// A refernce to a task configuration stored by the Aggregator.
     type WrappedDapTaskConfig: AsRef<DapTaskConfig>;
 
     /// Decide whether the given DAP request is authorized.
@@ -52,8 +56,8 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
 
     /// Look up the DAP task configuration for the given task ID.
     async fn get_task_config_for(
-        &'a self,
-        task_id: &Id,
+        &'srv self,
+        task_id: Cow<'req, Id>,
     ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
@@ -101,7 +105,10 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
         -> Result<(), DapError>;
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
-    async fn http_get_hpke_config(&'a self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn http_get_hpke_config(
+        &'srv self,
+        req: &DapRequest<S>,
+    ) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -124,9 +131,11 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
             id = Some(Id::get_decoded(&bytes)?);
         }
 
-        if let Some(ref task_id) = id {
+        let hpke_config = self.get_hpke_config_for(id.as_ref()).await?;
+
+        if let Some(task_id) = id {
             let task_config = self
-                .get_task_config_for(task_id)
+                .get_task_config_for(Cow::Owned(task_id))
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -136,7 +145,6 @@ pub trait DapAggregator<'a, S>: HpkeDecrypter<'a> + Sized {
             }
         }
 
-        let hpke_config = self.get_hpke_config_for(id.as_ref()).await?;
         Ok(DapResponse {
             media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
             payload: hpke_config.as_ref().get_encoded(),
@@ -171,7 +179,10 @@ macro_rules! leader_post {
 
 /// DAP Leader functionality.
 #[async_trait(?Send)]
-pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
+pub trait DapLeader<'srv, 'req, S>: DapAuthorizedSender<S> + DapAggregator<'srv, 'req, S>
+where
+    'srv: 'req,
+{
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;
 
@@ -214,7 +225,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
-    async fn http_post_upload(&'a self, req: &DapRequest<S>) -> Result<(), DapAbort> {
+    async fn http_post_upload(&'srv self, req: &'req DapRequest<S>) -> Result<(), DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -222,7 +233,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         let report = Report::get_decoded(req.payload.as_ref())?;
         let task_config = self
-            .get_task_config_for(&report.task_id)
+            .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -260,7 +271,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
-    async fn http_post_collect(&'a self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
+    async fn http_post_collect(&'srv self, req: &'req DapRequest<S>) -> Result<Url, DapAbort> {
         let now = self.get_current_time();
 
         // Check whether the DAP version indicated by the sender is supported.
@@ -274,7 +285,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         let collect_req = CollectReq::get_decoded(req.payload.as_ref())?;
         let wrapped_task_config = self
-            .get_task_config_for(&collect_req.task_id)
+            .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -413,7 +424,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         &self,
         collect_id: &Id,
         task_config: &DapTaskConfig,
-        collect_req: CollectReq,
+        collect_req: &CollectReq,
     ) -> Result<u64, DapAbort> {
         let leader_agg_share = self
             .get_agg_share(&collect_req.task_id, &collect_req.query)
@@ -421,11 +432,8 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
         // Check the batch size. If not not ready, then return early.
         //
-        // TODO Consider logging this error, as it shouuld never happen.
-        if !task_config
-            .query
-            .check_batch_size(leader_agg_share.report_count)?
-        {
+        // TODO Consider logging this error, as it should never happen.
+        if !task_config.is_report_count_compatible(leader_agg_share.report_count)? {
             return Ok(0);
         }
 
@@ -482,7 +490,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
     /// create a bottleneck. Such deployments can improve throughput by running many aggregation
     /// jobs in parallel.
     async fn process(
-        &'a self,
+        &'srv self,
         selector: &Self::ReportSelector,
     ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
         let mut telem = DapLeaderProcessTelemetry::default();
@@ -490,7 +498,7 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         // Fetch reports and run an aggregation job for each task.
         for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
             let task_config = self
-                .get_task_config_for(&task_id)
+                .get_task_config_for(Cow::Owned(task_id.clone()))
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -512,12 +520,12 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
         // job.
         for (collect_id, collect_req) in self.get_pending_collect_jobs().await? {
             let task_config = self
-                .get_task_config_for(&collect_req.task_id)
+                .get_task_config_for(Cow::Owned(collect_req.task_id.clone()))
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
             telem.reports_collected += self
-                .run_collect_job(&collect_id, task_config.as_ref(), collect_req)
+                .run_collect_job(&collect_id, task_config.as_ref(), &collect_req)
                 .await?;
         }
 
@@ -527,7 +535,10 @@ pub trait DapLeader<'a, S>: DapAuthorizedSender<S> + DapAggregator<'a, S> {
 
 /// DAP Helper functionality.
 #[async_trait(?Send)]
-pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
+pub trait DapHelper<'srv, 'req, S>: DapAggregator<'srv, 'req, S>
+where
+    'srv: 'req,
+{
     /// Store the Helper's aggregation-flow state.
     async fn put_helper_state(
         &self,
@@ -548,7 +559,10 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
     /// AggregateContinueReq and the response is an AggregateResp.
     ///
     /// This is called during the Initialization and Continuation phases.
-    async fn http_post_aggregate(&'a self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn http_post_aggregate(
+        &'srv self,
+        req: &'req DapRequest<S>,
+    ) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
@@ -562,7 +576,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
             Some(MEDIA_TYPE_AGG_INIT_REQ) => {
                 let agg_init_req = AggregateInitializeReq::get_decoded(&req.payload)?;
                 let wrapped_task_config = self
-                    .get_task_config_for(&agg_init_req.task_id)
+                    .get_task_config_for(Cow::Borrowed(req.task_id()?))
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();
@@ -663,7 +677,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
                 let agg_cont_req = AggregateContinueReq::get_decoded(&req.payload)?;
                 let wrapped_task_config = self
-                    .get_task_config_for(&agg_cont_req.task_id)
+                    .get_task_config_for(Cow::Borrowed(req.task_id()?))
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();
@@ -706,8 +720,8 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
     ///
     /// This is called during the Collection phase.
     async fn http_post_aggregate_share(
-        &'a self,
-        req: &DapRequest<S>,
+        &'srv self,
+        req: &'req DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
 
@@ -722,7 +736,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
         let agg_share_req = AggregateShareReq::get_decoded(&req.payload)?;
         let wrapped_task_config = self
-            .get_task_config_for(&agg_share_req.task_id)
+            .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -757,8 +771,7 @@ pub trait DapHelper<'a, S>: DapAggregator<'a, S> {
 
         // Check the batch size.
         if !task_config
-            .query
-            .check_batch_size(agg_share.report_count)
+            .is_report_count_compatible(agg_share.report_count)
             .unwrap_or(false)
         {
             return Err(DapAbort::InvalidBatchSize);
@@ -804,14 +817,17 @@ fn check_part_batch(
     Ok(())
 }
 
-async fn check_batch<'a, S>(
-    agg: &impl DapAggregator<'a, S>,
+async fn check_batch<'srv, 'req, S>(
+    agg: &impl DapAggregator<'srv, 'req, S>,
     task_config: &DapTaskConfig,
     task_id: &Id,
     batch_sel: &BatchSelector,
     agg_param: &[u8],
     now: Time,
-) -> Result<(), DapAbort> {
+) -> Result<(), DapAbort>
+where
+    'srv: 'req,
+{
     let global_config = agg.get_global_config();
     let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
 

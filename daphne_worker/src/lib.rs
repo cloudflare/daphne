@@ -154,9 +154,9 @@
 use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
 use daphne::{
     constants,
-    messages::Id,
+    messages::{Duration, HpkeConfig, Id, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
-    DapAbort, DapCollectJob, DapError, DapResponse,
+    DapAbort, DapCollectJob, DapError, DapQueryConfig, DapResponse, VdafConfig,
 };
 use prio::codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -352,6 +352,12 @@ impl DaphneWorkerRouter {
                         Response::from_json(&())
                     },
                 )
+                .post_async("/internal/test/add_task", |mut req, ctx| async move {
+                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    let cmd: InternalAddTask = req.json().await?;
+                    config.internal_add_task(cmd).await?;
+                    Response::from_json(&())
+                })
         } else {
             router
         };
@@ -400,6 +406,7 @@ fn abort(e: DapAbort) -> Result<Response> {
     }
 }
 
+// TODO(issue #138) Align this struct with the spec.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum InternalRole {
@@ -407,16 +414,29 @@ pub(crate) enum InternalRole {
     Collector,
 }
 
+// TODO(issue #138) Align this struct with the spec.
 #[derive(Debug, Deserialize)]
 pub(crate) struct InternalAddAuthenticationToken {
-    pub task_id: String, // base64url
-    pub role: InternalRole,
-    pub token: String,
+    pub(crate) task_id: String, // base64url
+    pub(crate) role: InternalRole,
+    pub(crate) token: String,
+}
+
+// TODO(issue #138) Align this struct with the spec.
+#[derive(Deserialize)]
+pub(crate) struct InternalAddTask {
+    task_id: String, // base64url
+    leader_url: Url,
+    helper_url: Url,
+    time_precision: Duration,
+    expiration: Time,
+    min_batch_size: u64,
+    query: DapQueryConfig,
+    vdaf: VdafConfig,
+    vdaf_verify_key: String, // base64url
+    collector_hpke_config: HpkeConfig,
 }
 
 mod config;
 mod dap;
 mod durable;
-
-#[cfg(test)]
-mod config_test;

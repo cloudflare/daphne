@@ -3,307 +3,71 @@
 
 // TODO Figure out why cargo thinks there is dead code here.
 
-use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
-    messages::{HpkeConfig, Id, Interval},
+    hpke::HpkeReceiverConfig,
+    messages::{Duration, HpkeConfig, HpkeKemId, Id, Interval},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
-    VdafConfig,
+    Prio3Config, VdafConfig,
 };
 use daphne_worker::DaphneWorkerReportSelector;
+#[cfg(feature = "test_janus")]
 use futures::channel::oneshot::Sender;
-use janus_prio::codec::Decode as JanusPrioDecode;
-use prio::codec::{Decode, Encode};
+use prio::codec::Decode;
 use rand::prelude::*;
 use serde::Serialize;
 use serde_json::json;
-use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
-    time::SystemTime,
-};
+use std::time::SystemTime;
+#[cfg(feature = "test_janus")]
 use tokio::task::JoinHandle;
 use url::Url;
 
-const JANUS_HELPER_PORT: u16 = 9788;
-
-const DEFAULT_TASK: &str = "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f";
-const FIXED_SIZE_TASK: &str = "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378";
-const JANUS_HELPER_TASK: &str = "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f";
-
-pub const GLOBAL_CONFIG: &str = r#"{
-    "report_storage_epoch_duration": 604800,
-    "max_batch_duration": 360000,
-    "min_batch_interval_start": 259200,
-    "max_batch_interval_end": 259200,
-    "supported_hpke_kems": ["X25519HkdfSha256"]
-}"#;
-
-// This value of this JSON string must match DAP_TASK_LIST in tests/backend/leader.env.
-//
-// TODO De-duplicate this config.
-//
-// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
-// When adding paths, they must not start with a "/".
-const LEADER_TASK_LIST: &str = r#"{
-    "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://helper:8788/v02/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "time_interval": {
-                "min_batch_size": 10
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-    },
-    "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://127.0.0.1:9788/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "time_interval": {
-                "min_batch_size": 10
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
-    },
-    "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://helper:8788/v02/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "fixed_size": {
-                "min_batch_size": 10,
-                "max_batch_size": 12
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "d4c0fd634e80005dc514eb4c9538fbf7"
-    }
-}"#;
-
-// This value of this JSON string must match DAP_TASK_LIST in tests/backend/helper.env.
-//
-// TODO De-duplicate this config.
-//
-// NOTE(nakatsuka-y) The leader_url and helper_url must end with a "/".
-// When adding paths, they must not start with a "/".
-const HELPER_TASK_LIST: &str = r#"{
-    "f285be3caf948fcfc36b7d32181c14db95c55f04f55a2db2ee439c5879264e1f": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://helper:8788/v02/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "time_interval": {
-                "min_batch_size": 10
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "1fd8d30dc0e0b7ac81f0050fcab0782d"
-    },
-    "6d2ef497d369fd2e72d96c47e5c28496800f5e546e912554d0df83bf24a25378": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://helper:8788/v02/",
-        "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "fixed_size": {
-                "min_batch_size": 10,
-                "max_batch_size": 12
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "d4c0fd634e80005dc514eb4c9538fbf7"
-    }
-}"#;
-
-pub(crate) const JANUS_HELPER_TASK_LIST: &str = r#"{
-    "410d5e0abd94a88b8435a192cc458cc1667da2989827584cbf8a591626d5a61f": {
-        "version": "v02",
-        "leader_url": "http://leader:8787/v02/",
-        "helper_url": "http://127.0.0.1:9788/",
-         "collector_hpke_config": {
-            "id": 23,
-            "kem_id": "X25519HkdfSha256",
-            "kdf_id": "HkdfSha256",
-            "aead_id": "Aes128Gcm",
-            "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-        },
-        "time_precision": 3600,
-        "expiration": 30695925405,
-        "query": {
-            "time_interval": {
-                "min_batch_size": 10
-            }
-        },
-        "vdaf": {
-            "prio3": {
-                "sum": {
-                    "bits": 10
-                }
-            }
-        },
-        "vdaf_verify_key": "01d6232e33fe7e63b4531e3706efa8cc"
-    }
-}"#;
-
-const JANUS_HELPER_TASK_LEADER_BEARER_TOKEN: &str =
-    "This is a differnt token 72938088f14b7ef318ef42ba72395a22";
-
-#[allow(dead_code)]
-pub(crate) const COLLECTOR_HPKE_RECEIVER_CONFIG: &str = r#" {
-    "config": {
-        "id": 23,
-        "kem_id": "X25519HkdfSha256",
-        "kdf_id": "HkdfSha256",
-        "aead_id": "Aes128Gcm",
-        "public_key":"ec6427a49c8e9245307cc757dbdcf5d287c7a74075141af9fa566c293a52ee7c"
-    },
-    "secret_key": "60890f1e438bf1f0e9ad2bd839acf1341137eee623bf7906972bf1cc80bb5d7b"
-}"#;
+const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
+const MIN_BATCH_SIZE: u64 = 10;
+const MAX_BATCH_SIZE: u64 = 12;
+const TIME_PRECISION: Duration = 3600; // seconds
 
 #[allow(dead_code)]
 pub struct TestRunner {
-    pub version: DapVersion,
+    pub global_config: DapGlobalConfig,
     pub task_id: Id,
+    pub task_config: DapTaskConfig,
     pub now: u64,
-    pub time_precision: u64,
-    pub query_config: DapQueryConfig,
-    pub max_batch_duration: u64,
-    pub min_batch_interval_start: u64,
-    pub max_batch_interval_end: u64,
-    pub vdaf: VdafConfig,
     pub leader_url: Url,
     pub helper_url: Url,
     pub leader_bearer_token: String,
     pub collector_bearer_token: String,
+    pub collector_hpke_receiver: HpkeReceiverConfig,
 }
 
 #[allow(dead_code)]
 impl TestRunner {
     pub async fn default() -> Self {
-        let t = Self::with(
-            GLOBAL_CONFIG,
-            DEFAULT_TASK,
-            LEADER_TASK_LIST,
-            HELPER_TASK_LIST,
-        )
-        .await;
+        let t = Self::with(&DapQueryConfig::TimeInterval).await;
         t
     }
 
     pub async fn fixed_size() -> Self {
-        let t = Self::with(
-            GLOBAL_CONFIG,
-            FIXED_SIZE_TASK,
-            LEADER_TASK_LIST,
-            HELPER_TASK_LIST,
-        )
+        let t = Self::with(&DapQueryConfig::FixedSize {
+            max_batch_size: MAX_BATCH_SIZE,
+        })
         .await;
         t
     }
 
-    async fn with(
-        global_config_obj: &str,
-        task_id_hex: &str,
-        leader_task_list_obj: &str,
-        helper_task_list_obj: &str,
-    ) -> Self {
+    async fn with(query_config: &DapQueryConfig) -> Self {
         let mut rng = thread_rng();
-        let global_config: DapGlobalConfig = serde_json::from_str(global_config_obj).unwrap();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
 
-        let task_id = Id::get_decoded(&hex::decode(task_id_hex).unwrap()).unwrap();
-
-        let leader_task_list: HashMap<Id, DapTaskConfig> =
-            serde_json::from_str(leader_task_list_obj).unwrap();
-
-        let helper_task_list: HashMap<Id, DapTaskConfig> =
-            serde_json::from_str(helper_task_list_obj).unwrap();
-
-        let task_config = leader_task_list.get(&task_id).unwrap();
+        let task_id = Id(rng.gen());
 
         // When running in a local development environment, override the hostname of each
         // aggregator URL with 127.0.0.1.
-        let mut leader_url = task_config.leader_url.clone();
-        let mut helper_url = task_config.helper_url.clone();
+        let mut leader_url = Url::parse("http://127.0.0.1:8787/v02/").unwrap();
+        let mut helper_url = Url::parse("http://127.0.0.1:8788/v02/").unwrap();
         if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
                 leader_url.set_host(Some("127.0.0.1")).unwrap();
@@ -313,50 +77,75 @@ impl TestRunner {
             }
         };
 
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let collector_hpke_receiver =
+            HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
+
+        let task_config = DapTaskConfig {
+            version: DapVersion::Draft02,
+            leader_url: leader_url.clone(),
+            helper_url: helper_url.clone(),
+            expiration: now + 604800, // one week from now
+            time_precision: TIME_PRECISION,
+            min_batch_size: MIN_BATCH_SIZE,
+            query: query_config.clone(),
+            vdaf: VDAF_CONFIG.clone(),
+            vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
+            collector_hpke_config: collector_hpke_receiver.config.clone(),
+        };
+
+        // This needs to be kept in-sync with daphne_worker_test/wrangler.toml.
+        let global_config = DapGlobalConfig {
+            report_storage_epoch_duration: 604800,
+            max_batch_duration: 360000,
+            min_batch_interval_start: 259200,
+            max_batch_interval_end: 259200,
+            supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
+        };
 
         let leader_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
         let collector_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
-
         let t = Self {
-            version: task_config.version.clone(),
+            global_config,
             task_id: task_id.clone(),
             now,
-            time_precision: task_config.time_precision,
-            query_config: task_config.query.clone(),
-            max_batch_duration: global_config.max_batch_duration,
-            min_batch_interval_start: global_config.min_batch_interval_start,
-            max_batch_interval_end: global_config.max_batch_interval_end,
-            vdaf: task_config.vdaf.clone(),
+            task_config,
             leader_url,
             helper_url,
             leader_bearer_token,
             collector_bearer_token,
+            collector_hpke_receiver,
         };
 
-        // Ensure the helper has a matching task config.
-        if let Some(helper_task_config) = helper_task_list.get(&task_id) {
-            assert_eq!(
-                helper_task_config.time_precision,
-                task_config.time_precision
-            );
-            assert_eq!(helper_task_config.query, task_config.query);
-            assert_eq!(helper_task_config.vdaf, task_config.vdaf);
-        } else {
-            panic!("Helper does not have as matching task configuration");
-        }
+        let vdaf_verify_key_base64url = base64::encode_config(
+            &t.task_config.vdaf_verify_key.as_ref(),
+            base64::URL_SAFE_NO_PAD,
+        );
 
-        // Ensure that the VDAF for this test case is Prio3Aes128Sum.
-        assert_matches!(task_config.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
-            assert_matches!(prio3_config, daphne::Prio3Config::Sum{..})});
+        let add_task_cmd = json!({
+            "task_id": t.task_id.to_base64url(),
+            "leader_url": t.leader_url,
+            "helper_url": t.helper_url,
+            "time_precision": t.task_config.time_precision,
+            "expiration": t.task_config.expiration,
+            "min_batch_size": t.task_config.min_batch_size,
+            "query": t.task_config.query,
+            "vdaf": t.task_config.vdaf,
+            "vdaf_verify_key": vdaf_verify_key_base64url,
+            "collector_hpke_config": t.task_config.collector_hpke_config,
+        });
 
-        // Configure the endpoints
+        // Configure the endpoints.
         //
         // First, delete the data from the previous test.
         t.internal_delete_all(&t.batch_interval()).await;
+
+        // Configure the Leader with the task.
+        t.leader_post_internal("/internal/test/add_task", &add_task_cmd)
+            .await;
+
+        // Configure the Helper with the task.
+        t.helper_post_internal("/internal/test/add_task", &add_task_cmd)
+            .await;
 
         // Configure the Leader with the Collector's bearer token.
         t.leader_post_internal(
@@ -402,10 +191,10 @@ impl TestRunner {
     }
 
     pub fn batch_interval(&self) -> Interval {
-        let start = self.now - (self.now % self.time_precision);
+        let start = self.now - (self.now % self.task_config.time_precision);
         Interval {
             start,
-            duration: self.time_precision * 2,
+            duration: self.task_config.time_precision * 2,
         }
     }
 
@@ -617,6 +406,7 @@ impl TestRunner {
     }
 }
 
+#[cfg(feature = "test_janus")]
 pub struct JanusServerHandle {
     shutdown_sender: Sender<()>,
     server_handle: JoinHandle<()>,
@@ -626,7 +416,7 @@ pub struct JanusServerHandle {
     db_handle: janus_server::datastore::test_util::DbHandle,
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "test_janus")]
 impl JanusServerHandle {
     pub async fn shutdown(self) {
         self.shutdown_sender.send(()).unwrap();
@@ -634,7 +424,7 @@ impl JanusServerHandle {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "test_janus")]
 impl TestRunner {
     pub async fn janus_helper() -> (Self, JanusServerHandle) {
         let t = Self::with(
@@ -648,7 +438,7 @@ impl TestRunner {
 
         let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
         let aggregator_endpoints = vec![t.leader_url.clone(), t.helper_url.clone()];
-        let vdaf = assert_matches!(t.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
+        let vdaf = assert_matches!(t.task_config.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
             assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
                 janus_server::task::VdafInstance::Real(janus_core::task::VdafInstance::Prio3Aes128Sum{ bits: *bits }
             ))
@@ -691,8 +481,8 @@ impl TestRunner {
             janus_core::message::Role::Helper,
             vec![vdaf_verify_key],
             1, // max_batch_lifetime
-            t.query_config.min_batch_size(),
-            janus_core::message::Duration::from_seconds(t.time_precision),
+            t.task_config.min_batch_size,
+            janus_core::message::Duration::from_seconds(t.task_config.time_precision),
             janus_core::message::Duration::from_seconds(0), // clock skew tolerance
             collector_hpke_config,
             vec![leader_bearer_token],
