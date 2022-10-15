@@ -96,6 +96,7 @@ impl AsRef<[u8]> for ReportId {
 
 /// Report extensions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Extension {
     Unhandled { typ: u16, payload: Vec<u8> },
 }
@@ -208,6 +209,7 @@ impl Decode for ReportShare {
 /// Batch parameter conveyed to the Helper by the Leader in the aggreagtion sub-protocol. Used to
 /// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
 #[derive(Clone, Debug, Eq, Deserialize, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PartialBatchSelector {
     TimeInterval,
     FixedSize { batch_id: Id },
@@ -370,6 +372,7 @@ impl Decode for TransitionVar {
 
 /// Transition error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TransitionFailure {
     BatchCollected = 0,
     ReportReplayed = 1,
@@ -648,6 +651,7 @@ impl Decode for AggregateShareResp {
 
 /// Codepoint for KEM schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum HpkeKemId {
     P256HkdfSha256,
     X25519HkdfSha256,
@@ -682,6 +686,7 @@ impl Decode for HpkeKemId {
 
 /// Codepoint for KDF schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum HpkeKdfId {
     HkdfSha256,
     NotImplemented(u16),
@@ -713,6 +718,7 @@ impl Decode for HpkeKdfId {
 
 /// Codepoint for AEAD schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum HpkeAeadId {
     Aes128Gcm,
     NotImplemented(u16),

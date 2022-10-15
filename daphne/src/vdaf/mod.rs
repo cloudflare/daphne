@@ -54,6 +54,7 @@ pub(crate) enum VdafError {
 
 /// A VDAF verification key.
 #[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VdafVerifyKey {
     Prio3(#[serde(with = "hex")] [u8; 16]),
     Prio2(#[serde(with = "hex")] [u8; 32]),
@@ -83,6 +84,7 @@ pub(crate) enum VdafMessage {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum VdafAggregateShare {
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),

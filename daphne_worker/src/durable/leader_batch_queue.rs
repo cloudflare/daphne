@@ -25,6 +25,7 @@ pub(crate) struct BatchCount {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum LeaderBatchQueueResult {
     Ok(Id),
     EmptyQueue,
