@@ -1,40 +1,106 @@
-name = "" # todo
-workers_dev = true
-type = "javascript" # required for wrangler<=2
 main = "build/worker/shim.mjs"
-compatibility_date = "2022-01-20"
-
+compatibility_date = "2022-10-14"
 
 [build]
 command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build"
 
-[build.upload]
-dir    = "build/worker"
-format = "modules"
-main   = "./shim.mjs"
+[[rules]]
+globs = [ "**/*.wasm" ]
+type = "CompiledWasm"
+fallthrough = false
 
-[[build.upload.rules]]
-globs = ["**/*.wasm"]
-type  = "CompiledWasm"
+#
+# leader
+#
 
 
-[durable_objects]
+[env.leader.vars]
+# NOTE: Variables marked as SECRET need to be provisioned securely in
+# production. In particular, they will not be passed as environment variables
+# as they are here. See
+# https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+DAP_DEPLOYMENT = "dev"
+DAP_AGGREGATOR_ROLE = "leader"
+DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
+DAP_COLLECT_ID_KEY = "b416a85d280591d6da14e5b75a7d6e31" # SECRET
+DAP_REPORT_SHARD_KEY = "61cd9685547370cfea76c2eb8d156ad9" # SECRET
+DAP_REPORT_SHARD_COUNT = "2"
+DAP_GLOBAL_CONFIG = """{
+     "report_storage_epoch_duration": 604800,
+     "max_batch_duration": 360000,
+     "min_batch_interval_start": 259200,
+     "max_batch_interval_end": 259200,
+     "supported_hpke_kems": ["x25519_hkdf_sha256"]
+}"""
+
+
+[env.leader.durable_objects]
 bindings = [
   { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
   { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
   { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
   { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
-  { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
   { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
   { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
   { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
-[[kv_namespaces]]
+
+[[env.leader.kv_namespaces]]
+binding = "DAP_CONFIG"
+id = "<ignored>"         # TODO(cjpatton) Figure out how to pick this.
+preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
+
+
+#
+# helper
+#
+
+
+[env.helper.vars]
+# NOTE: Variables marked as SECRET need to be provisioned securely in
+# production. In particular, they will not be passed as environment variables
+# as they are here. See
+# https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+DAP_DEPLOYMENT = "dev"
+DAP_AGGREGATOR_ROLE = "helper"
+DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
+DAP_REPORT_SHARD_KEY = "f79c352056982bae1737e34bdac24d63" # SECRET
+DAP_REPORT_SHARD_COUNT = "2"
+DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
+DAP_GLOBAL_CONFIG = """{
+  "report_storage_epoch_duration": 604800,
+  "max_batch_duration": 360000,
+  "min_batch_interval_start": 259200,
+  "max_batch_interval_end": 259200,
+  "supported_hpke_kems": ["x25519_hkdf_sha256"]
+}"""
+
+
+[env.helper.durable_objects]
+bindings = [
+  { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+  { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+  { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+  { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
+]
+
+
+[[env.helper.kv_namespaces]]
   binding = "DAP_CONFIG"
-  id = "<ignored>"
-  preview_id = "<ignored>"
+  id = "<ignored>"         # TODO(cjpatton) Figure out how to pick this.
+  preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
 
 
-[vars]
-WORKERS_RS_VERSION = "0.0.11"
+[[migrations]]
+tag = "v1"
+new_classes = [
+  "AggregateStore",
+  "HelperStateStore",
+  "LeaderAggregationJobQueue",
+  "LeaderBatchQueue",
+  "LeaderCollectionJobQueue",
+  "GarbageCollector",
+  "ReportsPending",
+  "ReportsProcessed",
+]
