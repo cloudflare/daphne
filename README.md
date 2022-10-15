@@ -43,8 +43,6 @@ directory for instructions on running Daphne-Worker locally.
 docker-compose up --build --abort-on-container-exit --exit-code-from test
 ```
 
-
-
 ## Acknowledgements
 
 Thanks to Yoshimichi Nakatsuka who contributed significantly to Daphne during
