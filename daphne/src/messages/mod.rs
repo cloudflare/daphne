@@ -14,10 +14,13 @@ use std::{
     io::{Cursor, Read},
 };
 
+// Various algorithm constants
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
 const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
 const KDF_ID_HKDF_SHA256: u16 = 0x0001;
 const AEAD_ID_AES128GCM: u16 = 0x0001;
+
+// Query types
 const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
 const QUERY_TYPE_FIXED_SIZE: u8 = 0x02;
 
@@ -862,3 +865,7 @@ pub(crate) fn decode_u32_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, Cod
     bytes.read_exact(&mut out)?;
     Ok(out)
 }
+
+#[cfg(test)]
+mod mod_test;
+pub mod taskprov;
