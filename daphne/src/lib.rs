@@ -881,8 +881,6 @@ pub mod hpke;
 #[cfg(test)]
 mod hpke_test;
 pub mod messages;
-#[cfg(test)]
-mod messages_test;
 pub mod roles;
 #[cfg(test)]
 mod roles_test;

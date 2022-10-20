@@ -1,6 +1,10 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use crate::messages::taskprov::{
+    DpConfig, DpMechanism, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig,
+    VdafTypeVar,
+};
 use crate::messages::{
     AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
     HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, PartialBatchSelector, Report, ReportId,
@@ -165,5 +169,70 @@ fn read_unsupported_hpke_config() {
             aead_id: HpkeAeadId::NotImplemented(99),
             public_key: b"this is a public key".to_vec(),
         }
+    );
+}
+
+#[test]
+fn read_vdaf_config() {
+    let data = [
+        0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02,
+        0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04, 0x03,
+        0x02, 0x03,
+    ];
+
+    let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
+    let vdaf_config = VdafConfig::get_decoded(&data).unwrap();
+    assert_eq!(
+        vdaf_config,
+        VdafConfig {
+            dp_config: DpConfig {
+                mechanism: DpMechanism::None
+            },
+            var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
+        }
+    );
+}
+
+#[test]
+fn read_task_config() {
+    let data = [
+        0x02, 0x48, 0x69, 0x00, 0x0e, 0x00, 0x0c, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f,
+        0x74, 0x65, 0x73, 0x74, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x80,
+        0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x52, 0xf9,
+        0xa5, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03,
+        0x02, 0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04,
+        0x03, 0x02, 0x03,
+    ];
+
+    let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
+    let task_config = TaskConfig::get_decoded(&data).unwrap();
+    assert_eq!(
+        task_config,
+        TaskConfig {
+            task_info: "Hi".as_bytes().to_vec(),
+            aggregator_endpoints: vec![UrlBytes {
+                bytes: "https://test".as_bytes().to_vec()
+            }],
+            query_config: QueryConfig {
+                time_precision: 0x01,
+                max_batch_query_count: 128,
+                min_batch_size: 1024,
+                var: QueryConfigVar::FixedSize {
+                    max_batch_size: 2048
+                },
+            },
+            task_expiration: 0x6352f9a5,
+            vdaf_config: VdafConfig {
+                dp_config: DpConfig {
+                    mechanism: DpMechanism::None
+                },
+                var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
+            },
+        }
+    );
+
+    assert_eq!(
+        task_config.compute_task_id().to_hex(),
+        "b4769bb063a8b3312af74297f30fdbf8e0b71c2eb2481f591d1d7de66a4ce34f"
     );
 }
