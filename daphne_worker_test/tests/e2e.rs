@@ -146,6 +146,28 @@ async fn e2e_leader_upload() {
     )
     .await;
 
+    // Try uploading a report past the task's expiration date.
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report(
+            &hpke_config_list,
+            t.task_config.expiration, // past the expiration date
+            &t.task_id,
+            DapMeasurement::U64(23),
+        )
+        .unwrap();
+    t.leader_post_expect_abort(
+        &client,
+        None, // dap_auth_token
+        path,
+        constants::MEDIA_TYPE_REPORT,
+        report.get_encoded(),
+        400,
+        "reportTooLate",
+    )
+    .await;
+
     // Upload a fixed report. This is a sanity check to make sure that the test resets the Leader's
     // state each time the test is run. If it didn't, this would result in an error due to the
     // report ID being repeated.
