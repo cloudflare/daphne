@@ -204,6 +204,14 @@ impl<'a> BearerTokenProvider<'a> for MockAggregator {
             ))
         }
     }
+
+    fn is_taskprov_leader_bearer_token(&self, _token: &BearerToken) -> bool {
+        panic!("MockAggregator does not implement the taskprov extension");
+    }
+
+    fn is_taskprov_collector_bearer_token(&self, _token: &BearerToken) -> bool {
+        panic!("MockAggregator does not implement the taskprov extension");
+    }
 }
 
 #[async_trait(?Send)]
@@ -281,9 +289,10 @@ where
         &self.global_config
     }
 
-    async fn get_task_config_for(
+    async fn get_task_config_considering_taskprov(
         &'srv self,
         task_id: Cow<'req, Id>,
+        _metadata: Option<&ReportMetadata>,
     ) -> Result<Option<&'req DapTaskConfig>, DapError> {
         Ok(self.tasks.get(task_id.as_ref()))
     }

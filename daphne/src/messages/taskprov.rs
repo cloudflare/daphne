@@ -5,17 +5,14 @@
 //! defined in draft-wang-ppm-dap-taskprov-00.
 
 use crate::messages::{
-    decode_u16_bytes, encode_u16_bytes, Duration, Id, Time, QUERY_TYPE_FIXED_SIZE,
+    decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
     QUERY_TYPE_TIME_INTERVAL,
 };
 use prio::codec::{
     decode_u16_items, decode_u24_items, decode_u8_items, encode_u16_items, encode_u24_items,
     encode_u8_items, CodecError, Decode, Encode,
 };
-use ring::{
-    hmac::HMAC_SHA256,
-    hmac::{sign, Key},
-};
+use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
@@ -28,6 +25,29 @@ const VDAF_TYPE_POPLAR1_AES128: u32 = 0x00001000; // The gap from the previous c
 // Differential privacy mechanism types.
 const DP_MECHANISM_RESERVED: u8 = 0x00;
 const DP_MECHANISM_NONE: u8 = 0x01;
+
+/// A VDAF type.
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VdafType {
+    Prio3Aes128Count,
+    Prio3Aes128Sum,
+    Prio3Aes128Histogram,
+    Poplar1Aes128,
+    NotImplemented(u32),
+}
+
+impl KeyType for VdafType {
+    fn len(&self) -> usize {
+        match self {
+            VdafType::Prio3Aes128Count => 16,
+            VdafType::Prio3Aes128Sum => 16,
+            VdafType::Prio3Aes128Histogram => 16,
+            VdafType::Poplar1Aes128 => 16,
+            _ => panic!("tried to get key length for undefined VDAF"),
+        }
+    }
+}
 
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -77,6 +97,18 @@ impl Decode for VdafTypeVar {
                 bit_length: u16::decode(bytes)?,
             }),
             _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
+impl From<VdafTypeVar> for VdafType {
+    fn from(var: VdafTypeVar) -> Self {
+        match var {
+            VdafTypeVar::Prio3Aes128Count => VdafType::Prio3Aes128Count,
+            VdafTypeVar::Prio3Aes128Histogram { .. } => VdafType::Prio3Aes128Histogram,
+            VdafTypeVar::Prio3Aes128Sum { .. } => VdafType::Prio3Aes128Sum,
+            VdafTypeVar::Poplar1Aes128 { .. } => VdafType::Poplar1Aes128,
+            VdafTypeVar::NotImplemented(x) => VdafType::NotImplemented(x),
         }
     }
 }
@@ -253,24 +285,6 @@ pub struct TaskConfig {
     pub query_config: QueryConfig,
     pub task_expiration: Time,
     pub vdaf_config: VdafConfig,
-}
-
-impl TaskConfig {
-    pub fn compute_task_id(&self) -> Id {
-        // SHA-256 of "dap-taskprov-00"
-        let task_prov_salt: Vec<u8> = vec![
-            0x4d, 0x63, 0x1a, 0xeb, 0xa8, 0xdf, 0xe0, 0x1b, 0x34, 0x4c, 0x29, 0x2d, 0x17, 0xba,
-            0x34, 0x9a, 0x78, 0x97, 0xbf, 0x64, 0x88, 0x00, 0x55, 0x1c, 0x0d, 0x75, 0x32, 0xab,
-            0x61, 0x4b, 0xe2, 0x21,
-        ];
-        let key = Key::new(HMAC_SHA256, &task_prov_salt);
-        let encoded = self.get_encoded();
-        let digest = sign(&key, &encoded);
-        let mut b: [u8; 32] = [0; 32];
-        let d = digest.as_ref();
-        b[..32].copy_from_slice(&d[..32]);
-        Id(b)
-    }
 }
 
 impl Encode for TaskConfig {

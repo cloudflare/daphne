@@ -50,8 +50,9 @@ use daphne::{
         ReportId, ReportMetadata, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
+    taskprov::{bad_request, get_taskprov_task_config},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
+    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode};
@@ -215,6 +216,22 @@ impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorkerConfig<D> {
             .await
             .map_err(dap_err)
     }
+
+    fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
+        self.get_global_config().allow_taskprov
+            && match &self.taskprov_config {
+                Some(config) => config.leader_bearer_token == *token,
+                None => false,
+            }
+    }
+
+    fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
+        self.get_global_config().allow_taskprov
+            && match &self.taskprov_config {
+                Some(config) => config.collector_bearer_token == *token,
+                None => false,
+            }
+    }
 }
 
 #[async_trait(?Send)]
@@ -251,11 +268,78 @@ where
         &self.global_config
     }
 
-    async fn get_task_config_for(
+    /// Get an existing task (whether an ordinary task or a previously created
+    /// taskprov task).  If we can't find it, see if there is a taskprov extension
+    /// in the report, and if so create the task.
+    async fn get_task_config_considering_taskprov(
         &'srv self,
         task_id: Cow<'req, Id>,
+        metadata: Option<&ReportMetadata>,
     ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
-        self.get_task_config(task_id).await.map_err(dap_err)
+        let found = self
+            .get_task_config(task_id.clone())
+            .await
+            .map_err(dap_err)?;
+        if found.is_some() {
+            return Ok(found);
+        }
+        // Not found and no error.
+        if metadata.is_none() {
+            // No report metadata, so we're not going to find anything.
+            return Ok(None);
+        }
+        let metadata_ref = metadata.unwrap();
+        let taskprov_task_config = get_taskprov_task_config(task_id.as_ref(), metadata_ref)?;
+        if taskprov_task_config.is_some() {
+            let global_config = self.get_global_config();
+            if !global_config.allow_taskprov {
+                // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
+                return Err(bad_request("taskprov is not allowed"));
+            }
+            let taskprov_config = self
+                .taskprov_config
+                .as_ref()
+                .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
+
+            // We currently always opt-in; any additional checks that would lead to
+            // us opting out should be done here.
+
+            let taskprov_task_id = task_id.as_ref().clone();
+            let task_config = DapTaskConfig::try_from_taskprov(
+                DapVersion::Draft02,
+                &taskprov_task_id,
+                taskprov_task_config.unwrap(),
+                taskprov_config.vdaf_verify_key_init.as_ref(),
+                taskprov_config.hpke_collector_config.as_ref(),
+            )?;
+
+            // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
+            // finds something.
+            //
+            // TODO(bhalleycf) Note that this is generating KV garbage that will
+            // need collection at some point.
+            self.set_leader_bearer_token(
+                &taskprov_task_id,
+                taskprov_config.leader_bearer_token.as_ref(),
+            )
+            .await
+            .map_err(dap_err)?;
+
+            // Write the task config to the KV.
+            //
+            // TODO(bhalleycf) Note that this is generating KV garbage that will
+            // need collection at some point.
+            self.set_task_config(&taskprov_task_id, &task_config)
+                .await
+                .map_err(dap_err)?;
+
+            // Do the usual get again so we cache and return the right type.
+            self.get_task_config(Cow::Owned(taskprov_task_id))
+                .await
+                .map_err(dap_err)
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_current_time(&self) -> u64 {

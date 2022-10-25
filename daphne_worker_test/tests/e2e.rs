@@ -8,17 +8,22 @@ mod test_runner;
 use daphne::{
     constants,
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, Interval, Query, Report,
-        ReportId, ReportMetadata,
+        taskprov::{
+            DpConfig, DpMechanism, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig,
+            VdafTypeVar,
+        },
+        BatchSelector, CollectReq, CollectResp, Extension, HpkeCiphertext, Id, Interval, Query,
+        Report, ReportId, ReportMetadata,
     },
-    DapAggregateResult, DapMeasurement,
+    taskprov::compute_task_id,
+    DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
-use test_runner::TestRunner;
+use test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 
 #[derive(Deserialize)]
 struct InternalTestEndpointForTaskResult {
@@ -276,6 +281,157 @@ async fn e2e_leader_upload() {
         "unexpected response status: {:?}",
         resp.text().await.unwrap()
     );
+
+    // Generate and upload a report with taskprov.
+    //
+    // We have to make this by hand as if we cut and paste a pre-serialized one it
+    // will have an expiring task.
+    let taskprov_task_config = TaskConfig {
+        task_info: "Hi".as_bytes().to_vec(),
+        aggregator_endpoints: vec![
+            UrlBytes {
+                bytes: "https://test1".as_bytes().to_vec(),
+            },
+            UrlBytes {
+                bytes: "https://test2".as_bytes().to_vec(),
+            },
+        ],
+        query_config: QueryConfig {
+            time_precision: 0x01,
+            max_batch_query_count: 128,
+            min_batch_size: 1024,
+            var: QueryConfigVar::FixedSize {
+                max_batch_size: 2048,
+            },
+        },
+        task_expiration: t.now + 86400,
+        vdaf_config: VdafConfig {
+            dp_config: DpConfig {
+                mechanism: DpMechanism::None,
+            },
+            var: VdafTypeVar::Prio3Aes128Count,
+        },
+    };
+    let payload = taskprov_task_config.get_encoded();
+    let task_id = compute_task_id(&payload);
+    let extensions = vec![Extension::Taskprov { payload }];
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now,
+            &task_id,
+            DapMeasurement::U64(23),
+            extensions,
+        )
+        .unwrap();
+    t.leader_post_expect_ok(
+        &client,
+        path,
+        constants::MEDIA_TYPE_REPORT,
+        report.get_encoded(),
+    )
+    .await;
+
+    // Generate and upload a report with taskprov but with the wrong id
+    let payload = taskprov_task_config.get_encoded();
+    let mut bad_payload = payload.clone();
+    bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
+    let task_id = compute_task_id(&bad_payload);
+    let extensions = vec![Extension::Taskprov { payload }];
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now,
+            &task_id,
+            DapMeasurement::U64(23),
+            extensions,
+        )
+        .unwrap();
+    t.leader_post_expect_abort(
+        &client,
+        None, // dap_auth_token
+        path,
+        constants::MEDIA_TYPE_REPORT,
+        report.get_encoded(),
+        400,
+        "unrecognizedTask",
+    )
+    .await;
+
+    // Generate and upload a report with two copies of the taskprov extension
+    let payload = taskprov_task_config.get_encoded();
+    let task_id = compute_task_id(&payload);
+    let extensions = vec![
+        Extension::Taskprov {
+            payload: payload.clone(),
+        },
+        Extension::Taskprov { payload },
+    ];
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now,
+            &task_id,
+            DapMeasurement::U64(23),
+            extensions,
+        )
+        .unwrap();
+    t.leader_post_expect_abort(
+        &client,
+        None, // dap_auth_token
+        path,
+        constants::MEDIA_TYPE_REPORT,
+        report.get_encoded(),
+        400,
+        "unrecognizedMessage",
+    )
+    .await;
+
+    // Generate and upload a report with taskprov but with only one aggregator endpoint (an error).
+    // (This report is also expired, but we notice the endpoint problem first).
+    let payload = [
+        0x02u8, 0x48, 0x69, 0x00, 0x0e, 0x00, 0x0c, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f,
+        0x74, 0x65, 0x73, 0x74, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x80,
+        0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x52, 0xf9,
+        0xa5, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03,
+        0x02, 0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04,
+        0x03, 0x02, 0x03,
+    ];
+    let extensions = vec![Extension::Taskprov {
+        payload: payload.to_vec(),
+    }];
+    let task_id = Id([
+        0xb4, 0x76, 0x9b, 0xb0, 0x63, 0xa8, 0xb3, 0x31, 0x2a, 0xf7, 0x42, 0x97, 0xf3, 0x0f, 0xdb,
+        0xf8, 0xe0, 0xb7, 0x1c, 0x2e, 0xb2, 0x48, 0x1f, 0x59, 0x1d, 0x1d, 0x7d, 0xe6, 0x6a, 0x4c,
+        0xe3, 0x4f,
+    ]);
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now,
+            &task_id,
+            DapMeasurement::U64(23),
+            extensions,
+        )
+        .unwrap();
+    t.leader_post_expect_abort(
+        &client,
+        None, // dap_auth_token
+        path,
+        constants::MEDIA_TYPE_REPORT,
+        report.get_encoded(),
+        400,
+        "badRequest",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -940,4 +1096,148 @@ async fn e2e_fixed_size() {
         "batchOverlap",
     )
     .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_taskprov_ok() {
+    let t = TestRunner::default().await;
+    let batch_interval = t.batch_interval();
+
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+
+    let taskprov_task_config = TaskConfig {
+        task_info: "".as_bytes().to_vec(),
+        aggregator_endpoints: vec![
+            UrlBytes {
+                bytes: t.task_config.leader_url.as_str().as_bytes().to_vec(),
+            },
+            UrlBytes {
+                bytes: t.task_config.helper_url.as_str().as_bytes().to_vec(),
+            },
+        ],
+        query_config: QueryConfig {
+            time_precision: TIME_PRECISION,
+            max_batch_query_count: 65535,
+            min_batch_size: u32::try_from(MIN_BATCH_SIZE).unwrap(),
+            var: QueryConfigVar::TimeInterval,
+        },
+        task_expiration: t.now + 86400 * 14,
+        vdaf_config: VdafConfig {
+            dp_config: DpConfig {
+                mechanism: DpMechanism::None,
+            },
+            var: VdafTypeVar::Prio3Aes128Sum { bit_length: 10 },
+        },
+    };
+    let payload = taskprov_task_config.get_encoded();
+    let task_id = compute_task_id(&payload);
+    let task_config = DapTaskConfig::try_from_taskprov(
+        DapVersion::Draft02,
+        &task_id.clone(),
+        taskprov_task_config.clone(),
+        &t.taskprov_vdaf_verify_key_init,
+        &t.taskprov_collector_hpke_receiver.config,
+    )
+    .unwrap();
+
+    // The reports are uploaded in the background.
+    let mut rng = thread_rng();
+    for _ in 0..t.task_config.min_batch_size {
+        let extensions = vec![Extension::Taskprov {
+            payload: payload.clone(),
+        }];
+        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        t.leader_post_expect_ok(
+            &client,
+            "upload",
+            constants::MEDIA_TYPE_REPORT,
+            task_config
+                .vdaf
+                .produce_report_with_extensions(
+                    &hpke_config_list,
+                    now,
+                    &task_id,
+                    DapMeasurement::U64(1),
+                    extensions,
+                )
+                .unwrap()
+                .get_encoded(),
+        )
+        .await;
+    }
+
+    // Get the collect URI.
+    let collect_req = CollectReq {
+        task_id: task_id.clone(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
+        agg_param: Vec::new(),
+    };
+    let collect_uri = t
+        .leader_post_collect_using_token(
+            &client,
+            collect_req.get_encoded(),
+            &"I am the collector!".to_string(), // Keep in sync with wrangler.toml
+        )
+        .await;
+    println!("collect_uri: {}", collect_uri);
+
+    // Poll the collect URI before the CollectResp is ready.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 202, "response: {:?}", resp);
+
+    // The reports are aggregated in the background.
+    let agg_telem = t
+        .internal_process(
+            &client,
+            &DaphneWorkerReportSelector {
+                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
+                max_reports: 100,
+            },
+        )
+        .await;
+    assert_eq!(
+        agg_telem.reports_processed, task_config.min_batch_size,
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated, task_config.min_batch_size,
+        "reports aggregated"
+    );
+    assert_eq!(
+        agg_telem.reports_collected, task_config.min_batch_size,
+        "reports collected"
+    );
+
+    // Poll the collect URI.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+    let agg_res = task_config
+        .vdaf
+        .consume_encrypted_agg_shares(
+            &t.taskprov_collector_hpke_receiver,
+            &task_id,
+            &BatchSelector::TimeInterval {
+                batch_interval: batch_interval.clone(),
+            },
+            collect_resp.report_count,
+            collect_resp.encrypted_agg_shares.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        agg_res,
+        DapAggregateResult::U128(task_config.min_batch_size as u128)
+    );
+
+    // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
+    // GET semantics.
+    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
 }

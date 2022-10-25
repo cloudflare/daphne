@@ -70,6 +70,12 @@ pub trait BearerTokenProvider<'a> {
         task_id: &'a Id,
     ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
 
+    /// Returns true if the given bearer token matches the leader token configured for the "taskprov" extension.
+    fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool;
+
+    /// Returns true if the given bearer token matches the collector token configured for the "taskprov" extension.
+    fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool;
+
     /// Return a bearer token that can be used to authorize a request with the given task ID and
     /// media type.
     async fn authorize_with_bearer_token(
@@ -118,6 +124,7 @@ pub trait BearerTokenProvider<'a> {
                 if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
                     return Ok(got == expected.as_ref());
                 }
+                return Ok(self.is_taskprov_leader_bearer_token(got));
             }
         }
 
@@ -126,6 +133,7 @@ pub trait BearerTokenProvider<'a> {
                 if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
                     return Ok(got == expected.as_ref());
                 }
+                return Ok(self.is_taskprov_collector_bearer_token(got));
             }
         }
 

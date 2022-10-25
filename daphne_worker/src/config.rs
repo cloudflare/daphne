@@ -43,6 +43,21 @@ pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/coll
 pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
+/// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-00 ("taskprov").
+pub(crate) struct TaskprovConfig {
+    /// HPKE collector configuration for all taskprov tasks.
+    pub(crate) hpke_collector_config: HpkeConfig,
+
+    /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.
+    pub(crate) vdaf_verify_key_init: Vec<u8>,
+
+    /// Leader bearer token for all taskprov tasks
+    pub(crate) leader_bearer_token: BearerToken,
+
+    /// Collector bearer token for all taskprov tasks
+    pub(crate) collector_bearer_token: BearerToken,
+}
+
 /// Long-lived parameters used a daphne across DAP tasks.
 pub(crate) struct DaphneWorkerConfig<D> {
     // TODO Determine if we actually need the route countext, and if not, replace it with `Env`.
@@ -84,6 +99,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// Indicates if DaphneWorker is used as the Leader.
     is_leader: bool,
+
+    /// draft-wang-ppm-dap-taskprov-00 configuration (optional).
+    pub(crate) taskprov_config: Option<TaskprovConfig>,
 }
 
 impl<D> DaphneWorkerConfig<D> {
@@ -149,6 +167,35 @@ impl<D> DaphneWorkerConfig<D> {
             None
         };
 
+        let taskprov_config = if global_config.allow_taskprov {
+            let hpke_collector_config = serde_json::from_str(
+                ctx.var("DAP_TASKPROV_HPKE_COLLECTOR_CONFIG")?
+                    .to_string()
+                    .as_ref(),
+            )?;
+
+            let vdaf_verify_key_init =
+                hex::decode(ctx.secret("DAP_TASKPROV_VDAF_VERIFY_KEY_INIT")?.to_string())
+                    .map_err(int_err)?;
+
+            let leader_bearer_token =
+                BearerToken::from(ctx.secret("DAP_TASKPROV_LEADER_BEARER_TOKEN")?.to_string());
+
+            let collector_bearer_token = BearerToken::from(
+                ctx.secret("DAP_TASKPROV_COLLECTOR_BEARER_TOKEN")?
+                    .to_string(),
+            );
+
+            Some(TaskprovConfig {
+                hpke_collector_config,
+                vdaf_verify_key_init,
+                leader_bearer_token,
+                collector_bearer_token,
+            })
+        } else {
+            None
+        };
+
         Ok(Self {
             ctx: Some(ctx),
             client,
@@ -162,6 +209,7 @@ impl<D> DaphneWorkerConfig<D> {
             report_shard_count,
             base_url,
             is_leader,
+            taskprov_config,
         })
     }
 
@@ -295,6 +343,16 @@ impl<D> DaphneWorkerConfig<D> {
         .await
     }
 
+    /// Set a leader bearer token for the given task.
+    pub(crate) async fn set_leader_bearer_token(
+        &self,
+        task_id: &Id,
+        token: &BearerToken,
+    ) -> Result<Option<BearerToken>> {
+        self.kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_LEADER, task_id, token.clone())
+            .await
+    }
+
     /// Retrieve from KV the Collector's bearer token for the given task.
     pub(crate) async fn get_collector_bearer_token<'a>(
         &'a self,
@@ -317,6 +375,16 @@ impl<D> DaphneWorkerConfig<D> {
         'srv: 'req,
     {
         self.kv_get_cached(&self.tasks, KV_KEY_PREFIX_TASK_CONFIG, task_id)
+            .await
+    }
+
+    /// Define a task in KV
+    pub(crate) async fn set_task_config(
+        &self,
+        task_id: &Id,
+        task_config: &DapTaskConfig,
+    ) -> Result<Option<DapTaskConfig>> {
+        self.kv_set_if_not_exists(KV_KEY_PREFIX_TASK_CONFIG, task_id, task_config.clone())
             .await
     }
 

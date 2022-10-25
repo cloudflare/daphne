@@ -70,6 +70,7 @@ impl Test {
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
+            allow_taskprov: true,
         };
 
         // Task Parameters that the Leader and Helper must agree on.

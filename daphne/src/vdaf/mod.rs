@@ -8,8 +8,8 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        BatchSelector, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector, Report, ReportId,
-        ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
+        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector, Report,
+        ReportId, ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
     vdaf::{
         prio2::{
@@ -146,20 +146,23 @@ impl VdafConfig {
     /// * `task_id` is the DAP task for which this report is being generated.
     ///
     /// * `measurement` is the measurement.
+    ///
+    /// * `extensions` are the extensions.
     //
     // TODO(issue #100): Truncate the timestamp, as required in DAP-02.
-    pub fn produce_report(
+    pub fn produce_report_with_extensions(
         &self,
         hpke_config_list: &[HpkeConfig],
         time: Time,
         task_id: &Id,
         measurement: DapMeasurement,
+        extensions: Vec<Extension>,
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time,
-            extensions: Vec::new(),
+            extensions,
         };
 
         let public_share = Vec::new();
@@ -209,6 +212,37 @@ impl VdafConfig {
             public_share,
             encrypted_input_shares,
         })
+    }
+
+    /// Generate a report for a measurement. This method is run by the Client.
+    ///
+    /// # Inputs
+    ///
+    /// * `hpke_config_list` is the sequence of HPKE configs, the first belonging to the Leader and the
+    /// remainder belonging to the Helpers. Note that the current draft only supports one Helper,
+    /// so this method will return an error if `hpke_config_list.len() != 2`.
+    ///
+    /// * `now` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
+    /// ensure this value is truncated to the nearest `min_batch_duration`, as required by the
+    /// spec.
+    ///
+    /// * `task_id` is the DAP task for which this report is being generated.
+    ///
+    /// * `measurement` is the measurement.
+    pub fn produce_report(
+        &self,
+        hpke_config_list: &[HpkeConfig],
+        time: Time,
+        task_id: &Id,
+        measurement: DapMeasurement,
+    ) -> Result<Report, DapError> {
+        self.produce_report_with_extensions(
+            hpke_config_list,
+            time,
+            task_id,
+            measurement,
+            Vec::new(),
+        )
     }
 
     /// Consume an encrypted input share sent in a report by the Client and return the Prepare
