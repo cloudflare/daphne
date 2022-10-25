@@ -7,7 +7,7 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
-    messages::{Duration, HpkeConfig, HpkeKemId, Id, Interval},
+    messages::{Duration, HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -24,9 +24,9 @@ use tokio::task::JoinHandle;
 use url::Url;
 
 const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
-const MIN_BATCH_SIZE: u64 = 10;
-const MAX_BATCH_SIZE: u64 = 12;
-const TIME_PRECISION: Duration = 3600; // seconds
+pub(crate) const MIN_BATCH_SIZE: u64 = 10;
+pub(crate) const MAX_BATCH_SIZE: u64 = 12;
+pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
 
 #[derive(Deserialize)]
 struct InternalTestAddTaskResult {
@@ -46,6 +46,8 @@ pub struct TestRunner {
     pub leader_bearer_token: String,
     pub collector_bearer_token: String,
     pub collector_hpke_receiver: HpkeReceiverConfig,
+    pub taskprov_vdaf_verify_key_init: Vec<u8>,
+    pub taskprov_collector_hpke_receiver: HpkeReceiverConfig,
 }
 
 #[allow(dead_code)]
@@ -101,14 +103,27 @@ impl TestRunner {
             collector_hpke_config: collector_hpke_receiver.config.clone(),
         };
 
-        // This needs to be kept in-sync with daphne_worker_test/wrangler.toml.
+        // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
         let global_config = DapGlobalConfig {
             report_storage_epoch_duration: 604800,
             max_batch_duration: 360000,
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
+            allow_taskprov: true,
         };
+        let taskprov_vdaf_verify_key_init =
+            hex::decode("0074a5dd6e9dac501f73f7a961193b2b").unwrap();
+        let taskprov_collector_hpke_receiver = HpkeReceiverConfig::new(
+            HpkeConfig {
+                id: 23,
+                kem_id: HpkeKemId::P256HkdfSha256,
+                kdf_id: HpkeKdfId::HkdfSha256,
+                aead_id: HpkeAeadId::Aes128Gcm,
+                public_key: hex::decode("047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466").unwrap()
+            },
+            hex::decode("9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e").unwrap()
+        );
 
         let leader_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
         let collector_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
@@ -122,6 +137,8 @@ impl TestRunner {
             leader_bearer_token,
             collector_bearer_token,
             collector_hpke_receiver,
+            taskprov_vdaf_verify_key_init,
+            taskprov_collector_hpke_receiver,
         };
 
         let vdaf_verify_key_base64url = base64::encode_config(
@@ -312,7 +329,12 @@ impl TestRunner {
         );
     }
 
-    pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
+    pub async fn leader_post_collect_using_token(
+        &self,
+        client: &reqwest::Client,
+        data: Vec<u8>,
+        token: &String,
+    ) -> Url {
         let url = self.leader_url.join("collect").unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -321,7 +343,7 @@ impl TestRunner {
         );
         headers.insert(
             reqwest::header::HeaderName::from_static("dap-auth-token"),
-            reqwest::header::HeaderValue::from_str(&self.collector_bearer_token).unwrap(),
+            reqwest::header::HeaderValue::from_str(token).unwrap(),
         );
         let resp = client
             .post(url.as_str())
@@ -339,6 +361,11 @@ impl TestRunner {
         );
         let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
         collect_uri.parse().unwrap()
+    }
+
+    pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
+        self.leader_post_collect_using_token(client, data, &self.collector_bearer_token)
+            .await
     }
 
     #[allow(dead_code)]

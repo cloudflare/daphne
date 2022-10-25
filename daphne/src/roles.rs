@@ -55,10 +55,20 @@ where
     fn get_global_config(&self) -> &DapGlobalConfig;
 
     /// Look up the DAP task configuration for the given task ID.
+    async fn get_task_config_considering_taskprov(
+        &'srv self,
+        task_id: Cow<'req, Id>,
+        report: Option<&ReportMetadata>,
+    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
+
+    /// Look up the DAP task configuration for the given task ID.
     async fn get_task_config_for(
         &'srv self,
         task_id: Cow<'req, Id>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
+    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError> {
+        self.get_task_config_considering_taskprov(task_id, None)
+            .await
+    }
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;
@@ -233,7 +243,10 @@ where
 
         let report = Report::get_decoded(req.payload.as_ref())?;
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(req.task_id()?))
+            .get_task_config_considering_taskprov(
+                Cow::Borrowed(req.task_id()?),
+                Some(&report.metadata),
+            )
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -575,8 +588,37 @@ where
         match req.media_type {
             Some(MEDIA_TYPE_AGG_INIT_REQ) => {
                 let agg_init_req = AggregateInitializeReq::get_decoded(&req.payload)?;
+
+                let mut first_metadata: Option<&ReportMetadata> = None;
+
+                // If taskprov is allowed, ensure that either all of the shares have it or none of them
+                // do (section 6 of draft-wang-ppm-dap-taskprov-00).
+                if self.get_global_config().allow_taskprov {
+                    let task_id = req.task_id()?;
+                    let using_taskprov = agg_init_req
+                        .report_shares
+                        .iter()
+                        .filter(|share| share.metadata.is_taskprov(task_id))
+                        .count();
+
+                    if using_taskprov == agg_init_req.report_shares.len() {
+                        // All the extensions use taskprov and look ok, so compute first_metadata.
+                        // Note this will always be Some().
+                        first_metadata = agg_init_req
+                            .report_shares
+                            .first()
+                            .map(|report_share| &report_share.metadata);
+                    } else if using_taskprov != 0 {
+                        // It's not all taskprov or no taskprov, so it's an error.
+                        return Err(DapAbort::UnrecognizedMessage);
+                    }
+                }
+
                 let wrapped_task_config = self
-                    .get_task_config_for(Cow::Borrowed(req.task_id()?))
+                    .get_task_config_considering_taskprov(
+                        Cow::Borrowed(req.task_id()?),
+                        first_metadata,
+                    )
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();

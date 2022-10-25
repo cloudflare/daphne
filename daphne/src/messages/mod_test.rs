@@ -10,6 +10,7 @@ use crate::messages::{
     HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, PartialBatchSelector, Report, ReportId,
     ReportMetadata, ReportShare, Transition, TransitionVar,
 };
+use crate::taskprov::compute_task_id;
 use prio::codec::{Decode, Encode};
 
 #[test]
@@ -232,7 +233,7 @@ fn read_task_config() {
     );
 
     assert_eq!(
-        task_config.compute_task_id().to_hex(),
+        compute_task_id(&task_config.get_encoded()).to_hex(),
         "b4769bb063a8b3312af74297f30fdbf8e0b71c2eb2481f591d1d7de66a4ce34f"
     );
 }

@@ -347,6 +347,9 @@ pub struct DapGlobalConfig {
     /// HPKE KEM types that are supported. Used when generating HPKE
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
+
+    /// Is the taskprov extension allowed?
+    pub allow_taskprov: bool,
 }
 
 impl DapGlobalConfig {
@@ -884,5 +887,8 @@ pub mod messages;
 pub mod roles;
 #[cfg(test)]
 mod roles_test;
+pub mod taskprov;
+#[cfg(test)]
+mod taskprov_test;
 pub mod testing;
 pub mod vdaf;

@@ -31,9 +31,21 @@ DAP_GLOBAL_CONFIG = """{
      "max_batch_duration": 360000,
      "min_batch_interval_start": 259200,
      "max_batch_interval_end": 259200,
-     "supported_hpke_kems": ["x25519_hkdf_sha256"]
+     "supported_hpke_kems": ["x25519_hkdf_sha256"],
+     "allow_taskprov": true
 }"""
-
+DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
+  "id": 23,
+  "kem_id": "p256_hkdf_sha256",
+  "kdf_id": "hkdf_sha256",
+  "aead_id": "aes128_gcm",
+  "public_key": "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+}"""
+# The secret key for the HPKE collector public key, recorded here for testing convenience:
+#     9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e   # SECRET
+DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "0074a5dd6e9dac501f73f7a961193b2b" # SECRET
+DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
+DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
 
 [env.leader.durable_objects]
 bindings = [
@@ -74,9 +86,21 @@ DAP_GLOBAL_CONFIG = """{
   "max_batch_duration": 360000,
   "min_batch_interval_start": 259200,
   "max_batch_interval_end": 259200,
-  "supported_hpke_kems": ["x25519_hkdf_sha256"]
+  "supported_hpke_kems": ["x25519_hkdf_sha256"],
+  "allow_taskprov": true
 }"""
-
+DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
+  "id": 23,
+  "kem_id": "p256_hkdf_sha256",
+  "kdf_id": "hkdf_sha256",
+  "aead_id": "aes128_gcm",
+  "public_key": "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+}"""
+# The secret key for the HPKE collector public key, recorded here for testing convenience:
+#     9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e   # SECRET
+DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "0074a5dd6e9dac501f73f7a961193b2b" # SECRET
+DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
+DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
 
 [env.helper.durable_objects]
 bindings = [

@@ -9,6 +9,7 @@ use prio::codec::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     convert::{TryFrom, TryInto},
     fmt::Debug,
     io::{Cursor, Read},
@@ -23,6 +24,9 @@ const AEAD_ID_AES128GCM: u16 = 0x0001;
 // Query types
 const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
 const QUERY_TYPE_FIXED_SIZE: u8 = 0x02;
+
+// Known extension types.
+const EXTENSION_TASKPROV: u16 = 0xff00;
 
 /// The identifier for a DAP task.
 #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
@@ -101,12 +105,27 @@ impl AsRef<[u8]> for ReportId {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Extension {
+    Taskprov { payload: Vec<u8> }, // Not a TaskConfig to make computing the expected task id more efficient
     Unhandled { typ: u16, payload: Vec<u8> },
+}
+
+impl Extension {
+    /// Return the type code associated with the extension
+    fn type_code(&self) -> u16 {
+        match self {
+            Self::Taskprov { .. } => EXTENSION_TASKPROV,
+            Self::Unhandled { typ, .. } => *typ,
+        }
+    }
 }
 
 impl Encode for Extension {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
+            Self::Taskprov { payload } => {
+                EXTENSION_TASKPROV.encode(bytes);
+                encode_u16_bytes(bytes, payload);
+            }
             Self::Unhandled { typ, payload } => {
                 typ.encode(bytes);
                 encode_u16_bytes(bytes, payload);
@@ -117,10 +136,12 @@ impl Encode for Extension {
 
 impl Decode for Extension {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        Ok(Self::Unhandled {
-            typ: u16::decode(bytes)?,
-            payload: decode_u16_bytes(bytes)?,
-        })
+        let typ = u16::decode(bytes)?;
+        let payload = decode_u16_bytes(bytes)?;
+        match typ {
+            EXTENSION_TASKPROV => Ok(Self::Taskprov { payload }),
+            _ => Ok(Self::Unhandled { typ, payload }),
+        }
     }
 }
 
@@ -143,11 +164,19 @@ impl Encode for ReportMetadata {
 
 impl Decode for ReportMetadata {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        Ok(Self {
+        let metadata = Self {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
             extensions: decode_u16_items(&(), bytes)?,
-        })
+        };
+        // Check for duplicate extensions.
+        let mut seen: HashSet<u16> = HashSet::new();
+        for extension in &metadata.extensions {
+            if !seen.insert(extension.type_code()) {
+                return Err(CodecError::UnexpectedValue);
+            }
+        }
+        Ok(metadata)
     }
 }
 

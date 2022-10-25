@@ -255,6 +255,11 @@ impl HpkeReceiverConfig {
             }
         }
     }
+
+    /// Create a new HPKE receiver context given an HpkeConfig and a corresponding secret key.
+    pub fn new(config: HpkeConfig, secret_key: Vec<u8>) -> Self {
+        HpkeReceiverConfig { config, secret_key }
+    }
 }
 
 #[async_trait(?Send)]
