@@ -86,6 +86,8 @@ impl DurableObject for ReportsPending {
                 let mut reports = Vec::with_capacity(reports_requested);
                 let mut keys = Vec::with_capacity(reports_requested);
                 while !item.done() {
+                    // TODO(issue #118) Remove this deprecated dependency.
+                    #[allow(deprecated)]
                     let (key, report_hex): (String, String) = item.value().into_serde()?;
                     reports.push(report_hex);
                     keys.push(key);

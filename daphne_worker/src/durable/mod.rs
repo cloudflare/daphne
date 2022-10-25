@@ -386,6 +386,8 @@ async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
     let mut js_item = iter.next()?;
     let mut res = Vec::new();
     while !js_item.done() {
+        // TODO(issue #118) Remove this deprecated dependency.
+        #[allow(deprecated)]
         let (key, item): (String, T) = js_item.value().into_serde()?;
         if key[..key_prefix.len()] != key_prefix {
             return Err(int_err("queue element key is improperly formatted"));

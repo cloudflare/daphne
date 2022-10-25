@@ -20,43 +20,27 @@ test_janus = []
 
 [dependencies]
 daphne_worker = { path = "../daphne_worker" }
-cfg-if = "0.1.2"
+cfg-if = "1.0.0"
 worker = "0.0.11"
-serde = { version = "^1.0", features = ["derive"] }
-serde_json = "1.0.82"
+serde = { version = "1.0.147", features = ["derive"] }
+serde_json = "1.0.87"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
-console_error_panic_hook = { version = "0.1.1", optional = true }
+console_error_panic_hook = { version = "0.1.7", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5.0"
-base64 = "0.13.0"
+base64 = "0.13.1"
 daphne = { path = "../daphne" }
 hex = { version = "0.4.3", features = ["serde"] }
 lazy_static = "1.4.0"
-futures = "0.3.21"
-janus_core = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
-janus_client = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9"}
-janus_server = { git = "https://github.com/divviup/janus", rev = "e5ed423cfc96051894de2997aa013b77b322e2b9", features = ["test-util"] }
-janus_prio = { package = "prio", version = "0.8.2" }
+futures = "0.3.25"
 prio = "0.10.0"
 rand = "0.8.5"
-reqwest = { version = "0.11.7", features = ["json"] }
+reqwest = { version = "0.11.12", features = ["json"] }
 ring = "0.16.20"
-tokio = { version = "^1.9", features = ["full"] }
-url = { version = "2.2.2", features = ["serde"] }
-
-
-# Dependencies for running janus_server.
-#
-# TODO Consider making the "janus_test" a workspace, as these depeendencies are
-# only required for Janus interop tests. Note that eventually we might be able
-# to just run Janus in a container,  at which point these dependencies would go
-# away.
-deadpool-postgres = "0.10.1"
-tracing = "0.1.34"
-testcontainers = "0.14.0"
-tokio-postgres = { version = "0.7.6", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1", "array-impls"] }
+tokio = { version = "1.21.2", features = ["full"] }
+url = { version = "2.3.1", features = ["serde"] }
