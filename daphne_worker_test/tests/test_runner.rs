@@ -3,6 +3,7 @@
 
 // TODO Figure out why cargo thinks there is dead code here.
 
+use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
@@ -13,7 +14,7 @@ use daphne::{
 use daphne_worker::DaphneWorkerReportSelector;
 #[cfg(feature = "test_janus")]
 use futures::channel::oneshot::Sender;
-use prio::codec::Decode;
+use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::Serialize;
 use serde_json::json;
@@ -121,18 +122,20 @@ impl TestRunner {
             base64::URL_SAFE_NO_PAD,
         );
 
-        let add_task_cmd = json!({
-            "task_id": t.task_id.to_base64url(),
-            "leader_url": t.leader_url,
-            "helper_url": t.helper_url,
-            "time_precision": t.task_config.time_precision,
-            "expiration": t.task_config.expiration,
-            "min_batch_size": t.task_config.min_batch_size,
-            "query": t.task_config.query,
-            "vdaf": t.task_config.vdaf,
-            "vdaf_verify_key": vdaf_verify_key_base64url,
-            "collector_hpke_config": t.task_config.collector_hpke_config,
+        let collector_hpke_config_base64url = base64::encode_config(
+            &t.collector_hpke_receiver.config.get_encoded(),
+            base64::URL_SAFE_NO_PAD,
+        );
+
+        let vdaf = json!({
+            "type": "Prio3Aes128Sum",
+            "bits": assert_matches!(t.task_config.vdaf, VdafConfig::Prio3(Prio3Config::Sum{ bits }) => bits),
         });
+
+        let (query_type, max_batch_size) = match t.task_config.query {
+            DapQueryConfig::TimeInterval => (1, None),
+            DapQueryConfig::FixedSize { max_batch_size } => (2, Some(max_batch_size)),
+        };
 
         // Configure the endpoints.
         //
@@ -140,45 +143,43 @@ impl TestRunner {
         t.internal_delete_all(&t.batch_interval()).await;
 
         // Configure the Leader with the task.
-        t.leader_post_internal("/internal/test/add_task", &add_task_cmd)
+        let leader_add_task_cmd = json!({
+            "task_id": t.task_id.to_base64url(),
+            "leader": t.leader_url,
+            "helper": t.helper_url,
+            "vdaf": vdaf.clone(),
+            "leader_authentication_token": t.leader_bearer_token.clone(),
+            "collector_authentication_token": t.collector_bearer_token.clone(),
+            "role": "leader",
+            "verify_key": vdaf_verify_key_base64url,
+            "query_type": query_type,
+            "min_batch_size": t.task_config.min_batch_size,
+            "max_batch_size": max_batch_size,
+            "time_precision": t.task_config.time_precision,
+            "collector_hpke_config": collector_hpke_config_base64url.clone(),
+            "task_expiration": t.task_config.expiration,
+        });
+        t.leader_post_internal("/internal/test/add_task", &leader_add_task_cmd)
             .await;
 
         // Configure the Helper with the task.
-        t.helper_post_internal("/internal/test/add_task", &add_task_cmd)
+        let helper_add_task_cmd = json!({
+            "task_id": t.task_id.to_base64url(),
+            "leader": t.leader_url,
+            "helper": t.helper_url,
+            "vdaf": vdaf.clone(),
+            "leader_authentication_token": t.leader_bearer_token.clone(),
+            "role": "helper",
+            "verify_key": vdaf_verify_key_base64url,
+            "query_type": query_type,
+            "min_batch_size": t.task_config.min_batch_size,
+            "max_batch_size": max_batch_size,
+            "time_precision": t.task_config.time_precision,
+            "collector_hpke_config": collector_hpke_config_base64url.clone(),
+            "task_expiration": t.task_config.expiration,
+        });
+        t.helper_post_internal("/internal/test/add_task", &helper_add_task_cmd)
             .await;
-
-        // Configure the Leader with the Collector's bearer token.
-        t.leader_post_internal(
-            "/internal/test/add_authentication_token",
-            &json!({
-                "role": "collector",
-                "task_id": t.task_id.to_base64url(),
-                "token": t.collector_bearer_token.clone()
-            }),
-        )
-        .await;
-
-        // Configure the Leader with the Leader's bearer token.
-        t.leader_post_internal(
-            "/internal/test/add_authentication_token",
-            &json!({
-                "role": "leader",
-                "task_id": t.task_id.to_base64url(),
-                "token": t.leader_bearer_token.clone()
-            }),
-        )
-        .await;
-
-        // Configure the Helper with the Leader's bearer token.
-        t.helper_post_internal(
-            "/internal/test/add_authentication_token",
-            &json!({
-                "role": "leader",
-                "task_id": t.task_id.to_base64url(),
-                "token": t.leader_bearer_token.clone()
-            }),
-        )
-        .await;
 
         t
     }
