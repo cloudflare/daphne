@@ -1,3 +1,4 @@
+name = "daphne_worker_test"
 main = "build/worker/shim.mjs"
 compatibility_date = "2022-10-14"
 
@@ -19,7 +20,6 @@ fallthrough = false
 # production. In particular, they will not be passed as environment variables
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
-DAP_DEPLOYMENT = "dev"
 DAP_AGGREGATOR_ROLE = "leader"
 DAP_BASE_URL = "http://127.0.0.1:8787/v02/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
@@ -63,7 +63,6 @@ preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
 # production. In particular, they will not be passed as environment variables
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
-DAP_DEPLOYMENT = "dev"
 DAP_AGGREGATOR_ROLE = "helper"
 DAP_BASE_URL = "http://127.0.0.1:8788/v02/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"

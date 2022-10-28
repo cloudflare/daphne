@@ -36,8 +36,7 @@ The `daphne` crate relies on unit tests. The `daphne_worker` crate relies mostly
 on integration tests implemented in `daphne_worker_test`. See the README in that
 directory for instructions on running Daphne-Worker locally.
 
-> NOTE Integration tests can be run via docker-compose, but this is not working
-> at the moment.
+Integration tests can be run via docker-compose.
 
 ```
 docker-compose up --build --abort-on-container-exit --exit-code-from test

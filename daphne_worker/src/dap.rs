@@ -8,8 +8,8 @@
 
 use crate::{
     config::{
-        DaphneWorkerConfig, DaphneWorkerDeployment, GuardedBearerToken, GuardedDapTaskConfig,
-        GuardedHpkeReceiverConfig, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+        DaphneWorkerConfig, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
+        KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
     },
     dap_err,
     durable::{
@@ -660,17 +660,7 @@ where
             .await
             .map_err(dap_err)?;
 
-        let mut url = task_config.as_ref().leader_url.clone();
-        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
-            // When running in a local development environment, override the hostname of the Leader
-            // with localhost.
-            url.set_host(Some("127.0.0.1")).map_err(|e| {
-                DapError::Fatal(format!(
-                    "failed to overwrite hostname for request URL: {}",
-                    e
-                ))
-            })?;
-        }
+        let url = task_config.as_ref().leader_url.clone();
 
         let collect_uri = url
             .join(&format!(
@@ -752,18 +742,7 @@ where
         &self,
         req: DapRequest<BearerToken>,
     ) -> std::result::Result<DapResponse, DapError> {
-        let (payload, mut url) = (req.payload, req.url);
-
-        // When running in a local development environment, override the hostname of the Helper
-        // with localhost.
-        if matches!(self.deployment, DaphneWorkerDeployment::Dev) {
-            url.set_host(Some("127.0.0.1")).map_err(|e| {
-                DapError::Fatal(format!(
-                    "failed to overwrite hostname for request URL: {}",
-                    e
-                ))
-            })?;
-        }
+        let (payload, url) = (req.payload, req.url);
 
         let mut headers = reqwest_wasm::header::HeaderMap::new();
         if let Some(content_type) = req.media_type {
