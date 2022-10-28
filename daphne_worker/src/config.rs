@@ -13,7 +13,7 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
-    int_err, InternalTestAddTask, InternalTestRole,
+    int_err, InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
 };
 use daphne::{
     auth::BearerToken,
@@ -76,6 +76,12 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// Shard count, the number of report storage shards. This should be a power of 2.
     report_shard_count: u64,
+
+    /// Base URL of the Aggregator.
+    base_url: Url,
+
+    /// Indicates if DaphneWorker is used as the Leader.
+    is_leader: bool,
 }
 
 impl<D> DaphneWorkerConfig<D> {
@@ -85,6 +91,12 @@ impl<D> DaphneWorkerConfig<D> {
             ctx.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
         .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
+
+        let base_url: Url = ctx
+            .var("DAP_BASE_URL")?
+            .to_string()
+            .parse()
+            .map_err(int_err)?;
 
         let report_shard_key = Seed::get_decoded(
             &hex::decode(ctx.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
@@ -147,6 +159,8 @@ impl<D> DaphneWorkerConfig<D> {
             deployment,
             report_shard_key,
             report_shard_count,
+            base_url,
+            is_leader,
         })
     }
 
@@ -382,7 +396,28 @@ impl<D> DaphneWorkerConfig<D> {
         }
     }
 
-    /// Configure Daphne-Worker a task.
+    /// Get the URL to use for this endpoint, as required by
+    /// draft-dcook-ppm-dap-interop-test-design-02.
+    pub(crate) async fn internal_endpoint_for_task(
+        &self,
+        cmd: InternalTestEndpointForTask,
+    ) -> Result<Response> {
+        if self.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
+            || !self.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
+        {
+            return Response::from_json(&serde_json::json!({
+                "status": "error",
+                "error": "role mismatch",
+            }));
+        }
+
+        Response::from_json(&serde_json::json!({
+            "status": "success",
+            "endpoint": self.base_url,
+        }))
+    }
+
+    /// Configure Daphne-Worker a task, as required by draft-dcook-ppm-dap-interop-test-design-02.
     pub(crate) async fn internal_add_task(&self, cmd: InternalTestAddTask) -> Result<()> {
         // Task ID.
         let task_id_data =
