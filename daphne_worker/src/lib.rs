@@ -148,7 +148,7 @@
 //! | `DAP_AGGREGATOR_ROLE` | `String` | no | Aggregator role, either "leader" or "helper". |
 //! | `DAP_COLLECT_ID_KEY` | `String` | yes | Hex-encoded key used to derive the collection job ID from the collect request |
 //! | `DAP_GLOBAL_CONFIG` | [`DapGlobalConfig`](daphne::DapGlobalConfig) | no | DAP global config. |
-//! | `DAP_DEPLOYMENT` | `String` | no | Deployment type, either "prod" or "dev". |
+//! | `DAP_DEPLOYMENT` | `String` | no | Deployment type, only "prod" for now. |
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};

@@ -68,6 +68,8 @@ pub(crate) struct DaphneWorkerConfig<D> {
     tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
 
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
+    #[allow(unused)]
+    // No overrides have been defined yet, but this will be used in the future.
     pub(crate) deployment: DaphneWorkerDeployment,
 
     /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
@@ -124,7 +126,6 @@ impl<D> DaphneWorkerConfig<D> {
 
         let deployment = if let Ok(deployment) = ctx.var("DAP_DEPLOYMENT") {
             match deployment.to_string().as_str() {
-                "dev" => DaphneWorkerDeployment::Dev,
                 "prod" => DaphneWorkerDeployment::Prod,
                 s => {
                     return Err(Error::RustError(format!(
@@ -617,10 +618,6 @@ impl AsRef<DapTaskConfig> for GuardedDapTaskConfig<'_> {
 /// communication.
 #[derive(Debug, Default)]
 pub(crate) enum DaphneWorkerDeployment {
-    /// Daphne-Worker is running in a local development environment. In this setting, the hostname
-    /// of the Leader and Helper URLs are overwritten with localhost.
-    Dev,
-
     /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
     #[default]
     Prod,

@@ -74,8 +74,8 @@ impl TestRunner {
 
         // When running in a local development environment, override the hostname of each
         // aggregator URL with 127.0.0.1.
-        let mut leader_url = Url::parse("http://127.0.0.1:8787/v02/").unwrap();
-        let mut helper_url = Url::parse("http://127.0.0.1:8788/v02/").unwrap();
+        let mut leader_url = Url::parse("http://leader:8787/v02/").unwrap();
+        let mut helper_url = Url::parse("http://helper:8788/v02/").unwrap();
         if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
                 leader_url.set_host(Some("127.0.0.1")).unwrap();
