@@ -154,9 +154,9 @@
 use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
 use daphne::{
     constants,
-    messages::{Duration, HpkeConfig, Id, Time},
+    messages::{Duration, Id, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
-    DapAbort, DapCollectJob, DapError, DapQueryConfig, DapResponse, VdafConfig,
+    DapAbort, DapCollectJob, DapError, DapResponse,
 };
 use prio::codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -343,18 +343,9 @@ impl DaphneWorkerRouter {
                         Err(e) => abort(e.into()),
                     }
                 })
-                .post_async(
-                    "/internal/test/add_authentication_token",
-                    |mut req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        let cmd: InternalAddAuthenticationToken = req.json().await?;
-                        config.internal_add_authentication_token(cmd).await?;
-                        Response::from_json(&())
-                    },
-                )
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    let cmd: InternalAddTask = req.json().await?;
+                    let cmd: InternalTestAddTask = req.json().await?;
                     config.internal_add_task(cmd).await?;
                     Response::from_json(&())
                 })
@@ -406,35 +397,40 @@ fn abort(e: DapAbort) -> Result<Response> {
     }
 }
 
-// TODO(issue #138) Align this struct with the spec.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum InternalRole {
+pub(crate) enum InternalTestRole {
     Leader,
-    Collector,
+    Helper,
 }
 
-// TODO(issue #138) Align this struct with the spec.
-#[derive(Debug, Deserialize)]
-pub(crate) struct InternalAddAuthenticationToken {
-    pub(crate) task_id: String, // base64url
-    pub(crate) role: InternalRole,
-    pub(crate) token: String,
-}
-
-// TODO(issue #138) Align this struct with the spec.
 #[derive(Deserialize)]
-pub(crate) struct InternalAddTask {
+pub(crate) struct InternalTestVdaf {
+    #[serde(rename = "type")]
+    typ: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bits: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct InternalTestAddTask {
     task_id: String, // base64url
-    leader_url: Url,
-    helper_url: Url,
-    time_precision: Duration,
-    expiration: Time,
+    leader: Url,
+    helper: Url,
+    vdaf: InternalTestVdaf,
+    leader_authentication_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    collector_authentication_token: Option<String>,
+    role: InternalTestRole,
+    verify_key: String, // base64url
+    query_type: u8,
     min_batch_size: u64,
-    query: DapQueryConfig,
-    vdaf: VdafConfig,
-    vdaf_verify_key: String, // base64url
-    collector_hpke_config: HpkeConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_batch_size: Option<u64>,
+    time_precision: Duration,
+    collector_hpke_config: String, // base64url
+    task_expiration: Time,
 }
 
 mod config;

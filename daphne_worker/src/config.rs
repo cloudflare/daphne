@@ -13,14 +13,15 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
-    int_err, InternalAddAuthenticationToken, InternalAddTask, InternalRole,
+    int_err, InternalTestAddTask, InternalTestRole,
 };
 use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
     messages::{HpkeConfig, Id, ReportMetadata},
-    DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
+    DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config,
+    VdafConfig,
 };
 use matchit::Router;
 use prio::{
@@ -381,48 +382,83 @@ impl<D> DaphneWorkerConfig<D> {
         }
     }
 
-    /// Configure Daphne-Worker with a bearer token (i.e., authentication token) for the given
-    /// task.
-    pub(crate) async fn internal_add_authentication_token(
-        &self,
-        cmd: InternalAddAuthenticationToken,
-    ) -> Result<()> {
+    /// Configure Daphne-Worker a task.
+    pub(crate) async fn internal_add_task(&self, cmd: InternalTestAddTask) -> Result<()> {
+        // Task ID.
         let task_id_data =
             base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
         let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
-        let token = BearerToken::from(cmd.token);
-        let kv_key_prefix = match cmd.role {
-            InternalRole::Leader => KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
-            InternalRole::Collector => KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
+
+        // VDAF config.
+        let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits) {
+            ("Prio3Aes128Count", None) => VdafConfig::Prio3(Prio3Config::Count),
+            ("Prio3Aes128Sum", Some(bits)) => VdafConfig::Prio3(Prio3Config::Sum { bits }),
+            _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 
+        // VDAF verificaiton key.
+        let vdaf_verify_key_data =
+            base64::decode_config(&cmd.verify_key, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
+        let vdaf_verify_key = vdaf
+            .get_decoded_verify_key(&vdaf_verify_key_data)
+            .map_err(int_err)?;
+
+        // Collector HPKE config.
+        let collector_hpke_config_data =
+            base64::decode_config(&cmd.collector_hpke_config, base64::URL_SAFE_NO_PAD)
+                .map_err(int_err)?;
+        let collector_hpke_config =
+            HpkeConfig::get_decoded(&collector_hpke_config_data).map_err(int_err)?;
+
+        // Leader authentication token.
+        let token = BearerToken::from(cmd.leader_authentication_token);
         if self
-            .kv_set_if_not_exists(kv_key_prefix, &task_id, token)
+            .kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_LEADER, &task_id, token)
             .await?
             .is_some()
         {
-            Err(int_err(format!(
-                "command failed: token already exists for the given task ({}) and bearer role ({:?})",
-                cmd.task_id, cmd.role
-            )))
-        } else {
-            Ok(())
+            return Err(int_err(format!(
+                "command failed: token already exists for the given task ({}) and bearer role (leader)",
+                cmd.task_id
+            )));
         }
-    }
 
-    /// Configure Daphne-Worker a task.
-    pub(crate) async fn internal_add_task(&self, cmd: InternalAddTask) -> Result<()> {
-        let task_id_data =
-            base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
-        let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
+        // Collector authentication token.
+        match (cmd.role, cmd.collector_authentication_token) {
+            (InternalTestRole::Leader, Some(token_string)) => {
+                let token = BearerToken::from(token_string);
+                if self
+                    .kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR, &task_id, token)
+                    .await?
+                    .is_some()
+                {
+                    return Err(int_err(format!(
+                        "command failed: token already exists for the given task ({}) and bearer role (collector)",
+                        cmd.task_id
+                    )));
+                }
+            }
+            (InternalTestRole::Leader, None) => {
+                return Err(int_err(
+                    "command failed: missing collector authentication token",
+                ))
+            }
+            (InternalTestRole::Helper, None) => (),
+            (InternalTestRole::Helper, Some(..)) => {
+                return Err(int_err(
+                    "command failed: unexpected collector authentication token",
+                ));
+            }
+        };
 
-        let vdaf_verify_key_data =
-            base64::decode_config(&cmd.vdaf_verify_key, base64::URL_SAFE_NO_PAD)
-                .map_err(int_err)?;
-        let vdaf_verify_key = cmd
-            .vdaf
-            .get_decoded_verify_key(&vdaf_verify_key_data)
-            .map_err(int_err)?;
+        // Query configuraiton.
+        let query = match (cmd.query_type, cmd.max_batch_size) {
+            (1, None) => DapQueryConfig::TimeInterval,
+            (1, Some(..)) => return Err(int_err("command failed: unexpected max batch size")),
+            (2, Some(max_batch_size)) => DapQueryConfig::FixedSize { max_batch_size },
+            (2, None) => return Err(int_err("command failed: missing max batch size")),
+            _ => return Err(int_err("command failed: unrecognized query type")),
+        };
 
         if self
             .kv_set_if_not_exists(
@@ -430,15 +466,15 @@ impl<D> DaphneWorkerConfig<D> {
                 &task_id,
                 DapTaskConfig {
                     version: DapVersion::Draft02,
-                    leader_url: cmd.leader_url,
-                    helper_url: cmd.helper_url,
+                    leader_url: cmd.leader,
+                    helper_url: cmd.helper,
                     time_precision: cmd.time_precision,
-                    expiration: cmd.expiration,
+                    expiration: cmd.task_expiration,
                     min_batch_size: cmd.min_batch_size,
-                    query: cmd.query,
-                    vdaf: cmd.vdaf,
+                    query,
+                    vdaf,
                     vdaf_verify_key,
-                    collector_hpke_config: cmd.collector_hpke_config,
+                    collector_hpke_config,
                 },
             )
             .await?
