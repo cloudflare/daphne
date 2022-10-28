@@ -347,6 +347,14 @@ impl DaphneWorkerRouter {
                 .post_async("/internal/test/ready", |_req, _ctx| async move {
                     Response::from_json(&())
                 })
+                .post_async(
+                    "/internal/test/endpoint_for_task",
+                    |mut req, ctx| async move {
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let cmd: InternalTestEndpointForTask = req.json().await?;
+                        config.internal_endpoint_for_task(cmd).await
+                    },
+                )
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let cmd: InternalTestAddTask = req.json().await?;
@@ -406,6 +414,11 @@ fn abort(e: DapAbort) -> Result<Response> {
 pub(crate) enum InternalTestRole {
     Leader,
     Helper,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct InternalTestEndpointForTask {
+    role: InternalTestRole,
 }
 
 #[derive(Deserialize)]

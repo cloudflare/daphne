@@ -21,6 +21,7 @@ fallthrough = false
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
 DAP_DEPLOYMENT = "dev"
 DAP_AGGREGATOR_ROLE = "leader"
+DAP_BASE_URL = "http://127.0.0.1:8787/v02/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
 DAP_COLLECT_ID_KEY = "b416a85d280591d6da14e5b75a7d6e31" # SECRET
 DAP_REPORT_SHARD_KEY = "61cd9685547370cfea76c2eb8d156ad9" # SECRET
@@ -64,6 +65,7 @@ preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
 DAP_DEPLOYMENT = "dev"
 DAP_AGGREGATOR_ROLE = "helper"
+DAP_BASE_URL = "http://127.0.0.1:8788/v02/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
 DAP_REPORT_SHARD_KEY = "f79c352056982bae1737e34bdac24d63" # SECRET
 DAP_REPORT_SHARD_COUNT = "2"

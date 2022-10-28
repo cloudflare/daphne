@@ -16,7 +16,7 @@ use daphne_worker::DaphneWorkerReportSelector;
 use futures::channel::oneshot::Sender;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::SystemTime;
 #[cfg(feature = "test_janus")]
@@ -159,7 +159,7 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
-        t.leader_post_internal("/internal/test/add_task", &leader_add_task_cmd)
+        t.leader_post_internal::<_, ()>("/internal/test/add_task", &leader_add_task_cmd)
             .await;
 
         // Configure the Helper with the task.
@@ -178,7 +178,7 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
-        t.helper_post_internal("/internal/test/add_task", &helper_add_task_cmd)
+        t.helper_post_internal::<_, ()>("/internal/test/add_task", &helper_add_task_cmd)
             .await;
 
         t
@@ -344,7 +344,12 @@ impl TestRunner {
         resp.json().await.unwrap()
     }
 
-    async fn post_internal<I: Serialize>(&self, is_leader: bool, path: &str, data: &I) {
+    async fn post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+        &self,
+        is_leader: bool,
+        path: &str,
+        data: &I,
+    ) -> O {
         let client = self.http_client();
         let mut url = if is_leader {
             self.leader_url.clone()
@@ -361,15 +366,24 @@ impl TestRunner {
         if resp.status() != 200 {
             panic!("request to {} failed: response: {:?}", url, resp);
         }
+        resp.json().await.expect("failed to parse result")
     }
 
     #[allow(dead_code)]
-    pub async fn leader_post_internal<I: Serialize>(&self, path: &str, data: &I) {
+    pub async fn leader_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+        &self,
+        path: &str,
+        data: &I,
+    ) -> O {
         self.post_internal(true /* is_leader */, path, data).await
     }
 
     #[allow(dead_code)]
-    pub async fn helper_post_internal<I: Serialize>(&self, path: &str, data: &I) {
+    pub async fn helper_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+        &self,
+        path: &str,
+        data: &I,
+    ) -> O {
         self.post_internal(false /* is_leader */, path, data).await
     }
 

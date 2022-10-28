@@ -16,20 +16,67 @@ use daphne::{
 use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
+use serde::Deserialize;
+use serde_json::json;
 use test_runner::TestRunner;
 
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_ready() {
-    let t = TestRunner::default().await;
-    t.leader_post_internal("/internal/test/ready", &()).await;
+#[derive(Deserialize)]
+struct InternalTestEndpointForTaskResult {
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    endpoint: Option<String>,
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_helper_ready() {
     let t = TestRunner::default().await;
-    t.helper_post_internal("/internal/test/ready", &()).await;
+    t.helper_post_internal::<_, ()>("/internal/test/ready", &())
+        .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_ready() {
+    let t = TestRunner::default().await;
+    t.leader_post_internal::<_, ()>("/internal/test/ready", &())
+        .await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_endpoint_for_task() {
+    let t = TestRunner::default().await;
+    let res: InternalTestEndpointForTaskResult = t
+        .leader_post_internal(
+            "/internal/test/endpoint_for_task",
+            &json!({
+                "task_id": "blah blah ignored",
+                "role": "leader",
+            }),
+        )
+        .await;
+    assert_eq!(res.status, "success");
+    assert_eq!(res.endpoint.unwrap(), "http://127.0.0.1:8787/v02/");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_endpoint_for_task() {
+    let t = TestRunner::default().await;
+    let res: InternalTestEndpointForTaskResult = t
+        .helper_post_internal(
+            "/internal/test/endpoint_for_task",
+            &json!({
+                "task_id": "blah blah ignored",
+                "role": "helper",
+            }),
+        )
+        .await;
+    assert_eq!(res.status, "success");
+    assert_eq!(res.endpoint.unwrap(), "http://127.0.0.1:8788/v02/");
 }
 
 #[tokio::test]
