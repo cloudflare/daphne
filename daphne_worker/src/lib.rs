@@ -343,6 +343,10 @@ impl DaphneWorkerRouter {
                         Err(e) => abort(e.into()),
                     }
                 })
+                // Endpoints for draft-dcook-ppm-dap-interop-test-design-02
+                .post_async("/internal/test/ready", |_req, _ctx| async move {
+                    Response::from_json(&())
+                })
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let cmd: InternalTestAddTask = req.json().await?;

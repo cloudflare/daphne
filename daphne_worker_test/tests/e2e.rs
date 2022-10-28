@@ -20,6 +20,20 @@ use test_runner::TestRunner;
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_ready() {
+    let t = TestRunner::default().await;
+    t.leader_post_internal("/internal/test/ready", &()).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_ready() {
+    let t = TestRunner::default().await;
+    t.helper_post_internal("/internal/test/ready", &()).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn e2e_leader_hpke_config() {
     let t = TestRunner::default().await;
     let client = t.http_client();
