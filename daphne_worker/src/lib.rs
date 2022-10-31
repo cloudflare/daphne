@@ -426,7 +426,7 @@ pub(crate) struct InternalTestVdaf {
     #[serde(rename = "type")]
     typ: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bits: Option<u32>,
+    bits: Option<String>,
 }
 
 #[derive(Deserialize)]
