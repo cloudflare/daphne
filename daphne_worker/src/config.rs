@@ -427,7 +427,10 @@ impl<D> DaphneWorkerConfig<D> {
         // VDAF config.
         let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits) {
             ("Prio3Aes128Count", None) => VdafConfig::Prio3(Prio3Config::Count),
-            ("Prio3Aes128Sum", Some(bits)) => VdafConfig::Prio3(Prio3Config::Sum { bits }),
+            ("Prio3Aes128Sum", Some(bits)) => {
+                let bits = bits.parse().map_err(int_err)?;
+                VdafConfig::Prio3(Prio3Config::Sum { bits })
+            }
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 

@@ -129,7 +129,10 @@ impl TestRunner {
 
         let vdaf = json!({
             "type": "Prio3Aes128Sum",
-            "bits": assert_matches!(t.task_config.vdaf, VdafConfig::Prio3(Prio3Config::Sum{ bits }) => bits),
+            "bits": assert_matches!(
+                t.task_config.vdaf,
+                VdafConfig::Prio3(Prio3Config::Sum{ bits }) => format!("{bits}")
+            ),
         });
 
         let (query_type, max_batch_size) = match t.task_config.query {
