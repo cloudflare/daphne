@@ -28,6 +28,13 @@ const MIN_BATCH_SIZE: u64 = 10;
 const MAX_BATCH_SIZE: u64 = 12;
 const TIME_PRECISION: Duration = 3600; // seconds
 
+#[derive(Deserialize)]
+struct InternalTestAddTaskResult {
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 #[allow(dead_code)]
 pub struct TestRunner {
     pub global_config: DapGlobalConfig,
@@ -162,8 +169,14 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
-        t.leader_post_internal::<_, ()>("/internal/test/add_task", &leader_add_task_cmd)
+        let res: InternalTestAddTaskResult = t
+            .leader_post_internal("/internal/test/add_task", &leader_add_task_cmd)
             .await;
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error: {:?}",
+            res.status, res.error
+        );
 
         // Configure the Helper with the task.
         let helper_add_task_cmd = json!({
@@ -181,8 +194,14 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
-        t.helper_post_internal::<_, ()>("/internal/test/add_task", &helper_add_task_cmd)
+        let res: InternalTestAddTaskResult = t
+            .helper_post_internal("/internal/test/add_task", &helper_add_task_cmd)
             .await;
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error: {:?}",
+            res.status, res.error
+        );
 
         t
     }

@@ -58,7 +58,11 @@ async fn e2e_leader_endpoint_for_task() {
             }),
         )
         .await;
-    assert_eq!(res.status, "success");
+    assert_eq!(
+        res.status, "success",
+        "response status: {}, error: {:?}",
+        res.status, res.error
+    );
     assert_eq!(res.endpoint.unwrap(), "/v02/");
 }
 
@@ -75,7 +79,11 @@ async fn e2e_helper_endpoint_for_task() {
             }),
         )
         .await;
-    assert_eq!(res.status, "success");
+    assert_eq!(
+        res.status, "success",
+        "response status: {}, error: {:?}",
+        res.status, res.error
+    );
     assert_eq!(res.endpoint.unwrap(), "/v02/");
 }
 
