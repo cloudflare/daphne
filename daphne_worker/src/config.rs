@@ -413,7 +413,7 @@ impl<D> DaphneWorkerConfig<D> {
 
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": self.base_url,
+            "endpoint": self.base_url.path(),
         }))
     }
 

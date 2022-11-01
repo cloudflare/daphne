@@ -59,7 +59,7 @@ async fn e2e_leader_endpoint_for_task() {
         )
         .await;
     assert_eq!(res.status, "success");
-    assert_eq!(res.endpoint.unwrap(), "http://127.0.0.1:8787/v02/");
+    assert_eq!(res.endpoint.unwrap(), "/v02/");
 }
 
 #[tokio::test]
@@ -76,7 +76,7 @@ async fn e2e_helper_endpoint_for_task() {
         )
         .await;
     assert_eq!(res.status, "success");
-    assert_eq!(res.endpoint.unwrap(), "http://127.0.0.1:8788/v02/");
+    assert_eq!(res.endpoint.unwrap(), "/v02/");
 }
 
 #[tokio::test]
