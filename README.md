@@ -45,8 +45,8 @@ docker-compose up --build --abort-on-container-exit --exit-code-from test
 ## Acknowledgements
 
 Thanks to Yoshimichi Nakatsuka who contributed significantly to Daphne during
-his internship at Cloudflare Research. Thanks to Brandon Pitman for testing,
-reporting bugs, and sending patches.
+his internship at Cloudflare Research. Thanks to Brandon Pitman and David Cook
+for testing, reporting bugs, and sending patches.
 
 The name "Daphne" is credited to Cloudflare Research interns Tim Alberdingk
 Thijm and James Larisch, who came up with the name independently.
