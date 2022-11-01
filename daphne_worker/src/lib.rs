@@ -359,7 +359,9 @@ impl DaphneWorkerRouter {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let cmd: InternalTestAddTask = req.json().await?;
                     config.internal_add_task(cmd).await?;
-                    Response::from_json(&())
+                    Response::from_json(&serde_json::json!({
+                        "status": "success",
+                    }))
                 })
         } else {
             router
