@@ -229,7 +229,7 @@ async fn main() -> Result<()> {
 }
 
 fn parse_id(id_str: &str) -> Result<Id> {
-    let id_bytes = base64::decode_config(&id_str, base64::URL_SAFE_NO_PAD)
+    let id_bytes = base64::decode_config(id_str, base64::URL_SAFE_NO_PAD)
         .with_context(|| "expected URL-safe, base64 string")?;
     Ok(Id::get_decoded(&id_bytes)?)
 }
