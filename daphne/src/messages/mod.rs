@@ -31,12 +31,12 @@ pub struct Id(#[serde(with = "hex")] pub [u8; 32]);
 impl Id {
     /// Return the URL-safe, base64 encoding of the task ID.
     pub fn to_base64url(&self) -> String {
-        base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD)
+        base64::encode_config(self.0, base64::URL_SAFE_NO_PAD)
     }
 
     /// Return the ID encoded as a hex string.
     pub fn to_hex(&self) -> String {
-        hex::encode(&self.0)
+        hex::encode(self.0)
     }
 }
 
