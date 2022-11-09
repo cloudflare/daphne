@@ -268,11 +268,20 @@ where
         &self.global_config
     }
 
+    fn taskprov_opt_in_decision(
+        &self,
+        _task_config: &DapTaskConfig,
+    ) -> std::result::Result<bool, DapError> {
+        // For now we always opt-in.
+        Ok(true)
+    }
+
     /// Get an existing task (whether an ordinary task or a previously created
     /// taskprov task).  If we can't find it, see if there is a taskprov extension
     /// in the report, and if so create the task.
     async fn get_task_config_considering_taskprov(
         &'srv self,
+        version: DapVersion,
         task_id: Cow<'req, Id>,
         metadata: Option<&ReportMetadata>,
     ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
@@ -289,7 +298,11 @@ where
             return Ok(None);
         }
         let metadata_ref = metadata.unwrap();
-        let taskprov_task_config = get_taskprov_task_config(task_id.as_ref(), metadata_ref)?;
+        let taskprov_task_config = get_taskprov_task_config(
+            self.global_config.taskprov_version,
+            task_id.as_ref(),
+            metadata_ref,
+        )?;
         if taskprov_task_config.is_some() {
             let global_config = self.get_global_config();
             if !global_config.allow_taskprov {
@@ -301,17 +314,20 @@ where
                 .as_ref()
                 .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
 
-            // We currently always opt-in; any additional checks that would lead to
-            // us opting out should be done here.
-
             let taskprov_task_id = task_id.as_ref().clone();
             let task_config = DapTaskConfig::try_from_taskprov(
-                DapVersion::Draft02,
+                version,
+                self.global_config.taskprov_version,
                 &taskprov_task_id,
                 taskprov_task_config.unwrap(),
                 taskprov_config.vdaf_verify_key_init.as_ref(),
                 taskprov_config.hpke_collector_config.as_ref(),
             )?;
+
+            // This is the opt-in / opt-out decision point.
+            if !self.taskprov_opt_in_decision(&task_config)? {
+                return Err(DapError::Abort(daphne::DapAbort::InvalidTask));
+            }
 
             // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
             // finds something.

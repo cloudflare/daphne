@@ -15,6 +15,7 @@ use crate::{
         TransitionVar,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
+    taskprov::TaskprovVersion,
     testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapLeaderTransition,
@@ -71,6 +72,7 @@ impl Test {
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
             allow_taskprov: true,
+            taskprov_version: TaskprovVersion::Draft01,
         };
 
         // Task Parameters that the Leader and Helper must agree on.

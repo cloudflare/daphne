@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    messages::taskprov::VdafType, messages::Id, taskprov::compute_vdaf_verify_key,
+    messages::taskprov::VdafType,
+    messages::Id,
+    taskprov::{compute_vdaf_verify_key, TaskprovVersion},
     vdaf::VdafVerifyKey,
 };
 
@@ -18,10 +20,15 @@ fn check_vdaf_key_computation() {
         0x32, 0xd7, 0xe1, 0xbc, 0x6c, 0x75, 0x10, 0x05, 0x60, 0x7b, 0x81, 0xda, 0xc3, 0xa7, 0xda,
         0x76, 0x1d,
     ];
-    let vk = compute_vdaf_verify_key(&verify_key_init, &task_id, VdafType::Prio3Aes128Count);
+    let vk = compute_vdaf_verify_key(
+        TaskprovVersion::Draft01,
+        &verify_key_init,
+        &task_id,
+        VdafType::Prio3Aes128Count,
+    );
     let expected: [u8; 16] = [
-        0x57, 0x7a, 0x80, 0x3c, 0xb7, 0xac, 0xa7, 0x5f, 0xdf, 0xb5, 0x86, 0xa9, 0xc1, 0xb6, 0x01,
-        0x75,
+        0xfb, 0xd1, 0x7d, 0xb5, 0x39, 0x0f, 0x94, 0x9e, 0xe3, 0x2d, 0x26, 0x34, 0xdc, 0x49, 0x9f,
+        0x5b,
     ];
     match &vk {
         VdafVerifyKey::Prio3(bytes) => assert_eq!(*bytes, expected),
