@@ -50,6 +50,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
 };
+use taskprov::TaskprovVersion;
 use url::Url;
 
 /// DAP errors.
@@ -145,6 +146,10 @@ pub enum DapAbort {
     #[error("invalidBatchSize")]
     InvalidBatchSize,
 
+    /// Invalid DAP task.  Sent when a server opts out of a taskprov task configuration.
+    #[error("invalidTask")]
+    InvalidTask,
+
     /// Request with missing task ID.
     #[error("missingTaskID")]
     MissingTaskId,
@@ -202,8 +207,9 @@ impl DapAbort {
             Self::BatchInvalid
             | Self::BatchMismatch
             | Self::BatchOverlap
-            | Self::InvalidProtocolVersion
             | Self::InvalidBatchSize
+            | Self::InvalidProtocolVersion
+            | Self::InvalidTask
             | Self::QueryMismatch
             | Self::MissingTaskId
             | Self::ReplayedReport
@@ -350,6 +356,9 @@ pub struct DapGlobalConfig {
 
     /// Is the taskprov extension allowed?
     pub allow_taskprov: bool,
+
+    /// Which taskprov draft should be used?
+    pub taskprov_version: TaskprovVersion,
 }
 
 impl DapGlobalConfig {

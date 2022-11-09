@@ -13,6 +13,7 @@ use crate::{
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
     DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+    DapVersion,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -289,8 +290,13 @@ where
         &self.global_config
     }
 
+    fn taskprov_opt_in_decision(&self, _task_config: &DapTaskConfig) -> Result<bool, DapError> {
+        panic!("MockAggregator does not implement the taskprov extension")
+    }
+
     async fn get_task_config_considering_taskprov(
         &'srv self,
+        _version: DapVersion,
         task_id: Cow<'req, Id>,
         _metadata: Option<&ReportMetadata>,
     ) -> Result<Option<&'req DapTaskConfig>, DapError> {

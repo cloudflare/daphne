@@ -54,9 +54,24 @@ where
     /// Look up the DAP global configuration.
     fn get_global_config(&self) -> &DapGlobalConfig;
 
+    /// Decide whether to opt-in or out-out of a task provisioned via taskprov.
+    ///
+    /// Returning `Ok(true)` opts in, returning `Ok(false)` opts out, and any error is
+    /// also an opt out, but that error code is used instead of InvalidTask.
+    fn taskprov_opt_in_decision(&self, task_config: &DapTaskConfig) -> Result<bool, DapError>;
+
     /// Look up the DAP task configuration for the given task ID.
+    ///
+    /// If a `report` has been provided, then look for the draft-wang-ppm-dap-taskprov-<nn> extension
+    /// in the report.  If a taskprov task configuration is successfully read from the report,
+    /// [`DapAggregator::taskprov_opt_in_decision`] will be called, and if it returns Ok(true) the server will opt-in to the task.
+    /// if it returns Ok(false) or an error then the server will opt-out or return an appropriate error.
+    ///
+    /// The DAP version must be specified because we may create a DapTaskConfig via taskprov, and we want it
+    /// to have the same version as the API entry point the client is using.
     async fn get_task_config_considering_taskprov(
         &'srv self,
+        version: DapVersion,
         task_id: Cow<'req, Id>,
         report: Option<&ReportMetadata>,
     ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
@@ -66,7 +81,9 @@ where
         &'srv self,
         task_id: Cow<'req, Id>,
     ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError> {
-        self.get_task_config_considering_taskprov(task_id, None)
+        // We use DapVersion::Unknown here as we don't know it and we don't need to
+        // know it as we will not be doing any taskprov task creation.
+        self.get_task_config_considering_taskprov(DapVersion::Unknown, task_id, None)
             .await
     }
 
@@ -244,6 +261,7 @@ where
         let report = Report::get_decoded(req.payload.as_ref())?;
         let task_config = self
             .get_task_config_considering_taskprov(
+                req.version,
                 Cow::Borrowed(req.task_id()?),
                 Some(&report.metadata),
             )
@@ -593,12 +611,17 @@ where
 
                 // If taskprov is allowed, ensure that either all of the shares have it or none of them
                 // do (section 6 of draft-wang-ppm-dap-taskprov-00).
-                if self.get_global_config().allow_taskprov {
+                let global_config = self.get_global_config();
+                if global_config.allow_taskprov {
                     let task_id = req.task_id()?;
                     let using_taskprov = agg_init_req
                         .report_shares
                         .iter()
-                        .filter(|share| share.metadata.is_taskprov(task_id))
+                        .filter(|share| {
+                            share
+                                .metadata
+                                .is_taskprov(global_config.taskprov_version, task_id)
+                        })
                         .count();
 
                     if using_taskprov == agg_init_req.report_shares.len() {
@@ -616,6 +639,7 @@ where
 
                 let wrapped_task_config = self
                     .get_task_config_considering_taskprov(
+                        req.version,
                         Cow::Borrowed(req.task_id()?),
                         first_metadata,
                     )

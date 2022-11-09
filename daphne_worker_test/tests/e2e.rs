@@ -15,11 +15,11 @@ use daphne::{
         BatchSelector, CollectReq, CollectResp, Extension, HpkeCiphertext, Id, Interval, Query,
         Report, ReportId, ReportMetadata,
     },
-    taskprov::compute_task_id,
+    taskprov::{compute_task_id, TaskprovVersion},
     DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
-use prio::codec::{Decode, Encode};
+use prio::codec::{Decode, Encode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -312,8 +312,8 @@ async fn e2e_leader_upload() {
             var: VdafTypeVar::Prio3Aes128Count,
         },
     };
-    let payload = taskprov_task_config.get_encoded();
-    let task_id = compute_task_id(&payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
+    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -335,10 +335,10 @@ async fn e2e_leader_upload() {
     .await;
 
     // Generate and upload a report with taskprov but with the wrong id
-    let payload = taskprov_task_config.get_encoded();
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
-    let task_id = compute_task_id(&bad_payload);
+    let task_id = compute_task_id(TaskprovVersion::Draft01, &bad_payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -363,8 +363,8 @@ async fn e2e_leader_upload() {
     .await;
 
     // Generate and upload a report with two copies of the taskprov extension
-    let payload = taskprov_task_config.get_encoded();
-    let task_id = compute_task_id(&payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
+    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
     let extensions = vec![
         Extension::Taskprov {
             payload: payload.clone(),
@@ -393,24 +393,34 @@ async fn e2e_leader_upload() {
     )
     .await;
 
-    // Generate and upload a report with taskprov but with only one aggregator endpoint (an error).
-    // (This report is also expired, but we notice the endpoint problem first).
-    let payload = [
-        0x02u8, 0x48, 0x69, 0x00, 0x0e, 0x00, 0x0c, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f,
-        0x74, 0x65, 0x73, 0x74, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x80,
-        0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x52, 0xf9,
-        0xa5, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03,
-        0x02, 0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04,
-        0x03, 0x02, 0x03,
-    ];
-    let extensions = vec![Extension::Taskprov {
-        payload: payload.to_vec(),
-    }];
-    let task_id = Id([
-        0xb4, 0x76, 0x9b, 0xb0, 0x63, 0xa8, 0xb3, 0x31, 0x2a, 0xf7, 0x42, 0x97, 0xf3, 0x0f, 0xdb,
-        0xf8, 0xe0, 0xb7, 0x1c, 0x2e, 0xb2, 0x48, 0x1f, 0x59, 0x1d, 0x1d, 0x7d, 0xe6, 0x6a, 0x4c,
-        0xe3, 0x4f,
-    ]);
+    // Generate and upload a report with taskprov but only one endpoint, which is an error.
+    //
+    // We have to make this by hand as if we cut and paste a pre-serialized one it
+    // will have an expiring task.
+    let taskprov_task_config = TaskConfig {
+        task_info: "Hi".as_bytes().to_vec(),
+        aggregator_endpoints: vec![UrlBytes {
+            bytes: "https://test1".as_bytes().to_vec(),
+        }],
+        query_config: QueryConfig {
+            time_precision: 0x01,
+            max_batch_query_count: 128,
+            min_batch_size: 1024,
+            var: QueryConfigVar::FixedSize {
+                max_batch_size: 2048,
+            },
+        },
+        task_expiration: t.now + 86400,
+        vdaf_config: VdafConfig {
+            dp_config: DpConfig {
+                mechanism: DpMechanism::None,
+            },
+            var: VdafTypeVar::Prio3Aes128Count,
+        },
+    };
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
+    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
+    let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
         .vdaf
@@ -1131,10 +1141,11 @@ async fn e2e_leader_collect_taskprov_ok() {
             var: VdafTypeVar::Prio3Aes128Sum { bit_length: 10 },
         },
     };
-    let payload = taskprov_task_config.get_encoded();
-    let task_id = compute_task_id(&payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
+    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
     let task_config = DapTaskConfig::try_from_taskprov(
         DapVersion::Draft02,
+        TaskprovVersion::Draft01,
         &task_id.clone(),
         taskprov_task_config.clone(),
         &t.taskprov_vdaf_verify_key_init,

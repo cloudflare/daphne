@@ -8,9 +8,10 @@ use crate::messages::{
     decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
     QUERY_TYPE_TIME_INTERVAL,
 };
+use crate::taskprov::TaskprovVersion;
 use prio::codec::{
     decode_u16_items, decode_u24_items, decode_u8_items, encode_u16_items, encode_u24_items,
-    encode_u8_items, CodecError, Decode, Encode,
+    encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
@@ -233,8 +234,8 @@ pub struct QueryConfig {
     pub var: QueryConfigVar,
 }
 
-impl Encode for QueryConfig {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl QueryConfig {
+    fn encode_query_type(&self, bytes: &mut Vec<u8>) {
         match &self.var {
             QueryConfigVar::TimeInterval => {
                 QUERY_TYPE_TIME_INTERVAL.encode(bytes);
@@ -243,9 +244,15 @@ impl Encode for QueryConfig {
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
             }
         }
+    }
+}
+
+impl ParameterizedEncode<TaskprovVersion> for QueryConfig {
+    fn encode_with_param(&self, _encoding_parameter: &TaskprovVersion, bytes: &mut Vec<u8>) {
         self.time_precision.encode(bytes);
         self.max_batch_query_count.encode(bytes);
         self.min_batch_size.encode(bytes);
+        self.encode_query_type(bytes);
         match &self.var {
             QueryConfigVar::TimeInterval => (),
             QueryConfigVar::FixedSize { max_batch_size } => {
@@ -255,12 +262,15 @@ impl Encode for QueryConfig {
     }
 }
 
-impl Decode for QueryConfig {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let query_type = u8::decode(bytes)?;
+impl ParameterizedDecode<TaskprovVersion> for QueryConfig {
+    fn decode_with_param(
+        _decoding_parameter: &TaskprovVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         let time_precision = Duration::decode(bytes)?;
         let max_batch_query_count = u16::decode(bytes)?;
         let min_batch_size = u32::decode(bytes)?;
+        let query_type = u8::decode(bytes)?;
         let var = match query_type {
             QUERY_TYPE_TIME_INTERVAL => Ok(QueryConfigVar::TimeInterval),
             QUERY_TYPE_FIXED_SIZE => Ok(QueryConfigVar::FixedSize {
@@ -287,22 +297,26 @@ pub struct TaskConfig {
     pub vdaf_config: VdafConfig,
 }
 
-impl Encode for TaskConfig {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<TaskprovVersion> for TaskConfig {
+    fn encode_with_param(&self, encoding_parameter: &TaskprovVersion, bytes: &mut Vec<u8>) {
         encode_u8_items(bytes, &(), &self.task_info);
         encode_u16_items(bytes, &(), &self.aggregator_endpoints);
-        self.query_config.encode(bytes);
+        self.query_config
+            .encode_with_param(encoding_parameter, bytes);
         self.task_expiration.encode(bytes);
         self.vdaf_config.encode(bytes);
     }
 }
 
-impl Decode for TaskConfig {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<TaskprovVersion> for TaskConfig {
+    fn decode_with_param(
+        decoding_parameter: &TaskprovVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(TaskConfig {
             task_info: decode_u8_items(&(), bytes)?,
             aggregator_endpoints: decode_u16_items(&(), bytes)?,
-            query_config: QueryConfig::decode(bytes)?,
+            query_config: QueryConfig::decode_with_param(decoding_parameter, bytes)?,
             task_expiration: Time::decode(bytes)?,
             vdaf_config: VdafConfig::decode(bytes)?,
         })

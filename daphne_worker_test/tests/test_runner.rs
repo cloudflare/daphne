@@ -8,6 +8,7 @@ use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
     messages::{Duration, HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval},
+    taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -111,6 +112,7 @@ impl TestRunner {
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
             allow_taskprov: true,
+            taskprov_version: TaskprovVersion::Draft01,
         };
         let taskprov_vdaf_verify_key_init =
             hex::decode("0074a5dd6e9dac501f73f7a961193b2b").unwrap();
