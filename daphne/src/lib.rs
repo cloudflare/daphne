@@ -6,7 +6,7 @@
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
 //! [VDAFs](https://github.com/cfrg/draft-irtf-cfrg-vdaf).
 //!
-//! Daphne implements draft-ietf-ppm-dap-02.
+//! Daphne implements draft-ietf-ppm-dap-02 and draft-ietf-ppm-dap-03.
 //!
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
@@ -281,6 +281,9 @@ pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
 
+    #[serde(rename = "v03")]
+    Draft03,
+
     #[serde(other)]
     Unknown,
 }
@@ -289,6 +292,7 @@ impl From<&str> for DapVersion {
     fn from(version: &str) -> Self {
         match version {
             "v02" => DapVersion::Draft02,
+            "v03" => DapVersion::Draft03,
             _ => DapVersion::Unknown,
         }
     }
@@ -298,6 +302,7 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft02 => "v02",
+            DapVersion::Draft03 => "v03",
             _ => panic!("tried to construct string from unknown DAP version"),
         }
     }
@@ -402,7 +407,7 @@ impl DapQueryConfig {
                 PartialBatchSelector::TimeInterval
             ) | (
                 Self::FixedSize { .. },
-                PartialBatchSelector::FixedSize { .. }
+                PartialBatchSelector::FixedSizeByBatchId { .. }
             )
         )
     }
@@ -413,7 +418,10 @@ impl DapQueryConfig {
             (
                 Self::TimeInterval { .. },
                 BatchSelector::TimeInterval { .. }
-            ) | (Self::FixedSize { .. }, BatchSelector::FixedSize { .. })
+            ) | (
+                Self::FixedSize { .. },
+                BatchSelector::FixedSizeByBatchId { .. }
+            )
         )
     }
 }
@@ -502,7 +510,7 @@ impl DapTaskConfig {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
                     batch_window: self.truncate_time(out_share.time),
                 },
-                PartialBatchSelector::FixedSize { batch_id } => {
+                PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
                     DapBatchBucket::FixedSize { batch_id }
                 }
             };
@@ -541,7 +549,7 @@ impl DapTaskConfig {
                 }
                 Ok(span)
             }
-            BatchSelector::FixedSize { batch_id } => {
+            BatchSelector::FixedSizeByBatchId { batch_id } => {
                 Ok(HashSet::from([DapBatchBucket::FixedSize { batch_id }]))
             }
         }
@@ -565,7 +573,7 @@ impl DapTaskConfig {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
                     batch_window: self.truncate_time(metadata.time),
                 },
-                PartialBatchSelector::FixedSize { batch_id } => {
+                PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
                     DapBatchBucket::FixedSize { batch_id }
                 }
             };

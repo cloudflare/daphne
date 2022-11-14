@@ -7,10 +7,10 @@ use crate::{
 };
 use daphne::{
     messages::{CollectReq, CollectResp, Id},
-    DapCollectJob,
+    DapCollectJob, DapVersion,
 };
 use prio::{
-    codec::{Decode, Encode},
+    codec::{Decode, ParameterizedEncode},
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
 use worker::*;
@@ -83,7 +83,12 @@ impl DurableObject for LeaderCollectionJobQueue {
                 // which prevents clients from enumerating collect URIs. Second, it provides a
                 // stable map from requests to URIs, which prevents us from processing the same
                 // collect request more than once.
-                let collect_req_bytes = collect_req.get_encoded();
+                //
+                // We are serializing the collect_req into binary, and for now we assume the
+                // version is always Draf03 since that works for both Draft02 and Draft03, but
+                // if this structure changes further, then version information will need to be
+                // added to this request.
+                let collect_req_bytes = collect_req.get_encoded_with_param(&DapVersion::Draft03);
                 let collect_id_key_hex = self
                     .env
                     .secret("DAP_COLLECT_ID_KEY")
