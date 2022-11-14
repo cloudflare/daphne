@@ -24,7 +24,6 @@ const VDAF_TYPE_PRIO3_AES128_HISTOGRAM: u32 = 0x00000002;
 const VDAF_TYPE_POPLAR1_AES128: u32 = 0x00001000; // The gap from the previous constant is intentional
 
 // Differential privacy mechanism types.
-const DP_MECHANISM_RESERVED: u8 = 0x00;
 const DP_MECHANISM_NONE: u8 = 0x01;
 
 /// A VDAF type.
@@ -115,56 +114,33 @@ impl From<VdafTypeVar> for VdafType {
 }
 
 /// A differential privacy mechanism.
-#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub enum DpMechanism {
-    Reserved,
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub enum DpConfig {
     None,
-    NotImplemented(u8),
 }
 
-impl From<DpMechanism> for u8 {
-    fn from(dp_mech: DpMechanism) -> Self {
-        match dp_mech {
-            DpMechanism::Reserved => DP_MECHANISM_RESERVED,
-            DpMechanism::None => DP_MECHANISM_NONE,
-            DpMechanism::NotImplemented(x) => x,
+impl From<DpConfig> for u8 {
+    fn from(dp_config: DpConfig) -> Self {
+        match dp_config {
+            DpConfig::None => DP_MECHANISM_NONE,
         }
     }
-}
-
-impl Encode for DpMechanism {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        u8::from(*self).encode(bytes);
-    }
-}
-
-impl Decode for DpMechanism {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u8::decode(bytes)? {
-            x if x == DP_MECHANISM_RESERVED => Ok(Self::Reserved),
-            x if x == DP_MECHANISM_NONE => Ok(Self::None),
-            _ => Err(CodecError::UnexpectedValue),
-        }
-    }
-}
-
-/// A differential privacy configuration.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct DpConfig {
-    pub mechanism: DpMechanism,
 }
 
 impl Encode for DpConfig {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        self.mechanism.encode(bytes);
+        match self {
+            Self::None => DP_MECHANISM_NONE.encode(bytes),
+        }
     }
 }
 
 impl Decode for DpConfig {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        Ok(Self {
-            mechanism: DpMechanism::decode(bytes)?,
-        })
+        match u8::decode(bytes)? {
+            DP_MECHANISM_NONE => Ok(Self::None),
+            _ => Err(CodecError::UnexpectedValue),
+        }
     }
 }
 
