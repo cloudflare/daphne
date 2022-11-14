@@ -9,8 +9,7 @@ use daphne::{
     constants,
     messages::{
         taskprov::{
-            DpConfig, DpMechanism, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig,
-            VdafTypeVar,
+            DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
         },
         BatchSelector, CollectReq, CollectResp, Extension, HpkeCiphertext, Id, Interval, Query,
         Report, ReportId, ReportMetadata,
@@ -306,9 +305,7 @@ async fn e2e_leader_upload() {
         },
         task_expiration: t.now + 86400,
         vdaf_config: VdafConfig {
-            dp_config: DpConfig {
-                mechanism: DpMechanism::None,
-            },
+            dp_config: DpConfig::None,
             var: VdafTypeVar::Prio3Aes128Count,
         },
     };
@@ -412,9 +409,7 @@ async fn e2e_leader_upload() {
         },
         task_expiration: t.now + 86400,
         vdaf_config: VdafConfig {
-            dp_config: DpConfig {
-                mechanism: DpMechanism::None,
-            },
+            dp_config: DpConfig::None,
             var: VdafTypeVar::Prio3Aes128Count,
         },
     };
@@ -1135,9 +1130,7 @@ async fn e2e_leader_collect_taskprov_ok() {
         },
         task_expiration: t.now + 86400 * 14,
         vdaf_config: VdafConfig {
-            dp_config: DpConfig {
-                mechanism: DpMechanism::None,
-            },
+            dp_config: DpConfig::None,
             var: VdafTypeVar::Prio3Aes128Sum { bit_length: 10 },
         },
     };

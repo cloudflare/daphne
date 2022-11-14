@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::messages::taskprov::{
-    DpConfig, DpMechanism, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig,
-    VdafTypeVar,
+    DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
 };
 use crate::messages::{
     AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
@@ -186,9 +185,7 @@ fn read_vdaf_config() {
     assert_eq!(
         vdaf_config,
         VdafConfig {
-            dp_config: DpConfig {
-                mechanism: DpMechanism::None
-            },
+            dp_config: DpConfig::None,
             var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
         }
     );
@@ -224,9 +221,7 @@ fn read_task_config_taskprov_draft01() {
             },
             task_expiration: 0x6352f9a5,
             vdaf_config: VdafConfig {
-                dp_config: DpConfig {
-                    mechanism: DpMechanism::None
-                },
+                dp_config: DpConfig::None,
                 var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
             },
         }
