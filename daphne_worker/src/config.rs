@@ -43,7 +43,7 @@ pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/coll
 pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
-/// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-00 ("taskprov").
+/// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-01 ("taskprov").
 pub(crate) struct TaskprovConfig {
     /// HPKE collector configuration for all taskprov tasks.
     pub(crate) hpke_collector_config: HpkeConfig,
@@ -100,7 +100,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// Indicates if DaphneWorker is used as the Leader.
     is_leader: bool,
 
-    /// draft-wang-ppm-dap-taskprov-00 configuration (optional).
+    /// draft-wang-ppm-dap-taskprov-01 configuration (optional).
     pub(crate) taskprov_config: Option<TaskprovConfig>,
 }
 

@@ -610,7 +610,7 @@ where
                 let mut first_metadata: Option<&ReportMetadata> = None;
 
                 // If taskprov is allowed, ensure that either all of the shares have it or none of them
-                // do (section 6 of draft-wang-ppm-dap-taskprov-00).
+                // do (section 6 of draft-wang-ppm-dap-taskprov-01).
                 let global_config = self.get_global_config();
                 if global_config.allow_taskprov {
                     let task_id = req.task_id()?;
