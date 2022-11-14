@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Messages in the taskprov extension to the DAP protocol, as
-//! defined in draft-wang-ppm-dap-taskprov-00.
+//! defined in draft-wang-ppm-dap-taskprov-01.
 
 use crate::messages::{
     decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
