@@ -4,7 +4,7 @@
 //! Implementation of DAP Aggregator roles for Daphne-Worker.
 //!
 //! Daphne-Worker uses bearer tokens for DAP request authorization as specified in
-//! draft-ietf-ppm-dap-02.
+//! draft-ietf-ppm-dap-03.
 
 use crate::{
     config::{
@@ -713,7 +713,7 @@ where
                             report_count,
                         } = batch_count;
                         reports_per_part.insert(
-                            PartialBatchSelector::FixedSize { batch_id },
+                            PartialBatchSelector::FixedSizeByBatchId { batch_id },
                             reports.drain(..report_count).collect(),
                         );
                     }
@@ -814,7 +814,9 @@ where
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         let durable = self.durable();
-        if let PartialBatchSelector::FixedSize { ref batch_id } = collect_resp.part_batch_sel {
+        if let PartialBatchSelector::FixedSizeByBatchId { ref batch_id } =
+            collect_resp.part_batch_sel
+        {
             durable
                 .post(
                     BINDING_DAP_LEADER_BATCH_QUEUE,

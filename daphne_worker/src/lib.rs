@@ -352,17 +352,42 @@ impl DaphneWorkerRouter {
                     |mut req, ctx| async move {
                         let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                         let cmd: InternalTestEndpointForTask = req.json().await?;
-                        config.internal_endpoint_for_task(cmd).await
+                        config
+                            .internal_endpoint_for_task(config.default_version, cmd)
+                            .await
+                    },
+                )
+                .post_async(
+                    "/:version/internal/test/endpoint_for_task",
+                    |mut req, ctx| async move {
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let cmd: InternalTestEndpointForTask = req.json().await?;
+                        let version = config.extract_version_parameter(&req)?;
+                        config.internal_endpoint_for_task(version, cmd).await
                     },
                 )
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                     let cmd: InternalTestAddTask = req.json().await?;
-                    config.internal_add_task(cmd).await?;
+                    config
+                        .internal_add_task(config.default_version, cmd)
+                        .await?;
                     Response::from_json(&serde_json::json!({
                         "status": "success",
                     }))
                 })
+                .post_async(
+                    "/:version/internal/test/add_task",
+                    |mut req, ctx| async move {
+                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let cmd: InternalTestAddTask = req.json().await?;
+                        let version = config.extract_version_parameter(&req)?;
+                        config.internal_add_task(version, cmd).await?;
+                        Response::from_json(&serde_json::json!({
+                            "status": "success",
+                        }))
+                    },
+                )
         } else {
             router
         };

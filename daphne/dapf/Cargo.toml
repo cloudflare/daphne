@@ -2,7 +2,7 @@
 
 [package]
 name = "dapf"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
   "Christopher Patton <cpatton@cloudflare.com>",
   "Armando Faz Hernandez <armfazh@cloudflare.com>",

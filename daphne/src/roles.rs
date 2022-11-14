@@ -13,7 +13,7 @@ use crate::{
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
         AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id,
-        PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
+        PartialBatchSelector, Query, Report, ReportId, ReportMetadata, Time, TransitionFailure,
         TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
@@ -21,7 +21,7 @@ use crate::{
     DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 use async_trait::async_trait;
-use prio::codec::{Decode, Encode};
+use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -314,7 +314,8 @@ where
             return Err(DapAbort::UnauthorizedRequest);
         }
 
-        let collect_req = CollectReq::get_decoded(req.payload.as_ref())?;
+        let mut collect_req =
+            CollectReq::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
@@ -326,13 +327,23 @@ where
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
+        if collect_req.query == Query::FixedSizeCurrentBatch {
+            // TODO(bhalleycf) This is where we assign the current batch, and
+            // convert the Query::FixedSizeCurrentBatch into a Query::FixedSize.
+            // For now, we just assign it batch 0.
+            collect_req.query = Query::FixedSizeByBatchId {
+                batch_id: Id([0; 32]),
+            };
+        }
+
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
+        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         check_batch(
             self,
             task_config,
             &collect_req.task_id,
-            &collect_req.query,
+            &batch_selector,
             &collect_req.agg_param,
             now,
         )
@@ -409,7 +420,7 @@ where
             task_config,
             "aggregate",
             MEDIA_TYPE_AGG_INIT_REQ,
-            agg_init_req.get_encoded()
+            agg_init_req.get_encoded_with_param(&task_config.version)
         );
         let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
@@ -448,7 +459,7 @@ where
         Ok(out_shares_count)
     }
 
-    /// Handle a pending collect request. If the results are reasdy, then cokmpute the aggregate
+    /// Handle a pending collect request. If the results are ready, then compute the aggregate
     /// results and store them to be retrieved by the Collector later. Returns the number of
     /// reports in the batch.
     async fn run_collect_job(
@@ -457,8 +468,9 @@ where
         task_config: &DapTaskConfig,
         collect_req: &CollectReq,
     ) -> Result<u64, DapAbort> {
+        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self
-            .get_agg_share(&collect_req.task_id, &collect_req.query)
+            .get_agg_share(&collect_req.task_id, &batch_selector)
             .await?;
 
         // Check the batch size. If not not ready, then return early.
@@ -468,18 +480,20 @@ where
             return Ok(0);
         }
 
+        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
+
         // Prepare the Leader's aggregate share.
         let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &collect_req.task_id,
-            &collect_req.query,
+            &batch_selector,
             &leader_agg_share,
         )?;
 
         // Prepare AggregateShareReq.
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_sel: collect_req.query.clone(),
+            batch_sel: batch_selector.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -492,13 +506,13 @@ where
             task_config,
             "aggregate_share",
             MEDIA_TYPE_AGG_SHARE_REQ,
-            agg_share_req.get_encoded()
+            agg_share_req.get_encoded_with_param(&task_config.version)
         );
         let agg_share_resp = AggregateShareResp::get_decoded(&resp.payload)?;
 
         // Complete the collect job.
         let collect_resp = CollectResp {
-            part_batch_sel: collect_req.query.clone().into(),
+            part_batch_sel: batch_selector.into(),
             report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
@@ -605,7 +619,8 @@ where
 
         match req.media_type {
             Some(MEDIA_TYPE_AGG_INIT_REQ) => {
-                let agg_init_req = AggregateInitializeReq::get_decoded(&req.payload)?;
+                let agg_init_req =
+                    AggregateInitializeReq::get_decoded_with_param(&req.version, &req.payload)?;
 
                 let mut first_metadata: Option<&ReportMetadata> = None;
 
@@ -800,7 +815,7 @@ where
             return Err(DapAbort::UnauthorizedRequest);
         }
 
-        let agg_share_req = AggregateShareReq::get_decoded(&req.payload)?;
+        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)?;
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
@@ -929,7 +944,7 @@ where
                 ));
             }
         }
-        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSize { batch_id }) => {
+        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSizeByBatchId { batch_id }) => {
             // TODO(cjpatton) The Helper can avoid this callback by first fetching the aggregate
             // share and aborting with "batchInvalid" if the report count is 0. Depending on how we
             // resolve https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/issues/342, this check may

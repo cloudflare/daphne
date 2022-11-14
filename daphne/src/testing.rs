@@ -38,7 +38,7 @@ pub(crate) enum DapBatchBucketOwned {
 impl From<DapBatchBucketOwned> for PartialBatchSelector {
     fn from(bucket: DapBatchBucketOwned) -> Self {
         match bucket {
-            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSize { batch_id },
+            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSizeByBatchId { batch_id },
             DapBatchBucketOwned::TimeInterval { .. } => Self::TimeInterval,
         }
     }
@@ -701,7 +701,9 @@ where
             .ok_or_else(|| DapError::fatal("collect job not found for collect_id"))?;
 
         // Remove the batch from the batch queue.
-        if let PartialBatchSelector::FixedSize { ref batch_id } = collect_resp.part_batch_sel {
+        if let PartialBatchSelector::FixedSizeByBatchId { ref batch_id } =
+            collect_resp.part_batch_sel
+        {
             leader_state
                 .batch_queue
                 .retain(|(id, _report_count)| id != batch_id);

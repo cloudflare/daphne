@@ -33,29 +33,52 @@ struct InternalTestEndpointForTaskResult {
     endpoint: Option<String>,
 }
 
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_helper_ready() {
-    let t = TestRunner::default().await;
+async fn e2e_helper_ready(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     t.helper_post_internal::<_, ()>("/internal/test/ready", &())
         .await;
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_ready() {
-    let t = TestRunner::default().await;
+async fn e2e_helper_ready_draft02() {
+    e2e_helper_ready(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_ready_draft03() {
+    e2e_helper_ready(DapVersion::Draft03).await
+}
+
+async fn e2e_leader_ready(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     t.leader_post_internal::<_, ()>("/internal/test/ready", &())
         .await;
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_endpoint_for_task() {
-    let t = TestRunner::default().await;
+async fn e2e_leader_ready_draft02() {
+    e2e_leader_ready(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_ready_draft03() {
+    e2e_leader_ready(DapVersion::Draft03).await
+}
+
+async fn e2e_leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
+    let prefix = if want_prefix {
+        format!("/{}", version.as_ref())
+    } else {
+        String::from("")
+    };
+    let t = TestRunner::default_with_version(version).await;
     let res: InternalTestEndpointForTaskResult = t
         .leader_post_internal(
-            "/internal/test/endpoint_for_task",
+            format!("{}/internal/test/endpoint_for_task", prefix).as_ref(),
             &json!({
                 "task_id": "blah blah ignored",
                 "role": "leader",
@@ -67,16 +90,48 @@ async fn e2e_leader_endpoint_for_task() {
         "response status: {}, error: {:?}",
         res.status, res.error
     );
-    assert_eq!(res.endpoint.unwrap(), "/v02/");
+    let expected = if want_prefix {
+        format!("/{}/", version.as_ref())
+    } else {
+        String::from("/v02/") // Must match DAP_DEFAULT_VERSION
+    };
+    assert_eq!(res.endpoint.unwrap(), expected);
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_helper_endpoint_for_task() {
-    let t = TestRunner::default().await;
+async fn e2e_leader_endpoint_for_task_draft02_unprefixed() {
+    e2e_leader_endpoint_for_task(DapVersion::Draft02, false).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_endpoint_for_task_draft03_unprefixed() {
+    e2e_leader_endpoint_for_task(DapVersion::Draft03, false).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_endpoint_for_task_draft02_prefixed() {
+    e2e_leader_endpoint_for_task(DapVersion::Draft02, true).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_endpoint_for_task_draft03_prefixed() {
+    e2e_leader_endpoint_for_task(DapVersion::Draft03, true).await
+}
+
+async fn e2e_helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
+    let prefix = if want_prefix {
+        format!("/{}", version.as_ref())
+    } else {
+        String::from("")
+    };
+    let t = TestRunner::default_with_version(version).await;
     let res: InternalTestEndpointForTaskResult = t
         .helper_post_internal(
-            "/internal/test/endpoint_for_task",
+            format!("{}/internal/test/endpoint_for_task", prefix).as_ref(),
             &json!({
                 "task_id": "blah blah ignored",
                 "role": "helper",
@@ -88,15 +143,54 @@ async fn e2e_helper_endpoint_for_task() {
         "response status: {}, error: {:?}",
         res.status, res.error
     );
-    assert_eq!(res.endpoint.unwrap(), "/v02/");
+    let expected = if want_prefix {
+        format!("/{}/", version.as_ref())
+    } else {
+        String::from("/v02/") // Must match DAP_DEFAULT_VERSION
+    };
+    assert_eq!(res.endpoint.unwrap(), expected);
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_hpke_config() {
-    let t = TestRunner::default().await;
+async fn e2e_helper_endpoint_for_task_draft02_unprefixed() {
+    e2e_helper_endpoint_for_task(DapVersion::Draft02, false).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_endpoint_for_task_draft03_unprefixed() {
+    e2e_helper_endpoint_for_task(DapVersion::Draft03, false).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_endpoint_for_task_draft02_prefixed() {
+    e2e_helper_endpoint_for_task(DapVersion::Draft02, true).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_helper_endpoint_for_task_draft03_prefixed() {
+    e2e_helper_endpoint_for_task(DapVersion::Draft03, true).await
+}
+
+async fn e2e_leader_hpke_config(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     t.leader_get_raw_hpke_config(&client).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_hpke_config_draft02() {
+    e2e_leader_hpke_config(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_hpke_config_draft03() {
+    e2e_leader_hpke_config(DapVersion::Draft03).await
 }
 
 #[tokio::test]
@@ -107,10 +201,8 @@ async fn e2e_helper_hpke_config() {
     t.helper_get_raw_hpke_config(&client).await;
 }
 
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_hpke_configs_are_cached() {
-    let t = TestRunner::default().await;
+async fn e2e_hpke_configs_are_cached(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     // Get a set of HPKE configs from leader and helper.
     let hpke_config_list_0 = t.get_hpke_configs(&client).await;
@@ -125,8 +217,18 @@ async fn e2e_hpke_configs_are_cached() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_upload() {
-    let t = TestRunner::default().await;
+async fn e2e_hpke_configs_are_cached_draft02() {
+    e2e_hpke_configs_are_cached(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_hpke_configs_are_cached_draft03() {
+    e2e_hpke_configs_are_cached(DapVersion::Draft03).await
+}
+
+async fn e2e_leader_upload(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
@@ -441,8 +543,18 @@ async fn e2e_leader_upload() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_internal_leader_process() {
-    let t = TestRunner::default().await;
+async fn e2e_leader_upload_draft02() {
+    e2e_leader_upload(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_upload_draft03() {
+    e2e_leader_upload(DapVersion::Draft03).await
+}
+
+async fn e2e_internal_leader_process(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
 
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(&client).await;
@@ -491,6 +603,18 @@ async fn e2e_internal_leader_process() {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_internal_leader_process_draft02() {
+    e2e_internal_leader_process(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_internal_leader_process_draft03() {
+    e2e_internal_leader_process(DapVersion::Draft03).await
+}
+
 // Test that all reports eventually get drained at minimum aggregation rate.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
@@ -533,10 +657,8 @@ async fn e2e_leader_process_min_agg_rate() {
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
 }
 
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_collect_ok() {
-    let t = TestRunner::default().await;
+async fn e2e_leader_collect_ok(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
     let client = t.http_client();
@@ -568,7 +690,7 @@ async fn e2e_leader_collect_ok() {
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -650,12 +772,22 @@ async fn e2e_leader_collect_ok() {
     //  .await;
 }
 
-// Test that collect jobs complete even if the request is issued after all reports for the task
-// have been processed.
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_collect_ok_interleaved() {
-    let t = TestRunner::default().await;
+async fn e2e_leader_collect_ok_draft02() {
+    e2e_leader_collect_ok(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_ok_draft03() {
+    e2e_leader_collect_ok(DapVersion::Draft03).await
+}
+
+// Test that collect jobs complete even if the request is issued after all reports for the task
+// have been processed.
+async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(&client).await;
@@ -698,7 +830,7 @@ async fn e2e_leader_collect_ok_interleaved() {
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
 
     // ... then the collect job gets completed.
@@ -707,6 +839,18 @@ async fn e2e_leader_collect_ok_interleaved() {
         agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
     );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_ok_interleaved_draft02() {
+    e2e_leader_collect_ok_interleaved(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_ok_interleaved_draft03() {
+    e2e_leader_collect_ok_interleaved(DapVersion::Draft03).await
 }
 
 #[tokio::test]
@@ -743,7 +887,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size() {
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -811,7 +955,7 @@ async fn e2e_leader_collect_accept_global_config_max_batch_duration() {
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
 }
 
@@ -839,7 +983,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
         Some(&t.collector_bearer_token),
         path,
         constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded(),
+        collect_req.get_encoded_with_param(&t.version),
         400,
         "batchInvalid",
     )
@@ -861,7 +1005,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval() {
         Some(&t.collector_bearer_token),
         path,
         constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded(),
+        collect_req.get_encoded_with_param(&t.version),
         400,
         "batchInvalid",
     )
@@ -902,7 +1046,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
 
     // The reports are aggregated in the background.
@@ -948,17 +1092,15 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval() {
         Some(&t.collector_bearer_token),
         "collect",
         constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded(),
+        collect_req.get_encoded_with_param(&t.version),
         400,
         "batchOverlap",
     )
     .await;
 }
 
-#[tokio::test]
-#[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_fixed_size() {
-    let t = TestRunner::fixed_size().await;
+async fn e2e_fixed_size(version: DapVersion) {
+    let t = TestRunner::fixed_size(version).await;
     let report_sel = DaphneWorkerReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: 100,
@@ -1003,13 +1145,13 @@ async fn e2e_fixed_size() {
     // Collector: Get the collect URI.
     let collect_req = CollectReq {
         task_id: t.task_id.clone(),
-        query: Query::FixedSize {
+        query: Query::FixedSizeByBatchId {
             batch_id: batch_id.clone(),
         },
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded())
+        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -1037,7 +1179,7 @@ async fn e2e_fixed_size() {
         .consume_encrypted_agg_shares(
             &t.collector_hpke_receiver,
             &t.task_id,
-            &BatchSelector::FixedSize {
+            &BatchSelector::FixedSizeByBatchId {
                 batch_id: batch_id.clone(),
             },
             collect_resp.report_count,
@@ -1091,12 +1233,12 @@ async fn e2e_fixed_size() {
         constants::MEDIA_TYPE_COLLECT_REQ,
         CollectReq {
             task_id: t.task_id.clone(),
-            query: Query::FixedSize {
+            query: Query::FixedSizeByBatchId {
                 batch_id: prev_batch_id.clone(),
             },
             agg_param: Vec::new(),
         }
-        .get_encoded(),
+        .get_encoded_with_param(&t.version),
         400,
         "batchOverlap",
     )
@@ -1105,8 +1247,18 @@ async fn e2e_fixed_size() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_collect_taskprov_ok() {
-    let t = TestRunner::default().await;
+async fn e2e_fixed_size_draft02() {
+    e2e_fixed_size(DapVersion::Draft02).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_fixed_size_draft03() {
+    e2e_fixed_size(DapVersion::Draft03).await;
+}
+
+async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
     let client = t.http_client();
@@ -1137,7 +1289,7 @@ async fn e2e_leader_collect_taskprov_ok() {
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
     let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
     let task_config = DapTaskConfig::try_from_taskprov(
-        DapVersion::Draft02,
+        version,
         TaskprovVersion::Draft02,
         &task_id.clone(),
         taskprov_task_config.clone(),
@@ -1183,7 +1335,7 @@ async fn e2e_leader_collect_taskprov_ok() {
     let collect_uri = t
         .leader_post_collect_using_token(
             &client,
-            collect_req.get_encoded(),
+            collect_req.get_encoded_with_param(&t.version),
             &"I am the collector!".to_string(), // Keep in sync with wrangler.toml
         )
         .await;
@@ -1244,4 +1396,16 @@ async fn e2e_leader_collect_taskprov_ok() {
     let resp = client.get(collect_uri.as_str()).send().await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_taskprov_ok_draft02() {
+    e2e_leader_collect_taskprov_ok(DapVersion::Draft02).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_collect_taskprov_ok_draft03() {
+    e2e_leader_collect_taskprov_ok(DapVersion::Draft03).await
 }

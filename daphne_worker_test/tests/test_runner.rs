@@ -49,24 +49,32 @@ pub struct TestRunner {
     pub collector_hpke_receiver: HpkeReceiverConfig,
     pub taskprov_vdaf_verify_key_init: Vec<u8>,
     pub taskprov_collector_hpke_receiver: HpkeReceiverConfig,
+    pub version: DapVersion,
 }
 
 #[allow(dead_code)]
 impl TestRunner {
-    pub async fn default() -> Self {
-        let t = Self::with(&DapQueryConfig::TimeInterval).await;
+    pub async fn default_with_version(version: DapVersion) -> Self {
+        let t = Self::with(version, &DapQueryConfig::TimeInterval).await;
         t
     }
 
-    pub async fn fixed_size() -> Self {
-        let t = Self::with(&DapQueryConfig::FixedSize {
-            max_batch_size: MAX_BATCH_SIZE,
-        })
+    pub async fn default() -> Self {
+        Self::default_with_version(DapVersion::Draft02).await
+    }
+
+    pub async fn fixed_size(version: DapVersion) -> Self {
+        let t = Self::with(
+            version,
+            &DapQueryConfig::FixedSize {
+                max_batch_size: MAX_BATCH_SIZE,
+            },
+        )
         .await;
         t
     }
 
-    async fn with(query_config: &DapQueryConfig) -> Self {
+    async fn with(version: DapVersion, query_config: &DapQueryConfig) -> Self {
         let mut rng = thread_rng();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -77,8 +85,14 @@ impl TestRunner {
 
         // When running in a local development environment, override the hostname of each
         // aggregator URL with 127.0.0.1.
-        let mut leader_url = Url::parse("http://leader:8787/v02/").unwrap();
-        let mut helper_url = Url::parse("http://helper:8788/v02/").unwrap();
+        let version_path = match version {
+            DapVersion::Draft02 => "v02",
+            DapVersion::Draft03 => "v03",
+            _ => panic!("unimplemented DapVersion"),
+        };
+        let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
+        let mut helper_url = Url::parse(&format!("http://helper:8788/{}/", version_path)).unwrap();
+        println!("leader_url = {}", leader_url);
         if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
                 leader_url.set_host(Some("127.0.0.1")).unwrap();
@@ -92,7 +106,7 @@ impl TestRunner {
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
 
         let task_config = DapTaskConfig {
-            version: DapVersion::Draft02,
+            version: version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
             expiration: now + 604800, // one week from now
@@ -141,6 +155,7 @@ impl TestRunner {
             collector_hpke_receiver,
             taskprov_vdaf_verify_key_init,
             taskprov_collector_hpke_receiver,
+            version,
         };
 
         let vdaf_verify_key_base64url = base64::encode_config(
@@ -188,8 +203,9 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
+        let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestAddTaskResult = t
-            .leader_post_internal("/internal/test/add_task", &leader_add_task_cmd)
+            .leader_post_internal(&add_task_path, &leader_add_task_cmd)
             .await;
         assert_eq!(
             res.status, "success",
@@ -214,7 +230,7 @@ impl TestRunner {
             "task_expiration": t.task_config.expiration,
         });
         let res: InternalTestAddTaskResult = t
-            .helper_post_internal("/internal/test/add_task", &helper_add_task_cmd)
+            .helper_post_internal(&add_task_path, &helper_add_task_cmd)
             .await;
         assert_eq!(
             res.status, "success",

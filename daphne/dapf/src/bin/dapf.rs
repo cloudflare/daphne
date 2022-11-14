@@ -6,10 +6,10 @@ use clap::{Parser, Subcommand};
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{CollectReq, CollectResp, HpkeConfig, Id, Query},
-    DapMeasurement, ProblemDetails, VdafConfig,
+    messages::{BatchSelector, CollectReq, CollectResp, HpkeConfig, Id, Query},
+    DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
 };
-use prio::codec::{Decode, Encode};
+use prio::codec::{Decode, Encode, ParameterizedEncode};
 use reqwest::blocking::{Client, ClientBuilder};
 use std::{
     io::{stdin, Read},
@@ -74,6 +74,7 @@ enum Action {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let version = DapVersion::Draft02; // TODO(bhalleycf) make a parameter
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
@@ -169,7 +170,7 @@ async fn main() -> Result<()> {
 
             let resp = http_client
                 .post(Url::parse(leader_url)?.join("collect")?)
-                .body(collect_req.get_encoded())
+                .body(collect_req.get_encoded_with_param(&version))
                 .headers(headers)
                 .send()?;
             if resp.status() == 400 {
@@ -198,7 +199,7 @@ async fn main() -> Result<()> {
                 .lock()
                 .read_to_string(&mut buf)
                 .with_context(|| "failed to read measurement from stdin")?;
-            let query: Query =
+            let batch_selector: BatchSelector =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             let resp = http_client.get(uri).send()?;
@@ -210,13 +211,12 @@ async fn main() -> Result<()> {
             let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
-
             let collect_resp = CollectResp::get_decoded(&resp.bytes()?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
                     receiver,
                     &task_id,
-                    &query,
+                    &batch_selector,
                     collect_resp.report_count,
                     collect_resp.encrypted_agg_shares,
                 )

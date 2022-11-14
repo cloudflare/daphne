@@ -23,7 +23,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use matchit::Router;
-use prio::codec::{Decode, Encode};
+use prio::codec::{Decode, Encode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use std::{
     borrow::Cow,
@@ -207,12 +207,12 @@ impl Test {
         let task_config = self.leader.tasks.get(task_id).unwrap();
         let part_batch_sel = match task_config.query {
             DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
-            DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSize {
+            DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSizeByBatchId {
                 batch_id: Id(rng.gen()),
             },
         };
 
-        self.leader_authorized_req(
+        self.leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_INIT_REQ,
@@ -258,7 +258,7 @@ impl Test {
         let task_id = &self.time_interval_task_id;
         let task_config = self.leader.tasks.get(task_id).unwrap();
 
-        self.leader_authorized_req(
+        self.leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
@@ -335,7 +335,7 @@ impl Test {
         // Leader: Send aggregate initialization request to Helper and receive response.
         let version = task_config.version.clone();
         let req = self
-            .leader_authorized_req(
+            .leader_authorized_req_with_version(
                 &task_id,
                 version,
                 MEDIA_TYPE_AGG_INIT_REQ,
@@ -408,27 +408,28 @@ impl Test {
         let (collect_id, collect_req) = &resp[0];
 
         // Leader: Handle collect job. First, fetch the aggregate share.
+        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self
             .leader
-            .get_agg_share(&collect_req.task_id, &collect_req.query)
+            .get_agg_share(&collect_req.task_id, &batch_selector)
             .await?;
         let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &collect_req.task_id,
-            &collect_req.query,
+            &batch_selector,
             &leader_agg_share,
         )?;
 
         // Leader->Helper: HTTP POST /aggregate_share
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_sel: collect_req.query.clone(),
+            batch_sel: batch_selector.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
         };
         let req = self
-            .leader_authorized_req(
+            .leader_authorized_req_with_version(
                 &task_id,
                 task_config.version,
                 MEDIA_TYPE_AGG_SHARE_REQ,
@@ -443,7 +444,7 @@ impl Test {
 
         // Leader: Complete the collect job.
         let collect_resp = CollectResp {
-            part_batch_sel: collect_req.query.clone().into(),
+            part_batch_sel: batch_selector.clone().into(),
             report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
@@ -486,7 +487,32 @@ impl Test {
         }
     }
 
-    async fn collector_authorized_req<M: Encode>(
+    async fn leader_authorized_req_with_version<M: ParameterizedEncode<DapVersion>>(
+        &self,
+        task_id: &Id,
+        version: DapVersion,
+        media_type: &'static str,
+        msg: M,
+        url: Url,
+    ) -> DapRequest<BearerToken> {
+        let payload = msg.get_encoded_with_param(&version);
+        let sender_auth = Some(
+            self.leader
+                .authorize(task_id, media_type, &payload)
+                .await
+                .unwrap(),
+        );
+        DapRequest {
+            version,
+            media_type: Some(media_type),
+            task_id: Some(task_id.clone()),
+            payload,
+            url,
+            sender_auth,
+        }
+    }
+
+    async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
         &self,
         version: DapVersion,
         media_type: &'static str,
@@ -498,7 +524,7 @@ impl Test {
             version,
             media_type: Some(media_type),
             task_id: Some(task_id.clone()),
-            payload: msg.get_encoded(),
+            payload: msg.get_encoded_with_param(&version),
             url,
             sender_auth: Some(self.collector_token.clone()),
         }
@@ -515,7 +541,7 @@ async fn http_post_aggregate_invalid_batch_sel() {
 
     // Helper expects "time_interval" query, but Leader indicates "fixed_size".
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_INIT_REQ,
@@ -523,7 +549,7 @@ async fn http_post_aggregate_invalid_batch_sel() {
                 task_id: task_id.clone(),
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
-                part_batch_sel: PartialBatchSelector::FixedSize {
+                part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 report_shares: Vec::default(),
@@ -678,13 +704,13 @@ async fn http_post_aggregate_share_invalid_batch_sel() {
     // Helper expects "time_interval" query, but Leader sent "fixed_size".
     let task_config = t.leader.tasks.get(&t.time_interval_task_id).unwrap();
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             &t.time_interval_task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
                 task_id: t.time_interval_task_id.clone(),
-                batch_sel: BatchSelector::FixedSize {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -702,13 +728,13 @@ async fn http_post_aggregate_share_invalid_batch_sel() {
     // Leader sends aggregate share request for unrecognized batch ID.
     let task_config = t.leader.tasks.get(&t.fixed_size_task_id).unwrap();
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             &t.fixed_size_task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
                 task_id: t.fixed_size_task_id.clone(),
-                batch_sel: BatchSelector::FixedSize {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -738,7 +764,7 @@ async fn http_post_collect_unauthorized_request() {
             query: Query::default(),
             agg_param: Vec::default(),
         }
-        .get_encoded(),
+        .get_encoded_with_param(&task_config.version),
         url: task_config.leader_url.join("collect").unwrap(),
         sender_auth: None, // Unauthorized request.
     };
@@ -1311,7 +1337,7 @@ async fn http_post_collect_invalid_query() {
             &t.time_interval_task_id,
             CollectReq {
                 task_id: t.time_interval_task_id.clone(),
-                query: Query::FixedSize {
+                query: Query::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -1333,7 +1359,7 @@ async fn http_post_collect_invalid_query() {
             &t.fixed_size_task_id,
             CollectReq {
                 task_id: t.fixed_size_task_id.clone(),
-                query: Query::FixedSize {
+                query: Query::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -1417,7 +1443,7 @@ async fn e2e_fixed_size() {
     t.run_agg_job(task_id).await.unwrap();
 
     // Collector: Create collection job and poll result.
-    let query = Query::FixedSize {
+    let query = Query::FixedSizeByBatchId {
         batch_id: t.leader.current_batch(task_id).unwrap(),
     };
     t.run_col_job(task_id, &query).await.unwrap();

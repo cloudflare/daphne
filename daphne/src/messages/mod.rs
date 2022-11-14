@@ -5,7 +5,7 @@
 
 use prio::codec::{
     decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
-    Encode,
+    Encode, ParameterizedDecode, ParameterizedEncode,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,6 +14,8 @@ use std::{
     fmt::Debug,
     io::{Cursor, Read},
 };
+
+use crate::{DapError, DapVersion};
 
 // Various algorithm constants
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
@@ -24,6 +26,10 @@ const AEAD_ID_AES128GCM: u16 = 0x0001;
 // Query types
 const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
 const QUERY_TYPE_FIXED_SIZE: u8 = 0x02;
+
+// FixedSize query subtypes
+const FIXEDSIZE_QUERY_TYPE_BY_BATCH_ID: u8 = 0x00;
+const FIXEDSIZE_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
 
 // Known extension types.
 const EXTENSION_TASKPROV: u16 = 0xff00;
@@ -238,20 +244,20 @@ impl Decode for ReportShare {
     }
 }
 
-/// Batch parameter conveyed to the Helper by the Leader in the aggreagtion sub-protocol. Used to
+/// Batch parameter conveyed to the Helper by the Leader in the aggregation sub-protocol. Used to
 /// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
 #[derive(Clone, Debug, Eq, Deserialize, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PartialBatchSelector {
     TimeInterval,
-    FixedSize { batch_id: Id },
+    FixedSizeByBatchId { batch_id: Id },
 }
 
 impl From<BatchSelector> for PartialBatchSelector {
     fn from(batch_sel: BatchSelector) -> Self {
         match batch_sel {
             BatchSelector::TimeInterval { .. } => Self::TimeInterval,
-            BatchSelector::FixedSize { batch_id } => Self::FixedSize { batch_id },
+            BatchSelector::FixedSizeByBatchId { batch_id } => Self::FixedSizeByBatchId { batch_id },
         }
     }
 }
@@ -260,7 +266,7 @@ impl Encode for PartialBatchSelector {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
             Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes),
-            Self::FixedSize { batch_id } => {
+            Self::FixedSizeByBatchId { batch_id } => {
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
                 batch_id.encode(bytes);
             }
@@ -272,10 +278,69 @@ impl Decode for PartialBatchSelector {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
-            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSize {
+            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
                 batch_id: Id::decode(bytes)?,
             }),
             _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
+/// A batch selector issued by the Leader in an aggregate-share request.
+#[derive(Clone, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchSelector {
+    TimeInterval { batch_interval: Interval },
+    FixedSizeByBatchId { batch_id: Id },
+}
+
+impl Encode for BatchSelector {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::TimeInterval { batch_interval } => {
+                QUERY_TYPE_TIME_INTERVAL.encode(bytes);
+                batch_interval.encode(bytes);
+            }
+            Self::FixedSizeByBatchId { batch_id } => {
+                QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                batch_id.encode(bytes);
+            }
+        }
+    }
+}
+
+impl Decode for BatchSelector {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        match u8::decode(bytes)? {
+            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                batch_interval: Interval::decode(bytes)?,
+            }),
+            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
+                batch_id: Id::decode(bytes)?,
+            }),
+            _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
+impl Default for BatchSelector {
+    fn default() -> Self {
+        Self::TimeInterval {
+            batch_interval: Interval::default(),
+        }
+    }
+}
+
+impl TryFrom<Query> for BatchSelector {
+    type Error = DapError;
+
+    fn try_from(query: Query) -> Result<Self, DapError> {
+        match query {
+            Query::TimeInterval { batch_interval } => Ok(Self::TimeInterval { batch_interval }),
+            Query::FixedSizeByBatchId { batch_id } => Ok(Self::FixedSizeByBatchId { batch_id }),
+            Query::FixedSizeCurrentBatch => Err(DapError::Fatal(
+                "tried to make a BatchSelector from a FixedSizeCurrentBatch query".to_string(),
+            )),
         }
     }
 }
@@ -290,22 +355,33 @@ pub struct AggregateInitializeReq {
     pub report_shares: Vec<ReportShare>,
 }
 
-impl Encode for AggregateInitializeReq {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for AggregateInitializeReq {
+    fn encode_with_param(&self, encoding_parameter: &DapVersion, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
         self.agg_job_id.encode(bytes);
-        encode_u16_bytes(bytes, &self.agg_param);
+        match encoding_parameter {
+            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
+            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
+            _ => panic!("unimplemented DapVersion"),
+        };
         self.part_batch_sel.encode(bytes);
         encode_u32_items(bytes, &(), &self.report_shares);
     }
 }
 
-impl Decode for AggregateInitializeReq {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for AggregateInitializeReq {
+    fn decode_with_param(
+        decoding_parameter: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
-            agg_param: decode_u16_bytes(bytes)?,
+            agg_param: match decoding_parameter {
+                DapVersion::Draft02 => decode_u16_bytes(bytes)?,
+                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
+                _ => panic!("unimplemented DapVersion"),
+            },
             part_batch_sel: PartialBatchSelector::decode(bytes)?,
             report_shares: decode_u32_items(&(), bytes)?,
         })
@@ -341,7 +417,7 @@ impl Decode for AggregateContinueReq {
 /// Transition message. This conveyes a message sent from one Aggregator to another during the
 /// preparation phase of VDAF evaluation.
 //
-// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-02. This is confusing because it
+// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-03. This is confusing because it
 // overloads a term used in draft-irtf-cfrg-draft-02.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transition {
@@ -518,33 +594,60 @@ impl Decode for Interval {
 #[serde(rename_all = "snake_case")]
 pub enum Query {
     TimeInterval { batch_interval: Interval },
-    FixedSize { batch_id: Id },
+    FixedSizeByBatchId { batch_id: Id },
+    FixedSizeCurrentBatch,
 }
 
-impl Encode for Query {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for Query {
+    fn encode_with_param(&self, encoding_parameter: &DapVersion, bytes: &mut Vec<u8>) {
         match self {
             Self::TimeInterval { batch_interval } => {
                 QUERY_TYPE_TIME_INTERVAL.encode(bytes);
                 batch_interval.encode(bytes);
             }
-            Self::FixedSize { batch_id } => {
+            Self::FixedSizeByBatchId { batch_id } => {
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                if *encoding_parameter != DapVersion::Draft02 {
+                    FIXEDSIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes);
+                }
                 batch_id.encode(bytes);
+            }
+            Self::FixedSizeCurrentBatch => {
+                if *encoding_parameter == DapVersion::Draft02 {
+                    panic!("tried to encode a Query or BatchSelector fixed size current batch in DAP 02");
+                }
+                QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                FIXEDSIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes);
             }
         }
     }
 }
 
-impl Decode for Query {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for Query {
+    fn decode_with_param(
+        decoding_parameter: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
                 batch_interval: Interval::decode(bytes)?,
             }),
-            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSize {
-                batch_id: Id::decode(bytes)?,
-            }),
+            QUERY_TYPE_FIXED_SIZE => {
+                if *decoding_parameter == DapVersion::Draft02 {
+                    Ok(Self::FixedSizeByBatchId {
+                        batch_id: Id::decode(bytes)?,
+                    })
+                } else {
+                    let subtype = u8::decode(bytes)?;
+                    match subtype {
+                        FIXEDSIZE_QUERY_TYPE_BY_BATCH_ID => Ok(Self::FixedSizeByBatchId {
+                            batch_id: Id::decode(bytes)?,
+                        }),
+                        FIXEDSIZE_QUERY_TYPE_CURRENT_BATCH => Ok(Self::FixedSizeCurrentBatch),
+                        _ => Err(CodecError::UnexpectedValue),
+                    }
+                }
+            }
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -568,20 +671,31 @@ pub struct CollectReq {
     pub agg_param: Vec<u8>,
 }
 
-impl Encode for CollectReq {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for CollectReq {
+    fn encode_with_param(&self, encoding_parameter: &DapVersion, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.query.encode(bytes);
-        encode_u16_bytes(bytes, &self.agg_param);
+        self.query.encode_with_param(encoding_parameter, bytes);
+        match encoding_parameter {
+            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
+            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
+            _ => panic!("unimplemented DapVersion"),
+        };
     }
 }
 
-impl Decode for CollectReq {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for CollectReq {
+    fn decode_with_param(
+        decoding_parameter: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            query: Query::decode(bytes)?,
-            agg_param: decode_u16_bytes(bytes)?,
+            query: Query::decode_with_param(decoding_parameter, bytes)?,
+            agg_param: match decoding_parameter {
+                DapVersion::Draft02 => decode_u16_bytes(bytes)?,
+                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
+                _ => panic!("unimplemented DapVersion"),
+            },
         })
     }
 }
@@ -614,17 +728,10 @@ impl Decode for CollectResp {
     }
 }
 
-/// A batch selector issued by the Leader in an aggregate-share request.
-//
-// NOTE(cjpatton) This structure is identical to Query, hence the typedef. Eventually the
-// strudcture might change (https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/issues/342), at which
-// point we will need to make BatchSelector its own struct.
-pub type BatchSelector = Query;
-
 /// An aggregate-share request.
 //
 // TODO Add serialization tests.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AggregateShareReq {
     pub task_id: Id,
     pub batch_sel: BatchSelector,
@@ -633,22 +740,33 @@ pub struct AggregateShareReq {
     pub checksum: [u8; 32],
 }
 
-impl Encode for AggregateShareReq {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for AggregateShareReq {
+    fn encode_with_param(&self, encoding_parameter: &DapVersion, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.batch_sel.encode(bytes);
-        encode_u16_bytes(bytes, &self.agg_param);
+        self.batch_sel.encode_with_param(encoding_parameter, bytes);
+        match encoding_parameter {
+            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
+            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
+            _ => panic!("unimplemented DapVersion"),
+        };
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
     }
 }
 
-impl Decode for AggregateShareReq {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for AggregateShareReq {
+    fn decode_with_param(
+        decoding_parameter: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            batch_sel: BatchSelector::decode(bytes)?,
-            agg_param: decode_u16_bytes(bytes)?,
+            batch_sel: BatchSelector::decode_with_param(decoding_parameter, bytes)?,
+            agg_param: match decoding_parameter {
+                DapVersion::Draft02 => decode_u16_bytes(bytes)?,
+                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
+                _ => panic!("unimplemented DapVersion"),
+            },
             report_count: u64::decode(bytes)?,
             checksum: {
                 let mut checksum = [0u8; 32];

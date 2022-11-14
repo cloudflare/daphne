@@ -94,7 +94,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     /// Shard count, the number of report storage shards. This should be a power of 2.
     report_shard_count: u64,
 
-    /// Base URL of the Aggregator.
+    /// Base URL of the Aggregator (unversioned).
     base_url: Url,
 
     /// Indicates if DaphneWorker is used as the Leader.
@@ -102,6 +102,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// draft-wang-ppm-dap-taskprov-02 configuration (optional).
     pub(crate) taskprov_config: Option<TaskprovConfig>,
+
+    /// Default DAP version to use if not specified by the API URL
+    pub(crate) default_version: DapVersion,
 }
 
 impl<D> DaphneWorkerConfig<D> {
@@ -111,6 +114,9 @@ impl<D> DaphneWorkerConfig<D> {
             ctx.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
         .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
+
+        let default_version =
+            DapVersion::from(ctx.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
 
         let base_url: Url = ctx
             .var("DAP_BASE_URL")?
@@ -210,6 +216,7 @@ impl<D> DaphneWorkerConfig<D> {
             base_url,
             is_leader,
             taskprov_config,
+            default_version,
         })
     }
 
@@ -469,6 +476,7 @@ impl<D> DaphneWorkerConfig<D> {
     /// draft-dcook-ppm-dap-interop-test-design-02.
     pub(crate) async fn internal_endpoint_for_task(
         &self,
+        version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response> {
         if self.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
@@ -482,12 +490,16 @@ impl<D> DaphneWorkerConfig<D> {
 
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": self.base_url.path(),
+            "endpoint": format!("{}{}/", self.base_url.path(), version.as_ref()),
         }))
     }
 
     /// Configure Daphne-Worker a task, as required by draft-dcook-ppm-dap-interop-test-design-02.
-    pub(crate) async fn internal_add_task(&self, cmd: InternalTestAddTask) -> Result<()> {
+    pub(crate) async fn internal_add_task(
+        &self,
+        version: DapVersion,
+        cmd: InternalTestAddTask,
+    ) -> Result<()> {
         // Task ID.
         let task_id_data =
             base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
@@ -572,7 +584,7 @@ impl<D> DaphneWorkerConfig<D> {
                 KV_KEY_PREFIX_TASK_CONFIG,
                 &task_id,
                 DapTaskConfig {
-                    version: DapVersion::Draft02,
+                    version,
                     leader_url: cmd.leader,
                     helper_url: cmd.helper,
                     time_precision: cmd.time_precision,
@@ -596,6 +608,19 @@ impl<D> DaphneWorkerConfig<D> {
         }
     }
 
+    pub(crate) fn extract_version_parameter(&self, req: &Request) -> Result<DapVersion> {
+        let url = req.url()?;
+        let path = url.path();
+        let mut router: Router<bool> = Router::new();
+        router.insert("/:version/*remaining", true).unwrap();
+        let url_match = router.at(path).unwrap();
+        let version = url_match
+            .params
+            .get("version")
+            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {}", path)))?;
+        Ok(DapVersion::from(version))
+    }
+
     pub(crate) async fn worker_request_to_dap(
         &self,
         mut req: Request,
@@ -608,16 +633,7 @@ impl<D> DaphneWorkerConfig<D> {
             None => None,
         };
 
-        let url = req.url()?;
-        let path = url.path();
-        let mut router: Router<bool> = Router::new();
-        router.insert("/:version/*remaining", true).unwrap();
-        let url_match = router.at(path).unwrap();
-        let version = url_match
-            .params
-            .get("version")
-            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {}", path)))?;
-
+        let version = self.extract_version_parameter(&req)?;
         let payload = req.bytes().await?;
 
         // Parse the task ID from the front of the request payload and use it to look up the
@@ -632,7 +648,7 @@ impl<D> DaphneWorkerConfig<D> {
         let task_id = Id::decode(&mut r).ok();
 
         Ok(DapRequest {
-            version: DapVersion::from(version),
+            version,
             task_id,
             payload,
             url: req.url()?,
