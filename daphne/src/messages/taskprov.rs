@@ -119,14 +119,6 @@ pub enum DpConfig {
     None,
 }
 
-impl From<DpConfig> for u8 {
-    fn from(dp_config: DpConfig) -> Self {
-        match dp_config {
-            DpConfig::None => DP_MECHANISM_NONE,
-        }
-    }
-}
-
 impl Encode for DpConfig {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
