@@ -38,7 +38,7 @@ pub(crate) enum DapBatchBucketOwned {
 impl From<DapBatchBucketOwned> for PartialBatchSelector {
     fn from(bucket: DapBatchBucketOwned) -> Self {
         match bucket {
-            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSize { batch_id },
+            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSizeByBatchId { batch_id },
             DapBatchBucketOwned::TimeInterval { .. } => Self::TimeInterval,
         }
     }
@@ -164,7 +164,7 @@ impl MockAggregator {
 
     /// Return the ID of the batch currently being filled with reports. Panics unless the task is
     /// configured for fixed-size queries.
-    pub(crate) fn current_batch(&self, task_id: &Id, task_config: &DapTaskConfig) -> Option<Id> {
+    pub(crate) fn current_batch_id(&self, task_id: &Id, task_config: &DapTaskConfig) -> Option<Id> {
         // Calling current_batch() is only well-defined for fixed-size tasks.
         assert_matches!(task_config.query, DapQueryConfig::FixedSize { .. });
 
@@ -513,6 +513,17 @@ where
 
         Ok(())
     }
+
+    async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError> {
+        let task_config = self.unchecked_get_task_config(task_id).await;
+        if let Some(id) = self.current_batch_id(task_id, &task_config) {
+            Ok(id)
+        } else {
+            Err(DapError::Abort(DapAbort::BadRequest(
+                "unknown version".to_string(),
+            )))
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -646,7 +657,8 @@ where
             }
             DapQueryConfig::FixedSize { .. } => {
                 // Drain the batch that is being filled.
-                let bucket = if let Some(batch_id) = self.current_batch(task_id, &task_config) {
+
+                let bucket = if let Some(batch_id) = self.current_batch_id(task_id, &task_config) {
                     DapBatchBucketOwned::FixedSize { batch_id }
                 } else {
                     return Ok(HashMap::default());
@@ -771,7 +783,9 @@ where
             .ok_or_else(|| DapError::fatal("collect job not found for collect_id"))?;
 
         // Remove the batch from the batch queue.
-        if let PartialBatchSelector::FixedSize { ref batch_id } = collect_resp.part_batch_sel {
+        if let PartialBatchSelector::FixedSizeByBatchId { ref batch_id } =
+            collect_resp.part_batch_sel
+        {
             leader_state
                 .batch_queue
                 .retain(|(id, _report_count)| id != batch_id);
@@ -840,4 +854,68 @@ pub(crate) struct LeaderState {
 pub(crate) struct AggStore {
     pub(crate) agg_share: DapAggregateShare,
     pub(crate) collected: bool,
+}
+
+// These are declarative macros which let us generate a test point for
+// each DapVersion given a test which takes a version parameter.
+//
+// E.g. currently
+//
+//     async_test_versions! { something }
+//
+// would generate async tests named
+//
+//     something_draft02
+//
+// and
+//
+//     something_draft03
+//
+// that called something(version) with the appropriate version.
+//
+// We use the "paste" crate to get a macro that can paste tokens and also
+// fiddle case.
+
+#[macro_export]
+macro_rules! test_version {
+    ($fname:ident, $version:ident) => {
+        paste! {
+            #[test]
+            fn [<$fname _ $version:lower>]() {
+                $fname (DapVersion::$version);
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! test_versions {
+    ($($fname:ident),*) => {
+        $(
+            test_version! { $fname, Draft02 }
+            test_version! { $fname, Draft03 }
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! async_test_version {
+    ($fname:ident, $version:ident) => {
+        paste! {
+            #[tokio::test]
+            async fn [<$fname _ $version:lower>]() {
+                $fname (DapVersion::$version) . await;
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! async_test_versions {
+    ($($fname:ident),*) => {
+        $(
+            async_test_version! { $fname, Draft02 }
+            async_test_version! { $fname, Draft03 }
+        )*
+    };
 }

@@ -100,7 +100,7 @@ impl DurableObject for LeaderBatchQueue {
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_LEADER_BATCH_QUEUE);
 
         match (req.path().as_ref(), req.method()) {
-            // Return the ID of the oldest, not-yet-collected bath.
+            // Return the ID of the oldest, not-yet-collected batch.
             //
             // Output: `LeaderBatchQueueResult`
             (DURABLE_LEADER_BATCH_QUEUE_CURRENT, Method::Get) => {

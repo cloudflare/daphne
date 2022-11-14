@@ -1,11 +1,14 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{vdaf::mod_test::Test, DapAggregateResult, DapMeasurement, VdafConfig};
+use crate::{
+    async_test_version, async_test_versions, vdaf::mod_test::Test, DapAggregateResult,
+    DapMeasurement, DapVersion, VdafConfig,
+};
+use paste::paste;
 
-#[tokio::test]
-async fn roundtrip() {
-    let mut t = Test::new(&VdafConfig::Prio2 { dimension: 5 });
+async fn roundtrip(version: DapVersion) {
+    let mut t = Test::new(&VdafConfig::Prio2 { dimension: 5 }, version);
     let got = t
         .roundtrip(vec![
             DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
@@ -17,3 +20,5 @@ async fn roundtrip() {
         .await;
     assert_eq!(got, DapAggregateResult::U32Vec(vec![3, 3, 1, 0, 5]));
 }
+
+async_test_versions! { roundtrip }

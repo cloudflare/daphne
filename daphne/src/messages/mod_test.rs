@@ -5,15 +5,45 @@ use crate::messages::taskprov::{
     DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
 };
 use crate::messages::{
-    AggregateContinueReq, AggregateInitializeReq, AggregateResp, Extension, HpkeAeadId,
-    HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, PartialBatchSelector, Report, ReportId,
-    ReportMetadata, ReportShare, Transition, TransitionVar,
+    AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq, BatchSelector,
+    DapVersion, Extension, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id,
+    PartialBatchSelector, Report, ReportId, ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use crate::taskprov::{compute_task_id, TaskprovVersion};
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 
 #[test]
 fn read_report() {
+    let report = Report {
+        task_id: Id([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 16,
+        ]),
+        metadata: ReportMetadata {
+            id: ReportId([23; 16]),
+            time: 1637364244,
+            extensions: vec![],
+        },
+        public_share: b"public share".to_vec(),
+        encrypted_input_shares: vec![
+            HpkeCiphertext {
+                config_id: 23,
+                enc: b"leader encapsulated key".to_vec(),
+                payload: b"leader ciphertext".to_vec(),
+            },
+            HpkeCiphertext {
+                config_id: 119,
+                enc: b"helper encapsulated key".to_vec(),
+                payload: b"helper ciphertext".to_vec(),
+            },
+        ],
+    };
+
+    assert_eq!(Report::get_decoded(&report.get_encoded()).unwrap(), report);
+}
+
+#[test]
+fn read_report_with_unknown_extensions() {
     let report = Report {
         task_id: Id([
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -42,7 +72,7 @@ fn read_report() {
         ],
     };
 
-    assert_eq!(Report::get_decoded(&report.get_encoded()).unwrap(), report);
+    assert!(Report::get_decoded(&report.get_encoded()).is_err());
 }
 
 #[test]
@@ -51,7 +81,7 @@ fn read_agg_init_req() {
         task_id: Id([23; 32]),
         agg_job_id: Id([1; 32]),
         agg_param: b"this is an aggregation parameter".to_vec(),
-        part_batch_sel: PartialBatchSelector::FixedSize {
+        part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
             batch_id: Id([0; 32]),
         },
         report_shares: vec![
@@ -84,7 +114,17 @@ fn read_agg_init_req() {
         ],
     };
 
-    let got = AggregateInitializeReq::get_decoded(&want.get_encoded()).unwrap();
+    let got = AggregateInitializeReq::get_decoded_with_param(
+        &crate::DapVersion::Draft02,
+        &want.get_encoded_with_param(&crate::DapVersion::Draft02),
+    )
+    .unwrap();
+    assert_eq!(got, want);
+    let got = AggregateInitializeReq::get_decoded_with_param(
+        &crate::DapVersion::Draft03,
+        &want.get_encoded_with_param(&crate::DapVersion::Draft03),
+    )
+    .unwrap();
     assert_eq!(got, want);
 }
 
@@ -108,6 +148,32 @@ fn read_agg_cont_req() {
     };
 
     let got = AggregateContinueReq::get_decoded(&want.get_encoded()).unwrap();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn read_agg_share_req() {
+    let want = AggregateShareReq {
+        task_id: Id([23; 32]),
+        batch_sel: BatchSelector::FixedSizeByBatchId {
+            batch_id: Id([23; 32]),
+        },
+        agg_param: b"this is an aggregation parameter".to_vec(),
+        report_count: 100,
+        checksum: [0; 32],
+    };
+
+    let got = AggregateShareReq::get_decoded_with_param(
+        &DapVersion::Draft02,
+        &want.get_encoded_with_param(&DapVersion::Draft02),
+    )
+    .unwrap();
+    assert_eq!(got, want);
+    let got = AggregateShareReq::get_decoded_with_param(
+        &DapVersion::Draft03,
+        &want.get_encoded_with_param(&DapVersion::Draft03),
+    )
+    .unwrap();
     assert_eq!(got, want);
 }
 

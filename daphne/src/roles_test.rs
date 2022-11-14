@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    async_test_version, async_test_versions,
     auth::BearerToken,
     constants::{
         MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ,
@@ -23,6 +24,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use matchit::Router;
+use paste::paste;
 use prio::codec::{Decode, Encode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use std::{
@@ -53,10 +55,11 @@ struct Test {
     time_interval_task_id: Id,
     fixed_size_task_id: Id,
     expired_task_id: Id,
+    version: DapVersion,
 }
 
 impl Test {
-    fn new() -> Self {
+    fn new(version: DapVersion) -> Self {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -80,7 +83,6 @@ impl Test {
         let leader_url = Url::parse("https://leader.biz/v02/").unwrap();
         let helper_url = Url::parse("http://helper.com:8788/v02/").unwrap();
         let time_precision = 3600;
-        let version = DapVersion::Draft02;
         let collector_hpke_receiver_config =
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256);
 
@@ -189,6 +191,7 @@ impl Test {
             time_interval_task_id,
             fixed_size_task_id,
             expired_task_id,
+            version,
         }
     }
 
@@ -215,12 +218,12 @@ impl Test {
         let task_config = self.leader.unchecked_get_task_config(task_id).await;
         let part_batch_sel = match task_config.query {
             DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
-            DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSize {
+            DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSizeByBatchId {
                 batch_id: Id(rng.gen()),
             },
         };
 
-        self.leader_authorized_req(
+        self.leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_INIT_REQ,
@@ -266,7 +269,7 @@ impl Test {
         let task_id = &self.time_interval_task_id;
         let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
-        self.leader_authorized_req(
+        self.leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
@@ -302,7 +305,13 @@ impl Test {
         // Construct report.
         let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
         let report = vdaf_config
-            .produce_report(&hpke_config_list, self.now, task_id, DapMeasurement::U64(1))
+            .produce_report(
+                &hpke_config_list,
+                self.now,
+                task_id,
+                DapMeasurement::U64(1),
+                self.version,
+            )
             .unwrap();
 
         report
@@ -335,6 +344,7 @@ impl Test {
                 &agg_job_id,
                 &part_batch_sel,
                 reports,
+                task_config.version,
             )
             .await?;
         assert_matches!(transition, DapLeaderTransition::Continue(..));
@@ -343,7 +353,7 @@ impl Test {
         // Leader: Send aggregate initialization request to Helper and receive response.
         let version = task_config.version.clone();
         let req = self
-            .leader_authorized_req(
+            .leader_authorized_req_with_version(
                 &task_id,
                 version,
                 MEDIA_TYPE_AGG_INIT_REQ,
@@ -416,27 +426,29 @@ impl Test {
         let (collect_id, collect_req) = &resp[0];
 
         // Leader: Handle collect job. First, fetch the aggregate share.
+        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self
             .leader
-            .get_agg_share(&collect_req.task_id, &collect_req.query)
+            .get_agg_share(&collect_req.task_id, &batch_selector)
             .await?;
         let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
             &task_config.collector_hpke_config,
             &collect_req.task_id,
-            &collect_req.query,
+            &batch_selector,
             &leader_agg_share,
+            task_config.version,
         )?;
 
         // Leader->Helper: HTTP POST /aggregate_share
         let agg_share_req = AggregateShareReq {
             task_id: collect_req.task_id.clone(),
-            batch_sel: collect_req.query.clone(),
+            batch_sel: batch_selector.clone(),
             agg_param: collect_req.agg_param.clone(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
         };
         let req = self
-            .leader_authorized_req(
+            .leader_authorized_req_with_version(
                 &task_id,
                 task_config.version,
                 MEDIA_TYPE_AGG_SHARE_REQ,
@@ -451,7 +463,7 @@ impl Test {
 
         // Leader: Complete the collect job.
         let collect_resp = CollectResp {
-            part_batch_sel: collect_req.query.clone().into(),
+            part_batch_sel: batch_selector.clone().into(),
             report_count: leader_agg_share.report_count,
             encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
@@ -494,7 +506,32 @@ impl Test {
         }
     }
 
-    async fn collector_authorized_req<M: Encode>(
+    async fn leader_authorized_req_with_version<M: ParameterizedEncode<DapVersion>>(
+        &self,
+        task_id: &Id,
+        version: DapVersion,
+        media_type: &'static str,
+        msg: M,
+        url: Url,
+    ) -> DapRequest<BearerToken> {
+        let payload = msg.get_encoded_with_param(&version);
+        let sender_auth = Some(
+            self.leader
+                .authorize(task_id, media_type, &payload)
+                .await
+                .unwrap(),
+        );
+        DapRequest {
+            version,
+            media_type: Some(media_type),
+            task_id: Some(task_id.clone()),
+            payload,
+            url,
+            sender_auth,
+        }
+    }
+
+    async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
         &self,
         version: DapVersion,
         media_type: &'static str,
@@ -506,7 +543,7 @@ impl Test {
             version,
             media_type: Some(media_type),
             task_id: Some(task_id.clone()),
-            payload: msg.get_encoded(),
+            payload: msg.get_encoded_with_param(&version),
             url,
             sender_auth: Some(self.collector_token.clone()),
         }
@@ -514,16 +551,15 @@ impl Test {
 }
 
 // Test that the Helper properly handles the batch parameter in the AggregateInitializeReq.
-#[tokio::test]
-async fn http_post_aggregate_invalid_batch_sel() {
+async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
     let mut rng = thread_rng();
-    let t = Test::new();
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
     // Helper expects "time_interval" query, but Leader indicates "fixed_size".
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             task_id,
             task_config.version,
             MEDIA_TYPE_AGG_INIT_REQ,
@@ -531,7 +567,7 @@ async fn http_post_aggregate_invalid_batch_sel() {
                 task_id: task_id.clone(),
                 agg_job_id: Id(rng.gen()),
                 agg_param: Vec::default(),
-                part_batch_sel: PartialBatchSelector::FixedSize {
+                part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 report_shares: Vec::default(),
@@ -545,9 +581,10 @@ async fn http_post_aggregate_invalid_batch_sel() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_init_unauthorized_request() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_invalid_batch_sel }
+
+async fn http_post_aggregate_init_unauthorized_request(version: DapVersion) {
+    let t = Test::new(version);
     let mut req = t
         .gen_test_agg_init_req(&t.time_interval_task_id, Vec::default())
         .await;
@@ -567,10 +604,11 @@ async fn http_post_aggregate_init_unauthorized_request() {
     );
 }
 
+async_test_versions! { http_post_aggregate_init_unauthorized_request }
+
 // Test that the Helper rejects reports past the expiration date.
-#[tokio::test]
-async fn http_post_aggregate_init_expired_task() {
-    let t = Test::new();
+async fn http_post_aggregate_init_expired_task(version: DapVersion) {
+    let t = Test::new(version);
 
     let report = t.gen_test_report(&t.expired_task_id).await;
     let report_share = ReportShare {
@@ -591,9 +629,10 @@ async fn http_post_aggregate_init_expired_task() {
     );
 }
 
-#[tokio::test]
-async fn http_get_hpke_config_unrecognized_task() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_init_expired_task }
+
+async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
+    let t = Test::new(version);
     let mut rng = thread_rng();
     let task_id = Id(rng.gen());
     let req = DapRequest {
@@ -615,9 +654,10 @@ async fn http_get_hpke_config_unrecognized_task() {
     );
 }
 
-#[tokio::test]
-async fn http_get_hpke_config_missing_task_id() {
-    let t = Test::new();
+async_test_versions! { http_get_hpke_config_unrecognized_task }
+
+async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
+    let t = Test::new(version);
     let req = DapRequest {
         version: DapVersion::Draft02,
         media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
@@ -636,9 +676,10 @@ async fn http_get_hpke_config_missing_task_id() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_cont_unauthorized_request() {
-    let t = Test::new();
+async_test_versions! { http_get_hpke_config_missing_task_id }
+
+async fn http_post_aggregate_cont_unauthorized_request(version: DapVersion) {
+    let t = Test::new(version);
     let mut rng = thread_rng();
     let mut req = t.gen_test_agg_cont_req(Id(rng.gen()), Vec::default()).await;
     req.sender_auth = None;
@@ -657,9 +698,10 @@ async fn http_post_aggregate_cont_unauthorized_request() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_share_unauthorized_request() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_cont_unauthorized_request }
+
+async fn http_post_aggregate_share_unauthorized_request(version: DapVersion) {
+    let t = Test::new(version);
     let mut req = t.gen_test_agg_share_req(0, [0; 32]).await;
     req.sender_auth = None;
 
@@ -677,11 +719,12 @@ async fn http_post_aggregate_share_unauthorized_request() {
     );
 }
 
+async_test_versions! { http_post_aggregate_share_unauthorized_request }
+
 // Test that the Helper handles the batch selector sent from the Leader properly.
-#[tokio::test]
-async fn http_post_aggregate_share_invalid_batch_sel() {
+async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
     let mut rng = thread_rng();
-    let t = Test::new();
+    let t = Test::new(version);
 
     // Helper expects "time_interval" query, but Leader sent "fixed_size".
     let task_config = t
@@ -689,13 +732,13 @@ async fn http_post_aggregate_share_invalid_batch_sel() {
         .unchecked_get_task_config(&t.time_interval_task_id)
         .await;
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             &t.time_interval_task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
                 task_id: t.time_interval_task_id.clone(),
-                batch_sel: BatchSelector::FixedSize {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -716,13 +759,13 @@ async fn http_post_aggregate_share_invalid_batch_sel() {
         .unchecked_get_task_config(&t.fixed_size_task_id)
         .await;
     let req = t
-        .leader_authorized_req(
+        .leader_authorized_req_with_version(
             &t.fixed_size_task_id,
             task_config.version,
             MEDIA_TYPE_AGG_SHARE_REQ,
             AggregateShareReq {
                 task_id: t.fixed_size_task_id.clone(),
-                batch_sel: BatchSelector::FixedSize {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -738,9 +781,10 @@ async fn http_post_aggregate_share_invalid_batch_sel() {
     );
 }
 
-#[tokio::test]
-async fn http_post_collect_unauthorized_request() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_share_invalid_batch_sel }
+
+async fn http_post_collect_unauthorized_request(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
     let mut req = DapRequest {
@@ -752,7 +796,7 @@ async fn http_post_collect_unauthorized_request() {
             query: Query::default(),
             agg_param: Vec::default(),
         }
-        .get_encoded(),
+        .get_encoded_with_param(&task_config.version),
         url: task_config.leader_url.join("collect").unwrap(),
         sender_auth: None, // Unauthorized request.
     };
@@ -771,9 +815,10 @@ async fn http_post_collect_unauthorized_request() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_failure_hpke_decrypt_error() {
-    let t = Test::new();
+async_test_versions! { http_post_collect_unauthorized_request }
+
+async fn http_post_aggregate_failure_hpke_decrypt_error(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -803,9 +848,10 @@ async fn http_post_aggregate_failure_hpke_decrypt_error() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_transition_continue() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_failure_hpke_decrypt_error }
+
+async fn http_post_aggregate_transition_continue(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -827,9 +873,10 @@ async fn http_post_aggregate_transition_continue() {
     assert_matches!(transition.var, TransitionVar::Continued(_));
 }
 
-#[tokio::test]
-async fn http_post_aggregate_failure_report_replayed() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_transition_continue }
+
+async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -866,9 +913,10 @@ async fn http_post_aggregate_failure_report_replayed() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_failure_batch_collected() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_failure_report_replayed }
+
+async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
@@ -915,9 +963,10 @@ async fn http_post_aggregate_failure_batch_collected() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_abort_helper_state_overwritten() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_failure_batch_collected }
+
+async fn http_post_aggregate_abort_helper_state_overwritten(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -941,9 +990,10 @@ async fn http_post_aggregate_abort_helper_state_overwritten() {
     );
 }
 
-#[tokio::test]
-async fn http_post_aggregate_fail_send_cont_req() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_abort_helper_state_overwritten }
+
+async fn http_post_aggregate_fail_send_cont_req(version: DapVersion) {
+    let t = Test::new(version);
     let mut rng = thread_rng();
     let req = t.gen_test_agg_cont_req(Id(rng.gen()), Vec::default()).await;
 
@@ -954,9 +1004,10 @@ async fn http_post_aggregate_fail_send_cont_req() {
     assert_matches!(err, DapAbort::UnrecognizedAggregationJob);
 }
 
-#[tokio::test]
-async fn http_post_upload_fail_send_invalid_report() {
-    let t = Test::new();
+async_test_versions! { http_post_aggregate_fail_send_cont_req }
+
+async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -991,10 +1042,11 @@ async fn http_post_upload_fail_send_invalid_report() {
     );
 }
 
+async_test_versions! { http_post_upload_fail_send_invalid_report }
+
 // Test that the Leader rejects reports past the expiration date.
-#[tokio::test]
-async fn http_post_upload_task_expired() {
-    let t = Test::new();
+async fn http_post_upload_task_expired(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.expired_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1014,9 +1066,10 @@ async fn http_post_upload_task_expired() {
     );
 }
 
-#[tokio::test]
-async fn get_reports_empty_response() {
-    let t = Test::new();
+async_test_versions! { http_post_upload_task_expired }
+
+async fn get_reports_empty_response(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -1044,9 +1097,10 @@ async fn get_reports_empty_response() {
     assert_eq!(&returned_task_id, task_id);
 }
 
-#[tokio::test]
-async fn poll_collect_job_test_results() {
-    let t = Test::new();
+async_test_versions! { get_reports_empty_response }
+
+async fn poll_collect_job_test_results(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1112,9 +1166,10 @@ async fn poll_collect_job_test_results() {
     );
 }
 
-#[tokio::test]
-async fn http_post_collect_fail_invalid_batch_interval() {
-    let t = Test::new();
+async_test_versions! { poll_collect_job_test_results }
+
+async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1203,9 +1258,10 @@ async fn http_post_collect_fail_invalid_batch_interval() {
     assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into future".to_string()));
 }
 
-#[tokio::test]
-async fn http_post_collect_succeed_max_batch_interval() {
-    let t = Test::new();
+async_test_versions! { http_post_collect_fail_invalid_batch_interval }
+
+async fn http_post_collect_succeed_max_batch_interval(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1235,10 +1291,11 @@ async fn http_post_collect_succeed_max_batch_interval() {
     let _collect_uri = t.leader.http_post_collect(&req).await.unwrap();
 }
 
+async_test_versions! { http_post_collect_succeed_max_batch_interval }
+
 // Send a collect request with an overlapping batch interval.
-#[tokio::test]
-async fn http_post_collect_fail_overlapping_batch_interval() {
-    let t = Test::new();
+async fn http_post_collect_fail_overlapping_batch_interval(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1263,11 +1320,12 @@ async fn http_post_collect_fail_overlapping_batch_interval() {
     );
 }
 
+async_test_versions! { http_post_collect_fail_overlapping_batch_interval }
+
 // Test a successful collect request submission.
 // This checks that the Leader reponds with the collect ID with the ID associated to the request.
-#[tokio::test]
-async fn http_post_collect_success() {
-    let t = Test::new();
+async fn http_post_collect_success(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1310,11 +1368,12 @@ async fn http_post_collect_success() {
     );
 }
 
+async_test_versions! { http_post_collect_success }
+
 // Test that the Leader handles queries from the Collector properly.
-#[tokio::test]
-async fn http_post_collect_invalid_query() {
+async fn http_post_collect_invalid_query(version: DapVersion) {
     let mut rng = thread_rng();
-    let t = Test::new();
+    let t = Test::new(version);
 
     // Leader expects "time_interval" query, but Collector sent "fixed_size".
     let task_config = t
@@ -1328,7 +1387,7 @@ async fn http_post_collect_invalid_query() {
             &t.time_interval_task_id,
             CollectReq {
                 task_id: t.time_interval_task_id.clone(),
-                query: Query::FixedSize {
+                query: Query::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -1353,7 +1412,7 @@ async fn http_post_collect_invalid_query() {
             &t.fixed_size_task_id,
             CollectReq {
                 task_id: t.fixed_size_task_id.clone(),
-                query: Query::FixedSize {
+                query: Query::FixedSizeByBatchId {
                     batch_id: Id(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -1367,10 +1426,11 @@ async fn http_post_collect_invalid_query() {
     );
 }
 
+async_test_versions! { http_post_collect_invalid_query }
+
 // Test HTTP POST requests with a wrong DAP version.
-#[tokio::test]
-async fn http_post_fail_wrong_dap_version() {
-    let t = Test::new();
+async fn http_post_fail_wrong_dap_version(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1384,9 +1444,10 @@ async fn http_post_fail_wrong_dap_version() {
     assert_matches!(err, DapAbort::InvalidProtocolVersion);
 }
 
-#[tokio::test]
-async fn http_post_upload() {
-    let t = Test::new();
+async_test_versions! { http_post_fail_wrong_dap_version }
+
+async fn http_post_upload(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
     let report = t.gen_test_report(task_id).await;
@@ -1398,9 +1459,10 @@ async fn http_post_upload() {
         .expect("upload failed unexpectedly");
 }
 
-#[tokio::test]
-async fn e2e_time_interval() {
-    let t = Test::new();
+async_test_versions! { http_post_upload }
+
+async fn e2e_time_interval(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1418,9 +1480,10 @@ async fn e2e_time_interval() {
     t.run_col_job(task_id, &query).await.unwrap();
 }
 
-#[tokio::test]
-async fn e2e_fixed_size() {
-    let t = Test::new();
+async_test_versions! { e2e_time_interval }
+
+async fn e2e_fixed_size(version: DapVersion) {
+    let t = Test::new(version);
     let task_id = &t.fixed_size_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
@@ -1434,15 +1497,16 @@ async fn e2e_fixed_size() {
     t.run_agg_job(task_id).await.unwrap();
 
     // Collector: Create collection job and poll result.
-    let query = Query::FixedSize {
-        batch_id: t.leader.current_batch(task_id, &task_config).unwrap(),
+    let query = Query::FixedSizeByBatchId {
+        batch_id: t.leader.current_batch_id(task_id, &task_config).unwrap(),
     };
     t.run_col_job(task_id, &query).await.unwrap();
 }
 
-#[tokio::test]
-async fn e2e_taskprov() {
-    let t = Test::new();
+async_test_versions! { e2e_fixed_size }
+
+async fn e2e_taskprov(version: DapVersion) {
+    let t = Test::new(version);
     let vdaf = VdafConfig::Prio3(Prio3Config::Count);
 
     // Create the upload extension.
@@ -1450,10 +1514,10 @@ async fn e2e_taskprov() {
         task_info: "cool task".as_bytes().to_vec(),
         aggregator_endpoints: vec![
             taskprov::UrlBytes {
-                bytes: b"https://cool.biz/v02/".to_vec(),
+                bytes: b"https://cool.biz/".to_vec(),
             },
             taskprov::UrlBytes {
-                bytes: b"http://cool.com:8788/v02/".to_vec(),
+                bytes: b"http://cool.com:8788/".to_vec(),
             },
         ],
         query_config: taskprov::QueryConfig {
@@ -1499,16 +1563,17 @@ async fn e2e_taskprov() {
             vec![Extension::Taskprov {
                 payload: taskprov_ext_payload,
             }],
+            version,
         )
         .unwrap();
 
     let task_id = &report.task_id;
     let req = DapRequest {
-        version: DapVersion::Draft02,
+        version,
         media_type: Some(MEDIA_TYPE_REPORT),
         task_id: Some(task_id.clone()),
         payload: report.get_encoded(),
-        url: Url::parse("https://cool.biz/v02/upload").unwrap(),
+        url: Url::parse("https://cool.biz/upload").unwrap(),
         sender_auth: None,
     };
     t.leader.http_post_upload(&req).await.unwrap();
@@ -1520,8 +1585,10 @@ async fn e2e_taskprov() {
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
     // Collector: Create collection job and poll result.
-    let query = Query::FixedSize {
-        batch_id: t.leader.current_batch(task_id, &task_config).unwrap(),
+    let query = Query::FixedSizeByBatchId {
+        batch_id: t.leader.current_batch_id(task_id, &task_config).unwrap(),
     };
     t.run_col_job(task_id, &query).await.unwrap();
 }
+
+async_test_versions! { e2e_taskprov }

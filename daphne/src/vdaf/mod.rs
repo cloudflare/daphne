@@ -23,7 +23,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    VdafConfig,
+    DapVersion, VdafConfig,
 };
 use prio::{
     codec::{CodecError, Encode},
@@ -37,8 +37,10 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryInto};
 
-const CTX_INPUT_SHARE: &[u8] = b"dap-02 input share";
-const CTX_AGG_SHARE: &[u8] = b"dap-02 aggregate share";
+const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
+const CTX_INPUT_SHARE_DRAFT03: &[u8] = b"dap-03 input share";
+const CTX_AGG_SHARE_DRAFT02: &[u8] = b"dap-02 aggregate share";
+const CTX_AGG_SHARE_DRAFT03: &[u8] = b"dap-03 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -101,6 +103,14 @@ impl Encode for VdafAggregateShare {
     }
 }
 
+fn unimplemented_version_abort() -> DapAbort {
+    DapAbort::BadRequest("unimplemented version".to_string())
+}
+
+fn unimplemented_version() -> DapError {
+    DapError::Abort(unimplemented_version_abort())
+}
+
 impl VdafConfig {
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
@@ -148,6 +158,8 @@ impl VdafConfig {
     /// * `measurement` is the measurement.
     ///
     /// * `extensions` are the extensions.
+    ///
+    /// * `version` is the DapVersion to use.
     //
     // TODO(issue #100): Truncate the timestamp, as required in DAP-02.
     pub fn produce_report_with_extensions(
@@ -157,6 +169,7 @@ impl VdafConfig {
         task_id: &Id,
         measurement: DapMeasurement,
         extensions: Vec<Extension>,
+        version: DapVersion,
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
         let metadata = ReportMetadata {
@@ -175,10 +188,17 @@ impl VdafConfig {
             return Err(DapError::Fatal("unexpected number of HPKE configs".into()));
         }
 
-        const N: usize = CTX_INPUT_SHARE.len();
-        let mut info = [0; N + 2];
-        info[..N].copy_from_slice(CTX_INPUT_SHARE);
-        info[N] = CTX_ROLE_CLIENT; // Sender role (receiver role set below)
+        let input_share_text = match version {
+            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
+            DapVersion::Draft03 => CTX_INPUT_SHARE_DRAFT03,
+            _ => return Err(unimplemented_version()),
+        };
+        let n: usize = input_share_text.len();
+        let mut info = Vec::new();
+        info.reserve(n + 2);
+        info.extend_from_slice(input_share_text);
+        info.push(CTX_ROLE_CLIENT); // Sender role
+        info.push(CTX_ROLE_LEADER); // Receiver role placeholder; updated below.
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
@@ -192,7 +212,7 @@ impl VdafConfig {
             .zip(encoded_input_shares)
             .enumerate()
         {
-            info[N + 1] = if i == 0 {
+            info[n + 1] = if i == 0 {
                 CTX_ROLE_LEADER
             } else {
                 CTX_ROLE_HELPER
@@ -229,12 +249,15 @@ impl VdafConfig {
     /// * `task_id` is the DAP task for which this report is being generated.
     ///
     /// * `measurement` is the measurement.
+    ///
+    /// * `version` is the DapVersion to use.
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],
         time: Time,
         task_id: &Id,
         measurement: DapMeasurement,
+        version: DapVersion,
     ) -> Result<Report, DapError> {
         self.produce_report_with_extensions(
             hpke_config_list,
@@ -242,6 +265,7 @@ impl VdafConfig {
             task_id,
             measurement,
             Vec::new(),
+            version,
         )
     }
 
@@ -259,6 +283,8 @@ impl VdafConfig {
     /// * `report_id` is the report ID.
     ///
     /// * `encrypted_input_share` is the encrypted input share.
+    ///
+    /// * `version` is the DapVersion to use.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn consume_report_share(
         &self,
@@ -269,16 +295,23 @@ impl VdafConfig {
         metadata: &ReportMetadata,
         public_share: &[u8],
         encrypted_input_share: &HpkeCiphertext,
+        version: DapVersion,
     ) -> Result<(VdafState, VdafMessage), DapError> {
-        const N: usize = CTX_INPUT_SHARE.len();
-        let mut info = [0; N + 2];
-        info[..N].copy_from_slice(CTX_INPUT_SHARE);
-        info[N] = CTX_ROLE_CLIENT; // Sender role
-        info[N + 1] = if is_leader {
+        let input_share_text = match version {
+            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
+            DapVersion::Draft03 => CTX_INPUT_SHARE_DRAFT03,
+            _ => return Err(unimplemented_version()),
+        };
+        let n: usize = input_share_text.len();
+        let mut info = Vec::new();
+        info.reserve(n + 2);
+        info.extend_from_slice(input_share_text);
+        info.push(CTX_ROLE_CLIENT); // Sender role (receiver role set below)
+        info.push(if is_leader {
             CTX_ROLE_LEADER
         } else {
             CTX_ROLE_HELPER
-        }; // Receiver role
+        }); // Receiver role
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
@@ -330,6 +363,9 @@ impl VdafConfig {
     /// * `task_id` indicates the DAP task for which the set of reports are being aggregated.
     ///
     /// * `reports` is the set of reports uploaded by Clients.
+    ///
+    /// * `version` is the DapVersion to use.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn produce_agg_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
@@ -338,6 +374,7 @@ impl VdafConfig {
         agg_job_id: &Id,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
+        version: DapVersion,
     ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -371,6 +408,7 @@ impl VdafConfig {
                     &report.metadata,
                     &report.public_share,
                     &leader_share,
+                    version,
                 )
                 .await
             {
@@ -436,11 +474,14 @@ impl VdafConfig {
     /// * `early_rejects` is a tableindicating the set of reports in `agg_init_req` that the Helper
     /// knows in advance it must reject. Each key is the report ID and the corresponding value is
     /// the transition failure the Helper is to transmit.
+    ///
+    /// * `version` is the DapVersion to use.
     pub(crate) async fn handle_agg_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         verify_key: &VdafVerifyKey,
         agg_init_req: &AggregateInitializeReq,
+        version: DapVersion,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -461,6 +502,7 @@ impl VdafConfig {
                     &report_share.metadata,
                     &report_share.public_share,
                     &report_share.encrypted_input_share,
+                    version,
                 )
                 .await
             {
@@ -758,26 +800,32 @@ impl VdafConfig {
     /// * `batch_interval` is the batch interval for the aggregate share.
     ///
     /// * `agg_share` is the aggregate share.
+    ///
+    /// * `version` is the DapVersion to use.
     pub(crate) fn produce_leader_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
         batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
+        version: DapVersion,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(true, hpke_config, task_id, batch_sel, agg_share)
+        produce_encrypted_agg_share(true, hpke_config, task_id, batch_sel, agg_share, version)
     }
 
     /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
     /// aggregate-share request.
+    ///
+    /// * `version` is the DapVersion to use.
     pub(crate) fn produce_helper_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &Id,
         batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
+        version: DapVersion,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(false, hpke_config, task_id, batch_sel, agg_share)
+        produce_encrypted_agg_share(false, hpke_config, task_id, batch_sel, agg_share, version)
     }
 
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -793,6 +841,8 @@ impl VdafConfig {
     ///
     /// * `encrypted_agg_shares` is the set of encrypted aggregate shares produced by the
     /// Aggregators. The first encrypted aggregate shares must be the Leader's.
+    ///
+    /// * `version` is the DapVersion to use.
     //
     // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
     pub async fn consume_encrypted_agg_shares(
@@ -802,11 +852,19 @@ impl VdafConfig {
         batch_sel: &BatchSelector,
         report_count: u64,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
+        version: DapVersion,
     ) -> Result<DapAggregateResult, DapError> {
-        const N: usize = CTX_AGG_SHARE.len();
-        let mut info = [0; N + 2];
-        info[..N].copy_from_slice(CTX_AGG_SHARE);
-        info[N + 1] = CTX_ROLE_COLLECTOR; // Receiver role (sender role set below)
+        let agg_share_text = match version {
+            DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
+            DapVersion::Draft03 => CTX_AGG_SHARE_DRAFT03,
+            _ => return Err(unimplemented_version()),
+        };
+        let n: usize = agg_share_text.len();
+        let mut info = Vec::new();
+        info.reserve(n + 2);
+        info.extend_from_slice(agg_share_text);
+        info.push(CTX_ROLE_LEADER); // Sender role placeholder
+        info.push(CTX_ROLE_COLLECTOR); // Receiver role
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad);
@@ -814,7 +872,7 @@ impl VdafConfig {
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
-            info[N] = if i == 0 {
+            info[n] = if i == 0 {
                 CTX_ROLE_LEADER
             } else {
                 CTX_ROLE_HELPER
@@ -850,6 +908,7 @@ fn produce_encrypted_agg_share(
     task_id: &Id,
     batch_sel: &BatchSelector,
     agg_share: &DapAggregateShare,
+    version: DapVersion,
 ) -> Result<HpkeCiphertext, DapAbort> {
     let agg_share_data = agg_share
         .data
@@ -857,15 +916,21 @@ fn produce_encrypted_agg_share(
         .ok_or_else(|| DapError::fatal("empty aggregate share"))?
         .get_encoded();
 
-    const N: usize = CTX_AGG_SHARE.len();
-    let mut info = [0; N + 2];
-    info[..N].copy_from_slice(CTX_AGG_SHARE);
-    info[N] = if is_leader {
+    let agg_share_text = match version {
+        DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
+        DapVersion::Draft03 => CTX_AGG_SHARE_DRAFT03,
+        _ => return Err(unimplemented_version_abort()),
+    };
+    let n: usize = agg_share_text.len();
+    let mut info = Vec::new();
+    info.reserve(n + 2);
+    info.extend_from_slice(agg_share_text);
+    info.push(if is_leader {
         CTX_ROLE_LEADER
     } else {
         CTX_ROLE_HELPER
-    }; // Sender role
-    info[N + 1] = CTX_ROLE_COLLECTOR; // Receiver role
+    }); // Sender role
+    info.push(CTX_ROLE_COLLECTOR); // Receiver role
 
     // TODO spec: Consider adding agg param to AAD.
     let mut aad = Vec::with_capacity(40);

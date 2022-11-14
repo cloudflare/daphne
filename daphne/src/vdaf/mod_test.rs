@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    async_test_version, async_test_versions,
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
         HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, PartialBatchSelector,
         Report, ReportId, Transition, TransitionFailure, TransitionVar,
     },
-    DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
-    DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState, VdafVerifyKey,
+    test_version, test_versions, DapAbort, DapAggregateResult, DapAggregateShare, DapError,
+    DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted,
+    DapMeasurement, DapOutputShare, DapVersion, Prio3Config, VdafAggregateShare, VdafConfig,
+    VdafMessage, VdafState, VdafVerifyKey,
 };
 use assert_matches::assert_matches;
+use paste::paste;
 use prio::vdaf::{
     prio3::Prio3, Aggregatable, Aggregator as VdafAggregator, Collector as VdafCollector,
     PrepareTransition,
@@ -63,9 +66,8 @@ impl<M: Debug> DapHelperTransition<M> {
 // TODO Exercise all of the Prio3 variants and not just Count.
 const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
 
-#[tokio::test]
-async fn roundtrip_report() {
-    let t = Test::new(TEST_VDAF);
+async fn roundtrip_report(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
     let report = t
         .vdaf
         .produce_report(
@@ -73,6 +75,7 @@ async fn roundtrip_report() {
             t.now,
             &t.task_id,
             DapMeasurement::U64(1),
+            version,
         )
         .unwrap();
 
@@ -85,6 +88,7 @@ async fn roundtrip_report() {
             &report.metadata,
             &report.public_share,
             &report.encrypted_input_shares[0],
+            version,
         )
         .await
         .unwrap();
@@ -98,6 +102,7 @@ async fn roundtrip_report() {
             &report.metadata,
             &report.public_share,
             &report.encrypted_input_shares[1],
+            version,
         )
         .await
         .unwrap();
@@ -138,9 +143,10 @@ async fn roundtrip_report() {
     }
 }
 
-#[test]
-fn roundtrip_report_unsupported_hpke_suite() {
-    let t = Test::new(TEST_VDAF);
+async_test_versions! { roundtrip_report }
+
+fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
 
     // The helper's HPKE config indicates a KEM type no supported by the client.
     let unsupported_hpke_config_list = vec![
@@ -159,13 +165,15 @@ fn roundtrip_report_unsupported_hpke_suite() {
         t.now,
         &t.task_id,
         DapMeasurement::U64(1),
+        version,
     );
     assert_matches!(res, Err(DapError::Fatal(s)) => assert_eq!(s, "HPKE ciphersuite not implemented (999, 1, 1)"));
 }
 
-#[tokio::test]
-async fn agg_init_req() {
-    let mut t = Test::new(TEST_VDAF);
+test_versions! { roundtrip_report_unsupported_hpke_suite }
+
+async fn agg_init_req(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
         DapMeasurement::U64(0),
@@ -192,9 +200,10 @@ async fn agg_init_req() {
     }
 }
 
-#[tokio::test]
-async fn agg_init_req_fail_hpke_decrypt_err() {
-    let t = Test::new(TEST_VDAF);
+async_test_versions! { agg_init_req }
+
+async fn agg_init_req_fail_hpke_decrypt_err(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Simulate HPKE decryption error of leader's report share.
@@ -206,9 +215,10 @@ async fn agg_init_req_fail_hpke_decrypt_err() {
     );
 }
 
-#[tokio::test]
-async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id() {
-    let t = Test::new(TEST_VDAF);
+async_test_versions! { agg_init_req_fail_hpke_decrypt_err }
+
+async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Client tries to send Leader encrypted input with incorrect config ID.
@@ -220,9 +230,10 @@ async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_fail_hpke_decrypt_err() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_init_req_fail_hpke_decrypt_err_wrong_config_id }
+
+async fn agg_resp_fail_hpke_decrypt_err(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Simulate HPKE decryption error of helper's report share.
@@ -241,9 +252,10 @@ async fn agg_resp_fail_hpke_decrypt_err() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_fail_hpke_decrypt_err_wrong_id() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_resp_fail_hpke_decrypt_err }
+
+async fn agg_resp_fail_hpke_decrypt_err_wrong_id(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
     // Client tries to send Helper encrypted input with incorrect config ID.
@@ -262,9 +274,10 @@ async fn agg_resp_fail_hpke_decrypt_err_wrong_id() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_abort_transition_out_of_order() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_resp_fail_hpke_decrypt_err_wrong_id }
+
+async fn agg_resp_abort_transition_out_of_order(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -280,9 +293,10 @@ async fn agg_resp_abort_transition_out_of_order() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_abort_report_id_repeated() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_resp_abort_transition_out_of_order }
+
+async fn agg_resp_abort_report_id_repeated(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -297,10 +311,11 @@ async fn agg_resp_abort_report_id_repeated() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_abort_unrecognized_report_id() {
+async_test_versions! { agg_resp_abort_report_id_repeated }
+
+async fn agg_resp_abort_unrecognized_report_id(version: DapVersion) {
     let mut rng = thread_rng();
-    let mut t = Test::new(TEST_VDAF);
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -317,9 +332,10 @@ async fn agg_resp_abort_unrecognized_report_id() {
     );
 }
 
-#[tokio::test]
-async fn agg_resp_abort_invalid_transition() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_resp_abort_unrecognized_report_id }
+
+async fn agg_resp_abort_invalid_transition(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -333,9 +349,10 @@ async fn agg_resp_abort_invalid_transition() {
     );
 }
 
-#[tokio::test]
-async fn agg_cont_req() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_resp_abort_invalid_transition }
+
+async fn agg_cont_req(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
         DapMeasurement::U64(1),
@@ -392,9 +409,10 @@ async fn agg_cont_req() {
     );
 }
 
-#[tokio::test]
-async fn agg_cont_req_skip_vdaf_prep_error() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_cont_req }
+
+async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
         DapMeasurement::U64(1),
@@ -429,10 +447,11 @@ async fn agg_cont_req_skip_vdaf_prep_error() {
     );
 }
 
-#[tokio::test]
-async fn agg_cont_abort_unrecognized_report_id() {
+async_test_versions! { agg_cont_req_skip_vdaf_prep_error }
+
+async fn agg_cont_abort_unrecognized_report_id(version: DapVersion) {
     let mut rng = thread_rng();
-    let mut t = Test::new(TEST_VDAF);
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -455,9 +474,10 @@ async fn agg_cont_abort_unrecognized_report_id() {
     );
 }
 
-#[tokio::test]
-async fn agg_cont_req_abort_transition_out_of_order() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_cont_abort_unrecognized_report_id }
+
+async fn agg_cont_req_abort_transition_out_of_order(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -476,9 +496,10 @@ async fn agg_cont_req_abort_transition_out_of_order() {
     );
 }
 
-#[tokio::test]
-async fn agg_cont_req_abort_report_id_repeated() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { agg_cont_req_abort_transition_out_of_order }
+
+async fn agg_cont_req_abort_report_id_repeated(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
@@ -496,9 +517,10 @@ async fn agg_cont_req_abort_report_id_repeated() {
     );
 }
 
-#[tokio::test]
-async fn encrypted_agg_share() {
-    let t = Test::new(TEST_VDAF);
+async_test_versions! { agg_cont_req_abort_report_id_repeated }
+
+async fn encrypted_agg_share(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
     let leader_agg_share = DapAggregateShare {
         report_count: 50,
         checksum: [0; 32],
@@ -531,9 +553,10 @@ async fn encrypted_agg_share() {
     assert_eq!(agg_res, DapAggregateResult::U64(32));
 }
 
-#[tokio::test]
-async fn helper_state_serialization() {
-    let mut t = Test::new(TEST_VDAF);
+async_test_versions! { encrypted_agg_share }
+
+async fn helper_state_serialization(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
         DapMeasurement::U64(1),
@@ -551,6 +574,8 @@ async fn helper_state_serialization() {
     assert!(DapHelperState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())
 }
 
+async_test_versions! { helper_state_serialization }
+
 pub(crate) struct Test<'a> {
     now: u64,
     vdaf: &'a VdafConfig,
@@ -563,10 +588,11 @@ pub(crate) struct Test<'a> {
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_config: HpkeConfig,
     collector_hpke_receiver_config: HpkeReceiverConfig,
+    version: DapVersion,
 }
 
 impl<'a> Test<'a> {
-    pub(crate) fn new(vdaf: &'a VdafConfig) -> Test {
+    pub(crate) fn new(vdaf: &'a VdafConfig, version: DapVersion) -> Test {
         let mut rng = thread_rng();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -597,6 +623,7 @@ impl<'a> Test<'a> {
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
             collector_hpke_config,
             collector_hpke_receiver_config,
+            version,
         }
     }
 
@@ -611,6 +638,7 @@ impl<'a> Test<'a> {
                         self.now,
                         &self.task_id,
                         measurement,
+                        self.version,
                     )
                     .unwrap(),
             );
@@ -630,6 +658,7 @@ impl<'a> Test<'a> {
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
+                self.version,
             )
             .await
             .unwrap()
@@ -645,6 +674,7 @@ impl<'a> Test<'a> {
                 &self.helper_hpke_receiver_config,
                 &self.vdaf_verify_key,
                 &agg_init_req,
+                self.version,
             )
             .await
             .unwrap();
@@ -723,6 +753,7 @@ impl<'a> Test<'a> {
                 &self.task_id,
                 batch_selector,
                 agg_share,
+                self.version,
             )
             .unwrap()
     }
@@ -738,6 +769,7 @@ impl<'a> Test<'a> {
                 &self.task_id,
                 batch_selector,
                 agg_share,
+                self.version,
             )
             .unwrap()
     }
@@ -755,6 +787,7 @@ impl<'a> Test<'a> {
                 batch_selector,
                 report_count,
                 enc_agg_shares,
+                self.version,
             )
             .await
             .unwrap()

@@ -14,7 +14,7 @@ use crate::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-/// A bearer token used for authorizing DAP requests as specified in draft-ietf-ppm-dap-02.
+/// A bearer token used for authorizing DAP requests.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BearerToken {
     raw: String,

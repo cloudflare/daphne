@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "dapf"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "daphne"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_matches",
  "async-trait",
@@ -436,6 +436,7 @@ dependencies = [
  "hex",
  "hpke",
  "matchit 0.6.0",
+ "paste",
  "prio",
  "rand",
  "ring",
@@ -448,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "daphne-worker-test"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_matches",
  "base64",
@@ -459,6 +460,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "paste",
  "prio",
  "rand",
  "reqwest",
@@ -472,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "daphne_worker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1211,6 +1213,12 @@ checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
 dependencies = [
  "regex",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "percent-encoding"
