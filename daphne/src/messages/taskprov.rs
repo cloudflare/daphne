@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Messages in the taskprov extension to the DAP protocol, as
-//! defined in draft-wang-ppm-dap-taskprov-01.
+//! defined in draft-wang-ppm-dap-taskprov-02.
 
 use crate::messages::{
     decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
@@ -217,10 +217,10 @@ impl QueryConfig {
 
 impl ParameterizedEncode<TaskprovVersion> for QueryConfig {
     fn encode_with_param(&self, _encoding_parameter: &TaskprovVersion, bytes: &mut Vec<u8>) {
+        self.encode_query_type(bytes);
         self.time_precision.encode(bytes);
         self.max_batch_query_count.encode(bytes);
         self.min_batch_size.encode(bytes);
-        self.encode_query_type(bytes);
         match &self.var {
             QueryConfigVar::TimeInterval => (),
             QueryConfigVar::FixedSize { max_batch_size } => {
@@ -235,10 +235,10 @@ impl ParameterizedDecode<TaskprovVersion> for QueryConfig {
         _decoding_parameter: &TaskprovVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let query_type = u8::decode(bytes)?;
         let time_precision = Duration::decode(bytes)?;
         let max_batch_query_count = u16::decode(bytes)?;
         let min_batch_size = u32::decode(bytes)?;
-        let query_type = u8::decode(bytes)?;
         let var = match query_type {
             QUERY_TYPE_TIME_INTERVAL => Ok(QueryConfigVar::TimeInterval),
             QUERY_TYPE_FIXED_SIZE => Ok(QueryConfigVar::FixedSize {
