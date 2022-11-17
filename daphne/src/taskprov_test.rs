@@ -21,7 +21,7 @@ fn check_vdaf_key_computation() {
         0x76, 0x1d,
     ];
     let vk = compute_vdaf_verify_key(
-        TaskprovVersion::Draft01,
+        TaskprovVersion::Draft02,
         &verify_key_init,
         &task_id,
         VdafType::Prio3Aes128Count,

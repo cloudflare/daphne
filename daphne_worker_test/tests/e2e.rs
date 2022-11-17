@@ -309,8 +309,8 @@ async fn e2e_leader_upload() {
             var: VdafTypeVar::Prio3Aes128Count,
         },
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
-    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -332,10 +332,10 @@ async fn e2e_leader_upload() {
     .await;
 
     // Generate and upload a report with taskprov but with the wrong id
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
-    let task_id = compute_task_id(TaskprovVersion::Draft01, &bad_payload);
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &bad_payload).unwrap();
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -360,8 +360,8 @@ async fn e2e_leader_upload() {
     .await;
 
     // Generate and upload a report with two copies of the taskprov extension
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
-    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
     let extensions = vec![
         Extension::Taskprov {
             payload: payload.clone(),
@@ -413,8 +413,8 @@ async fn e2e_leader_upload() {
             var: VdafTypeVar::Prio3Aes128Count,
         },
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
-    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -1134,11 +1134,11 @@ async fn e2e_leader_collect_taskprov_ok() {
             var: VdafTypeVar::Prio3Aes128Sum { bit_length: 10 },
         },
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft01);
-    let task_id = compute_task_id(TaskprovVersion::Draft01, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
     let task_config = DapTaskConfig::try_from_taskprov(
         DapVersion::Draft02,
-        TaskprovVersion::Draft01,
+        TaskprovVersion::Draft02,
         &task_id.clone(),
         taskprov_task_config.clone(),
         &t.taskprov_vdaf_verify_key_init,

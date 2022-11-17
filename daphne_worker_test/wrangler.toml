@@ -33,7 +33,7 @@ DAP_GLOBAL_CONFIG = """{
      "max_batch_interval_end": 259200,
      "supported_hpke_kems": ["x25519_hkdf_sha256"],
      "allow_taskprov": true,
-     "taskprov_version": "v01"
+     "taskprov_version": "v02"
 }"""
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
@@ -89,7 +89,7 @@ DAP_GLOBAL_CONFIG = """{
   "max_batch_interval_end": 259200,
   "supported_hpke_kems": ["x25519_hkdf_sha256"],
   "allow_taskprov": true,
-  "taskprov_version": "v01"
+  "taskprov_version": "v02"
 }"""
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
