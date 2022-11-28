@@ -11,9 +11,9 @@ use crate::{
         PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
     },
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
-    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
-    DapVersion,
+    taskprov, DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
+    DapGlobalConfig, DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
+    DapTaskConfig, DapVersion,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -66,7 +66,7 @@ pub(crate) struct MockAggregatorReportSelector(pub(crate) Id);
 pub(crate) struct MockAggregator {
     pub(crate) now: Time,
     pub(crate) global_config: DapGlobalConfig,
-    pub(crate) tasks: HashMap<Id, DapTaskConfig>,
+    pub(crate) tasks: Arc<Mutex<HashMap<Id, DapTaskConfig>>>,
     pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub(crate) leader_token: BearerToken,
     pub(crate) collector_token: Option<BearerToken>, // Not set by Helper
@@ -74,6 +74,8 @@ pub(crate) struct MockAggregator {
     pub(crate) leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<DapBatchBucketOwned, AggStore>>>>,
+    pub(crate) collector_hpke_config: HpkeConfig,
+    pub(crate) taskprov_vdaf_verify_key_init: Vec<u8>,
 }
 
 #[allow(dead_code)]
@@ -117,11 +119,12 @@ impl MockAggregator {
     /// Assign the report to a bucket.
     ///
     /// TODO(cjpatton) Figure out if we can avoid returning and owned thing here.
-    fn assign_report_to_bucket(&self, report: &Report) -> Option<DapBatchBucketOwned> {
+    async fn assign_report_to_bucket(&self, report: &Report) -> Option<DapBatchBucketOwned> {
         let mut rng = thread_rng();
         let task_config = self
-            .tasks
-            .get(&report.task_id)
+            .get_task_config_for(Cow::Borrowed(&report.task_id))
+            .await
+            .unwrap()
             .expect("tasks: unrecognized task");
 
         match task_config.query {
@@ -161,9 +164,8 @@ impl MockAggregator {
 
     /// Return the ID of the batch currently being filled with reports. Panics unless the task is
     /// configured for fixed-size queries.
-    pub(crate) fn current_batch(&self, task_id: &Id) -> Option<Id> {
+    pub(crate) fn current_batch(&self, task_id: &Id, task_config: &DapTaskConfig) -> Option<Id> {
         // Calling current_batch() is only well-defined for fixed-size tasks.
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         assert_matches!(task_config.query, DapQueryConfig::FixedSize { .. });
 
         let guard = self
@@ -179,6 +181,13 @@ impl MockAggregator {
             .front()
             .cloned() // TODO(cjpatton) Avoid clone by returning MutexGuard
             .map(|(batch_id, _report_count)| batch_id)
+    }
+
+    pub(crate) async fn unchecked_get_task_config(&self, task_id: &Id) -> DapTaskConfig {
+        self.get_task_config_for(Cow::Borrowed(task_id))
+            .await
+            .expect("encountered unexpected error")
+            .expect("missing task config")
     }
 }
 
@@ -207,11 +216,17 @@ impl<'a> BearerTokenProvider<'a> for MockAggregator {
     }
 
     fn is_taskprov_leader_bearer_token(&self, _token: &BearerToken) -> bool {
-        panic!("MockAggregator does not implement the taskprov extension");
+        // MockAggregator currently uses the same token for all tasks, regardless of how the task
+        // is configured. As a result, we don't expect BearerTokenProver::bearer_token_authorized()
+        // to ever reach this point.
+        unreachable!("did not expect to check bearer token");
     }
 
     fn is_taskprov_collector_bearer_token(&self, _token: &BearerToken) -> bool {
-        panic!("MockAggregator does not implement the taskprov extension");
+        // MockAggregator currently uses the same token for all tasks, regardless of how the task
+        // is configured. As a result, we don't expect BearerTokenProver::bearer_token_authorized()
+        // to ever reach this point.
+        unreachable!("did not expect to check bearer token");
     }
 }
 
@@ -280,7 +295,10 @@ impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for MockAggregator
 where
     'srv: 'req,
 {
-    type WrappedDapTaskConfig = &'req DapTaskConfig;
+    // The lifetimes on the traits ensure that we can return a reference to a task config stored by
+    // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
+    // clones the task config as needed.
+    type WrappedDapTaskConfig = DapTaskConfig;
 
     async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
         self.bearer_token_authorized(req).await
@@ -291,16 +309,55 @@ where
     }
 
     fn taskprov_opt_in_decision(&self, _task_config: &DapTaskConfig) -> Result<bool, DapError> {
-        panic!("MockAggregator does not implement the taskprov extension")
+        Ok(true)
     }
 
     async fn get_task_config_considering_taskprov(
         &'srv self,
-        _version: DapVersion,
+        version: DapVersion,
         task_id: Cow<'req, Id>,
-        _metadata: Option<&ReportMetadata>,
-    ) -> Result<Option<&'req DapTaskConfig>, DapError> {
-        Ok(self.tasks.get(task_id.as_ref()))
+        metadata: Option<&ReportMetadata>,
+    ) -> Result<Option<DapTaskConfig>, DapError> {
+        let taskprov_version = self.global_config.taskprov_version;
+
+        // Before looking up the task configuration, first check if it needs to be configured from
+        // the current request.
+        if self.get_global_config().allow_taskprov
+            && metadata.is_some()
+            && metadata.unwrap().is_taskprov(taskprov_version, &task_id)
+        {
+            if let Some(taskprov_task_config) = taskprov::get_taskprov_task_config(
+                taskprov_version,
+                task_id.as_ref(),
+                metadata.unwrap(),
+            )? {
+                let task_config = DapTaskConfig::try_from_taskprov(
+                    version,
+                    self.global_config.taskprov_version,
+                    task_id.as_ref(),
+                    taskprov_task_config,
+                    &self.taskprov_vdaf_verify_key_init,
+                    &self.collector_hpke_config,
+                )?;
+
+                let mut tasks = self.tasks.lock().expect("tasks: lock failed");
+                if tasks.get(task_id.as_ref()).is_none() {
+                    // Decide whether to opt-in to the task.
+                    if !self.taskprov_opt_in_decision(&task_config)? {
+                        return Err(DapError::Abort(DapAbort::InvalidTask));
+                    }
+
+                    tasks
+                        .deref_mut()
+                        .insert(task_id.into_owned(), task_config.clone());
+                }
+
+                return Ok(Some(task_config));
+            }
+        }
+
+        let tasks = self.tasks.lock().expect("tasks: lock failed");
+        Ok(tasks.get(task_id.as_ref()).cloned())
     }
 
     fn get_current_time(&self) -> Time {
@@ -315,8 +372,12 @@ where
         task_id: &Id,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(Cow::Borrowed(task_id))
+            .await
+            .unwrap()
+            .expect("tasks: unrecognized task");
         let guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         let agg_store = if let Some(agg_store) = guard.get(task_id) {
             agg_store
         } else {
@@ -376,9 +437,13 @@ where
         task_id: &Id,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
+        let task_config = self
+            .get_task_config_for(Cow::Borrowed(task_id))
+            .await
+            .unwrap()
+            .expect("tasks: unrecognized task");
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
@@ -401,7 +466,11 @@ where
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
     ) -> Result<HashMap<ReportId, TransitionFailure>, DapError> {
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
+        let task_config = self
+            .get_task_config_for(Cow::Borrowed(task_id))
+            .await
+            .unwrap()
+            .expect("tasks: unrecognized task");
         let span = task_config.batch_span_for_meta(part_batch_sel, report_meta)?;
         let mut early_fails = HashMap::new();
         for (bucket, report_meta) in span.iter() {
@@ -432,9 +501,9 @@ where
         task_id: &Id,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
+        let task_config = self.unchecked_get_task_config(task_id).await;
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             if let Some(inner_agg_store) = agg_store.get_mut(&bucket.to_owned_bucket()) {
@@ -521,6 +590,7 @@ where
     async fn put_report(&self, report: &Report) -> Result<(), DapError> {
         let bucket = self
             .assign_report_to_bucket(report)
+            .await
             .expect("could not determine batch for report");
 
         // Check whether Report has been collected or replayed.
@@ -550,12 +620,12 @@ where
         &self,
         report_sel: &MockAggregatorReportSelector,
     ) -> Result<HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>>, DapError> {
+        let task_id = &report_sel.0;
+        let task_config = self.unchecked_get_task_config(task_id).await;
         let mut guard = self
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        let task_id = &report_sel.0;
-        let task_config = self.tasks.get(task_id).expect("tasks: unrecognized task");
         let report_store = guard.entry(task_id.clone()).or_default();
 
         // For the task indicated by the report selector, choose a single report to aggregate.
@@ -576,7 +646,7 @@ where
             }
             DapQueryConfig::FixedSize { .. } => {
                 // Drain the batch that is being filled.
-                let bucket = if let Some(batch_id) = self.current_batch(task_id) {
+                let bucket = if let Some(batch_id) = self.current_batch(task_id, &task_config) {
                     DapBatchBucketOwned::FixedSize { batch_id }
                 } else {
                     return Ok(HashMap::default());
