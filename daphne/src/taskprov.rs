@@ -78,11 +78,11 @@ pub(crate) fn expand_prk_into_verify_key(
     vdaf_type: VdafType,
 ) -> VdafVerifyKey {
     let info = [task_id.as_ref()];
+    // This expand(), and the associated fill() below can only fail if the length is wrong,
+    // and it won't be, so we unwrap().
+    let okm = prk.expand(&info, vdaf_type).unwrap();
     match &vdaf_type {
         VdafType::Prio3Aes128Count | VdafType::Prio3Aes128Sum | VdafType::Prio3Aes128Histogram => {
-            // This expand(), and the associated fill() below can only fail if the length is wrong,
-            // and it won't be, so we unwrap().
-            let okm = prk.expand(&info, vdaf_type.clone()).unwrap();
             let mut bytes = [0u8; 16];
             okm.fill(&mut bytes[..]).unwrap();
             VdafVerifyKey::Prio3(bytes)
@@ -175,7 +175,9 @@ impl From<VdafTypeVar> for VdafConfig {
             VdafTypeVar::Prio3Aes128Sum { bit_length } => VdafConfig::Prio3(Prio3Config::Sum {
                 bits: bit_length.into(),
             }),
-            _ => panic!("poplar1 is not implemented"),
+            VdafTypeVar::Poplar1Aes128 { .. } | VdafTypeVar::NotImplemented(..) => {
+                unreachable!("VDAF not implemented")
+            }
         }
     }
 }
