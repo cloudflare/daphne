@@ -27,7 +27,7 @@ const VDAF_TYPE_POPLAR1_AES128: u32 = 0x00001000; // The gap from the previous c
 const DP_MECHANISM_NONE: u8 = 0x01;
 
 /// A VDAF type.
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VdafType {
     Prio3Aes128Count,
