@@ -77,6 +77,7 @@ preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
 # production. In particular, they will not be passed as environment variables
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+DAP_ADMIN_BEARER_TOKEN = "administrator bearer token" # SECRET
 DAP_AGGREGATOR_ROLE = "helper"
 DAP_BASE_URL = "http://127.0.0.1:8788/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
