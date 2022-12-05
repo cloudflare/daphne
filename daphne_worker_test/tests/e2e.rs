@@ -24,6 +24,7 @@ use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
+use url::Url;
 
 // Redefine async_test_version locally because we want a
 // cfg_attr as well.
@@ -1381,3 +1382,50 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
 }
 
 async_test_versions! { e2e_leader_collect_taskprov_ok }
+
+async fn e2e_helper_admin_add_task(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
+
+    let add_task_cmd = serde_json::json!({
+        "collector_hpke_config": "kwAgAAEAAQAgAPjfKNRNrnodTEuoCKA5qAOTaWOmVlmNVyAXOL6__20",
+        "leader": format!("http://cool.leader/{}/", version.as_ref()),
+        "helper": format!("https:/awesome.helper.web:8788/{}/", version.as_ref()),
+        "leader_authentication_token": "leader bearer token",
+        "min_batch_size": 10,
+        "query_type": 1,
+        "role": "helper",
+        "task_expiration": 1670880698,
+        "task_id": "GNsYenwC_BMh9QddDHjVfvuhKKyvJZlt24FP3hubplw",
+        "time_precision": 3600,
+        "vdaf": {
+            "bits":"10",
+            "type":"Prio3Aes128Sum"
+        },
+        "verify_key": "y4e6alnJMQ0MZTvdJRJx5Q"
+    });
+
+    let url = Url::parse("http://127.0.0.1:8788/task").unwrap();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::HeaderName::from_lowercase(b"x-daphne-worker-admin-bearer-token").unwrap(),
+        "administrator bearer token".parse().unwrap(),
+    );
+    let resp = t
+        .http_client()
+        .post(url.clone())
+        .json(&add_task_cmd)
+        .headers(headers)
+        .send()
+        .await
+        .expect("request failed");
+    if resp.status() != 200 {
+        panic!(
+            "request to {} failed: {}: {}",
+            url,
+            resp.status(),
+            resp.text().await.unwrap()
+        );
+    }
+}
+
+async_test_versions! { e2e_helper_admin_add_task }

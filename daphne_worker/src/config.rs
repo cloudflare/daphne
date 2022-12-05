@@ -105,6 +105,9 @@ pub(crate) struct DaphneWorkerConfig<D> {
 
     /// Default DAP version to use if not specified by the API URL
     pub(crate) default_version: DapVersion,
+
+    /// Admin bearer token. If configured, it is used to authorize requests from the administrator.
+    pub(crate) admin_token: Option<BearerToken>,
 }
 
 impl<D> DaphneWorkerConfig<D> {
@@ -202,6 +205,14 @@ impl<D> DaphneWorkerConfig<D> {
             None
         };
 
+        let admin_token = match ctx.secret("DAP_ADMIN_BEARER_TOKEN") {
+            Ok(raw) => Some(BearerToken::from(raw.to_string())),
+            Err(err) => {
+                console_log!("DAP_ADMIN_BEARER_TOKEN not configured: {:?}", err);
+                None
+            }
+        };
+
         Ok(Self {
             ctx: Some(ctx),
             client,
@@ -217,6 +228,7 @@ impl<D> DaphneWorkerConfig<D> {
             is_leader,
             taskprov_config,
             default_version,
+            admin_token,
         })
     }
 

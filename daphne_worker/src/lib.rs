@@ -153,6 +153,7 @@
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
 use daphne::{
+    auth::BearerToken,
     constants,
     messages::{Duration, Id, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
@@ -217,16 +218,38 @@ impl DaphneWorkerRouter {
     //
     // TODO Document endpoints that aren't defined in the DAP spec
     pub async fn handle_request(&self, req: Request, env: Env) -> Result<Response> {
-        let router = Router::new().get_async("/:version/hpke_config", |req, ctx| async move {
-            let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-            let req = config.worker_request_to_dap(req).await?;
+        let router = Router::new()
+            .get_async("/:version/hpke_config", |req, ctx| async move {
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                let req = config.worker_request_to_dap(req).await?;
 
-            // TODO(cjpatton) Have this method return a DapResponse.
-            match config.http_get_hpke_config(&req).await {
-                Ok(req) => dap_response_to_worker(req),
-                Err(e) => abort(e),
-            }
-        });
+                // TODO(cjpatton) Have this method return a DapResponse.
+                match config.http_get_hpke_config(&req).await {
+                    Ok(req) => dap_response_to_worker(req),
+                    Err(e) => abort(e),
+                }
+            })
+            .post_async("/task", |mut req, ctx| async move {
+                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                let admin_token = req
+                    .headers()
+                    .get("X-Daphne-Worker-Admin-Bearer-Token")?
+                    .map(BearerToken::from);
+
+                if config.admin_token.is_none() {
+                    return Response::error("admin not configured", 400);
+                }
+
+                if admin_token.is_none() || admin_token != config.admin_token {
+                    return Response::error("missing or invalid bearer token for admin", 401);
+                }
+
+                let cmd: InternalTestAddTask = req.json().await?;
+                config
+                    .internal_add_task(config.default_version, cmd)
+                    .await?;
+                Response::empty()
+            });
 
         let router = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_ref() {
             "leader" => {
