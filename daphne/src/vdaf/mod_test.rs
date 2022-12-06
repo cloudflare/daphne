@@ -15,6 +15,7 @@ use crate::{
     VdafMessage, VdafState, VdafVerifyKey,
 };
 use assert_matches::assert_matches;
+use hpke_rs::HpkePublicKey;
 use paste::paste;
 use prio::vdaf::{
     prio3::Prio3, Aggregatable, Aggregator as VdafAggregator, Collector as VdafCollector,
@@ -156,7 +157,7 @@ fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
             kem_id: HpkeKemId::NotImplemented(999),
             kdf_id: HpkeKdfId::HkdfSha256,
             aead_id: HpkeAeadId::Aes128Gcm,
-            public_key: b"some KEM public key".to_vec(),
+            public_key: HpkePublicKey::from(b"some KEM public key".to_vec()),
         },
     ];
 

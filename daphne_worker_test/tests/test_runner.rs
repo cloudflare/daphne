@@ -15,6 +15,7 @@ use daphne::{
 use daphne_worker::DaphneWorkerReportSelector;
 #[cfg(feature = "test_janus")]
 use futures::channel::oneshot::Sender;
+use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -130,16 +131,16 @@ impl TestRunner {
         };
         let taskprov_vdaf_verify_key_init =
             hex::decode("0074a5dd6e9dac501f73f7a961193b2b").unwrap();
-        let taskprov_collector_hpke_receiver = HpkeReceiverConfig::new(
+        let taskprov_collector_hpke_receiver = HpkeReceiverConfig::try_from((
             HpkeConfig {
                 id: 23,
                 kem_id: HpkeKemId::P256HkdfSha256,
                 kdf_id: HpkeKdfId::HkdfSha256,
                 aead_id: HpkeAeadId::Aes128Gcm,
-                public_key: hex::decode("047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466").unwrap()
+                public_key: HpkePublicKey::from(hex::decode("047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466").unwrap())
             },
-            hex::decode("9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e").unwrap()
-        );
+            HpkePrivateKey::from(hex::decode("9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e").unwrap())
+        )).expect("bad hpke configuration");
 
         let leader_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
         let collector_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());

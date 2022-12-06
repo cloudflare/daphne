@@ -3,7 +3,8 @@
 
 //! Messages in the DAP protocol.
 
-use crate::{DapError, DapVersion};
+use crate::{hpke::HpkePublicKeySerde, DapError, DapVersion};
+use hpke_rs::HpkePublicKey;
 use prio::codec::{
     decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
     Encode, ParameterizedDecode, ParameterizedEncode,
@@ -902,18 +903,14 @@ impl Decode for HpkeAeadId {
 }
 
 /// The HPKE public key configuration of a Server.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct HpkeConfig {
     pub id: u8,
     pub kem_id: HpkeKemId,
     pub kdf_id: HpkeKdfId,
     pub aead_id: HpkeAeadId,
-    // TODO Change this type to be the deserialized public key in order to avoid copying the
-    // serialized key. We can't do this with rust-hpke because <X25519HkdfSha256 as Kem>::PublicKey
-    // doesn't implement Debug. Eventually we'll replace rust-hpke with a more ergonomic
-    // implementation that does. For now we'll eat the copy.
-    #[serde(with = "hex")]
-    pub public_key: Vec<u8>,
+    #[serde(with = "HpkePublicKeySerde")]
+    pub public_key: HpkePublicKey,
 }
 
 impl AsRef<HpkeConfig> for HpkeConfig {
@@ -928,7 +925,7 @@ impl Encode for HpkeConfig {
         self.kem_id.encode(bytes);
         self.kdf_id.encode(bytes);
         self.aead_id.encode(bytes);
-        encode_u16_bytes(bytes, &self.public_key);
+        encode_u16_bytes(bytes, self.public_key.as_slice());
     }
 }
 
@@ -939,7 +936,7 @@ impl Decode for HpkeConfig {
             kem_id: HpkeKemId::decode(bytes)?,
             kdf_id: HpkeKdfId::decode(bytes)?,
             aead_id: HpkeAeadId::decode(bytes)?,
-            public_key: decode_u16_bytes(bytes)?,
+            public_key: HpkePublicKey::from(decode_u16_bytes(bytes)?),
         })
     }
 }
