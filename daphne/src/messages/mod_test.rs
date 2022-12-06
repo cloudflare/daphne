@@ -10,6 +10,7 @@ use crate::messages::{
     PartialBatchSelector, Report, ReportId, ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use crate::taskprov::{compute_task_id, TaskprovVersion};
+use hpke_rs::HpkePublicKey;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 
 #[test]
@@ -213,7 +214,7 @@ fn read_hpke_config() {
             kem_id: HpkeKemId::X25519HkdfSha256,
             kdf_id: HpkeKdfId::HkdfSha256,
             aead_id: HpkeAeadId::Aes128Gcm,
-            public_key: b"this is a public key".to_vec(),
+            public_key: HpkePublicKey::from(b"this is a public key".to_vec()),
         }
     );
 }
@@ -233,7 +234,7 @@ fn read_unsupported_hpke_config() {
             kem_id: HpkeKemId::NotImplemented(99),
             kdf_id: HpkeKdfId::NotImplemented(99),
             aead_id: HpkeAeadId::NotImplemented(99),
-            public_key: b"this is a public key".to_vec(),
+            public_key: HpkePublicKey::from(b"this is a public key".to_vec()),
         }
     );
 }

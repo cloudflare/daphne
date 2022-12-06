@@ -69,23 +69,21 @@ impl HpkeConfig {
         plaintext: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
         let sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
-        let pk = HpkePublicKey::new(self.public_key.clone());
-        let (enc, mut ctx) = sender.setup_sender(&pk, info, None, None, None)?;
+        let (enc, mut ctx) = sender.setup_sender(&self.public_key, info, None, None, None)?;
         let ciphertext = ctx.seal(aad, plaintext)?;
         Ok((enc, ciphertext))
     }
 
     pub(crate) fn decrypt(
         &self,
-        secret_key: &[u8],
+        private_key: &HpkePrivateKey,
         info: &[u8],
         aad: &[u8],
         enc: &[u8],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, DapError> {
         let receiver: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
-        let sk = HpkePrivateKey::new(secret_key.to_vec());
-        let mut ctx = receiver.setup_receiver(enc, &sk, info, None, None, None)?;
+        let mut ctx = receiver.setup_receiver(enc, private_key, info, None, None, None)?;
         let plaintext = ctx.open(aad, ciphertext)?;
         Ok(plaintext)
     }
@@ -117,11 +115,11 @@ pub trait HpkeDecrypter<'a> {
 }
 
 /// Struct that combines HpkeConfig and HpkeSecretKey
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
-    #[serde(with = "hex")]
-    secret_key: Vec<u8>,
+    #[serde(with = "HpkePrivateKeySerde")]
+    private_key: HpkePrivateKey,
 }
 
 impl HpkeReceiverConfig {
@@ -144,7 +142,7 @@ impl HpkeReceiverConfig {
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, DapError> {
         self.config
-            .decrypt(&self.secret_key, info, aad, enc, ciphertext)
+            .decrypt(&self.private_key, info, aad, enc, ciphertext)
     }
 
     /// Generate and return a new HPKE receiver context given a HPKE config ID and HPKE KEM.
@@ -161,17 +159,16 @@ impl HpkeReceiverConfig {
         let generator = Hpke::<ImplHpkeCrypto>::new(Mode::Base, kem, kdf, aead);
         match generator.generate_key_pair() {
             Ok(keypair) => {
-                let pk = keypair.public_key();
-                let sk = keypair.private_key();
+                let (private_key, public_key) = keypair.into_keys();
                 Ok(HpkeReceiverConfig {
                     config: HpkeConfig {
                         id,
                         kem_id,
                         kdf_id: HpkeKdfId::HkdfSha256,
                         aead_id: HpkeAeadId::Aes128Gcm,
-                        public_key: Vec::from(pk.as_slice()),
+                        public_key,
                     },
-                    secret_key: Vec::from(sk.as_slice()),
+                    private_key,
                 })
             }
             Err(e) => Err(DapError::Fatal(format!(
@@ -180,10 +177,27 @@ impl HpkeReceiverConfig {
             ))),
         }
     }
+}
 
-    /// Create a new HPKE receiver context given an HpkeConfig and a corresponding secret key.
-    pub fn new(config: HpkeConfig, secret_key: Vec<u8>) -> Self {
-        HpkeReceiverConfig { config, secret_key }
+impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
+    type Error = DapError;
+    /// Create a new HPKE receiver context given an HpkeConfig and a corresponding private key.
+    /// Returns an error if the public key does not correspond to the private_key.
+    fn try_from((config, private_key): (HpkeConfig, HpkePrivateKey)) -> Result<Self, Self::Error> {
+        let kem_id_u16: u16 = config.kem_id.into();
+        let kem_id: KemAlgorithm = kem_id_u16.try_into().unwrap();
+        let public_key = HpkePublicKey::from(ImplHpkeCrypto::kem_derive_base(
+            kem_id,
+            private_key.as_slice(),
+        )?);
+        if public_key == config.public_key {
+            Ok(Self {
+                config,
+                private_key,
+            })
+        } else {
+            Err(DapError::fatal("public key does not match private key"))
+        }
     }
 }
 
@@ -219,7 +233,7 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
 impl Encode for HpkeReceiverConfig {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.config.encode(bytes);
-        encode_u16_bytes(bytes, &self.secret_key);
+        encode_u16_bytes(bytes, self.private_key.as_slice());
     }
 }
 
@@ -227,7 +241,7 @@ impl Decode for HpkeReceiverConfig {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             config: HpkeConfig::decode(bytes)?,
-            secret_key: decode_u16_bytes(bytes)?,
+            private_key: HpkePrivateKey::from(decode_u16_bytes(bytes)?),
         })
     }
 }
@@ -237,5 +251,39 @@ impl std::str::FromStr for HpkeReceiverConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(s)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "HpkePublicKey")]
+pub(crate) struct HpkePublicKeySerde(
+    #[serde(getter = "HpkePublicKeySerde::to_vec", with = "hex")] Vec<u8>,
+);
+
+impl HpkePublicKeySerde {
+    fn to_vec(public_key: &HpkePublicKey) -> Vec<u8> {
+        public_key.as_slice().into()
+    }
+}
+
+impl From<HpkePublicKeySerde> for HpkePublicKey {
+    fn from(public_key_serde: HpkePublicKeySerde) -> HpkePublicKey {
+        HpkePublicKey::new(public_key_serde.0)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "HpkePrivateKey")]
+struct HpkePrivateKeySerde(#[serde(getter = "HpkePrivateKeySerde::to_vec", with = "hex")] Vec<u8>);
+
+impl HpkePrivateKeySerde {
+    fn to_vec(private_key: &HpkePrivateKey) -> Vec<u8> {
+        private_key.as_slice().into()
+    }
+}
+
+impl From<HpkePrivateKeySerde> for HpkePrivateKey {
+    fn from(private_key_serde: HpkePrivateKeySerde) -> HpkePrivateKey {
+        HpkePrivateKey::new(private_key_serde.0)
     }
 }

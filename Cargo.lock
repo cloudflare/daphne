@@ -450,6 +450,7 @@ dependencies = [
  "daphne_worker",
  "futures",
  "hex",
+ "hpke-rs",
  "lazy_static",
  "paste",
  "prio",
@@ -880,6 +881,9 @@ checksum = "c9c8449efb0694b5dd0ee0d7a5582eccce1eb3aeb6c25dc569143ceadc536ca5"
 dependencies = [
  "hpke-rs-crypto",
  "log",
+ "serde",
+ "serde_json",
+ "tls_codec",
  "zeroize",
 ]
 
@@ -1975,6 +1979,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "172a9c24d46b5fe280b77f37161ed9a919229cb104085384e8bf30637c2e4bca"
 dependencies = [
+ "serde",
  "tls_codec_derive",
  "zeroize",
 ]
