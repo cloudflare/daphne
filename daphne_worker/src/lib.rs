@@ -223,7 +223,6 @@ impl DaphneWorkerRouter {
                 let config = DaphneWorkerConfig::from_worker_context(ctx)?;
                 let req = config.worker_request_to_dap(req).await?;
 
-                // TODO(cjpatton) Have this method return a DapResponse.
                 match config.http_get_hpke_config(&req).await {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => abort(e),
