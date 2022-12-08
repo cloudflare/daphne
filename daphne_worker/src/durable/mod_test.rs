@@ -7,9 +7,10 @@ use crate::durable::{
 };
 use daphne::{
     messages::{Id, Report, ReportId, ReportMetadata},
-    DapBatchBucket, DapVersion,
+    test_version, test_versions, DapBatchBucket, DapVersion,
 };
-use prio::codec::{Decode, Encode};
+use paste::paste;
+use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 
 #[test]
@@ -40,8 +41,7 @@ fn durable_name() {
 // Test that the `report_id_from_report()` method properly extracts the report ID from the
 // hex-encoded report. This helps ensure that changes to the `Report` wire format don't cause any
 // regressions to `ReportStore`.
-#[test]
-fn parse_report_id_hex_from_report() {
+fn parse_report_id_hex_from_report(version: DapVersion) {
     let mut rng = thread_rng();
     let report = Report {
         task_id: Id(rng.gen()),
@@ -54,10 +54,12 @@ fn parse_report_id_hex_from_report() {
         encrypted_input_shares: Vec::default(),
     };
 
-    let report_hex = hex::encode(report.get_encoded());
+    let report_hex = hex::encode(report.get_encoded_with_param(&version));
     let key = report_id_hex_from_report(&report_hex).unwrap();
     assert_eq!(
-        ReportId::get_decoded(&hex::decode(key).unwrap()).unwrap(),
+        ReportId::get_decoded_with_param(&version, &hex::decode(key).unwrap()).unwrap(),
         report.metadata.id
     );
 }
+
+test_versions! {parse_report_id_hex_from_report}

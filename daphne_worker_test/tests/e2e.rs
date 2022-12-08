@@ -202,7 +202,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
     )
     .await;
 
@@ -212,7 +212,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "replayedReport",
     )
@@ -234,7 +234,7 @@ async fn e2e_leader_upload(version: DapVersion) {
                 version,
             )
             .unwrap()
-            .get_encoded(),
+            .get_encoded_with_param(&version),
         400,
         "unrecognizedTask",
     )
@@ -258,7 +258,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "unrecognizedHpkeConfig",
     )
@@ -293,7 +293,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "reportTooLate",
     )
@@ -327,7 +327,7 @@ async fn e2e_leader_upload(version: DapVersion) {
                     },
                 ],
             }
-            .get_encoded(),
+            .get_encoded_with_param(&version),
         )
         .send()
         .await
@@ -338,6 +338,18 @@ async fn e2e_leader_upload(version: DapVersion) {
         "unexpected response status: {:?}",
         resp.text().await.unwrap()
     );
+}
+
+async_test_versions! { e2e_leader_upload }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "test_e2e"), ignore)]
+async fn e2e_leader_upload_taskprov() {
+    let version = DapVersion::Draft02;
+    let t = TestRunner::default_with_version(version).await;
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let path = "upload";
 
     // Generate and upload a report with taskprov.
     //
@@ -386,7 +398,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
     )
     .await;
 
@@ -413,7 +425,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "unrecognizedTask",
     )
@@ -445,7 +457,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "unrecognizedMessage",
     )
@@ -494,14 +506,12 @@ async fn e2e_leader_upload(version: DapVersion) {
         None, // dap_auth_token
         path,
         constants::MEDIA_TYPE_REPORT,
-        report.get_encoded(),
+        report.get_encoded_with_param(&version),
         400,
         "badRequest",
     )
     .await;
 }
-
-async_test_versions! { e2e_leader_upload }
 
 async fn e2e_internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
@@ -534,7 +544,7 @@ async fn e2e_internal_leader_process(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -586,7 +596,7 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -634,7 +644,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -759,7 +769,7 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -822,7 +832,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -987,7 +997,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -1089,7 +1099,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -1189,7 +1199,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -1301,7 +1311,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded(),
+                .get_encoded_with_param(&version),
         )
         .await;
     }
@@ -1381,7 +1391,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
 }
 
-async_test_versions! { e2e_leader_collect_taskprov_ok }
+async_test_version! { e2e_leader_collect_taskprov_ok, Draft02 }
 
 async fn e2e_helper_admin_add_task(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;

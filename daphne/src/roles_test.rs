@@ -203,7 +203,7 @@ impl Test {
             version,
             media_type: Some(MEDIA_TYPE_REPORT),
             task_id: Some(report.task_id.clone()),
-            payload: report.get_encoded(),
+            payload: report.get_encoded_with_param(&version),
             url: task_config.leader_url.join("upload").unwrap(),
             sender_auth: None,
         }
@@ -1018,7 +1018,7 @@ async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_REPORT),
         task_id: Some(report_invalid_task_id.task_id.clone()),
-        payload: report_invalid_task_id.get_encoded(),
+        payload: report_invalid_task_id.get_encoded_with_param(&task_config.version),
         url: task_config.leader_url.join("upload").unwrap(),
         sender_auth: None,
     };
@@ -1055,7 +1055,7 @@ async fn http_post_upload_task_expired(version: DapVersion) {
         version: task_config.version,
         media_type: Some(MEDIA_TYPE_REPORT),
         task_id: Some(task_id.clone()),
-        payload: report.get_encoded(),
+        payload: report.get_encoded_with_param(&version),
         url: task_config.leader_url.join("upload").unwrap(),
         sender_auth: None,
     };
@@ -1572,7 +1572,7 @@ async fn e2e_taskprov(version: DapVersion) {
         version,
         media_type: Some(MEDIA_TYPE_REPORT),
         task_id: Some(task_id.clone()),
-        payload: report.get_encoded(),
+        payload: report.get_encoded_with_param(&version),
         url: Url::parse("https://cool.biz/upload").unwrap(),
         sender_auth: None,
     };
@@ -1591,4 +1591,4 @@ async fn e2e_taskprov(version: DapVersion) {
     t.run_col_job(task_id, &query).await.unwrap();
 }
 
-async_test_versions! { e2e_taskprov }
+async_test_version! { e2e_taskprov, Draft02 }

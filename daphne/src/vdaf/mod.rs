@@ -8,8 +8,9 @@ use crate::{
     hpke::HpkeDecrypter,
     messages::{
         encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector, Report,
-        ReportId, ReportMetadata, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
+        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector,
+        PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, Time, Transition,
+        TransitionFailure, TransitionVar,
     },
     vdaf::{
         prio2::{
@@ -26,7 +27,7 @@ use crate::{
     DapVersion, VdafConfig,
 };
 use prio::{
-    codec::{CodecError, Encode},
+    codec::{CodecError, Decode, Encode, ParameterizedEncode},
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
         prio2::{Prio2PrepareShare, Prio2PrepareState},
@@ -172,17 +173,32 @@ impl VdafConfig {
         version: DapVersion,
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
+        let report_extensions = match version {
+            DapVersion::Draft02 => extensions.clone(),
+            _ => vec![],
+        };
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time,
-            extensions,
+            extensions: report_extensions,
         };
 
         let public_share = Vec::new();
-        let encoded_input_shares = match self {
+        let mut encoded_input_shares = match self {
             Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
             Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
         };
+        if version != DapVersion::Draft02 {
+            let mut encoded: Vec<Vec<u8>> = Vec::new();
+            for share in encoded_input_shares.into_iter() {
+                let input_share = PlaintextInputShare {
+                    extensions: extensions.clone(),
+                    payload: share,
+                };
+                encoded.push(PlaintextInputShare::get_encoded(&input_share));
+            }
+            encoded_input_shares = encoded;
+        }
 
         if hpke_config_list.len() != encoded_input_shares.len() {
             return Err(DapError::Fatal("unexpected number of HPKE configs".into()));
@@ -202,7 +218,7 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
-        metadata.encode(&mut aad);
+        metadata.encode_with_param(&version, &mut aad);
         // NOTE(cjpatton): In DAP-02, the tag-length prefix is not specified. However, the intent
         // was to include the prefix, and it is specified unambiguoiusly in DAP-03. All of our
         // partners for interop have agreed to include the prefix for DAP-02, so we have hard-coded
@@ -318,13 +334,23 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
-        metadata.encode(&mut aad);
+        metadata.encode_with_param(&version, &mut aad);
         // TODO spec: Consider folding the public share into a field called "header".
         encode_u32_bytes(&mut aad, public_share);
 
-        let input_share_data = decrypter
+        let encoded_input_share = decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
             .await?;
+        // For Draft02, the encoded input share is the VDAF-specific payload, but for Draft03 and
+        // later it is a serialized PlaintextInputShare.  For simplicity in later code, we wrap the Draft02
+        // payload into a PlaintextInputShare.
+        let input_share = match version {
+            DapVersion::Draft02 => PlaintextInputShare {
+                extensions: vec![],
+                payload: encoded_input_share,
+            },
+            _ => PlaintextInputShare::get_decoded(&encoded_input_share)?,
+        };
 
         let agg_id = if is_leader { 0 } else { 1 };
         match (self, verify_key) {
@@ -334,7 +360,7 @@ impl VdafConfig {
                     verify_key,
                     agg_id,
                     metadata.id.as_ref(),
-                    &input_share_data,
+                    &input_share.payload,
                 )?)
             }
             (Self::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
@@ -343,7 +369,7 @@ impl VdafConfig {
                     verify_key,
                     agg_id,
                     metadata.id.as_ref(),
-                    &input_share_data,
+                    &input_share.payload,
                 )?)
             }
             _ => Err(DapError::fatal("VDAF verify key does not match config")),

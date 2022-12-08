@@ -9,7 +9,7 @@ use daphne::{
     messages::{BatchSelector, CollectReq, CollectResp, HpkeConfig, Id, Query},
     DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
 };
-use prio::codec::{Decode, Encode, ParameterizedEncode};
+use prio::codec::{Decode, ParameterizedEncode};
 use reqwest::blocking::{Client, ClientBuilder};
 use std::{
     io::{stdin, Read},
@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
             );
             let resp = http_client
                 .post(Url::parse(leader_url)?.join("upload")?)
-                .body(report.get_encoded())
+                .body(report.get_encoded_with_param(&version))
                 .headers(headers)
                 .send()?;
             if resp.status() == 400 {
