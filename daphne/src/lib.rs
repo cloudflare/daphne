@@ -27,6 +27,12 @@
 //!
 //! * Daphne does not implement a complete DAP Client or Collector. However, methods are provided
 //! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
+//!
+//! * Daphne does not yet support deletion of collection jobs:
+//!
+//!     > The leader MUST remove a collect job's results when the collector sends an HTTP DELETE
+//!     > request to the collect job  URI. The leader responds with HTTP status 204 No Content for
+//!     > requests to a collect job URI whose results have been removed.
 
 use crate::{
     hpke::HpkeReceiverConfig,
