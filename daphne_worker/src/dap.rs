@@ -55,7 +55,7 @@ use daphne::{
     DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 use futures::future::try_join_all;
-use prio::codec::{Decode, Encode};
+use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -595,6 +595,16 @@ where
     }
 }
 
+fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
+    // The task id MUST BE the first 32 bytes of the serialized report; if this
+    // needs to change in the future, then we must change the DO serialization
+    // format to contain a version.
+    let id = Id(report[..32]
+        .try_into()
+        .map_err(|_| DapError::fatal("serialize report is too short"))?);
+    Ok(id)
+}
+
 #[async_trait(?Send)]
 impl<'srv, 'req, D> DapLeader<'srv, 'req, BearerToken> for DaphneWorkerConfig<D>
 where
@@ -605,7 +615,7 @@ where
     async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config(&report.task_id).await?;
         let task_id_hex = report.task_id.to_hex();
-        let report_hex = hex::encode(report.get_encoded());
+        let report_hex = hex::encode(report.get_encoded_with_param(&task_config.as_ref().version));
         let res: ReportsPendingResult = self
             .durable()
             .post(
@@ -672,10 +682,13 @@ where
                 .map_err(dap_err)?;
 
             for report_hex in reports_from_durable {
-                let report = Report::get_decoded(&hex::decode(&report_hex).map_err(|_| {
+                let report_bytes = hex::decode(&report_hex).map_err(|_| {
                     DapError::fatal("response from ReportsPending is not valid hex")
-                })?)?;
-
+                })?;
+                let task_id = task_id_from_report(&report_bytes)?;
+                let task_config = self.try_get_task_config(&task_id).await?;
+                let report =
+                    Report::get_decoded_with_param(&task_config.as_ref().version, &report_bytes)?;
                 if let Some(reports) = reports_per_task.get_mut(&report.task_id) {
                     reports.push(report);
                 } else {

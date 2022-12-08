@@ -475,6 +475,7 @@ dependencies = [
  "getrandom",
  "hex",
  "matchit 0.6.0",
+ "paste",
  "prio",
  "rand",
  "reqwest-wasm",

@@ -10,11 +10,12 @@ use crate::messages::{
     PartialBatchSelector, Report, ReportId, ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use crate::taskprov::{compute_task_id, TaskprovVersion};
+use crate::{test_version, test_versions};
 use hpke_rs::HpkePublicKey;
+use paste::paste;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 
-#[test]
-fn read_report() {
+fn read_report(version: DapVersion) {
     let report = Report {
         task_id: Id([
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -39,12 +40,16 @@ fn read_report() {
             },
         ],
     };
-
-    assert_eq!(Report::get_decoded(&report.get_encoded()).unwrap(), report);
+    assert_eq!(
+        Report::get_decoded_with_param(&version, &report.get_encoded_with_param(&version)).unwrap(),
+        report
+    );
 }
 
+test_versions! {read_report}
+
 #[test]
-fn read_report_with_unknown_extensions() {
+fn read_report_with_unknown_extensions_draft02() {
     let report = Report {
         task_id: Id([
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -72,8 +77,10 @@ fn read_report_with_unknown_extensions() {
             },
         ],
     };
-
-    assert!(Report::get_decoded(&report.get_encoded()).is_err());
+    let version = DapVersion::Draft02;
+    assert!(
+        Report::get_decoded_with_param(&version, &report.get_encoded_with_param(&version)).is_err()
+    );
 }
 
 #[test]

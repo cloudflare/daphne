@@ -157,23 +157,35 @@ impl Decode for Extension {
 pub struct ReportMetadata {
     pub id: ReportId,
     pub time: Time,
+
+    /// Report extensions, only used in draft-02. In draft-03 and above, extensions are carried in encrypted input share.
     pub extensions: Vec<Extension>,
 }
 
-impl Encode for ReportMetadata {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for ReportMetadata {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.id.encode(bytes);
         self.time.encode(bytes);
-        encode_u16_items(bytes, &(), &self.extensions);
+        if matches!(version, DapVersion::Draft02) {
+            encode_u16_items(bytes, &(), &self.extensions);
+        } else if !self.extensions.is_empty() {
+            panic!("tried to encode extensions in the ReportMetadata for DAP > draft-02")
+        }
     }
 }
 
-impl Decode for ReportMetadata {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for ReportMetadata {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         let metadata = Self {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
-            extensions: decode_u16_items(&(), bytes)?,
+            extensions: match version {
+                DapVersion::Draft02 => decode_u16_items(&(), bytes)?,
+                _ => Vec::new(),
+            },
         };
         // Check for duplicate extensions and unknown extensions.
         let mut seen: HashSet<u16> = HashSet::new();
@@ -200,20 +212,23 @@ pub struct Report {
     pub encrypted_input_shares: Vec<HpkeCiphertext>,
 }
 
-impl Encode for Report {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for Report {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.task_id.encode(bytes);
-        self.metadata.encode(bytes);
+        self.metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
         encode_u32_items(bytes, &(), &self.encrypted_input_shares);
     }
 }
 
-impl Decode for Report {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for Report {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
-            metadata: ReportMetadata::decode(bytes)?,
+            metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
             encrypted_input_shares: decode_u32_items(&(), bytes)?,
         })
@@ -230,18 +245,21 @@ pub struct ReportShare {
     pub encrypted_input_share: HpkeCiphertext,
 }
 
-impl Encode for ReportShare {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.metadata.encode(bytes);
+impl ParameterizedEncode<DapVersion> for ReportShare {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+        self.metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
         self.encrypted_input_share.encode(bytes);
     }
 }
 
-impl Decode for ReportShare {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for ReportShare {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
-            metadata: ReportMetadata::decode(bytes)?,
+            metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
             encrypted_input_share: HpkeCiphertext::decode(bytes)?,
         })
@@ -369,25 +387,25 @@ impl ParameterizedEncode<DapVersion> for AggregateInitializeReq {
             _ => unreachable!("unimplemented version"),
         };
         self.part_batch_sel.encode(bytes);
-        encode_u32_items(bytes, &(), &self.report_shares);
+        encode_u32_items(bytes, version, &self.report_shares);
     }
 }
 
 impl ParameterizedDecode<DapVersion> for AggregateInitializeReq {
     fn decode_with_param(
-        decoding_parameter: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
             task_id: Id::decode(bytes)?,
             agg_job_id: Id::decode(bytes)?,
-            agg_param: match decoding_parameter {
+            agg_param: match version {
                 DapVersion::Draft02 => decode_u16_bytes(bytes)?,
                 DapVersion::Draft03 => decode_u32_bytes(bytes)?,
                 _ => unreachable!("unimplemented version"),
             },
             part_batch_sel: PartialBatchSelector::decode(bytes)?,
-            report_shares: decode_u32_items(&(), bytes)?,
+            report_shares: decode_u32_items(version, bytes)?,
         })
     }
 }
@@ -968,6 +986,41 @@ impl Decode for HpkeCiphertext {
             enc: decode_u16_bytes(bytes)?,
             payload: decode_u32_bytes(bytes)?,
         })
+    }
+}
+
+/// A plaintext input share.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct PlaintextInputShare {
+    pub extensions: Vec<Extension>,
+    pub payload: Vec<u8>,
+}
+
+impl Encode for PlaintextInputShare {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        encode_u16_items(bytes, &(), &self.extensions);
+        encode_u32_bytes(bytes, &self.payload);
+    }
+}
+
+impl Decode for PlaintextInputShare {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        let share = Self {
+            extensions: decode_u16_items(&(), bytes)?,
+            payload: decode_u32_bytes(bytes)?,
+        };
+        // Check for duplicate extensions and unknown extensions.
+        let mut seen: HashSet<u16> = HashSet::new();
+        for extension in &share.extensions {
+            if !seen.insert(extension.type_code()) {
+                return Err(CodecError::UnexpectedValue);
+            }
+            if matches!(extension, Extension::Unhandled { .. }) {
+                return Err(CodecError::UnexpectedValue);
+            }
+        }
+        Ok(share)
     }
 }
 

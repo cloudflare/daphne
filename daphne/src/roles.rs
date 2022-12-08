@@ -260,7 +260,7 @@ where
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
-        let report = Report::get_decoded(req.payload.as_ref())?;
+        let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         let task_config = self
             .get_task_config_considering_taskprov(
                 req.version,
