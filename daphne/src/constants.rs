@@ -7,7 +7,8 @@
 //
 // TODO spec: Decide if media type should be enforced. (We currently don't.) In any case, it may be
 // useful to enforce this for testing purposes.
-pub const MEDIA_TYPE_HPKE_CONFIG: &str = "application/dap-hpke-config";
+pub const DRAFT02_MEDIA_TYPE_HPKE_CONFIG: &str = "application/dap-hpke-config";
+pub const MEDIA_TYPE_HPKE_CONFIG_LIST: &str = "application/dap-hpke-config-list";
 pub const MEDIA_TYPE_REPORT: &str = "application/dap-report";
 pub const MEDIA_TYPE_AGG_INIT_REQ: &str = "application/dap-aggregate-initialize-req";
 pub const MEDIA_TYPE_AGG_INIT_RESP: &str = "application/dap-aggregate-initialize-resp";
@@ -22,7 +23,7 @@ pub const MEDIA_TYPE_COLLECT_RESP: &str = "application/dap-collect-resp";
 /// return a static reference to the media type.
 pub fn media_type_for(content_type: &str) -> Option<&'static str> {
     match content_type {
-        MEDIA_TYPE_HPKE_CONFIG => Some(MEDIA_TYPE_HPKE_CONFIG),
+        DRAFT02_MEDIA_TYPE_HPKE_CONFIG => Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
         MEDIA_TYPE_REPORT => Some(MEDIA_TYPE_REPORT),
         MEDIA_TYPE_AGG_INIT_REQ => Some(MEDIA_TYPE_AGG_INIT_REQ),
         MEDIA_TYPE_AGG_INIT_RESP => Some(MEDIA_TYPE_AGG_INIT_RESP),

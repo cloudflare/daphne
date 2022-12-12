@@ -167,9 +167,9 @@ async fn e2e_hpke_configs_are_cached(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     // Get a set of HPKE configs from leader and helper.
-    let hpke_config_list_0 = t.get_hpke_configs(&client).await;
+    let hpke_config_list_0 = t.get_hpke_configs(version, &client).await;
     // Get another set of HPKE configs from leader and helper.
-    let hpke_config_list_1 = t.get_hpke_configs(&client).await;
+    let hpke_config_list_1 = t.get_hpke_configs(version, &client).await;
     // The leader HPKE configs in the two sets must be the same because we store
     // the HPKE receiver config in KV.
     assert_eq!(hpke_config_list_0[0], hpke_config_list_1[0]);
@@ -183,7 +183,7 @@ async fn e2e_leader_upload(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = "upload";
 
     // Generate and upload a report.
@@ -348,7 +348,7 @@ async fn e2e_leader_upload_taskprov() {
     let version = DapVersion::Draft02;
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = "upload";
 
     // Generate and upload a report with taskprov.
@@ -517,7 +517,7 @@ async fn e2e_internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
 
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     let report_sel = DaphneWorkerReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
@@ -576,7 +576,7 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -624,7 +624,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     let batch_interval = t.batch_interval();
 
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -749,7 +749,7 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -812,7 +812,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
@@ -977,7 +977,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -1081,7 +1081,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     };
 
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // Clients: Upload reports.
     for _ in 0..t.task_config.min_batch_size {
@@ -1253,7 +1253,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     let batch_interval = t.batch_interval();
 
     let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(&client).await;
+    let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     let taskprov_task_config = TaskConfig {
         task_info: "".as_bytes().to_vec(),

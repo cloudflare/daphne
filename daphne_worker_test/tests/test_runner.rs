@@ -7,7 +7,9 @@ use assert_matches::assert_matches;
 use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
-    messages::{Duration, HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval},
+    messages::{
+        Duration, HpkeAeadId, HpkeConfig, HpkeConfigList, HpkeKdfId, HpkeKemId, Id, Interval,
+    },
     taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
@@ -257,13 +259,34 @@ impl TestRunner {
         }
     }
 
-    pub async fn get_hpke_configs(&self, client: &reqwest::Client) -> [HpkeConfig; 2] {
+    pub async fn get_hpke_configs(
+        &self,
+        version: DapVersion,
+        client: &reqwest::Client,
+    ) -> [HpkeConfig; 2] {
         let raw_leader_hpke_config = self.leader_get_raw_hpke_config(&client).await;
         let raw_helper_hpke_config = self.helper_get_raw_hpke_config(&client).await;
-        [
-            HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
-            HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap(),
-        ]
+        match version {
+            DapVersion::Draft02 => [
+                HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
+                HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap(),
+            ],
+            _ => {
+                let mut leader_hpke_config_list =
+                    HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
+                let mut helper_hpke_config_list =
+                    HpkeConfigList::get_decoded(&raw_helper_hpke_config).unwrap();
+                if leader_hpke_config_list.hpke_configs.len() != 1
+                    || helper_hpke_config_list.hpke_configs.len() != 1
+                {
+                    panic!("only a length 1 HpkeConfList is currently supported by the test suite")
+                }
+                [
+                    leader_hpke_config_list.hpke_configs.pop().unwrap(),
+                    helper_hpke_config_list.hpke_configs.pop().unwrap(),
+                ]
+            }
+        }
     }
 
     pub async fn leader_get_raw_hpke_config(&self, client: &reqwest::Client) -> Vec<u8> {
