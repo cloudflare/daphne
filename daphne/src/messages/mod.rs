@@ -512,6 +512,8 @@ pub enum TransitionFailure {
     VdafPrepError = 5,
     BatchSaturated = 6,
     TaskExpired = 7,
+    UnrecognizedMessage = 8,
+    ReportTooEarly = 9,
 }
 
 impl TryFrom<u8> for TransitionFailure {
@@ -527,6 +529,8 @@ impl TryFrom<u8> for TransitionFailure {
             b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
             b if b == Self::BatchSaturated as u8 => Ok(Self::BatchSaturated),
             b if b == Self::TaskExpired as u8 => Ok(Self::TaskExpired),
+            b if b == Self::UnrecognizedMessage as u8 => Ok(Self::UnrecognizedMessage),
+            b if b == Self::ReportTooEarly as u8 => Ok(Self::ReportTooEarly),
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -555,6 +559,8 @@ impl std::fmt::Display for TransitionFailure {
             Self::VdafPrepError => write!(f, "vdaf-prep-error({})", *self as u8),
             Self::BatchSaturated => write!(f, "batch-saturated({})", *self as u8),
             Self::TaskExpired => write!(f, "task-expired({})", *self as u8),
+            Self::UnrecognizedMessage => write!(f, "unrecognized-message({})", *self as u8),
+            Self::ReportTooEarly => write!(f, "report-too-early({})", *self as u8),
         }
     }
 }
@@ -955,6 +961,26 @@ impl Decode for HpkeConfig {
             kdf_id: HpkeKdfId::decode(bytes)?,
             aead_id: HpkeAeadId::decode(bytes)?,
             public_key: HpkePublicKey::from(decode_u16_bytes(bytes)?),
+        })
+    }
+}
+
+/// A list of HPKE public key configurations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HpkeConfigList {
+    pub hpke_configs: Vec<HpkeConfig>,
+}
+
+impl Encode for HpkeConfigList {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        encode_u16_items(bytes, &(), &self.hpke_configs);
+    }
+}
+
+impl Decode for HpkeConfigList {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        Ok(Self {
+            hpke_configs: decode_u16_items(&(), bytes)?,
         })
     }
 }

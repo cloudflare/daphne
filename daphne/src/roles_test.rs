@@ -5,8 +5,8 @@ use crate::{
     async_test_version, async_test_versions,
     auth::BearerToken,
     constants::{
-        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ,
-        MEDIA_TYPE_COLLECT_REQ, MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_REPORT,
+        DRAFT02_MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ,
+        MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ, MEDIA_TYPE_REPORT,
     },
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
@@ -637,7 +637,7 @@ async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
     let task_id = Id(rng.gen());
     let req = DapRequest {
         version: DapVersion::Draft02,
-        media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+        media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
         payload: Vec::new(),
         task_id: Some(task_id.clone()),
         url: Url::parse(&format!(
@@ -660,7 +660,7 @@ async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
     let t = Test::new(version);
     let req = DapRequest {
         version: DapVersion::Draft02,
-        media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
+        media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
         task_id: Some(t.time_interval_task_id.clone()),
         payload: Vec::new(),
         url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),

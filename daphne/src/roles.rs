@@ -5,16 +5,16 @@
 
 use crate::{
     constants::{
-        MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_CONT_RESP, MEDIA_TYPE_AGG_INIT_REQ,
-        MEDIA_TYPE_AGG_INIT_RESP, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_AGG_SHARE_RESP,
-        MEDIA_TYPE_HPKE_CONFIG,
+        DRAFT02_MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_CONT_RESP,
+        MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_INIT_RESP, MEDIA_TYPE_AGG_SHARE_REQ,
+        MEDIA_TYPE_AGG_SHARE_RESP, MEDIA_TYPE_HPKE_CONFIG_LIST,
     },
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp, Id,
-        PartialBatchSelector, Query, Report, ReportId, ReportMetadata, Time, TransitionFailure,
-        TransitionVar,
+        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp,
+        HpkeConfigList, Id, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, Time,
+        TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -172,10 +172,24 @@ where
             }
         }
 
-        Ok(DapResponse {
-            media_type: Some(MEDIA_TYPE_HPKE_CONFIG),
-            payload: hpke_config.as_ref().get_encoded(),
-        })
+        match req.version {
+            DapVersion::Draft02 => Ok(DapResponse {
+                media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
+                payload: hpke_config.as_ref().get_encoded(),
+            }),
+            DapVersion::Draft03 => {
+                let hpke_config_list = HpkeConfigList {
+                    hpke_configs: vec![hpke_config.as_ref().clone()],
+                };
+                Ok(DapResponse {
+                    media_type: Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
+                    payload: hpke_config_list.get_encoded(),
+                })
+            }
+            // This is just to keep the compiler happy as we excluded DapVersion::Unknown
+            // with an InvalidProtocolError at the top of the function.
+            DapVersion::Unknown => unreachable!("unknown DapVersion"),
+        }
     }
 
     async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError>;
