@@ -25,6 +25,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
 
     let router = DaphneWorkerRouter {
         enable_internal_test: true,
+        enable_default_response: false,
     };
     router.handle_request(req, env).await
 }

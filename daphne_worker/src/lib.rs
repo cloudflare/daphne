@@ -197,7 +197,15 @@ macro_rules! parse_id {
 pub struct DaphneWorkerRouter {
     /// If true, then enable internal test endpoints. These should not be enabled in production.
     pub enable_internal_test: bool,
+
+    /// If true, then respond to unhandled requests with 200 OK instead of 404 Not Found. The
+    /// response body can be overrided by setting environment variable DAP_DEFAULT_RESPONSE_HTML.
+    pub enable_default_response: bool,
 }
+
+/// The response body for unhandled requests when [`DaphneWorkerRouter::enable_default_response`]
+/// is set. This value can be overrided by DAP_DEFAULT_RESPONSE_HTML.
+pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
 impl DaphneWorkerRouter {
     /// HTTP request handler for Daphne-Worker.
@@ -410,6 +418,17 @@ impl DaphneWorkerRouter {
                         }))
                     },
                 )
+        } else {
+            router
+        };
+
+        let router = if self.enable_default_response {
+            router.or_else_any_method_async("/*catchall", |_req, ctx| async move {
+                match ctx.var("DAP_DEFAULT_RESPONSE_HTML") {
+                    Ok(text) => Response::from_html(text.to_string()),
+                    Err(..) => Response::from_html(DEFAULT_RESPONSE_HTML),
+                }
+            })
         } else {
             router
         };
