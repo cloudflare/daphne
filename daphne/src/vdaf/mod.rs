@@ -352,7 +352,7 @@ impl VdafConfig {
             _ => PlaintextInputShare::get_decoded(&encoded_input_share)?,
         };
 
-        let agg_id = if is_leader { 0 } else { 1 };
+        let agg_id = usize::from(!is_leader);
         match (self, verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
                 Ok(prio3_prepare_init(
