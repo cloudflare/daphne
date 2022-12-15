@@ -537,7 +537,7 @@ where
         let mut reports_processed = HashSet::new();
         for response in reports_processed_responses.into_iter() {
             for report_id_hex in response.into_iter() {
-                let report_id = ReportId::get_decoded(&hex::decode(&report_id_hex)?)?;
+                let report_id = ReportId::get_decoded(&hex::decode(report_id_hex)?)?;
                 reports_processed.insert(report_id);
             }
         }
@@ -968,7 +968,7 @@ where
         match res {
             Some(helper_state_hex) => {
                 let data =
-                    hex::decode(&helper_state_hex).map_err(|e| DapError::Fatal(e.to_string()))?;
+                    hex::decode(helper_state_hex).map_err(|e| DapError::Fatal(e.to_string()))?;
                 let helper_state = DapHelperState::get_decoded(&task_config.as_ref().vdaf, &data)?;
                 Ok(Some(helper_state))
             }
