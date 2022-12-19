@@ -118,7 +118,7 @@ pub trait HpkeDecrypter<'a> {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
-    #[serde(with = "HpkePrivateKeySerde")]
+    #[serde(rename = "secret_key", with = "HpkePrivateKeySerde")]
     private_key: HpkePrivateKey,
 }
 
