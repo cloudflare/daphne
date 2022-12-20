@@ -69,7 +69,8 @@ impl Test {
         // Global config. In a real deployment, the Leader and Helper may make different choices
         // here.
         let global_config = DapGlobalConfig {
-            report_storage_epoch_duration: 604800, // one week
+            report_storage_epoch_duration: 604800,    // one week
+            report_storage_max_future_time_skew: 300, // 5 minutes
             max_batch_duration: 360000,
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,

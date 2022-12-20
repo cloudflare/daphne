@@ -125,6 +125,7 @@ impl TestRunner {
         // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
         let global_config = DapGlobalConfig {
             report_storage_epoch_duration: 604800,
+            report_storage_max_future_time_skew: 300,
             max_batch_duration: 360000,
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
@@ -248,7 +249,8 @@ impl TestRunner {
     }
 
     pub fn batch_interval(&self) -> Interval {
-        let start = self.now - (self.now % self.task_config.time_precision);
+        let epoch_start = self.now - (self.now % self.global_config.report_storage_epoch_duration);
+        let start = epoch_start - (epoch_start % self.task_config.time_precision);
         Interval {
             start,
             duration: self.task_config.time_precision * 2,

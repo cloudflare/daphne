@@ -5,7 +5,9 @@ use crate::{
     durable::{state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
     int_err,
 };
+use daphne::DapGlobalConfig;
 use futures::future::try_join_all;
+use std::time::Duration;
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
@@ -30,6 +32,7 @@ pub struct ReportsProcessed {
     state: State,
     env: Env,
     touched: bool,
+    alarmed: bool,
 }
 
 impl ReportsProcessed {
@@ -54,12 +57,32 @@ impl DurableObject for ReportsProcessed {
             state,
             env,
             touched: false,
+            alarmed: false,
         }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PROCESSED);
+
+        let global_config: DapGlobalConfig = serde_json::from_str(
+            self.env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
+        )
+        .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
+        let safety_interval: u64 = self
+            .env
+            .var("DAP_PROCESSED_ALARM_SAFETY_INTERVAL")?
+            .to_string()
+            .parse()
+            .map_err(int_err)?;
+        ensure_alarmed!(
+            self,
+            Duration::from_secs(
+                global_config
+                    .report_storage_epoch_duration
+                    .saturating_add(safety_interval)
+            )
+        );
 
         match (req.path().as_ref(), req.method()) {
             // Mark a set of reports as aggregated. Return the set of report IDs that already
@@ -85,5 +108,12 @@ impl DurableObject for ReportsProcessed {
                 req.path()
             ))),
         }
+    }
+
+    async fn alarm(&mut self) -> Result<Response> {
+        self.state.storage().delete_all().await?;
+        self.alarmed = false;
+        self.touched = false;
+        Response::from_json(&())
     }
 }

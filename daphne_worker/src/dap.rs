@@ -545,9 +545,13 @@ where
         let agg_store_responses: Vec<bool> =
             try_join_all(agg_store_requests).await.map_err(dap_err)?;
 
-        // Decide which reports to reject early. A report will be rejected if has been processed
-        // but not collected or if it has not been proceessed but pertains to a batch that was
-        // previously collected.
+        // Decide which reports to reject early. A report will be rejected here if, for example,
+        // it has been processed but not collected, or if it has not been proceessed but pertains
+        // to a batch that was previously collected, or if it is not within time bounds specified
+        // by the configuration.
+        let current_time = self.get_current_time();
+        let min_time = self.least_valid_report_time(current_time);
+        let max_time = self.greatest_valid_report_time(current_time);
         let mut early_fails = HashMap::new();
         for (bucket, collected) in agg_store_request_bucket
             .iter()
@@ -559,6 +563,10 @@ where
                     early_fails.insert(metadata.id.clone(), TransitionFailure::ReportReplayed);
                 } else if !processed && collected {
                     early_fails.insert(metadata.id.clone(), TransitionFailure::BatchCollected);
+                } else if metadata.time < min_time {
+                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportDropped);
+                } else if metadata.time > max_time {
+                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportTooEarly);
                 }
             }
         }
@@ -637,7 +645,7 @@ where
                 // NOTE This check for report replay is not definitive. It's possible for two
                 // reports with the same ID to appear in two different ReportsPending instances.
                 // The definitive check is performed by DapAggregator::check_early_reject(), which
-                // tracks all repoort IDs consumed for the task in ReportsProcessed. This check
+                // tracks all report IDs consumed for the task in ReportsProcessed. This check
                 // would be too expensive to do during the upload sub-protocol.
                 Err(DapError::Transition(TransitionFailure::ReportReplayed))
             }

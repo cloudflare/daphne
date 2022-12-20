@@ -312,30 +312,15 @@ impl AsRef<str> for DapVersion {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DapGlobalConfig {
     /// The report storage epoch duration. This value is used to control the period of time for
-    /// which an Aggregator guarantees storage of reports and/or report metadata:
+    /// which an Aggregator guarantees storage of reports and/or report metadata.
     ///
-    /// 1. Once an epoch has elapsed, all reports and metadata corresponding to the epoch may be
-    ///    deleted in order to reduce storage costs. In addition, all reports for this epoch will
-    ///    be rejected.
-    /// 2. Reports pertaining to epochs that have not yet begun may be rejected.
-    ///
-    /// Let `now` be the current time truncated by the report storage epoch duration. All epochs
-    /// preceeding the previous are subject to deletion; for all epochs following the next, reports
-    /// will be rejected:
-    ///
-    /// ```text
-    ///     now-2 <- reports rejected, data subject to deletion
-    ///     now-1 <- start of previous epoch
-    ///     now   <- start of current epoch
-    ///     now+1 <- start of next epoch
-    ///     now+2 <- reports rejected
-    /// ```
-    ///
-    /// Thus, storage is only guaranteed for the previous epoch, the current epoch, and the next
-    /// epoch.
-    //
-    // TODO(issue #100) Implement the rejection mechanism described here.
+    /// A report will be accepted if its timestamp is no more than the specified number of seconds
+    /// before the current time.
     pub report_storage_epoch_duration: Duration,
+
+    /// The report storage maximum future time skew. Reports with timestamps greater than the
+    /// current time plus this value will be rejected.
+    pub report_storage_max_future_time_skew: Duration,
 
     /// Maximum interval duration permitted in CollectReq.
     /// Prevents Collectors from requesting wide range or reports.

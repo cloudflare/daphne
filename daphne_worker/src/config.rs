@@ -154,6 +154,7 @@ impl<D> DaphneWorkerConfig<D> {
         let deployment = if let Ok(deployment) = ctx.var("DAP_DEPLOYMENT") {
             match deployment.to_string().as_str() {
                 "prod" => DaphneWorkerDeployment::Prod,
+                "dev" => DaphneWorkerDeployment::Dev,
                 s => {
                     return Err(Error::RustError(format!(
                         "Invalid value for DAP_DEPLOYMENT: {}",
@@ -667,6 +668,14 @@ impl<D> DaphneWorkerConfig<D> {
             sender_auth,
         })
     }
+
+    pub(crate) fn least_valid_report_time(&self, now: u64) -> u64 {
+        now.saturating_sub(self.global_config.report_storage_epoch_duration)
+    }
+
+    pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
+        now.saturating_add(self.global_config.report_storage_max_future_time_skew)
+    }
 }
 
 /// RwLockReadGuard'ed object, used to catch items fetched from KV.
@@ -716,4 +725,8 @@ pub(crate) enum DaphneWorkerDeployment {
     /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
     #[default]
     Prod,
+    /// Daphne-Worker is running in a development environment. Any durable objects that are created
+    /// will be registered by the garbage collector so that they can be deleted manually using the
+    /// internal test API.
+    Dev,
 }
