@@ -109,26 +109,43 @@ macro_rules! ensure_garbage_collected {
             $object.touched = false;
             return Response::from_json(&());
         } else if !$object.touched {
-            let touched: bool =
-                crate::durable::state_set_if_not_exists(&$object.state, "touched", &true)
-                    .await?
-                    .unwrap_or(false);
-            if !touched {
-                let durable = crate::durable::DurableConnector::new(&$object.env);
-                durable
-                    .post(
-                        crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
-                        crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
-                        "garbage_collector".to_string(),
-                        &crate::durable::DurableReference {
-                            binding: $binding.to_string(),
-                            id_hex: $id,
-                            task_id: None,
-                        },
-                    )
-                    .await?;
-                $object.touched = true;
+            // The GarbageCollector should only be used when running tests. In production, the DO->DO
+            // communication overhead adds unacceptable latency, and there's no need to do the
+            // bulk deletes of state that test suites require.
+            let deployment = $object.env.var("DAP_DEPLOYMENT")?.to_string();
+            if deployment != "prod" {
+                let touched: bool =
+                    crate::durable::state_set_if_not_exists(&$object.state, "touched", &true)
+                        .await?
+                        .unwrap_or(false);
+                if !touched {
+                    let durable = crate::durable::DurableConnector::new(&$object.env);
+                    durable
+                        .post(
+                            crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
+                            crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
+                            "garbage_collector".to_string(),
+                            &crate::durable::DurableReference {
+                                binding: $binding.to_string(),
+                                id_hex: $id,
+                                task_id: None,
+                            },
+                        )
+                        .await?;
+                }
             }
+            $object.touched = true;
+        }
+    }};
+}
+
+macro_rules! ensure_alarmed {
+    ($object:expr, $lifetime:expr) => {{
+        if !$object.alarmed {
+            if $object.state.storage().get_alarm().await?.is_none() {
+                $object.state.storage().set_alarm($lifetime).await?;
+            }
+            $object.alarmed = true;
         }
     }};
 }

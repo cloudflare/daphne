@@ -28,6 +28,7 @@ DAP_REPORT_SHARD_KEY = "61cd9685547370cfea76c2eb8d156ad9" # SECRET
 DAP_REPORT_SHARD_COUNT = "2"
 DAP_GLOBAL_CONFIG = """{
      "report_storage_epoch_duration": 604800,
+     "report_storage_max_future_time_skew": 300,
      "max_batch_duration": 360000,
      "min_batch_interval_start": 259200,
      "max_batch_interval_end": 259200,
@@ -35,6 +36,8 @@ DAP_GLOBAL_CONFIG = """{
      "allow_taskprov": true,
      "taskprov_version": "v02"
 }"""
+DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
+DAP_DEPLOYMENT = "dev"
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
   "kem_id": "p256_hkdf_sha256",
@@ -86,6 +89,7 @@ DAP_REPORT_SHARD_COUNT = "2"
 DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
 DAP_GLOBAL_CONFIG = """{
   "report_storage_epoch_duration": 604800,
+  "report_storage_max_future_time_skew": 300,
   "max_batch_duration": 360000,
   "min_batch_interval_start": 259200,
   "max_batch_interval_end": 259200,
@@ -93,6 +97,8 @@ DAP_GLOBAL_CONFIG = """{
   "allow_taskprov": true,
   "taskprov_version": "v02"
 }"""
+DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
+DAP_DEPLOYMENT = "dev"
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
   "kem_id": "p256_hkdf_sha256",
