@@ -19,22 +19,22 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 assert_matches = "1.5.0"
-async-trait = "0.1.58"
+async-trait = "0.1.60"
 base64 = "0.13.1"
 getrandom = { version = "0.2.8", features = ["js"] } # Required for prio
-serde_json = "1.0.87"
+serde_json = "1.0.91"
 prio = { version = "0.10.0", features = ["prio2"] }
 hpke-rs = { version = "0.1.0" , features = ["hazmat", "serialization"] }
 hpke-rs-crypto = { version = "0.1.1" }
 hpke-rs-rust-crypto = { version = "0.1.1"}
 ring = "0.16.20"
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.147", features = ["derive"] }
+serde = { version = "1.0.152", features = ["derive"] }
 rand = "0.8.5"
-thiserror = "1.0.37"
+thiserror = "1.0.38"
 url = { version = "2.3.1", features = ["serde"] }
 matchit = "0.6.0"
-paste = "1.0.9"
+paste = "1.0.11"
 
 [dev-dependencies]
-tokio = { version = "1.21.2", features = ["rt", "macros"] }
+tokio = { version = "1.23.0", features = ["rt", "macros"] }
