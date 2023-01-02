@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{BatchSelector, CollectReq, CollectResp, HpkeConfig, Id, Query},
+    messages::{decode_base64url, BatchSelector, CollectReq, CollectResp, HpkeConfig, Id, Query},
     DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
 };
 use prio::codec::{Decode, ParameterizedEncode};
@@ -231,9 +231,10 @@ async fn main() -> Result<()> {
 }
 
 fn parse_id(id_str: &str) -> Result<Id> {
-    let id_bytes = base64::decode_config(id_str, base64::URL_SAFE_NO_PAD)
+    let id_bytes = decode_base64url(id_str.as_bytes())
+        .ok_or_else(|| anyhow!("failed to decode ID"))
         .with_context(|| "expected URL-safe, base64 string")?;
-    Ok(Id::get_decoded(&id_bytes)?)
+    Ok(Id(id_bytes))
 }
 
 // TODO(cjpatton) Refactor integration tests to use this method.

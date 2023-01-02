@@ -96,6 +96,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
+name = "base64"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+
+[[package]]
 name = "base64ct"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -403,7 +409,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "base64",
+ "base64 0.20.0",
  "clap",
  "daphne",
  "prio",
@@ -420,13 +426,13 @@ version = "0.3.0"
 dependencies = [
  "assert_matches",
  "async-trait",
- "base64",
+ "base64 0.20.0",
  "getrandom",
  "hex",
  "hpke-rs",
  "hpke-rs-crypto",
  "hpke-rs-rust-crypto",
- "matchit 0.6.0",
+ "matchit 0.7.0",
  "paste",
  "prio",
  "rand",
@@ -443,7 +449,7 @@ name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
  "assert_matches",
- "base64",
+ "base64 0.20.0",
  "cfg-if",
  "console_error_panic_hook",
  "daphne",
@@ -469,12 +475,12 @@ name = "daphne_worker"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.20.0",
  "daphne",
  "futures",
  "getrandom",
  "hex",
- "matchit 0.6.0",
+ "matchit 0.7.0",
  "paste",
  "prio",
  "rand",
@@ -1117,9 +1123,9 @@ checksum = "9376a4f0340565ad675d11fc1419227faf5f60cd7ac9cb2e7185a471f30af833"
 
 [[package]]
 name = "matchit"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dfc802da7b1cf80aefffa0c7b2f77247c8b32206cc83c270b61264f5b360a80"
+checksum = "b87248edafb776e59e6ee64a79086f65890d3510f2c656c000bf2a7e8a0aea40"
 
 [[package]]
 name = "memchr"
@@ -1446,7 +1452,7 @@ checksum = "a0453e1ec5f2f48af9a67aab1d812f9aec48619dda0d9a59e2f79ebd235448ec"
 dependencies = [
  "aes 0.8.2",
  "aes-gcm",
- "base64",
+ "base64 0.13.1",
  "byteorder",
  "cmac",
  "ctr 0.9.2",
@@ -1569,7 +1575,7 @@ version = "0.11.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68cc60575865c7831548863cc02356512e3f1dc2f3f82cb837d7fc4cc8f3c97c"
 dependencies = [
- "base64",
+ "base64 0.13.1",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -1606,7 +1612,7 @@ version = "0.11.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59fdca8934fccbd5aec3e208bdb5a76107ce8690aa51c6c292c31f21541b52b9"
 dependencies = [
- "base64",
+ "base64 0.13.1",
  "bytes",
  "encoding_rs",
  "futures",

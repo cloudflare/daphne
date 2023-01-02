@@ -155,11 +155,11 @@ use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
 use daphne::{
     auth::BearerToken,
     constants,
-    messages::{Duration, Id, Time},
+    messages::{decode_base64url, Duration, Id, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
     DapAbort, DapCollectJob, DapError, DapResponse,
 };
-use prio::codec::{Decode, Encode};
+use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -178,15 +178,10 @@ macro_rules! parse_id {
         $option_str:expr
     ) => {
         match $option_str {
-            Some(ref id_base64url) => {
-                match base64::decode_config(id_base64url, base64::URL_SAFE_NO_PAD) {
-                    Ok(ref id_raw) => match Id::get_decoded(id_raw) {
-                        Ok(id) => id,
-                        Err(_) => return Response::error("Bad Request", 400),
-                    },
-                    Err(_) => return Response::error("Bad Request", 400),
-                }
-            }
+            Some(id_base64url) => match decode_base64url(id_base64url.as_bytes()) {
+                Some(id_bytes) => Id(id_bytes),
+                None => return Response::error("Bad Request", 400),
+            },
             None => return Response::error("Bad Request", 400),
         }
     };
