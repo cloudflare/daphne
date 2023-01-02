@@ -8,7 +8,8 @@ use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
     messages::{
-        Duration, HpkeAeadId, HpkeConfig, HpkeConfigList, HpkeKdfId, HpkeKemId, Id, Interval,
+        decode_base64url, encode_base64url, Duration, HpkeAeadId, HpkeConfig, HpkeConfigList,
+        HpkeKdfId, HpkeKemId, Id, Interval,
     },
     taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
@@ -161,15 +162,10 @@ impl TestRunner {
             version,
         };
 
-        let vdaf_verify_key_base64url = base64::encode_config(
-            &t.task_config.vdaf_verify_key.as_ref(),
-            base64::URL_SAFE_NO_PAD,
-        );
+        let vdaf_verify_key_base64url = encode_base64url(&t.task_config.vdaf_verify_key.as_ref());
 
-        let collector_hpke_config_base64url = base64::encode_config(
-            &t.collector_hpke_receiver.config.get_encoded(),
-            base64::URL_SAFE_NO_PAD,
-        );
+        let collector_hpke_config_base64url =
+            encode_base64url(&t.collector_hpke_receiver.config.get_encoded());
 
         let vdaf = json!({
             "type": "Prio3Aes128Sum",
@@ -500,11 +496,8 @@ impl TestRunner {
             .expect("request failed");
         if resp.status() == 200 {
             let batch_id_base64url = resp.text().await.unwrap();
-            let batch_id = Id::get_decoded(
-                &base64::decode_config(&batch_id_base64url, base64::URL_SAFE_NO_PAD)
-                    .expect("Failed to parse URL-safe base64 batch ID"),
-            )
-            .expect("Failed to parse batch ID");
+            let batch_id = Id(decode_base64url(batch_id_base64url.as_bytes())
+                .expect("Failed to parse URL-safe base64 batch ID"));
             batch_id
         } else {
             panic!("request to {} failed: response: {:?}", url, resp);
@@ -642,10 +635,7 @@ async fn get_raw_hpke_config(
     let max_time_to_wait = std::time::Duration::from_secs(60 * 3);
     let mut elapsed_time = std::time::Duration::default();
     let url = base_url.join("hpke_config").unwrap();
-    let query = [(
-        "task_id",
-        base64::encode_config(task_id, base64::URL_SAFE_NO_PAD),
-    )];
+    let query = [("task_id", encode_base64url(task_id))];
     while elapsed_time < max_time_to_wait {
         let req = client.get(url.as_str()).query(&query);
         match req.send().await {

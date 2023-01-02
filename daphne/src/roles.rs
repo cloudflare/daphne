@@ -11,10 +11,10 @@ use crate::{
     },
     hpke::HpkeDecrypter,
     messages::{
-        constant_time_eq, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq, CollectResp,
-        HpkeConfigList, Id, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, Time,
-        TransitionFailure, TransitionVar,
+        constant_time_eq, decode_base64url, AggregateContinueReq, AggregateInitializeReq,
+        AggregateResp, AggregateShareReq, AggregateShareResp, BatchSelector, CollectReq,
+        CollectResp, HpkeConfigList, Id, PartialBatchSelector, Query, Report, ReportId,
+        ReportMetadata, Time, TransitionFailure, TransitionVar,
     },
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
@@ -148,14 +148,11 @@ where
                 return Err(DapAbort::BadRequest("unexpected query parameter".into()));
             }
 
-            let bytes =
-                base64::decode_config(v.as_ref(), base64::URL_SAFE_NO_PAD).map_err(|_| {
-                    DapAbort::BadRequest(
-                        "failed to parse query parameter as URL-safe Base64".into(),
-                    )
-                })?;
+            let bytes = decode_base64url(v.as_bytes()).ok_or(DapAbort::BadRequest(
+                "failed to parse query parameter as URL-safe Base64".into(),
+            ))?;
 
-            id = Some(Id::get_decoded(&bytes)?);
+            id = Some(Id(bytes))
         }
 
         let hpke_config = self.get_hpke_config_for(id.as_ref()).await?;

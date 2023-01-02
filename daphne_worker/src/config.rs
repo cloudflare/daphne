@@ -19,7 +19,7 @@ use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{HpkeConfig, Id, ReportMetadata},
+    messages::{decode_base64url_vec, HpkeConfig, Id, ReportMetadata},
     DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -513,8 +513,8 @@ impl<D> DaphneWorkerConfig<D> {
         cmd: InternalTestAddTask,
     ) -> Result<()> {
         // Task ID.
-        let task_id_data =
-            base64::decode_config(&cmd.task_id, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
+        let task_id_data = decode_base64url_vec(cmd.task_id.as_bytes())
+            .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
         let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
 
         // VDAF config.
@@ -528,16 +528,15 @@ impl<D> DaphneWorkerConfig<D> {
         };
 
         // VDAF verificaiton key.
-        let vdaf_verify_key_data =
-            base64::decode_config(&cmd.verify_key, base64::URL_SAFE_NO_PAD).map_err(int_err)?;
+        let vdaf_verify_key_data = decode_base64url_vec(cmd.verify_key.as_bytes())
+            .ok_or_else(|| int_err("VDAF verify key is not valid URL-safe base64"))?;
         let vdaf_verify_key = vdaf
             .get_decoded_verify_key(&vdaf_verify_key_data)
             .map_err(int_err)?;
 
         // Collector HPKE config.
-        let collector_hpke_config_data =
-            base64::decode_config(&cmd.collector_hpke_config, base64::URL_SAFE_NO_PAD)
-                .map_err(int_err)?;
+        let collector_hpke_config_data = decode_base64url_vec(cmd.collector_hpke_config.as_bytes())
+            .ok_or_else(|| int_err("HPKE collector config is not valid URL-safe base64"))?;
         let collector_hpke_config =
             HpkeConfig::get_decoded(&collector_hpke_config_data).map_err(int_err)?;
 
