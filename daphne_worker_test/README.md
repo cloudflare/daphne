@@ -4,7 +4,7 @@ This directory defines a deployment of Daphne-Worker for testing changes
 locally. It also implements integration tests between Daphne and and
 Daphne-Worker and interop tests with [Janus](https://github.com/divviup/janus).
 
-[Wrangler](https://github.com/cloudflare/wrangler2) (>=2.1.11) is used to mock
+[Wrangler](https://github.com/cloudflare/wrangler2) (>=2.6.2) is used to mock
 the Cloudflare Workers platform for local testing. Wrangler is available from
 npm. To run the Leader, do
 
