@@ -58,29 +58,9 @@ pub(crate) struct TaskprovConfig {
     pub(crate) collector_bearer_token: BearerToken,
 }
 
-/// Long-lived parameters used a daphne across DAP tasks.
-pub(crate) struct DaphneWorkerConfig<D> {
-    // TODO Determine if we actually need the route countext, and if not, replace it with `Env`.
-    ctx: Option<RouteContext<D>>,
-
-    /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
-    /// configured as the DAP Helper.
-    pub(crate) client: Option<reqwest_wasm::Client>,
-
-    pub(crate) global_config: DapGlobalConfig,
-
-    /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
-    /// receiver config for the first time from Cloudflare KV.
-    hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
-
-    /// Laeder bearer token per task.
-    leader_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
-
-    /// Collector bearer token per task.
-    collector_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
-
-    /// Task list.
-    tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
+/// Long-lived parameters used by Daphne-Worker across DAP tasks.
+pub(crate) struct DaphneWorkerConfig {
+    pub(crate) global: DapGlobalConfig,
 
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
     #[allow(unused)]
@@ -101,7 +81,7 @@ pub(crate) struct DaphneWorkerConfig<D> {
     is_leader: bool,
 
     /// draft-wang-ppm-dap-taskprov-02 configuration (optional).
-    pub(crate) taskprov_config: Option<TaskprovConfig>,
+    pub(crate) taskprov: Option<TaskprovConfig>,
 
     /// Default DAP version to use if not specified by the API URL
     pub(crate) default_version: DapVersion,
@@ -110,29 +90,28 @@ pub(crate) struct DaphneWorkerConfig<D> {
     pub(crate) admin_token: Option<BearerToken>,
 }
 
-impl<D> DaphneWorkerConfig<D> {
-    /// Fetch DAP parameters from environment variables.
-    pub(crate) fn from_worker_context(ctx: RouteContext<D>) -> Result<Self> {
-        let global_config: DapGlobalConfig = serde_json::from_str(
-            ctx.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
+impl DaphneWorkerConfig {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let global: DapGlobalConfig = serde_json::from_str(
+            env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
         .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
 
         let default_version =
-            DapVersion::from(ctx.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
+            DapVersion::from(env.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
 
-        let base_url: Url = ctx
+        let base_url: Url = env
             .var("DAP_BASE_URL")?
             .to_string()
             .parse()
             .map_err(int_err)?;
 
         let report_shard_key = Seed::get_decoded(
-            &hex::decode(ctx.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
+            &hex::decode(env.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
         )
         .map_err(int_err)?;
 
-        let report_shard_count: u64 = ctx
+        let report_shard_count: u64 = env
             .var("DAP_REPORT_SHARD_COUNT")?
             .to_string()
             .parse()
@@ -140,7 +119,7 @@ impl<D> DaphneWorkerConfig<D> {
                 Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {}", err))
             })?;
 
-        let is_leader = match ctx.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
+        let is_leader = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
             "leader" => true,
             "helper" => false,
             other => {
@@ -151,7 +130,7 @@ impl<D> DaphneWorkerConfig<D> {
             }
         };
 
-        let deployment = if let Ok(deployment) = ctx.var("DAP_DEPLOYMENT") {
+        let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
             match deployment.to_string().as_str() {
                 "prod" => DaphneWorkerDeployment::Prod,
                 "dev" => DaphneWorkerDeployment::Dev,
@@ -169,30 +148,22 @@ impl<D> DaphneWorkerConfig<D> {
             console_debug!("DAP deployment override applied: {:?}", deployment);
         }
 
-        let client = if is_leader {
-            // TODO Configure this client to use HTTPS only, excpet if running in a test
-            // environment.
-            Some(reqwest_wasm::Client::new())
-        } else {
-            None
-        };
-
-        let taskprov_config = if global_config.allow_taskprov {
+        let taskprov = if global.allow_taskprov {
             let hpke_collector_config = serde_json::from_str(
-                ctx.var("DAP_TASKPROV_HPKE_COLLECTOR_CONFIG")?
+                env.var("DAP_TASKPROV_HPKE_COLLECTOR_CONFIG")?
                     .to_string()
                     .as_ref(),
             )?;
 
             let vdaf_verify_key_init =
-                hex::decode(ctx.secret("DAP_TASKPROV_VDAF_VERIFY_KEY_INIT")?.to_string())
+                hex::decode(env.secret("DAP_TASKPROV_VDAF_VERIFY_KEY_INIT")?.to_string())
                     .map_err(int_err)?;
 
             let leader_bearer_token =
-                BearerToken::from(ctx.secret("DAP_TASKPROV_LEADER_BEARER_TOKEN")?.to_string());
+                BearerToken::from(env.secret("DAP_TASKPROV_LEADER_BEARER_TOKEN")?.to_string());
 
             let collector_bearer_token = BearerToken::from(
-                ctx.secret("DAP_TASKPROV_COLLECTOR_BEARER_TOKEN")?
+                env.secret("DAP_TASKPROV_COLLECTOR_BEARER_TOKEN")?
                     .to_string(),
             );
 
@@ -206,7 +177,7 @@ impl<D> DaphneWorkerConfig<D> {
             None
         };
 
-        let admin_token = match ctx.secret("DAP_ADMIN_BEARER_TOKEN") {
+        let admin_token = match env.secret("DAP_ADMIN_BEARER_TOKEN") {
             Ok(raw) => Some(BearerToken::from(raw.to_string())),
             Err(err) => {
                 console_log!("DAP_ADMIN_BEARER_TOKEN not configured: {:?}", err);
@@ -215,19 +186,13 @@ impl<D> DaphneWorkerConfig<D> {
         };
 
         Ok(Self {
-            ctx: Some(ctx),
-            client,
-            global_config,
-            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
-            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            tasks: Arc::new(RwLock::new(HashMap::new())),
+            global,
             deployment,
             report_shard_key,
             report_shard_count,
             base_url,
             is_leader,
-            taskprov_config,
+            taskprov,
             default_version,
             admin_token,
         })
@@ -243,17 +208,69 @@ impl<D> DaphneWorkerConfig<D> {
         let mut shard_seed = [0; 8];
         PrgAes128::seed_stream(&self.report_shard_key, metadata.id.as_ref()).fill(&mut shard_seed);
         let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
-        let epoch =
-            metadata.time - (metadata.time % self.global_config.report_storage_epoch_duration);
+        let epoch = metadata.time - (metadata.time % self.global.report_storage_epoch_duration);
         durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
+    }
+}
+
+/// Daphne-Worker state. Constructed upon receiving an HTTP request.
+pub(crate) struct DaphneWorker<D> {
+    context: Option<RouteContext<D>>,
+    pub(crate) config: DaphneWorkerConfig,
+
+    /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
+    /// configured as the DAP Helper.
+    pub(crate) client: Option<reqwest_wasm::Client>,
+
+    /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
+    /// receiver config for the first time from Cloudflare KV.
+    hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
+
+    /// Laeder bearer token per task.
+    leader_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
+
+    /// Collector bearer token per task.
+    collector_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
+
+    /// Task list.
+    tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
+}
+
+impl<D> DaphneWorker<D> {
+    pub(crate) fn from_worker_context(context: RouteContext<D>) -> Result<Self> {
+        let config = DaphneWorkerConfig::from_worker_env(&context.env)?;
+
+        let client = if config.is_leader {
+            // TODO Configure this client to use HTTPS only, excpet if running in a test
+            // environment.
+            Some(reqwest_wasm::Client::new())
+        } else {
+            None
+        };
+
+        Ok(Self {
+            context: Some(context),
+            config,
+            client,
+            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
+            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(RwLock::new(HashMap::new())),
+        })
     }
 
     pub(crate) fn durable(&self) -> DurableConnector<'_> {
-        DurableConnector::new(&self.ctx.as_ref().expect("no route context configured").env)
+        DurableConnector::new(
+            &self
+                .context
+                .as_ref()
+                .expect("no route context configured")
+                .env,
+        )
     }
 
     pub(crate) fn kv(&self) -> Result<KvStore> {
-        self.ctx
+        self.context
             .as_ref()
             .ok_or_else(|| Error::RustError("route context does not exist".to_string()))?
             .kv(KV_BINDING_DAP_CONFIG)
@@ -492,8 +509,8 @@ impl<D> DaphneWorkerConfig<D> {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response> {
-        if self.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
-            || !self.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
+        if self.config.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
+            || !self.config.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -503,7 +520,7 @@ impl<D> DaphneWorkerConfig<D> {
 
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": format!("{}{}/", self.base_url.path(), version.as_ref()),
+            "endpoint": format!("{}{}/", self.config.base_url.path(), version.as_ref()),
         }))
     }
 
@@ -670,11 +687,11 @@ impl<D> DaphneWorkerConfig<D> {
     }
 
     pub(crate) fn least_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_sub(self.global_config.report_storage_epoch_duration)
+        now.saturating_sub(self.config.global.report_storage_epoch_duration)
     }
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_add(self.global_config.report_storage_max_future_time_skew)
+        now.saturating_add(self.config.global.report_storage_max_future_time_skew)
     }
 }
 

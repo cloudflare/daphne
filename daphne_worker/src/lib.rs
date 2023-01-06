@@ -151,7 +151,7 @@
 //! | `DAP_DEPLOYMENT` | `String` | no | Deployment type, only "prod" for now. |
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
-use crate::{config::DaphneWorkerConfig, dap::dap_response_to_worker};
+use crate::{config::DaphneWorker, dap::dap_response_to_worker};
 use daphne::{
     auth::BearerToken,
     constants,
@@ -223,32 +223,31 @@ impl DaphneWorkerRouter {
     pub async fn handle_request(&self, req: Request, env: Env) -> Result<Response> {
         let router = Router::new()
             .get_async("/:version/hpke_config", |req, ctx| async move {
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                let req = config.worker_request_to_dap(req).await?;
+                let daph = DaphneWorker::from_worker_context(ctx)?;
+                let req = daph.worker_request_to_dap(req).await?;
 
-                match config.http_get_hpke_config(&req).await {
+                match daph.http_get_hpke_config(&req).await {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => abort(e),
                 }
             })
             .post_async("/task", |mut req, ctx| async move {
-                let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                let daph = DaphneWorker::from_worker_context(ctx)?;
                 let admin_token = req
                     .headers()
                     .get("X-Daphne-Worker-Admin-Bearer-Token")?
                     .map(BearerToken::from);
 
-                if config.admin_token.is_none() {
+                if daph.config.admin_token.is_none() {
                     return Response::error("admin not configured", 400);
                 }
 
-                if admin_token.is_none() || admin_token != config.admin_token {
+                if admin_token.is_none() || admin_token != daph.config.admin_token {
                     return Response::error("missing or invalid bearer token for admin", 401);
                 }
 
                 let cmd: InternalTestAddTask = req.json().await?;
-                config
-                    .internal_add_task(config.default_version, cmd)
+                daph.internal_add_task(daph.config.default_version, cmd)
                     .await?;
                 Response::empty()
             });
@@ -257,19 +256,19 @@ impl DaphneWorkerRouter {
             "leader" => {
                 router
                     .post_async("/:version/upload", |req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        let req = config.worker_request_to_dap(req).await?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
+                        let req = daph.worker_request_to_dap(req).await?;
 
-                        match config.http_post_upload(&req).await {
+                        match daph.http_post_upload(&req).await {
                             Ok(()) => Response::empty(),
                             Err(e) => abort(e),
                         }
                     })
                     .post_async("/:version/collect", |req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                        let req = config.worker_request_to_dap(req).await?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
+                        let req = daph.worker_request_to_dap(req).await?;
 
-                        match config.http_post_collect(&req).await {
+                        match daph.http_post_collect(&req).await {
                             Ok(collect_uri) => {
                                 let mut headers = Headers::new();
                                 headers.set("Location", collect_uri.as_str())?;
@@ -286,8 +285,8 @@ impl DaphneWorkerRouter {
                         |_req, ctx| async move {
                             let task_id = parse_id!(ctx.param("task_id"));
                             let collect_id = parse_id!(ctx.param("collect_id"));
-                            let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                            match config.poll_collect_job(&task_id, &collect_id).await {
+                            let daph = DaphneWorker::from_worker_context(ctx)?;
+                            match daph.poll_collect_job(&task_id, &collect_id).await {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
                                     dap_response_to_worker(DapResponse {
                                         media_type: Some(constants::MEDIA_TYPE_COLLECT_RESP),
@@ -307,9 +306,9 @@ impl DaphneWorkerRouter {
                     )
                     .post_async("/internal/process", |mut req, ctx| async move {
                         // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
-                        match config.process(&report_sel).await {
+                        match daph.process(&report_sel).await {
                             Ok(telem) => {
                                 console_debug!("{:?}", telem);
                                 Response::from_json(&telem)
@@ -325,8 +324,8 @@ impl DaphneWorkerRouter {
                             //
                             // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
                             let task_id = parse_id!(ctx.param("task_id"));
-                            let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                            match config.internal_current_batch(&task_id).await {
+                            let daph = DaphneWorker::from_worker_context(ctx)?;
+                            match daph.internal_current_batch(&task_id).await {
                                 Ok(batch_id) => Response::from_bytes(
                                     batch_id.to_base64url().as_bytes().to_owned(),
                                 ),
@@ -338,19 +337,19 @@ impl DaphneWorkerRouter {
 
             "helper" => router
                 .post_async("/:version/aggregate", |req, ctx| async move {
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    let req = config.worker_request_to_dap(req).await?;
+                    let daph = DaphneWorker::from_worker_context(ctx)?;
+                    let req = daph.worker_request_to_dap(req).await?;
 
-                    match config.http_post_aggregate(&req).await {
+                    match daph.http_post_aggregate(&req).await {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
                 })
                 .post_async("/:version/aggregate_share", |req, ctx| async move {
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    let req = config.worker_request_to_dap(req).await?;
+                    let daph = DaphneWorker::from_worker_context(ctx)?;
+                    let req = daph.worker_request_to_dap(req).await?;
 
-                    match config.http_post_aggregate_share(&req).await {
+                    match daph.http_post_aggregate_share(&req).await {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
@@ -362,8 +361,8 @@ impl DaphneWorkerRouter {
         let router = if self.enable_internal_test {
             router
                 .post_async("/internal/delete_all", |_req, ctx| async move {
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
-                    match config.internal_delete_all().await {
+                    let daph = DaphneWorker::from_worker_context(ctx)?;
+                    match daph.internal_delete_all().await {
                         Ok(()) => Response::empty(),
                         Err(e) => abort(e.into()),
                     }
@@ -375,27 +374,25 @@ impl DaphneWorkerRouter {
                 .post_async(
                     "/internal/test/endpoint_for_task",
                     |mut req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
                         let cmd: InternalTestEndpointForTask = req.json().await?;
-                        config
-                            .internal_endpoint_for_task(config.default_version, cmd)
+                        daph.internal_endpoint_for_task(daph.config.default_version, cmd)
                             .await
                     },
                 )
                 .post_async(
                     "/:version/internal/test/endpoint_for_task",
                     |mut req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
                         let cmd: InternalTestEndpointForTask = req.json().await?;
-                        let version = config.extract_version_parameter(&req)?;
-                        config.internal_endpoint_for_task(version, cmd).await
+                        let version = daph.extract_version_parameter(&req)?;
+                        daph.internal_endpoint_for_task(version, cmd).await
                     },
                 )
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
-                    let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                    let daph = DaphneWorker::from_worker_context(ctx)?;
                     let cmd: InternalTestAddTask = req.json().await?;
-                    config
-                        .internal_add_task(config.default_version, cmd)
+                    daph.internal_add_task(daph.config.default_version, cmd)
                         .await?;
                     Response::from_json(&serde_json::json!({
                         "status": "success",
@@ -404,10 +401,10 @@ impl DaphneWorkerRouter {
                 .post_async(
                     "/:version/internal/test/add_task",
                     |mut req, ctx| async move {
-                        let config = DaphneWorkerConfig::from_worker_context(ctx)?;
+                        let daph = DaphneWorker::from_worker_context(ctx)?;
                         let cmd: InternalTestAddTask = req.json().await?;
-                        let version = config.extract_version_parameter(&req)?;
-                        config.internal_add_task(version, cmd).await?;
+                        let version = daph.extract_version_parameter(&req)?;
+                        daph.internal_add_task(version, cmd).await?;
                         Response::from_json(&serde_json::json!({
                             "status": "success",
                         }))
