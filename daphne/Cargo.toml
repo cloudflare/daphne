@@ -37,4 +37,4 @@ matchit = "0.7.0"
 paste = "1.0.11"
 
 [dev-dependencies]
-tokio = { version = "1.23.0", features = ["rt", "macros"] }
+tokio = { version = "1.23.1", features = ["rt", "macros"] }
