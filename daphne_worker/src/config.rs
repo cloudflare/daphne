@@ -34,6 +34,7 @@ use std::{
     collections::HashMap,
     io::Cursor,
     sync::{Arc, RwLock, RwLockReadGuard},
+    time::Duration,
 };
 use worker::{kv::KvStore, *};
 
@@ -60,12 +61,17 @@ pub(crate) struct TaskprovConfig {
 
 /// Long-lived parameters used by Daphne-Worker across DAP tasks.
 pub(crate) struct DaphneWorkerConfig {
+    /// Indicates if DaphneWorker is used as the Leader.
+    is_leader: bool,
+
+    /// Global DAP configuration.
     pub(crate) global: DapGlobalConfig,
 
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
-    #[allow(unused)]
-    // No overrides have been defined yet, but this will be used in the future.
     pub(crate) deployment: DaphneWorkerDeployment,
+
+    /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
+    pub(crate) collect_id_key: Option<Seed<16>>,
 
     /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
     /// to (based on the report ID).
@@ -77,10 +83,8 @@ pub(crate) struct DaphneWorkerConfig {
     /// Base URL of the Aggregator (unversioned).
     base_url: Url,
 
-    /// Indicates if DaphneWorker is used as the Leader.
-    is_leader: bool,
-
-    /// draft-wang-ppm-dap-taskprov-02 configuration (optional).
+    /// Optional: draft-wang-ppm-dap-taskprov-02 configuration. If not configured, then taskprov
+    /// will be disabled.
     pub(crate) taskprov: Option<TaskprovConfig>,
 
     /// Default DAP version to use if not specified by the API URL
@@ -88,10 +92,29 @@ pub(crate) struct DaphneWorkerConfig {
 
     /// Admin bearer token. If configured, it is used to authorize requests from the administrator.
     pub(crate) admin_token: Option<BearerToken>,
+
+    /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
+    /// configured by the Leader.
+    pub(crate) helper_state_store_garbage_collect_after_secs: Option<Duration>,
+
+    /// Additional time to wait before deletng an instance of ReportsProcessed. Added to the value
+    /// of the `report_storage_epoch_duration` field of the global DAP configuration.
+    pub(crate) processed_alarm_safety_interval: Duration,
 }
 
 impl DaphneWorkerConfig {
     pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let is_leader = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
+            "leader" => true,
+            "helper" => false,
+            other => {
+                return Err(Error::RustError(format!(
+                    "Invalid value for DAP_AGGREGATOR_ROLE: '{}'",
+                    other
+                )))
+            }
+        };
+
         let global: DapGlobalConfig = serde_json::from_str(
             env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
@@ -106,6 +129,19 @@ impl DaphneWorkerConfig {
             .parse()
             .map_err(int_err)?;
 
+        let collect_id_key = if is_leader {
+            let collect_id_key_hex = env
+                .secret("DAP_COLLECT_ID_KEY")
+                .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {}", e))?
+                .to_string();
+            let collect_id_key =
+                Seed::get_decoded(&hex::decode(collect_id_key_hex).map_err(int_err)?)
+                    .map_err(int_err)?;
+            Some(collect_id_key)
+        } else {
+            None
+        };
+
         let report_shard_key = Seed::get_decoded(
             &hex::decode(env.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
         )
@@ -118,17 +154,6 @@ impl DaphneWorkerConfig {
             .map_err(|err| {
                 Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {}", err))
             })?;
-
-        let is_leader = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
-            "leader" => true,
-            "helper" => false,
-            other => {
-                return Err(Error::RustError(format!(
-                    "Invalid value for DAP_AGGREGATOR_ROLE: '{}'",
-                    other
-                )))
-            }
-        };
 
         let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
             match deployment.to_string().as_str() {
@@ -185,9 +210,38 @@ impl DaphneWorkerConfig {
             }
         };
 
+        let helper_state_store_garbage_collect_after_secs = if !is_leader {
+            Some(Duration::from_secs(
+                env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
+                    .to_string()
+                    .parse()
+                    .map_err(|err| {
+                        Error::RustError(format!(
+                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {}",
+                            err
+                        ))
+                    })?,
+            ))
+        } else {
+            None
+        };
+
+        let processed_alarm_safety_interval = Duration::from_secs(
+            env.var("DAP_PROCESSED_ALARM_SAFETY_INTERVAL")?
+                .to_string()
+                .parse()
+                .map_err(|err| {
+                    Error::RustError(format!(
+                        "Failed to parse DAP_PROCESSED_ALARM_SAFETY_INTERVAL: {}",
+                        err
+                    ))
+                })?,
+        );
+
         Ok(Self {
             global,
             deployment,
+            collect_id_key,
             report_shard_key,
             report_shard_count,
             base_url,
@@ -195,6 +249,8 @@ impl DaphneWorkerConfig {
             taskprov,
             default_version,
             admin_token,
+            helper_state_store_garbage_collect_after_secs,
+            processed_alarm_safety_interval,
         })
     }
 

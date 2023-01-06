@@ -1,9 +1,8 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{durable::state_get, int_err};
+use crate::{config::DaphneWorkerConfig, durable::state_get, int_err};
 use daphne::{messages::Id, DapVersion};
-use std::time::Duration;
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -33,29 +32,30 @@ pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get
 #[durable_object]
 pub struct HelperStateStore {
     state: State,
-    env: Env,
+    config: DaphneWorkerConfig,
     alarmed: bool,
 }
 
 #[durable_object]
 impl DurableObject for HelperStateStore {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
-            env,
+            config,
             alarmed: false,
         }
     }
 
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         // Ensure this DO instance is garbage collected eventually.
-        let secs: u64 = self
-            .env
-            .var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
-            .to_string()
-            .parse()
-            .map_err(int_err)?;
-        ensure_alarmed!(self, Duration::from_secs(secs));
+        ensure_alarmed!(
+            self,
+            self.config
+                .helper_state_store_garbage_collect_after_secs
+                .expect("Daphne-Worker not configured as helper")
+        );
 
         match (req.path().as_ref(), req.method()) {
             // Store the Helper's state.

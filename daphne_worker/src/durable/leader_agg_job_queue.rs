@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE},
     int_err,
 };
@@ -35,15 +36,19 @@ pub struct LeaderAggregationJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for LeaderAggregationJobQueue {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
         }
     }

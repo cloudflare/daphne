@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{
         durable_name_queue,
         leader_agg_job_queue::{
@@ -53,15 +54,19 @@ pub struct ReportsPending {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for ReportsPending {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
         }
     }

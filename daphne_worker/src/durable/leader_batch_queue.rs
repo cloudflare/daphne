@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE},
     int_err,
 };
@@ -54,6 +55,7 @@ pub struct LeaderBatchQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
 }
 
@@ -88,9 +90,12 @@ impl LeaderBatchQueue {
 #[durable_object]
 impl DurableObject for LeaderBatchQueue {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
         }
     }

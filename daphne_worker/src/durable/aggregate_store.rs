@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     int_err,
 };
@@ -36,15 +37,19 @@ pub struct AggregateStore {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for AggregateStore {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
         }
     }
