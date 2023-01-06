@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{state_get, state_get_or_default, DurableOrdered, BINDING_DAP_LEADER_COL_JOB_QUEUE},
     int_err,
 };
@@ -10,8 +11,8 @@ use daphne::{
     DapCollectJob, DapVersion,
 };
 use prio::{
-    codec::{Decode, ParameterizedEncode},
-    vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
+    codec::ParameterizedEncode,
+    vdaf::prg::{Prg, PrgAes128, SeedStream},
 };
 use worker::*;
 
@@ -52,15 +53,19 @@ pub struct LeaderCollectionJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
 }
 
 #[durable_object]
 impl DurableObject for LeaderCollectionJobQueue {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
         }
     }
@@ -89,17 +94,12 @@ impl DurableObject for LeaderCollectionJobQueue {
                 // if this structure changes further, then version information will need to be
                 // added to this request.
                 let collect_req_bytes = collect_req.get_encoded_with_param(&DapVersion::Draft03);
-                let collect_id_key_hex = self
-                    .env
-                    .secret("DAP_COLLECT_ID_KEY")
-                    .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {}", e))?
-                    .to_string();
-                let collect_id_key =
-                    Seed::get_decoded(&hex::decode(&collect_id_key_hex).map_err(int_err)?)
-                        .map_err(int_err)?;
                 let mut collect_id_bytes = [0; 32];
-                PrgAes128::seed_stream(&collect_id_key, &collect_req_bytes)
-                    .fill(&mut collect_id_bytes);
+                PrgAes128::seed_stream(
+                    self.config.collect_id_key.as_ref().unwrap(),
+                    &collect_req_bytes,
+                )
+                .fill(&mut collect_id_bytes);
                 let collect_id = Id(collect_id_bytes);
                 let collect_id_hex = collect_id.to_hex();
 

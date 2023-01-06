@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    config::DaphneWorkerConfig,
     durable::{state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
     int_err,
 };
-use daphne::DapGlobalConfig;
 use futures::future::try_join_all;
 use std::time::Duration;
 use worker::*;
@@ -31,6 +31,7 @@ pub struct ReportsProcessed {
     #[allow(dead_code)]
     state: State,
     env: Env,
+    config: DaphneWorkerConfig,
     touched: bool,
     alarmed: bool,
 }
@@ -53,9 +54,12 @@ impl ReportsProcessed {
 #[durable_object]
 impl DurableObject for ReportsProcessed {
     fn new(state: State, env: Env) -> Self {
+        let config =
+            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
+            config,
             touched: false,
             alarmed: false,
         }
@@ -64,24 +68,10 @@ impl DurableObject for ReportsProcessed {
     async fn fetch(&mut self, mut req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PROCESSED);
-
-        let global_config: DapGlobalConfig = serde_json::from_str(
-            self.env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
-        )
-        .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
-        let safety_interval: u64 = self
-            .env
-            .var("DAP_PROCESSED_ALARM_SAFETY_INTERVAL")?
-            .to_string()
-            .parse()
-            .map_err(int_err)?;
         ensure_alarmed!(
             self,
-            Duration::from_secs(
-                global_config
-                    .report_storage_epoch_duration
-                    .saturating_add(safety_interval)
-            )
+            Duration::from_secs(self.config.global.report_storage_epoch_duration)
+                .saturating_add(self.config.processed_alarm_safety_interval)
         );
 
         match (req.path().as_ref(), req.method()) {

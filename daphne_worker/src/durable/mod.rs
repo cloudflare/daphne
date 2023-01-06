@@ -112,8 +112,7 @@ macro_rules! ensure_garbage_collected {
             // The GarbageCollector should only be used when running tests. In production, the DO->DO
             // communication overhead adds unacceptable latency, and there's no need to do the
             // bulk deletes of state that test suites require.
-            let deployment = $object.env.var("DAP_DEPLOYMENT")?.to_string();
-            if deployment != "prod" {
+            if matches!($object.config.deployment, crate::config::DaphneWorkerDeployment::Dev) {
                 let touched: bool =
                     crate::durable::state_set_if_not_exists(&$object.state, "touched", &true)
                         .await?
