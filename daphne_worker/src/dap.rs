@@ -8,7 +8,7 @@
 
 use crate::{
     config::{
-        DaphneWorkerConfig, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
+        DaphneWorker, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
         KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
     },
     dap_err,
@@ -75,7 +75,7 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorkerConfig<D> {
+impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorker<D> {
     type WrappedHpkeConfig = GuardedHpkeReceiverConfig<'srv>;
 
     async fn get_hpke_config_for(
@@ -96,7 +96,7 @@ impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorkerConfig<D> {
             //
             // For now, expect that only one KEM algorithm is supported and that only one config
             // will be used at anyone time.
-            if self.global_config.supported_hpke_kems.len() != 1 {
+            if self.config.global.supported_hpke_kems.len() != 1 {
                 return Err(DapError::Fatal(
                     "The number of supported HPKE KEMs must be 1".to_string(),
                 ));
@@ -104,7 +104,8 @@ impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorkerConfig<D> {
 
             let mut hpke_config_id = None;
             for it in self
-                .global_config
+                .config
+                .global
                 .gen_hpke_receiver_config_list(rand::random())
             {
                 let hpke_receiver_config = it.expect("failed to generate HPKE receiver config");
@@ -198,7 +199,7 @@ fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, 
 }
 
 #[async_trait(?Send)]
-impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorkerConfig<D> {
+impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorker<D> {
     type WrappedBearerToken = GuardedBearerToken<'srv>;
 
     async fn get_leader_bearer_token_for(
@@ -219,7 +220,7 @@ impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorkerConfig<D> {
 
     fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.taskprov_config {
+            && match &self.config.taskprov {
                 Some(config) => config.leader_bearer_token == *token,
                 None => false,
             }
@@ -227,7 +228,7 @@ impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorkerConfig<D> {
 
     fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.taskprov_config {
+            && match &self.config.taskprov {
                 Some(config) => config.collector_bearer_token == *token,
                 None => false,
             }
@@ -235,7 +236,7 @@ impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorkerConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
+impl<D> DapAuthorizedSender<BearerToken> for DaphneWorker<D> {
     async fn authorize(
         &self,
         task_id: &Id,
@@ -251,7 +252,7 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneWorkerConfig<D> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapAggregator<'srv, 'req, BearerToken> for DaphneWorkerConfig<D>
+impl<'srv, 'req, D> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker<D>
 where
     'srv: 'req,
 {
@@ -265,7 +266,7 @@ where
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.global_config
+        &self.config.global
     }
 
     fn taskprov_opt_in_decision(
@@ -299,29 +300,30 @@ where
         }
         let metadata_ref = metadata.unwrap();
         let taskprov_task_config = get_taskprov_task_config(
-            self.global_config.taskprov_version,
+            self.config.global.taskprov_version,
             task_id.as_ref(),
             metadata_ref,
         )?;
         if taskprov_task_config.is_some() {
-            let global_config = self.get_global_config();
-            if !global_config.allow_taskprov {
+            let global = self.get_global_config();
+            if !global.allow_taskprov {
                 // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
                 return Err(bad_request("taskprov is not allowed"));
             }
-            let taskprov_config = self
-                .taskprov_config
+            let taskprov = self
+                .config
+                .taskprov
                 .as_ref()
                 .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
 
             let taskprov_task_id = task_id.as_ref().clone();
             let task_config = DapTaskConfig::try_from_taskprov(
                 version,
-                self.global_config.taskprov_version,
+                self.config.global.taskprov_version,
                 &taskprov_task_id,
                 taskprov_task_config.unwrap(),
-                taskprov_config.vdaf_verify_key_init.as_ref(),
-                taskprov_config.hpke_collector_config.as_ref(),
+                taskprov.vdaf_verify_key_init.as_ref(),
+                taskprov.hpke_collector_config.as_ref(),
             )?;
 
             // This is the opt-in / opt-out decision point.
@@ -334,12 +336,9 @@ where
             //
             // TODO(bhalleycf) Note that this is generating KV garbage that will
             // need collection at some point.
-            self.set_leader_bearer_token(
-                &taskprov_task_id,
-                taskprov_config.leader_bearer_token.as_ref(),
-            )
-            .await
-            .map_err(dap_err)?;
+            self.set_leader_bearer_token(&taskprov_task_id, taskprov.leader_bearer_token.as_ref())
+                .await
+                .map_err(dap_err)?;
 
             // Write the task config to the KV.
             //
@@ -498,8 +497,11 @@ where
             ));
             agg_store_request_bucket.push(bucket);
             for metadata in report_meta {
-                let durable_name =
-                    self.durable_name_report_store(task_config.as_ref(), &task_id_hex, metadata);
+                let durable_name = self.config.durable_name_report_store(
+                    task_config.as_ref(),
+                    &task_id_hex,
+                    metadata,
+                );
                 let report_id_hex = hex::encode(metadata.id.get_encoded());
                 let report_id_hex_set = reports_processed_request_data
                     .entry(durable_name)
@@ -614,7 +616,7 @@ fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapLeader<'srv, 'req, BearerToken> for DaphneWorkerConfig<D>
+impl<'srv, 'req, D> DapLeader<'srv, 'req, BearerToken> for DaphneWorker<D>
 where
     'srv: 'req,
 {
@@ -629,7 +631,7 @@ where
             .post(
                 BINDING_DAP_REPORTS_PENDING,
                 DURABLE_REPORTS_PENDING_PUT,
-                self.durable_name_report_store(
+                self.config.durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
                     &report.metadata,
@@ -932,7 +934,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapHelper<'srv, 'req, BearerToken> for DaphneWorkerConfig<D>
+impl<'srv, 'req, D> DapHelper<'srv, 'req, BearerToken> for DaphneWorker<D>
 where
     'srv: 'req,
 {
