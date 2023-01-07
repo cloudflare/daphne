@@ -75,7 +75,7 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, D> HpkeDecrypter<'srv> for DaphneWorker<D> {
+impl<'srv> HpkeDecrypter<'srv> for DaphneWorker {
     type WrappedHpkeConfig = GuardedHpkeReceiverConfig<'srv>;
 
     async fn get_hpke_config_for(
@@ -199,7 +199,7 @@ fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, 
 }
 
 #[async_trait(?Send)]
-impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorker<D> {
+impl<'srv> BearerTokenProvider<'srv> for DaphneWorker {
     type WrappedBearerToken = GuardedBearerToken<'srv>;
 
     async fn get_leader_bearer_token_for(
@@ -236,7 +236,7 @@ impl<'srv, D> BearerTokenProvider<'srv> for DaphneWorker<D> {
 }
 
 #[async_trait(?Send)]
-impl<D> DapAuthorizedSender<BearerToken> for DaphneWorker<D> {
+impl DapAuthorizedSender<BearerToken> for DaphneWorker {
     async fn authorize(
         &self,
         task_id: &Id,
@@ -252,7 +252,7 @@ impl<D> DapAuthorizedSender<BearerToken> for DaphneWorker<D> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker<D>
+impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker
 where
     'srv: 'req,
 {
@@ -616,7 +616,7 @@ fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapLeader<'srv, 'req, BearerToken> for DaphneWorker<D>
+impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for DaphneWorker
 where
     'srv: 'req,
 {
@@ -934,7 +934,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req, D> DapHelper<'srv, 'req, BearerToken> for DaphneWorker<D>
+impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for DaphneWorker
 where
     'srv: 'req,
 {
