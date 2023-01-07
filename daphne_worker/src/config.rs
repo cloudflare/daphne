@@ -270,8 +270,9 @@ impl DaphneWorkerConfig {
 }
 
 /// Daphne-Worker state. Constructed upon receiving an HTTP request.
-pub(crate) struct DaphneWorker<D> {
-    context: Option<RouteContext<D>>,
+pub(crate) struct DaphneWorker {
+    env: Env,
+
     pub(crate) config: DaphneWorkerConfig,
 
     /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
@@ -292,9 +293,9 @@ pub(crate) struct DaphneWorker<D> {
     tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
 }
 
-impl<D> DaphneWorker<D> {
-    pub(crate) fn from_worker_context(context: RouteContext<D>) -> Result<Self> {
-        let config = DaphneWorkerConfig::from_worker_env(&context.env)?;
+impl DaphneWorker {
+    pub(crate) fn from_worker_env(env: Env) -> Result<Self> {
+        let config = DaphneWorkerConfig::from_worker_env(&env)?;
 
         let client = if config.is_leader {
             // TODO Configure this client to use HTTPS only, excpet if running in a test
@@ -305,7 +306,7 @@ impl<D> DaphneWorker<D> {
         };
 
         Ok(Self {
-            context: Some(context),
+            env,
             config,
             client,
             hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
@@ -316,20 +317,11 @@ impl<D> DaphneWorker<D> {
     }
 
     pub(crate) fn durable(&self) -> DurableConnector<'_> {
-        DurableConnector::new(
-            &self
-                .context
-                .as_ref()
-                .expect("no route context configured")
-                .env,
-        )
+        DurableConnector::new(&self.env)
     }
 
     pub(crate) fn kv(&self) -> Result<KvStore> {
-        self.context
-            .as_ref()
-            .ok_or_else(|| Error::RustError("route context does not exist".to_string()))?
-            .kv(KV_BINDING_DAP_CONFIG)
+        self.env.kv(KV_BINDING_DAP_CONFIG)
     }
 
     /// Set a key/value pair unless the key already exists. If the key exists, then return the current
