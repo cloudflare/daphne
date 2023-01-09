@@ -23,6 +23,7 @@ use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::ops::Range;
 use std::time::SystemTime;
 #[cfg(feature = "test_janus")]
 use tokio::task::JoinHandle;
@@ -249,12 +250,17 @@ impl TestRunner {
     }
 
     pub fn batch_interval(&self) -> Interval {
-        let epoch_start = self.now - (self.now % self.global_config.report_storage_epoch_duration);
-        let start = epoch_start - (epoch_start % self.task_config.time_precision);
+        let start = self.now - (self.now % self.task_config.time_precision);
         Interval {
             start,
             duration: self.task_config.time_precision * 2,
         }
+    }
+
+    pub fn report_interval(&self, interval: &Interval) -> Range<u64> {
+        // This is a portion of the interval which is guaranteed to be a valid report time
+        // provided that the interval start time is valid.
+        interval.start..interval.start + self.global_config.report_storage_max_future_time_skew
     }
 
     pub async fn get_hpke_configs(
