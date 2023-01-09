@@ -5,15 +5,17 @@ use crate::messages::taskprov::{
     DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
 };
 use crate::messages::{
-    AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq, BatchSelector,
-    DapVersion, Extension, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id,
-    PartialBatchSelector, Report, ReportId, ReportMetadata, ReportShare, Transition, TransitionVar,
+    decode_base64url, decode_base64url_vec, encode_base64url, AggregateContinueReq,
+    AggregateInitializeReq, AggregateResp, AggregateShareReq, BatchSelector, DapVersion, Extension,
+    HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, PartialBatchSelector, Report,
+    ReportId, ReportMetadata, ReportShare, Transition, TransitionVar,
 };
 use crate::taskprov::{compute_task_id, TaskprovVersion};
 use crate::{test_version, test_versions};
 use hpke_rs::HpkePublicKey;
 use paste::paste;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
+use rand::prelude::*;
 
 fn read_report(version: DapVersion) {
     let report = Report {
@@ -315,4 +317,12 @@ fn read_task_config_taskprov_draft02() {
         task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
         &data
     );
+}
+
+#[test]
+fn test_base64url() {
+    let mut rng = thread_rng();
+    let id = rng.gen::<[u8; 32]>();
+    assert_eq!(decode_base64url(encode_base64url(id)).unwrap(), id);
+    assert_eq!(decode_base64url_vec(encode_base64url(id)).unwrap(), id);
 }

@@ -4,7 +4,7 @@
 //! Messages in the DAP protocol.
 
 use crate::{hpke::HpkePublicKeySerde, DapError, DapVersion};
-use base64::engine::Engine;
+use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use hpke_rs::HpkePublicKey;
 use prio::codec::{
     decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
@@ -42,7 +42,7 @@ pub struct Id(#[serde(with = "hex")] pub [u8; 32]);
 impl Id {
     /// Return the URL-safe, base64 encoding of the task ID.
     pub fn to_base64url(&self) -> String {
-        encode_base64url(&self.0)
+        encode_base64url(self.0)
     }
 
     /// Return the ID encoded as a hex string.
@@ -1093,37 +1093,28 @@ pub(crate) fn decode_u32_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, Cod
     Ok(out)
 }
 
-const URL_SAFE_ENGINE: base64::engine::fast_portable::FastPortable =
-    base64::engine::fast_portable::FastPortable::from(
-        &base64::alphabet::URL_SAFE,
-        base64::engine::fast_portable::NO_PAD,
-    );
-
 /// Encode the input bytes as a URL-safe, base64 string.
-pub fn encode_base64url(input: &[u8]) -> String {
-    base64::encode_engine(input, &URL_SAFE_ENGINE)
+pub fn encode_base64url<T: AsRef<[u8]>>(input: T) -> String {
+    URL_SAFE_NO_PAD.encode(input)
 }
 
 /// Decode the input as a URL-safe, base64 encoding of an `OUT_LEN`-length byte string.
-pub fn decode_base64url<const OUT_LEN: usize>(input: &[u8]) -> Option<[u8; OUT_LEN]> {
+pub fn decode_base64url<T: AsRef<[u8]>, const OUT_LEN: usize>(input: T) -> Option<[u8; OUT_LEN]> {
     let mut bytes = [0; OUT_LEN];
-    let res = URL_SAFE_ENGINE.decode(
-        input,
-        &mut bytes[..],
-        URL_SAFE_ENGINE.decoded_length_estimate(input.len()),
-    );
-    if res.is_err() || res.unwrap() != OUT_LEN {
+    // NOTE(cjpatton) It would be better to use `decode_slice` here, but this function uses a
+    // conservative estimate of the decoded length (`decoded_len_estimate`). See
+    // https://github.com/marshallpierce/rust-base64/issues/210.
+    let vec = URL_SAFE_NO_PAD.decode(input).ok()?;
+    if vec.len() != OUT_LEN {
         return None;
-    }
+    };
+    bytes.copy_from_slice(vec.as_ref());
     Some(bytes)
 }
 
 /// Decode the input as a URL-safe, base64 encoding of a byte string of any length.
-pub fn decode_base64url_vec(input: &[u8]) -> Option<Vec<u8>> {
-    let mut bytes = Vec::new();
-    let mut decoder = base64::read::DecoderReader::from(Cursor::new(input), &URL_SAFE_ENGINE);
-    decoder.read_to_end(&mut bytes).ok()?;
-    Some(bytes)
+pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
+    URL_SAFE_NO_PAD.decode(input).ok()
 }
 
 #[cfg(test)]
