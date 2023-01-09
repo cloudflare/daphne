@@ -529,7 +529,7 @@ async fn e2e_internal_leader_process(version: DapVersion) {
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
     for _ in 0..report_sel.max_reports + 3 {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -581,7 +581,7 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..7 {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -629,7 +629,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -725,7 +725,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     // to avoid sharding ReportsProcessed by batch bucket, which is not feasilbe for fixed-size
     // tasks.
     //
-    //  let now = rng.gen_range(batch_interval.start..batch_interval.end());
+    //  let now = rng.gen_range(t.report_interval(&batch_interval));
     //  t.leader_post_expect_abort(
     //      &client,
     //      None, // dap_auth_token
@@ -754,7 +754,7 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -817,7 +817,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size - 1 {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -982,7 +982,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
@@ -1295,7 +1295,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
         let extensions = vec![Extension::Taskprov {
             payload: payload.clone(),
         }];
-        let now = rng.gen_range(batch_interval.start..batch_interval.end());
+        let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_post_expect_ok(
             &client,
             "upload",
