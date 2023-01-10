@@ -992,3 +992,31 @@ where
 
     Ok(())
 }
+
+/// Check for transition failures due to:
+///
+/// * the report having already been processed
+/// * the report having already been collected
+/// * the report not being within time bounds
+///
+/// Returns `Some(TransitionFailure)` if there is a problem,
+/// or `None` if no transition failure occurred.
+pub fn early_metadata_check(
+    metadata: &ReportMetadata,
+    processed: bool,
+    collected: bool,
+    min_time: u64,
+    max_time: u64,
+) -> Option<TransitionFailure> {
+    if processed {
+        Some(TransitionFailure::ReportReplayed)
+    } else if collected {
+        Some(TransitionFailure::BatchCollected)
+    } else if metadata.time < min_time {
+        Some(TransitionFailure::ReportDropped)
+    } else if metadata.time > max_time {
+        Some(TransitionFailure::ReportTooEarly)
+    } else {
+        None
+    }
+}
