@@ -12,11 +12,12 @@ use crate::{
     messages::{
         taskprov, AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
         AggregateShareResp, BatchSelector, CollectReq, CollectResp, Extension, HpkeKemId, Id,
-        Interval, PartialBatchSelector, Query, Report, ReportShare, Time, Transition,
-        TransitionFailure, TransitionVar,
+        Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, ReportShare, Time,
+        Transition, TransitionFailure, TransitionVar,
     },
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
+    roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::TaskprovVersion,
+    test_version, test_versions,
     testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapLeaderTransition,
@@ -1593,3 +1594,78 @@ async fn e2e_taskprov(version: DapVersion) {
 }
 
 async_test_version! { e2e_taskprov, Draft02 }
+
+fn early_metadata_checks(version: DapVersion) {
+    let t = Test::new(version);
+    let mut rng = thread_rng();
+    let metadata = ReportMetadata {
+        id: ReportId(rng.gen()),
+        time: t.now,
+        extensions: vec![],
+    };
+    // We declare these so the first call to early_metadata_check() is more readable.
+    let processed = false;
+    let collected = false;
+    // A current not processed, not collected report is OK!
+    assert_matches!(
+        early_metadata_check(&metadata, processed, collected, t.now - 100, t.now + 100),
+        None
+    );
+    // A current processed, not collected report is TransitionFailure::ReportReplayed.
+    assert_matches!(
+        early_metadata_check(&metadata, true, false, t.now - 100, t.now + 100),
+        Some(TransitionFailure::ReportReplayed)
+    );
+    // A current not processed but collected report is TransitionFailure::BatchCollected.
+    assert_matches!(
+        early_metadata_check(&metadata, false, true, t.now - 100, t.now + 100),
+        Some(TransitionFailure::BatchCollected)
+    );
+    // A current processed and collected report is TransitionFailure::ReportReplayed.
+    assert_matches!(
+        early_metadata_check(&metadata, true, true, t.now - 100, t.now + 100),
+        Some(TransitionFailure::ReportReplayed)
+    );
+    // A not collected and not processed report at the future boundary is OK.
+    let metadata = ReportMetadata {
+        id: ReportId(rng.gen()),
+        time: t.now + 100,
+        extensions: vec![],
+    };
+    assert_matches!(
+        early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
+        None
+    );
+    // A not collected and not processed report too far in the future is TransitionFailure::ReportTooEarly.
+    let metadata = ReportMetadata {
+        id: ReportId(rng.gen()),
+        time: t.now + 101,
+        extensions: vec![],
+    };
+    assert_matches!(
+        early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
+        Some(TransitionFailure::ReportTooEarly)
+    );
+    // A not collected and not processed report at the past boundary is OK.
+    let metadata = ReportMetadata {
+        id: ReportId(rng.gen()),
+        time: t.now - 100,
+        extensions: vec![],
+    };
+    assert_matches!(
+        early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
+        None
+    );
+    // A not collected and not processed report too far in the past is TransitionFailure::ReportDropped.
+    let metadata = ReportMetadata {
+        id: ReportId(rng.gen()),
+        time: t.now - 101,
+        extensions: vec![],
+    };
+    assert_matches!(
+        early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
+        Some(TransitionFailure::ReportDropped)
+    );
+}
+
+test_versions! { early_metadata_checks }

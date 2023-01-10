@@ -49,7 +49,7 @@ use daphne::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, PartialBatchSelector, Report,
         ReportId, ReportMetadata, TransitionFailure,
     },
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
+    roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::{bad_request, get_taskprov_task_config},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
@@ -561,14 +561,10 @@ where
         {
             for metadata in span.get(bucket).unwrap() {
                 let processed = reports_processed.contains(&metadata.id);
-                if processed && !collected {
-                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportReplayed);
-                } else if !processed && collected {
-                    early_fails.insert(metadata.id.clone(), TransitionFailure::BatchCollected);
-                } else if metadata.time < min_time {
-                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportDropped);
-                } else if metadata.time > max_time {
-                    early_fails.insert(metadata.id.clone(), TransitionFailure::ReportTooEarly);
+                if let Some(failure) =
+                    early_metadata_check(metadata, processed, collected, min_time, max_time)
+                {
+                    early_fails.insert(metadata.id.clone(), failure);
                 }
             }
         }
