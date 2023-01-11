@@ -10,6 +10,7 @@ use crate::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id,
         PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
     },
+    metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov, DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
     DapGlobalConfig, DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
@@ -76,6 +77,7 @@ pub(crate) struct MockAggregator {
     pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<DapBatchBucketOwned, AggStore>>>>,
     pub(crate) collector_hpke_config: HpkeConfig,
     pub(crate) taskprov_vdaf_verify_key_init: Vec<u8>,
+    pub(crate) metrics: DaphneMetrics,
 }
 
 #[allow(dead_code)]
@@ -523,6 +525,10 @@ where
                 "unknown version".to_string(),
             )))
         }
+    }
+
+    fn metrics(&self) -> &DaphneMetrics {
+        &self.metrics
     }
 }
 
