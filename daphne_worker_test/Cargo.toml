@@ -19,26 +19,25 @@ test_e2e = []
 test_janus = []
 
 [dependencies]
-daphne_worker = { path = "../daphne_worker" }
 cfg-if = "1.0.0"
-worker = "0.0.12"
-serde = { version = "1.0.152", features = ["derive"] }
-serde_json = "1.0.91"
-
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
+daphne_worker = { path = "../daphne_worker" }
+serde = { version = "1.0.152", features = ["derive"] }
+serde_json = "1.0.91"
+worker = "0.0.12"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
 base64 = "0.21.0"
 daphne = { path = "../daphne" }
+futures = "0.3.25"
 hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "0.1.0"
 lazy_static = "1.4.0"
-futures = "0.3.25"
 paste = "1.0.11"
 prio = "0.10.0"
 rand = "0.8.5"
