@@ -15,6 +15,7 @@ use crate::{
         Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, ReportShare, Time,
         Transition, TransitionFailure, TransitionVar,
     },
+    metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::TaskprovVersion,
     test_version, test_versions,
@@ -48,10 +49,64 @@ macro_rules! get_reports {
     }};
 }
 
+// Helper macro used by `assert_metrics_include`.
+macro_rules! build_metrics_list {
+    ($set:expr, $k:tt: $v:expr,) => {{
+        let line = format!("{} {}", $k, $v);
+        $set.insert(line);
+    }};
+
+    ($set:expr, $k:tt: $v:expr, $($ks:tt: $vs:expr),+,) => {{
+        let line = format!("{} {}", $k, $v);
+        $set.insert(line);
+        build_metrics_list!($set, $($ks: $vs),+)
+    }}
+}
+
+// Gather metrics from a registry and assert that a list of metrics are present and have the
+// correct value. For example:
+// ```
+// let registry = prometheus::Registry::new();
+//
+// // ... Register a metric called "report_counter" and use it.
+//
+// assert_metrics_include!(t.helper_prometheus_registry, {
+//      r#"report_counter{status="aggregated"}"#: 23,
+// });
+// ```
+macro_rules! assert_metrics_include {
+    ($registry:expr, {$($ks:tt: $vs:expr),+,}) => {{
+        use prometheus::{Encoder, TextEncoder};
+        use std::collections::HashSet;
+
+        let mut want: HashSet<String> = HashSet::new();
+        build_metrics_list!(&mut want, $($ks: $vs),+,);
+
+        // Encode the metrics and iterate over each line. For each line, if the line appears in the
+        // list of expected output lines, then remove it.
+        let mut got_buf = Vec::new();
+        let encoder = TextEncoder::new();
+        encoder.encode(&$registry.gather(), &mut got_buf).unwrap();
+        let got_str = String::from_utf8(got_buf).unwrap();
+        for line in got_str.split('\n') {
+            want.remove(line);
+        }
+
+        // The metrics contain the expected lines if the the set is now empty.
+        if !want.is_empty() {
+            panic!("unexpected metrics: got:\n{}\nmust contain:\n{}\n",
+                   got_str, want.into_iter().collect::<Vec<String>>().join("\n"));
+        }
+    }}
+}
+
 struct Test {
     now: Time,
     leader: MockAggregator,
     helper: MockAggregator,
+    #[allow(dead_code)]
+    leader_prometheus_registry: prometheus::Registry,
+    helper_prometheus_registry: prometheus::Registry,
     collector_token: BearerToken,
     time_interval_task_id: Id,
     fixed_size_task_id: Id,
@@ -151,6 +206,7 @@ impl Test {
             .gen_hpke_receiver_config_list(rng.gen())
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
+        let leader_prometheus_registry = prometheus::Registry::new();
         let leader = MockAggregator {
             now,
             global_config: global_config.clone(),
@@ -164,12 +220,14 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
+            metrics: DaphneMetrics::register(&leader_prometheus_registry).unwrap(),
         };
 
         let helper_hpke_receiver_config_list = global_config
             .gen_hpke_receiver_config_list(rng.gen())
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
+        let helper_prometheus_registry = prometheus::Registry::new();
         let helper = MockAggregator {
             now,
             global_config,
@@ -183,12 +241,15 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config,
             taskprov_vdaf_verify_key_init,
+            metrics: DaphneMetrics::register(&helper_prometheus_registry).unwrap(),
         };
 
         Self {
             now,
             leader,
             helper,
+            leader_prometheus_registry,
+            helper_prometheus_registry,
             collector_token,
             time_interval_task_id,
             fixed_size_task_id,
@@ -1480,6 +1541,10 @@ async fn e2e_time_interval(version: DapVersion) {
     // Collector: Create collection job and poll result.
     let query = task_config.query_for_current_batch_window(t.now);
     t.run_col_job(task_id, &query).await.unwrap();
+
+    assert_metrics_include!(t.helper_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
 }
 
 async_test_versions! { e2e_time_interval }
@@ -1503,6 +1568,10 @@ async fn e2e_fixed_size(version: DapVersion) {
         batch_id: t.leader.current_batch_id(task_id, &task_config).unwrap(),
     };
     t.run_col_job(task_id, &query).await.unwrap();
+
+    assert_metrics_include!(t.helper_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
 }
 
 async_test_versions! { e2e_fixed_size }
@@ -1591,6 +1660,10 @@ async fn e2e_taskprov(version: DapVersion) {
         batch_id: t.leader.current_batch_id(task_id, &task_config).unwrap(),
     };
     t.run_col_job(task_id, &query).await.unwrap();
+
+    assert_metrics_include!(t.helper_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
 }
 
 async_test_version! { e2e_taskprov, Draft02 }

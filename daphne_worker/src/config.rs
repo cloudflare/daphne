@@ -20,6 +20,7 @@ use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
     messages::{decode_base64url_vec, HpkeConfig, Id, ReportMetadata},
+    metrics::DaphneMetrics,
     DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -28,6 +29,7 @@ use prio::{
     codec::Decode,
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
+use prometheus::Registry;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -291,6 +293,13 @@ pub(crate) struct DaphneWorker {
 
     /// Task list.
     tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
+
+    /// Registry for Prometheus metrics collected while handling the request.
+    #[allow(dead_code)]
+    pub(crate) prometheus_registry: Registry,
+
+    /// Daphne metrics.
+    pub(crate) daphne_metrics: DaphneMetrics,
 }
 
 impl DaphneWorker {
@@ -305,6 +314,11 @@ impl DaphneWorker {
             None
         };
 
+        // TODO(cjpatton) Push metrics to gateway after handling the request.
+        let prometheus_registry = Registry::new();
+        let daphne_metrics = DaphneMetrics::register(&prometheus_registry)
+            .map_err(|e| Error::RustError(format!("failed to register daphne metrics: {}", e)))?;
+
         Ok(Self {
             env,
             config,
@@ -313,6 +327,8 @@ impl DaphneWorker {
             leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
+            prometheus_registry,
+            daphne_metrics,
         })
     }
 

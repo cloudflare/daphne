@@ -83,6 +83,12 @@ impl DapError {
     }
 }
 
+impl From<prometheus::Error> for DapError {
+    fn from(e: prometheus::Error) -> Self {
+        Self::Fatal(format!("prometheus: {}", e))
+    }
+}
+
 impl From<serde_json::Error> for DapError {
     fn from(e: serde_json::Error) -> Self {
         Self::Fatal(format!("serde_json: {}", e))
@@ -886,6 +892,7 @@ pub mod hpke;
 #[cfg(test)]
 mod hpke_test;
 pub mod messages;
+pub mod metrics;
 pub mod roles;
 #[cfg(test)]
 mod roles_test;

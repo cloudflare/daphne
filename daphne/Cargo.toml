@@ -26,9 +26,11 @@ hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = { version = "0.1.0" , features = ["hazmat", "serialization"] }
 hpke-rs-crypto = { version = "0.1.1" }
 hpke-rs-rust-crypto = { version = "0.1.1"}
+lazy_static = "1.4.0"
 matchit = "0.7.0"
 paste = "1.0.11"
 prio = { version = "0.10.0", features = ["prio2"] }
+prometheus = "0.13.3"
 rand = "0.8.5"
 ring = "0.16.20"
 serde = { version = "1.0.152", features = ["derive"] }

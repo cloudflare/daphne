@@ -16,6 +16,7 @@ use crate::{
         CollectResp, HpkeConfigList, Id, PartialBatchSelector, Query, Report, ReportId,
         ReportMetadata, Time, TransitionFailure, TransitionVar,
     },
+    metrics::DaphneMetrics,
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
     DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
@@ -190,6 +191,9 @@ where
     }
 
     async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError>;
+
+    /// Access the Prometheus metrics.
+    fn metrics(&self) -> &DaphneMetrics;
 }
 
 macro_rules! leader_post {
@@ -476,6 +480,12 @@ where
         let out_shares_count = out_shares.len() as u64;
         self.put_out_shares(task_id, part_batch_sel, out_shares)
             .await?;
+
+        self.metrics()
+            .report_counter
+            .with_label_values(&["aggregated"])
+            .inc_by(out_shares_count);
+
         Ok(out_shares_count)
     }
 
@@ -801,16 +811,22 @@ where
                 let part_batch_sel = state.part_batch_sel.clone();
                 let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_cont_req)?;
 
-                let agg_resp = match transition {
+                let (agg_resp, out_shares_count) = match transition {
                     DapHelperTransition::Continue(..) => {
                         return Err(DapError::fatal("unexpected transition (continued)").into());
                     }
                     DapHelperTransition::Finish(out_shares, agg_resp) => {
+                        let out_shares_count = u64::try_from(out_shares.len()).unwrap();
                         self.put_out_shares(&agg_cont_req.task_id, &part_batch_sel, out_shares)
                             .await?;
-                        agg_resp
+                        (agg_resp, out_shares_count)
                     }
                 };
+
+                self.metrics()
+                    .report_counter
+                    .with_label_values(&["aggregated"])
+                    .inc_by(out_shares_count);
 
                 Ok(DapResponse {
                     media_type: Some(MEDIA_TYPE_AGG_CONT_RESP),

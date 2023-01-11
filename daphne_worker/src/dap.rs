@@ -49,6 +49,7 @@ use daphne::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, PartialBatchSelector, Report,
         ReportId, ReportMetadata, TransitionFailure,
     },
+    metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::{bad_request, get_taskprov_task_config},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
@@ -598,6 +599,10 @@ where
 
     async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError> {
         self.internal_current_batch(task_id).await
+    }
+
+    fn metrics(&self) -> &DaphneMetrics {
+        &self.daphne_metrics
     }
 }
 
