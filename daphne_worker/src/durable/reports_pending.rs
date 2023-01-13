@@ -11,9 +11,10 @@ use crate::{
         report_id_hex_from_report, state_get, state_set_if_not_exists, DurableConnector,
         DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
     },
-    int_err,
+    initialize_tracing, int_err,
 };
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PENDING_GET: &str = "/internal/do/reports_pending/get";
@@ -61,6 +62,7 @@ pub struct ReportsPending {
 #[durable_object]
 impl DurableObject for ReportsPending {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
@@ -177,7 +179,7 @@ impl DurableObject for ReportsPending {
                     }
                 }
 
-                console_debug!(
+                debug!(
                     "drained {} reports from bucket {}",
                     reports.len(),
                     self.state.id().to_string()

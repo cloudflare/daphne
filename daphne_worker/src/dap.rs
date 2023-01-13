@@ -61,6 +61,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
 };
+use tracing::{debug, error, info};
 use worker::*;
 
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
@@ -762,7 +763,7 @@ where
             for reports in reports.values() {
                 report_count += reports.len();
             }
-            console_debug!(
+            debug!(
                 "got {} reports for task {}",
                 report_count,
                 task_id.to_base64url()
@@ -908,7 +909,7 @@ where
             .await
             .map_err(|e| DapError::Fatal(e.to_string()))?;
         let end = Date::now().as_millis();
-        console_log!("request to {} completed in {}ms", url, end - start);
+        info!("request to {} completed in {}ms", url, end - start);
         let status = reqwest_resp.status();
         if status == 200 {
             // Translate the reqwest response into a Worker response.
@@ -931,7 +932,7 @@ where
                 media_type,
             })
         } else {
-            console_error!("{}: request failed: {:?}", url, reqwest_resp);
+            error!("{}: request failed: {:?}", url, reqwest_resp);
             Err(DapError::fatal(INT_ERR_PEER_ABORT))
         }
     }

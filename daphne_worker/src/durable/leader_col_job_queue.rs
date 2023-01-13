@@ -4,7 +4,7 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{state_get, state_get_or_default, DurableOrdered, BINDING_DAP_LEADER_COL_JOB_QUEUE},
-    int_err,
+    initialize_tracing, int_err,
 };
 use daphne::{
     messages::{CollectReq, CollectResp, Id},
@@ -60,6 +60,7 @@ pub struct LeaderCollectionJobQueue {
 #[durable_object]
 impl DurableObject for LeaderCollectionJobQueue {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {

@@ -4,7 +4,7 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
-    int_err,
+    initialize_tracing, int_err,
 };
 use futures::future::try_join_all;
 use std::time::Duration;
@@ -54,6 +54,7 @@ impl ReportsProcessed {
 #[durable_object]
 impl DurableObject for ReportsProcessed {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
