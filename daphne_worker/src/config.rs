@@ -38,6 +38,7 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
+use tracing::{debug, info};
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
@@ -172,7 +173,7 @@ impl DaphneWorkerConfig {
             DaphneWorkerDeployment::default()
         };
         if !matches!(deployment, DaphneWorkerDeployment::Prod) {
-            console_debug!("DAP deployment override applied: {:?}", deployment);
+            info!("DAP deployment override applied: {:?}", deployment);
         }
 
         let taskprov = if global.allow_taskprov {
@@ -207,7 +208,7 @@ impl DaphneWorkerConfig {
         let admin_token = match env.secret("DAP_ADMIN_BEARER_TOKEN") {
             Ok(raw) => Some(BearerToken::from(raw.to_string())),
             Err(err) => {
-                console_log!("DAP_ADMIN_BEARER_TOKEN not configured: {:?}", err);
+                info!("DAP_ADMIN_BEARER_TOKEN not configured: {:?}", err);
                 None
             }
         };
@@ -538,7 +539,7 @@ impl<'srv> DaphneWorker<'srv> {
                 .delete(kv_key.name.as_str())
                 .await
                 .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
-            console_debug!("deleted KV item {}", kv_key.name);
+            debug!("deleted KV item {}", kv_key.name);
         }
 
         future_delete_durable.await.map_err(dap_err)?;

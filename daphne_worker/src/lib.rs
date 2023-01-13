@@ -152,6 +152,7 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 use crate::{config::DaphneWorkerState, dap::dap_response_to_worker};
+use chrono::{SecondsFormat, Utc};
 use daphne::{
     auth::BearerToken,
     constants,
@@ -161,6 +162,9 @@ use daphne::{
 };
 use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
+use std::{io, str, sync::Once};
+use tracing::{debug, error, info};
+use tracing_subscriber::{fmt, layer::*, prelude::*, registry, EnvFilter};
 use worker::*;
 
 /// Parameters used by the Leader to select a set of reports for aggregation.
@@ -221,13 +225,17 @@ impl DaphneWorkerRouter {
     //
     // TODO Document endpoints that aren't defined in the DAP spec
     pub async fn handle_request(&self, req: Request, env: Env) -> Result<Response> {
+        // Ensure that tracing is initialized. Some callers may choose to initialize earlier,
+        // but it's safe and cheap to call initialize_tracing() more than once, and this ensures
+        // it's definitely ready for use even if the caller hasn't done anything.
+        initialize_tracing(&env);
+
         let state = DaphneWorkerState::from_worker_env(&env)?;
 
         let router = Router::with_data(&state)
             .get_async("/:version/hpke_config", |req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = daph.worker_request_to_dap(req).await?;
-
                 match daph.http_get_hpke_config(&req).await {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => abort(e),
@@ -312,7 +320,7 @@ impl DaphneWorkerRouter {
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
                         match daph.process(&report_sel).await {
                             Ok(telem) => {
-                                console_debug!("{:?}", telem);
+                                debug!("{:?}", telem);
                                 Response::from_json(&telem)
                             }
                             Err(e) => abort(e),
@@ -430,7 +438,7 @@ impl DaphneWorkerRouter {
         let start = Date::now().as_millis();
         let resp = router.run(req, env).await?;
         let end = Date::now().as_millis();
-        console_log!("request completed in {}ms", end - start);
+        info!("request completed in {}ms", end - start);
         Ok(resp)
     }
 }
@@ -440,7 +448,7 @@ pub(crate) fn now() -> u64 {
 }
 
 pub(crate) fn int_err<S: ToString>(s: S) -> Error {
-    console_error!("internal error: {}", s.to_string());
+    error!("internal error: {}", s.to_string());
     Error::RustError("internalError".to_string())
 }
 
@@ -458,7 +466,7 @@ pub(crate) fn dap_err(e: Error) -> DapError {
 fn abort(e: DapAbort) -> Result<Response> {
     match &e {
         DapAbort::Internal(..) => {
-            console_error!("internal error: {}", e.to_string());
+            error!("internal error: {}", e.to_string());
             Err(Error::RustError("internalError".to_string()))
         }
         _ => {
@@ -510,6 +518,74 @@ pub(crate) struct InternalTestAddTask {
     time_precision: Duration,
     collector_hpke_config: String, // base64url
     task_expiration: Time,
+}
+
+/// LogWriter helps us write to the worker console.
+///
+/// It provides and io::Write implementation that provides line buffering. It also takes care of
+/// emitting a timestamp as the timestamp code in the tracing library tries to use standard clock
+/// code, which does not work in a worker.
+struct LogWriter {
+    buffer: String,
+}
+
+impl LogWriter {
+    fn new() -> Self {
+        LogWriter {
+            buffer: String::new(),
+        }
+    }
+}
+
+impl io::Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        self.buffer.push_str(s);
+        // We assume the caller is doing line buffering and that any write containing a NL will have
+        // it at the end.
+        if self.buffer.ends_with('\n') {
+            // Chrono is smart and knows how to read the time on everything, including WASM!
+            let now = Utc::now();
+            // We will format the time as ISO-8601 with milliseconds precision and a Z timezone.
+            console_log!(
+                "{} {}",
+                now.to_rfc3339_opts(SecondsFormat::Millis, true),
+                &self.buffer[..self.buffer.len() - 1]
+            );
+            self.buffer.clear();
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+static INITIALIZE_LOGGING: Once = Once::new();
+
+/// Setup logging.
+///
+/// Initialize tracing using configuration from DAP_TRACING in the environment
+/// if present, otherwise using a default level of `info` and more severe.
+///
+/// Panics if the log handler cannot be installed.
+///
+/// Logging will only be initialized once, no matter how many times this
+/// function is called.
+pub fn initialize_tracing(env: &Env) {
+    // We have to do this in a once block as the worker instance can get multiple invocations of
+    // main() within its lifetime.
+    INITIALIZE_LOGGING.call_once(|| {
+        let filter = match env.var("DAP_TRACING") {
+            Ok(var) => var.to_string(),
+            Err(_) => "info".to_string(),
+        };
+        registry()
+            .with(fmt::layer().with_writer(LogWriter::new).without_time())
+            .with(EnvFilter::new(filter))
+            .init();
+    });
 }
 
 mod config;

@@ -20,6 +20,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 async-trait = "0.1.61"
 base64 = "0.21.0"
+chrono = "0.4.23"
 daphne = { path = "../daphne" }
 futures = "0.3.25"
 getrandom = { version = "0.2.8", features = ["js"] } # Required for prio
@@ -33,6 +34,8 @@ reqwest-wasm = { version = "0.11.16", features = ["json"] }
 ring = "0.16.20"
 serde = { version = "1.0.152", features = ["derive"] }
 thiserror = "1.0.38"
+tracing = "0.1.37"
+tracing-subscriber = {version = "0.3.16", features = ["env-filter"]}
 url = { version = "2.3.1", features = ["serde"] }
 serde_json = "1.0.91"
 worker = "0.0.12"

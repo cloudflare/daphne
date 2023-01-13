@@ -1,8 +1,9 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{config::DaphneWorkerConfig, durable::state_get, int_err};
+use crate::{config::DaphneWorkerConfig, durable::state_get, initialize_tracing, int_err};
 use daphne::{messages::Id, DapVersion};
+use tracing::debug;
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -39,6 +40,7 @@ pub struct HelperStateStore {
 #[durable_object]
 impl DurableObject for HelperStateStore {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
@@ -100,7 +102,7 @@ impl DurableObject for HelperStateStore {
     async fn alarm(&mut self) -> Result<Response> {
         self.state.storage().delete_all().await?;
         self.alarmed = false;
-        console_debug!(
+        debug!(
             "HelperStateStore: deleted instance {}",
             self.state.id().to_string()
         );

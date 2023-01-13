@@ -4,11 +4,12 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE},
-    int_err,
+    initialize_tracing, int_err,
 };
 use daphne::messages::Id;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use worker::*;
 
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_ASSIGN: &str = "/internal/do/leader_batch_queue/assign";
@@ -82,7 +83,7 @@ impl LeaderBatchQueue {
             .await?;
 
         // Generate a random batch ID and write the batch count to the queue.
-        console_debug!("LeaderBatchQueue: created batch {}", batch_id_hex);
+        debug!("LeaderBatchQueue: created batch {}", batch_id_hex);
         Ok(queued.into_item())
     }
 }
@@ -90,6 +91,7 @@ impl LeaderBatchQueue {
 #[durable_object]
 impl DurableObject for LeaderBatchQueue {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
@@ -176,7 +178,7 @@ impl DurableObject for LeaderBatchQueue {
                 }
 
                 self.state.storage().delete(&lookup_key).await?;
-                console_debug!("LeaderBatchQueue: removed batch {}", batch_id_hex);
+                debug!("LeaderBatchQueue: removed batch {}", batch_id_hex);
                 Response::from_json(&())
             }
 

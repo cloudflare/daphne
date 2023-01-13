@@ -4,8 +4,9 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE},
-    int_err,
+    initialize_tracing, int_err,
 };
+use tracing::debug;
 use worker::*;
 
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
@@ -43,6 +44,7 @@ pub struct LeaderAggregationJobQueue {
 #[durable_object]
 impl DurableObject for LeaderAggregationJobQueue {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
@@ -65,7 +67,7 @@ impl DurableObject for LeaderAggregationJobQueue {
             (DURABLE_LEADER_AGG_JOB_QUEUE_PUT, Method::Post) => {
                 let agg_job: DurableOrdered<String> = req.json().await?;
                 agg_job.put(&self.state).await?;
-                console_debug!(
+                debug!(
                     "LeaderAggregationJobQueue: {} has been scheduled",
                     agg_job.as_ref(),
                 );
@@ -86,7 +88,7 @@ impl DurableObject for LeaderAggregationJobQueue {
                         .map(|agg_job| agg_job.into_item())
                         .collect();
 
-                console_debug!("agg job queue: {:?}", res);
+                debug!("agg job queue: {:?}", res);
                 Response::from_json(&res)
             }
 

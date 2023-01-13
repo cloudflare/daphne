@@ -4,7 +4,7 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
-    int_err,
+    initialize_tracing, int_err,
 };
 use daphne::DapAggregateShare;
 use worker::*;
@@ -44,6 +44,7 @@ pub struct AggregateStore {
 #[durable_object]
 impl DurableObject for AggregateStore {
     fn new(state: State, env: Env) -> Self {
+        initialize_tracing(&env);
         let config =
             DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
