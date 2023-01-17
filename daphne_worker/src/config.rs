@@ -61,7 +61,7 @@ pub(crate) struct TaskprovConfig {
     pub(crate) collector_bearer_token: BearerToken,
 }
 
-/// Long-lived parameters used by Daphne-Worker across DAP tasks.
+/// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
 pub(crate) struct DaphneWorkerConfig {
     /// Indicates if DaphneWorker is used as the Leader.
     is_leader: bool,
@@ -271,10 +271,9 @@ impl DaphneWorkerConfig {
     }
 }
 
-/// Daphne-Worker state. Constructed upon receiving an HTTP request.
-pub(crate) struct DaphneWorker {
-    env: Env,
-
+/// Daphne-Worker state, used for handling a DAP request. Includes long-lived configuration,
+/// metrics, cached responses from KV, etc.
+pub(crate) struct DaphneWorkerState {
     pub(crate) config: DaphneWorkerConfig,
 
     /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
@@ -302,9 +301,9 @@ pub(crate) struct DaphneWorker {
     pub(crate) daphne_metrics: DaphneMetrics,
 }
 
-impl DaphneWorker {
-    pub(crate) fn from_worker_env(env: Env) -> Result<Self> {
-        let config = DaphneWorkerConfig::from_worker_env(&env)?;
+impl DaphneWorkerState {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let config = DaphneWorkerConfig::from_worker_env(env)?;
 
         let client = if config.is_leader {
             // TODO Configure this client to use HTTPS only, excpet if running in a test
@@ -320,7 +319,6 @@ impl DaphneWorker {
             .map_err(|e| Error::RustError(format!("failed to register daphne metrics: {}", e)))?;
 
         Ok(Self {
-            env,
             config,
             client,
             hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
@@ -332,8 +330,20 @@ impl DaphneWorker {
         })
     }
 
+    pub(crate) fn handler<'srv>(&'srv self, env: &'srv Env) -> DaphneWorker<'srv> {
+        DaphneWorker { state: self, env }
+    }
+}
+
+/// Daphne-Worker, used to handle a DAP request. Constructed from `DaphneWorkerState::handler()`.
+pub(crate) struct DaphneWorker<'srv> {
+    pub(crate) state: &'srv DaphneWorkerState,
+    env: &'srv Env,
+}
+
+impl<'srv> DaphneWorker<'srv> {
     pub(crate) fn durable(&self) -> DurableConnector<'_> {
-        DurableConnector::new(&self.env)
+        DurableConnector::new(self.env)
     }
 
     pub(crate) fn kv(&self) -> Result<KvStore> {
@@ -364,7 +374,7 @@ impl DaphneWorker {
         Ok(None)
     }
 
-    async fn kv_get_cached<'srv, 'req, K, V>(
+    async fn kv_get_cached<'req, K, V>(
         &self,
         map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
@@ -424,7 +434,7 @@ impl DaphneWorker {
         hpke_config_id: u8,
     ) -> Result<Option<GuardedHpkeReceiverConfig>> {
         self.kv_get_cached(
-            &self.hpke_receiver_configs,
+            &self.state.hpke_receiver_configs,
             KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
             Cow::Owned(hpke_config_id),
         )
@@ -437,7 +447,7 @@ impl DaphneWorker {
         task_id: &'a Id,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
-            &self.leader_bearer_tokens,
+            &self.state.leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
             Cow::Borrowed(task_id),
         )
@@ -460,7 +470,7 @@ impl DaphneWorker {
         task_id: &'a Id,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
-            &self.collector_bearer_tokens,
+            &self.state.collector_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
             Cow::Borrowed(task_id),
         )
@@ -468,14 +478,14 @@ impl DaphneWorker {
     }
 
     /// Retrieve from KV the configuration for the given task.
-    pub(crate) async fn get_task_config<'srv, 'req>(
+    pub(crate) async fn get_task_config<'req>(
         &'srv self,
         task_id: Cow<'req, Id>,
     ) -> Result<Option<GuardedDapTaskConfig<'req>>>
     where
         'srv: 'req,
     {
-        self.kv_get_cached(&self.tasks, KV_KEY_PREFIX_TASK_CONFIG, task_id)
+        self.kv_get_cached(&self.state.tasks, KV_KEY_PREFIX_TASK_CONFIG, task_id)
             .await
     }
 
@@ -491,7 +501,7 @@ impl DaphneWorker {
 
     /// Try retrieving from KV the configuration for the given task. Return an error if the
     /// indicated task is not recognized.
-    pub(crate) async fn try_get_task_config<'srv, 'req>(
+    pub(crate) async fn try_get_task_config<'req>(
         &'srv self,
         task_id: &'req Id,
     ) -> std::result::Result<GuardedDapTaskConfig<'req>, DapError>
@@ -573,8 +583,8 @@ impl DaphneWorker {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response> {
-        if self.config.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
-            || !self.config.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
+        if self.state.config.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
+            || !self.state.config.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -584,7 +594,7 @@ impl DaphneWorker {
 
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": format!("{}{}/", self.config.base_url.path(), version.as_ref()),
+            "endpoint": format!("{}{}/", self.state.config.base_url.path(), version.as_ref()),
         }))
     }
 
@@ -751,11 +761,11 @@ impl DaphneWorker {
     }
 
     pub(crate) fn least_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_sub(self.config.global.report_storage_epoch_duration)
+        now.saturating_sub(self.state.config.global.report_storage_epoch_duration)
     }
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_add(self.config.global.report_storage_max_future_time_skew)
+        now.saturating_add(self.state.config.global.report_storage_max_future_time_skew)
     }
 }
 

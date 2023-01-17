@@ -76,7 +76,7 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 }
 
 #[async_trait(?Send)]
-impl<'srv> HpkeDecrypter<'srv> for DaphneWorker {
+impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
     type WrappedHpkeConfig = GuardedHpkeReceiverConfig<'srv>;
 
     async fn get_hpke_config_for(
@@ -97,7 +97,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker {
             //
             // For now, expect that only one KEM algorithm is supported and that only one config
             // will be used at anyone time.
-            if self.config.global.supported_hpke_kems.len() != 1 {
+            if self.state.config.global.supported_hpke_kems.len() != 1 {
                 return Err(DapError::Fatal(
                     "The number of supported HPKE KEMs must be 1".to_string(),
                 ));
@@ -105,6 +105,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker {
 
             let mut hpke_config_id = None;
             for it in self
+                .state
                 .config
                 .global
                 .gen_hpke_receiver_config_list(rand::random())
@@ -200,7 +201,7 @@ fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, 
 }
 
 #[async_trait(?Send)]
-impl<'srv> BearerTokenProvider<'srv> for DaphneWorker {
+impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
     type WrappedBearerToken = GuardedBearerToken<'srv>;
 
     async fn get_leader_bearer_token_for(
@@ -221,7 +222,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker {
 
     fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.config.taskprov {
+            && match &self.state.config.taskprov {
                 Some(config) => config.leader_bearer_token == *token,
                 None => false,
             }
@@ -229,7 +230,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker {
 
     fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.config.taskprov {
+            && match &self.state.config.taskprov {
                 Some(config) => config.collector_bearer_token == *token,
                 None => false,
             }
@@ -237,7 +238,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker {
 }
 
 #[async_trait(?Send)]
-impl DapAuthorizedSender<BearerToken> for DaphneWorker {
+impl DapAuthorizedSender<BearerToken> for DaphneWorker<'_> {
     async fn authorize(
         &self,
         task_id: &Id,
@@ -253,7 +254,7 @@ impl DapAuthorizedSender<BearerToken> for DaphneWorker {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker
+impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
@@ -267,7 +268,7 @@ where
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.config.global
+        &self.state.config.global
     }
 
     fn taskprov_opt_in_decision(
@@ -301,7 +302,7 @@ where
         }
         let metadata_ref = metadata.unwrap();
         let taskprov_task_config = get_taskprov_task_config(
-            self.config.global.taskprov_version,
+            self.state.config.global.taskprov_version,
             task_id.as_ref(),
             metadata_ref,
         )?;
@@ -312,6 +313,7 @@ where
                 return Err(bad_request("taskprov is not allowed"));
             }
             let taskprov = self
+                .state
                 .config
                 .taskprov
                 .as_ref()
@@ -320,7 +322,7 @@ where
             let taskprov_task_id = task_id.as_ref().clone();
             let task_config = DapTaskConfig::try_from_taskprov(
                 version,
-                self.config.global.taskprov_version,
+                self.state.config.global.taskprov_version,
                 &taskprov_task_id,
                 taskprov_task_config.unwrap(),
                 taskprov.vdaf_verify_key_init.as_ref(),
@@ -498,7 +500,7 @@ where
             ));
             agg_store_request_bucket.push(bucket);
             for metadata in report_meta {
-                let durable_name = self.config.durable_name_report_store(
+                let durable_name = self.state.config.durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
                     metadata,
@@ -602,7 +604,7 @@ where
     }
 
     fn metrics(&self) -> &DaphneMetrics {
-        &self.daphne_metrics
+        &self.state.daphne_metrics
     }
 }
 
@@ -617,7 +619,7 @@ fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for DaphneWorker
+impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
@@ -632,7 +634,7 @@ where
             .post(
                 BINDING_DAP_REPORTS_PENDING,
                 DURABLE_REPORTS_PENDING_PUT,
-                self.config.durable_name_report_store(
+                self.state.config.durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
                     &report.metadata,
@@ -892,6 +894,7 @@ where
         }
 
         let reqwest_req = self
+            .state
             .client
             .as_ref()
             .ok_or_else(|| DapError::Fatal("helper cannot send HTTP requests".into()))?
@@ -935,7 +938,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for DaphneWorker
+impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
