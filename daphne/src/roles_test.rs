@@ -208,7 +208,6 @@ impl Test {
             .expect("failed to generate HPKE receiver config");
         let leader_prometheus_registry = prometheus::Registry::new();
         let leader = MockAggregator {
-            now,
             global_config: global_config.clone(),
             tasks: Arc::new(Mutex::new(tasks.clone())),
             hpke_receiver_config_list: leader_hpke_receiver_config_list,
@@ -229,7 +228,6 @@ impl Test {
             .expect("failed to generate HPKE receiver config");
         let helper_prometheus_registry = prometheus::Registry::new();
         let helper = MockAggregator {
-            now,
             global_config,
             tasks: Arc::new(Mutex::new(tasks)),
             leader_token,
