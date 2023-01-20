@@ -63,9 +63,7 @@ impl<'a> DapBatchBucket<'a> {
 
 pub(crate) struct MockAggregatorReportSelector(pub(crate) Id);
 
-#[allow(dead_code)]
 pub(crate) struct MockAggregator {
-    pub(crate) now: Time,
     pub(crate) global_config: DapGlobalConfig,
     pub(crate) tasks: Arc<Mutex<HashMap<Id, DapTaskConfig>>>,
     pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
@@ -80,7 +78,6 @@ pub(crate) struct MockAggregator {
     pub(crate) metrics: DaphneMetrics,
 }
 
-#[allow(dead_code)]
 impl MockAggregator {
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
