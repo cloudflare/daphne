@@ -5,6 +5,7 @@
 
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
+    constants,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id,
@@ -76,6 +77,10 @@ pub(crate) struct MockAggregator {
     pub(crate) collector_hpke_config: HpkeConfig,
     pub(crate) taskprov_vdaf_verify_key_init: Vec<u8>,
     pub(crate) metrics: DaphneMetrics,
+
+    // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
+    // implement `DapLeader::send_http_post()` for `MockAggregator`. Not set by the Helper.
+    pub(crate) peer: Option<Arc<MockAggregator>>,
 }
 
 impl MockAggregator {
@@ -815,8 +820,27 @@ where
         }
     }
 
-    async fn send_http_post(&self, _req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
-        unreachable!("not implemented");
+    async fn send_http_post(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
+        match req
+            .media_type
+            .expect("tried to send request without media type")
+        {
+            constants::MEDIA_TYPE_AGG_INIT_REQ | constants::MEDIA_TYPE_AGG_CONT_REQ => Ok(self
+                .peer
+                .as_ref()
+                .expect("peer not configured")
+                .http_post_aggregate(&req)
+                .await
+                .expect("peer aborted unexpectedly")),
+            constants::MEDIA_TYPE_AGG_SHARE_REQ => Ok(self
+                .peer
+                .as_ref()
+                .expect("peer not configured")
+                .http_post_aggregate_share(&req)
+                .await
+                .expect("peer aborted unexpectedly")),
+            s => unreachable!("unhandled media type: {}", s),
+        }
     }
 }
 

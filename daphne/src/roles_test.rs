@@ -11,8 +11,8 @@ use crate::{
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         taskprov, AggregateContinueReq, AggregateInitializeReq, AggregateResp, AggregateShareReq,
-        AggregateShareResp, BatchSelector, CollectReq, CollectResp, Extension, HpkeKemId, Id,
-        Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, ReportShare, Time,
+        BatchSelector, CollectReq, CollectResp, Extension, HpkeKemId, Id, Interval,
+        PartialBatchSelector, Query, Report, ReportId, ReportMetadata, ReportShare, Time,
         Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
@@ -21,8 +21,8 @@ use crate::{
     test_version, test_versions,
     testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
     vdaf::VdafVerifyKey,
-    DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapLeaderTransition,
-    DapMeasurement, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
+    DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapMeasurement, DapQueryConfig,
+    DapRequest, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
 };
 use assert_matches::assert_matches;
 use matchit::Router;
@@ -102,8 +102,8 @@ macro_rules! assert_metrics_include {
 
 struct Test {
     now: Time,
-    leader: MockAggregator,
-    helper: MockAggregator,
+    leader: Arc<MockAggregator>,
+    helper: Arc<MockAggregator>,
     #[allow(dead_code)]
     leader_prometheus_registry: prometheus::Registry,
     helper_prometheus_registry: prometheus::Registry,
@@ -202,12 +202,33 @@ impl Test {
         let mut taskprov_vdaf_verify_key_init = vec![0; 32];
         rng.fill(&mut taskprov_vdaf_verify_key_init[..]);
 
+        let helper_hpke_receiver_config_list = global_config
+            .gen_hpke_receiver_config_list(rng.gen())
+            .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
+            .expect("failed to generate HPKE receiver config");
+        let helper_prometheus_registry = prometheus::Registry::new();
+        let helper = Arc::new(MockAggregator {
+            global_config: global_config.clone(),
+            tasks: Arc::new(Mutex::new(tasks.clone())),
+            leader_token: leader_token.clone(),
+            collector_token: None,
+            hpke_receiver_config_list: helper_hpke_receiver_config_list,
+            report_store: Arc::new(Mutex::new(HashMap::new())),
+            leader_state_store: Arc::new(Mutex::new(HashMap::new())),
+            helper_state_store: Arc::new(Mutex::new(HashMap::new())),
+            agg_store: Arc::new(Mutex::new(HashMap::new())),
+            collector_hpke_config: collector_hpke_receiver_config.config.clone(),
+            taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
+            metrics: DaphneMetrics::register(&helper_prometheus_registry).unwrap(),
+            peer: None,
+        });
+
         let leader_hpke_receiver_config_list = global_config
             .gen_hpke_receiver_config_list(rng.gen())
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
         let leader_prometheus_registry = prometheus::Registry::new();
-        let leader = MockAggregator {
+        let leader = Arc::new(MockAggregator {
             global_config: global_config.clone(),
             tasks: Arc::new(Mutex::new(tasks.clone())),
             hpke_receiver_config_list: leader_hpke_receiver_config_list,
@@ -220,27 +241,8 @@ impl Test {
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
             metrics: DaphneMetrics::register(&leader_prometheus_registry).unwrap(),
-        };
-
-        let helper_hpke_receiver_config_list = global_config
-            .gen_hpke_receiver_config_list(rng.gen())
-            .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
-            .expect("failed to generate HPKE receiver config");
-        let helper_prometheus_registry = prometheus::Registry::new();
-        let helper = MockAggregator {
-            global_config,
-            tasks: Arc::new(Mutex::new(tasks)),
-            leader_token,
-            collector_token: None,
-            hpke_receiver_config_list: helper_hpke_receiver_config_list,
-            report_store: Arc::new(Mutex::new(HashMap::new())),
-            leader_state_store: Arc::new(Mutex::new(HashMap::new())),
-            helper_state_store: Arc::new(Mutex::new(HashMap::new())),
-            agg_store: Arc::new(Mutex::new(HashMap::new())),
-            collector_hpke_config: collector_hpke_receiver_config.config,
-            taskprov_vdaf_verify_key_init,
-            metrics: DaphneMetrics::register(&helper_prometheus_registry).unwrap(),
-        };
+            peer: Some(Arc::clone(&helper)),
+        });
 
         Self {
             now,
@@ -378,9 +380,6 @@ impl Test {
         report
     }
 
-    // TODO Rework the test framework to call DapLeader::run_agg_job() directly. The method here is
-    // basically a re-implementration that allows us to avoid having to mock the HTTP connection.
-    // The (major) downside is that we have to keep the code in-sync.
     async fn run_agg_job(&self, task_id: &Id) -> Result<(), DapAbort> {
         let wrapped = self
             .leader
@@ -389,72 +388,14 @@ impl Test {
             .unwrap();
         let task_config = wrapped.as_ref().unwrap();
 
-        // Leader: Store received report to ReportStore.
         let report_sel = MockAggregatorReportSelector(task_id.clone());
         let (task_id, part_batch_sel, reports) = get_reports!(self.leader, &report_sel);
 
-        // Leader: Consume report share.
-        let mut rng = thread_rng();
-        let agg_job_id = Id(rng.gen());
-        let transition = task_config
-            .vdaf
-            .produce_agg_init_req(
-                &self.leader,
-                &task_config.vdaf_verify_key,
-                &task_id,
-                &agg_job_id,
-                &part_batch_sel,
-                reports,
-                task_config.version,
-            )
+        // Leader->Helper: Run aggregation job.
+        let _reports_aggregated = self
+            .leader
+            .run_agg_job(&task_id, task_config, &part_batch_sel, reports)
             .await?;
-        assert_matches!(transition, DapLeaderTransition::Continue(..));
-        let (leader_state, agg_init_req) = transition.unwrap_continue();
-
-        // Leader: Send aggregate initialization request to Helper and receive response.
-        let version = task_config.version.clone();
-        let req = self
-            .leader_authorized_req_with_version(
-                &task_id,
-                version,
-                MEDIA_TYPE_AGG_INIT_REQ,
-                agg_init_req,
-                task_config.helper_url.join("aggregate").unwrap(),
-            )
-            .await;
-        let res = self.helper.http_post_aggregate(&req).await?;
-        let agg_resp = AggregateResp::get_decoded(&res.payload).unwrap();
-
-        // Leader: Produce Leader output share and prepare aggregate continue request for Helper.
-        let transition =
-            task_config
-                .vdaf
-                .handle_agg_resp(&task_id, &agg_job_id, leader_state, agg_resp)?;
-        assert_matches!(transition, DapLeaderTransition::Uncommitted(..));
-        let (leader_uncommitted, agg_cont_req) = transition.unwrap_uncommitted();
-
-        // Leader: Send aggregate continue request to Helper and receive response.
-        let version = task_config.version.clone();
-        let req = self
-            .leader_authorized_req(
-                &task_id,
-                version,
-                MEDIA_TYPE_AGG_CONT_REQ,
-                agg_cont_req,
-                task_config.helper_url.join("aggregate").unwrap(),
-            )
-            .await;
-        let res = self.helper.http_post_aggregate(&req).await?;
-        let agg_resp = AggregateResp::get_decoded(&res.payload)?;
-
-        // Leader: Commit output shares of Leader and Helper.
-        let out_shares = task_config
-            .vdaf
-            .handle_final_agg_resp(leader_uncommitted, agg_resp)?;
-        self.leader
-            .put_out_shares(&task_id, &part_batch_sel, out_shares)
-            .await?;
-
         Ok(())
     }
 
@@ -466,7 +407,7 @@ impl Test {
             .unwrap();
         let task_config = wrapped.as_ref().unwrap();
 
-        // Collector->Leader: HTTP POST /collect
+        // Collector->Leader: Initialize collection job.
         let req = self
             .collector_authorized_req(
                 task_config.version,
@@ -481,64 +422,16 @@ impl Test {
             )
             .await;
 
-        // Handle request.
+        // Leader: Handle request form Collector.
         self.leader.http_post_collect(&req).await?;
         let resp = self.leader.get_pending_collect_jobs().await?;
         let (collect_id, collect_req) = &resp[0];
 
-        // Leader: Handle collect job. First, fetch the aggregate share.
-        let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
-        let leader_agg_share = self
+        // Leader->Helper: Complete collection job.
+        let _reports_collected = self
             .leader
-            .get_agg_share(&collect_req.task_id, &batch_selector)
+            .run_collect_job(collect_id, task_config, collect_req)
             .await?;
-        let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
-            &task_config.collector_hpke_config,
-            &collect_req.task_id,
-            &batch_selector,
-            &leader_agg_share,
-            task_config.version,
-        )?;
-
-        // Leader->Helper: HTTP POST /aggregate_share
-        let agg_share_req = AggregateShareReq {
-            task_id: collect_req.task_id.clone(),
-            batch_sel: batch_selector.clone(),
-            agg_param: collect_req.agg_param.clone(),
-            report_count: leader_agg_share.report_count,
-            checksum: leader_agg_share.checksum,
-        };
-        let req = self
-            .leader_authorized_req_with_version(
-                &task_id,
-                task_config.version,
-                MEDIA_TYPE_AGG_SHARE_REQ,
-                agg_share_req.clone(),
-                task_config.helper_url.join("aggregate_share").unwrap(),
-            )
-            .await;
-
-        // Helper: Handle request.
-        let res = self.helper.http_post_aggregate_share(&req).await?;
-        let agg_share_resp = AggregateShareResp::get_decoded(&res.payload).unwrap();
-
-        // Leader: Complete the collect job.
-        let collect_resp = CollectResp {
-            part_batch_sel: batch_selector.clone().into(),
-            report_count: leader_agg_share.report_count,
-            encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
-        };
-        self.leader
-            .finish_collect_job(task_id, collect_id, &collect_resp)
-            .await?;
-        self.leader
-            .mark_collected(task_id, &agg_share_req.batch_sel)
-            .await?;
-
-        // Collector: Poll the collect job.
-        let collect_job = self.leader.poll_collect_job(&task_id, &collect_id).await?;
-        assert_matches!(collect_job, DapCollectJob::Done(..));
-
         Ok(())
     }
 
