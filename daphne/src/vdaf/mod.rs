@@ -24,7 +24,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapVersion, VdafConfig,
+    DapTaskConfig, DapVersion, VdafConfig,
 };
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedEncode},
@@ -288,8 +288,8 @@ impl VdafConfig {
         )
     }
 
-    /// Consume an encrypted input share sent in a report by the Client and return the Prepare
-    /// step. This is run by an Aggregator.
+    /// Consume a report share sent by the Client and return the initial Prepare step. This is run
+    /// by each Aggregator.
     ///
     /// # Inputs
     ///
@@ -309,14 +309,17 @@ impl VdafConfig {
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         is_leader: bool,
-        verify_key: &VdafVerifyKey,
         task_id: &Id,
+        task_config: &DapTaskConfig,
         metadata: &ReportMetadata,
         public_share: &[u8],
         encrypted_input_share: &HpkeCiphertext,
-        version: DapVersion,
     ) -> Result<(VdafState, VdafMessage), DapError> {
-        let input_share_text = match version {
+        if metadata.time >= task_config.expiration {
+            return Err(DapError::Transition(TransitionFailure::TaskExpired));
+        }
+
+        let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
             DapVersion::Draft03 => CTX_INPUT_SHARE_DRAFT03,
             _ => return Err(unimplemented_version()),
@@ -334,7 +337,7 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
-        metadata.encode_with_param(&version, &mut aad);
+        metadata.encode_with_param(&task_config.version, &mut aad);
         // TODO spec: Consider folding the public share into a field called "header".
         encode_u32_bytes(&mut aad, public_share);
 
@@ -344,7 +347,7 @@ impl VdafConfig {
         // For Draft02, the encoded input share is the VDAF-specific payload, but for Draft03 and
         // later it is a serialized PlaintextInputShare.  For simplicity in later code, we wrap the Draft02
         // payload into a PlaintextInputShare.
-        let input_share = match version {
+        let input_share = match task_config.version {
             DapVersion::Draft02 => PlaintextInputShare {
                 extensions: vec![],
                 payload: encoded_input_share,
@@ -353,7 +356,7 @@ impl VdafConfig {
         };
 
         let agg_id = usize::from(!is_leader);
-        match (self, verify_key) {
+        match (self, &task_config.vdaf_verify_key) {
             (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
                 Ok(prio3_prepare_init(
                     prio3_config,
@@ -398,12 +401,11 @@ impl VdafConfig {
     pub(crate) async fn produce_agg_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
-        verify_key: &VdafVerifyKey,
         task_id: &Id,
+        task_config: &DapTaskConfig,
         agg_job_id: &Id,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-        version: DapVersion,
     ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -432,12 +434,11 @@ impl VdafConfig {
                 .consume_report_share(
                     decrypter,
                     true, // is_leader
-                    verify_key,
                     task_id,
+                    task_config,
                     &report.metadata,
                     &report.public_share,
                     &leader_share,
-                    version,
                 )
                 .await
             {
@@ -508,9 +509,8 @@ impl VdafConfig {
     pub(crate) async fn handle_agg_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
-        verify_key: &VdafVerifyKey,
+        task_config: &DapTaskConfig,
         agg_init_req: &AggregateInitializeReq,
-        version: DapVersion,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -526,12 +526,11 @@ impl VdafConfig {
                 .consume_report_share(
                     decrypter,
                     false, // is_leader
-                    verify_key,
                     &agg_init_req.task_id,
+                    task_config,
                     &report_share.metadata,
                     &report_share.public_share,
                     &report_share.encrypted_input_share,
-                    version,
                 )
                 .await
             {

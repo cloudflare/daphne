@@ -421,12 +421,11 @@ where
             .vdaf
             .produce_agg_init_req(
                 self,
-                &task_config.vdaf_verify_key,
                 task_id,
+                task_config,
                 &agg_job_id,
                 part_batch_sel,
                 reports,
-                task_config.version,
             )
             .await?;
         let (state, agg_init_req) = match transition {
@@ -718,12 +717,7 @@ where
 
                 let transition = task_config
                     .vdaf
-                    .handle_agg_init_req(
-                        self,
-                        &task_config.vdaf_verify_key,
-                        &agg_init_req,
-                        task_config.version,
-                    )
+                    .handle_agg_init_req(self, task_config, &agg_init_req)
                     .await?;
 
                 // Check that helper state with task_id and agg_job_id does not exist.
@@ -740,18 +734,12 @@ where
                     DapHelperTransition::Continue(mut state, mut agg_resp) => {
                         let mut i = 0;
                         while i < state.seq.len() {
-                            let (_vdaf_state, time, report_id) = &state.seq[i];
-
-                            let early_result =
-                                early_rejects.get(&agg_resp.transitions[i].report_id);
-                            let result = if time >= &task_config.expiration {
-                                Some(&TransitionFailure::TaskExpired)
-                            } else {
-                                early_result
-                            };
+                            let (_vdaf_state, _time, report_id) = &state.seq[i];
 
                             // TODO Emit metrics for failure reasons.
-                            if let Some(failure) = result {
+                            if let Some(failure) =
+                                early_rejects.get(&agg_resp.transitions[i].report_id)
+                            {
                                 // Mark reports that were rejected early as TransitionVar::Failed.
                                 agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
 

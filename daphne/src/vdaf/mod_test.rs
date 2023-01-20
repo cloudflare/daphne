@@ -7,12 +7,12 @@ use crate::{
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
         HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, PartialBatchSelector,
-        Report, ReportId, Transition, TransitionFailure, TransitionVar,
+        Report, ReportId, Time, Transition, TransitionFailure, TransitionVar,
     },
     test_version, test_versions, DapAbort, DapAggregateResult, DapAggregateShare, DapError,
     DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted,
-    DapMeasurement, DapOutputShare, DapVersion, Prio3Config, VdafAggregateShare, VdafConfig,
-    VdafMessage, VdafState, VdafVerifyKey,
+    DapMeasurement, DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config,
+    VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
 };
 use assert_matches::assert_matches;
 use hpke_rs::HpkePublicKey;
@@ -23,6 +23,7 @@ use prio::vdaf::{
 };
 use rand::prelude::*;
 use std::{collections::HashMap, fmt::Debug, time::SystemTime};
+use url::Url;
 
 impl<M: Debug> DapLeaderTransition<M> {
     pub(crate) fn unwrap_continue(self) -> (DapLeaderState, M) {
@@ -70,6 +71,7 @@ const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
 async fn roundtrip_report(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let report = t
+        .task_config
         .vdaf
         .produce_report(
             &t.client_hpke_config_list,
@@ -84,12 +86,11 @@ async fn roundtrip_report(version: DapVersion) {
         .consume_report_share(
             &t.leader_hpke_receiver_config,
             true, // is_leader
-            &t.vdaf_verify_key,
             &t.task_id,
+            &t.task_config,
             &report.metadata,
             &report.public_share,
             &report.encrypted_input_shares[0],
-            version,
         )
         .await
         .unwrap();
@@ -98,12 +99,11 @@ async fn roundtrip_report(version: DapVersion) {
         .consume_report_share(
             &t.helper_hpke_receiver_config,
             false, // is_leader
-            &t.vdaf_verify_key,
             &t.task_id,
+            &t.task_config,
             &report.metadata,
             &report.public_share,
             &report.encrypted_input_shares[1],
-            version,
         )
         .await
         .unwrap();
@@ -161,7 +161,7 @@ fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
         },
     ];
 
-    let res = t.vdaf.produce_report(
+    let res = t.task_config.vdaf.produce_report(
         &unsupported_hpke_config_list,
         t.now,
         &t.task_id,
@@ -577,23 +577,20 @@ async fn helper_state_serialization(version: DapVersion) {
 
 async_test_versions! { helper_state_serialization }
 
-pub(crate) struct Test<'a> {
-    now: u64,
-    vdaf: &'a VdafConfig,
+pub(crate) struct Test {
+    now: Time,
     task_id: Id,
     agg_job_id: Id,
-    vdaf_verify_key: VdafVerifyKey,
+    task_config: DapTaskConfig,
     leader_hpke_receiver_config: HpkeReceiverConfig,
     helper_hpke_receiver_config: HpkeReceiverConfig,
     early_rejects: HashMap<ReportId, TransitionFailure>,
     client_hpke_config_list: Vec<HpkeConfig>,
-    collector_hpke_config: HpkeConfig,
     collector_hpke_receiver_config: HpkeReceiverConfig,
-    version: DapVersion,
 }
 
-impl<'a> Test<'a> {
-    pub(crate) fn new(vdaf: &'a VdafConfig, version: DapVersion) -> Test {
+impl Test {
+    pub(crate) fn new(vdaf: &VdafConfig, version: DapVersion) -> Test {
         let mut rng = thread_rng();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -614,17 +611,25 @@ impl<'a> Test<'a> {
 
         Test {
             now,
-            vdaf,
             task_id,
             agg_job_id,
-            vdaf_verify_key,
             leader_hpke_receiver_config,
             helper_hpke_receiver_config,
             early_rejects: HashMap::default(),
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
-            collector_hpke_config,
             collector_hpke_receiver_config,
-            version,
+            task_config: DapTaskConfig {
+                version,
+                leader_url: Url::parse("http://dummy.url").unwrap(),
+                helper_url: Url::parse("http://dummy.url").unwrap(),
+                time_precision: 500,
+                expiration: now + 500,
+                min_batch_size: 10,
+                query: DapQueryConfig::TimeInterval,
+                vdaf: vdaf.clone(),
+                vdaf_verify_key,
+                collector_hpke_config,
+            },
         }
     }
 
@@ -633,13 +638,14 @@ impl<'a> Test<'a> {
 
         for measurement in measurements.into_iter() {
             reports.push(
-                self.vdaf
+                self.task_config
+                    .vdaf
                     .produce_report(
                         &self.client_hpke_config_list,
                         self.now,
                         &self.task_id,
                         measurement,
-                        self.version,
+                        self.task_config.version,
                     )
                     .unwrap(),
             );
@@ -651,15 +657,15 @@ impl<'a> Test<'a> {
         &self,
         reports: Vec<Report>,
     ) -> DapLeaderTransition<AggregateInitializeReq> {
-        self.vdaf
+        self.task_config
+            .vdaf
             .produce_agg_init_req(
                 &self.leader_hpke_receiver_config,
-                &self.vdaf_verify_key,
                 &self.task_id,
+                &self.task_config,
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
-                self.version,
             )
             .await
             .unwrap()
@@ -670,12 +676,12 @@ impl<'a> Test<'a> {
         agg_init_req: AggregateInitializeReq,
     ) -> DapHelperTransition<AggregateResp> {
         let agg_resp = self
+            .task_config
             .vdaf
             .handle_agg_init_req(
                 &self.helper_hpke_receiver_config,
-                &self.vdaf_verify_key,
+                &self.task_config,
                 &agg_init_req,
-                self.version,
             )
             .await
             .unwrap();
@@ -696,7 +702,8 @@ impl<'a> Test<'a> {
         leader_state: DapLeaderState,
         agg_resp: AggregateResp,
     ) -> DapLeaderTransition<AggregateContinueReq> {
-        self.vdaf
+        self.task_config
+            .vdaf
             .handle_agg_resp(&self.task_id, &self.agg_job_id, leader_state, agg_resp)
             .unwrap()
     }
@@ -706,7 +713,8 @@ impl<'a> Test<'a> {
         leader_state: DapLeaderState,
         agg_resp: AggregateResp,
     ) -> DapAbort {
-        self.vdaf
+        self.task_config
+            .vdaf
             .handle_agg_resp(&self.task_id, &self.agg_job_id, leader_state, agg_resp)
             .err()
             .expect("handle_agg_resp() succeeded; expected failure")
@@ -717,7 +725,8 @@ impl<'a> Test<'a> {
         helper_state: DapHelperState,
         agg_cont_req: &AggregateContinueReq,
     ) -> DapHelperTransition<AggregateResp> {
-        self.vdaf
+        self.task_config
+            .vdaf
             .handle_agg_cont_req(helper_state, agg_cont_req)
             .unwrap()
     }
@@ -727,7 +736,8 @@ impl<'a> Test<'a> {
         helper_state: DapHelperState,
         agg_cont_req: &AggregateContinueReq,
     ) -> DapAbort {
-        self.vdaf
+        self.task_config
+            .vdaf
             .handle_agg_cont_req(helper_state, agg_cont_req)
             .err()
             .expect("handle_agg_cont_req() succeeded; expected failure")
@@ -738,7 +748,8 @@ impl<'a> Test<'a> {
         leader_uncommitted: DapLeaderUncommitted,
         agg_resp: AggregateResp,
     ) -> Vec<DapOutputShare> {
-        self.vdaf
+        self.task_config
+            .vdaf
             .handle_final_agg_resp(leader_uncommitted, agg_resp)
             .unwrap()
     }
@@ -748,13 +759,14 @@ impl<'a> Test<'a> {
         batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
-        self.vdaf
+        self.task_config
+            .vdaf
             .produce_leader_encrypted_agg_share(
-                &self.collector_hpke_config,
+                &self.task_config.collector_hpke_config,
                 &self.task_id,
                 batch_selector,
                 agg_share,
-                self.version,
+                self.task_config.version,
             )
             .unwrap()
     }
@@ -764,13 +776,14 @@ impl<'a> Test<'a> {
         batch_selector: &BatchSelector,
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
-        self.vdaf
+        self.task_config
+            .vdaf
             .produce_helper_encrypted_agg_share(
-                &self.collector_hpke_config,
+                &self.task_config.collector_hpke_config,
                 &self.task_id,
                 batch_selector,
                 agg_share,
-                self.version,
+                self.task_config.version,
             )
             .unwrap()
     }
@@ -781,14 +794,15 @@ impl<'a> Test<'a> {
         report_count: u64,
         enc_agg_shares: Vec<HpkeCiphertext>,
     ) -> DapAggregateResult {
-        self.vdaf
+        self.task_config
+            .vdaf
             .consume_encrypted_agg_shares(
                 &self.collector_hpke_receiver_config,
                 &self.task_id,
                 batch_selector,
                 report_count,
                 enc_agg_shares,
-                self.version,
+                self.task_config.version,
             )
             .await
             .unwrap()
@@ -812,9 +826,9 @@ impl<'a> Test<'a> {
         let (leader_state, agg_init) = self.produce_agg_init_req(reports).await.unwrap_continue();
         let (helper_state, agg_resp) = self.handle_agg_init_req(agg_init).await.unwrap_continue();
         let got = DapHelperState::get_decoded(
-            &self.vdaf,
+            &self.task_config.vdaf,
             &helper_state
-                .get_encoded(&self.vdaf)
+                .get_encoded(&self.task_config.vdaf)
                 .expect("failed to encode helper state"),
         )
         .expect("failed to decode helper state");
