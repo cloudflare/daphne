@@ -22,7 +22,7 @@ use prio::vdaf::{
     PrepareTransition,
 };
 use rand::prelude::*;
-use std::{collections::HashMap, fmt::Debug, time::SystemTime};
+use std::{fmt::Debug, time::SystemTime};
 use url::Url;
 
 impl<M: Debug> DapLeaderTransition<M> {
@@ -584,7 +584,6 @@ pub(crate) struct Test {
     task_config: DapTaskConfig,
     leader_hpke_receiver_config: HpkeReceiverConfig,
     helper_hpke_receiver_config: HpkeReceiverConfig,
-    early_rejects: HashMap<ReportId, TransitionFailure>,
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_receiver_config: HpkeReceiverConfig,
 }
@@ -615,7 +614,6 @@ impl Test {
             agg_job_id,
             leader_hpke_receiver_config,
             helper_hpke_receiver_config,
-            early_rejects: HashMap::default(),
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
             collector_hpke_receiver_config,
             task_config: DapTaskConfig {
@@ -685,14 +683,6 @@ impl Test {
             )
             .await
             .unwrap();
-
-        for report_share in agg_init_req.report_shares {
-            // Make sure the Leader doesn't try to aggregate these reports again.
-            self.early_rejects.insert(
-                report_share.metadata.id.clone(),
-                TransitionFailure::ReportReplayed,
-            );
-        }
 
         agg_resp
     }

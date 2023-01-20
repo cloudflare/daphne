@@ -865,6 +865,10 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
         transition.var,
         TransitionVar::Failed(TransitionFailure::ReportReplayed)
     );
+
+    assert_metrics_include!(t.helper_prometheus_registry, {
+        r#"daphne_report_counter{status="rejected_report_replayed"}"#: 1,
+    });
 }
 
 async_test_versions! { http_post_aggregate_failure_report_replayed }
@@ -915,6 +919,10 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
         transition.var,
         TransitionVar::Failed(TransitionFailure::BatchCollected)
     );
+
+    assert_metrics_include!(t.helper_prometheus_registry, {
+        r#"daphne_report_counter{status="rejected_batch_collected"}"#: 1,
+    });
 }
 
 async_test_versions! { http_post_aggregate_failure_batch_collected }

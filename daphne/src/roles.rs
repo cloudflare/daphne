@@ -393,8 +393,6 @@ where
 
         // Filter out early rejected reports.
         //
-        // TODO Add metrics for early rejects.
-        //
         // TODO Add a test similar to http_post_aggregate_init_expired_task() in roles_test.rs that
         // verifies that the Leader properly checks for expiration. This will require extending the
         // test framework to run run_agg_job() directly.
@@ -408,10 +406,14 @@ where
         let reports = reports
             .into_iter()
             .filter(|report| {
-                // Filter the reports, removing any with a timestamps beyond the expiry or that was
-                // early rejected.
-                report.metadata.time < task_config.expiration
-                    && early_rejects.get(&report.metadata.id).is_none()
+                if let Some(failure) = early_rejects.get(&report.metadata.id) {
+                    self.metrics()
+                        .report_counter
+                        .with_label_values(&[&format!("rejected_{}", failure)])
+                        .inc();
+                    return false;
+                }
+                true
             })
             .collect();
 
@@ -728,32 +730,46 @@ where
                     ));
                 }
 
-                // Remove reports that are rejected early.
-                let early_rejects = early_rejects_future.await?;
                 let agg_resp = match transition {
                     DapHelperTransition::Continue(mut state, mut agg_resp) => {
-                        let mut i = 0;
-                        while i < state.seq.len() {
-                            let (_vdaf_state, _time, report_id) = &state.seq[i];
-
-                            // TODO Emit metrics for failure reasons.
-                            if let Some(failure) =
-                                early_rejects.get(&agg_resp.transitions[i].report_id)
+                        // Filter out early rejected reports.
+                        let early_rejects = early_rejects_future.await?;
+                        let mut state_index = 0;
+                        for transition in agg_resp.transitions.iter_mut() {
+                            let early_failure = early_rejects.get(&transition.report_id);
+                            if !matches!(transition.var, TransitionVar::Failed(..))
+                                && early_failure.is_some()
                             {
-                                // Mark reports that were rejected early as TransitionVar::Failed.
-                                agg_resp.transitions[i].var = TransitionVar::Failed(*failure);
+                                // NOTE(cjpatton) Clippy wants us to use and `if let` statement to
+                                // unwrap `early_failure`. I don't think this works becauase we
+                                // only want to enter this loop if `early_failure.is_some()` and
+                                // the current `transition` is not a failure. As far as I know, `if
+                                // let` statements can't yet be combined with other conditions.
+                                #[allow(clippy::unnecessary_unwrap)]
+                                let failure = early_failure.unwrap();
+                                transition.var = TransitionVar::Failed(*failure);
 
                                 // Remove VDAF preparation state of reports that were rejected early.
-                                if report_id == &agg_resp.transitions[i].report_id {
-                                    let _val = state.seq.remove(i);
+                                if transition.report_id == state.seq[state_index].2 {
+                                    let _val = state.seq.remove(state_index);
                                 } else {
                                     // The report ID in the Helper state and Aggregate response
-                                    // must be aligned. Abort with an internal error if this is not
-                                    // the case.
+                                    // must be aligned. If not, handle as an internal error.
                                     return Err(DapError::fatal("report IDs not aligned").into());
                                 }
+
+                                // NOTE(cjpatton) Unlike the Leader, the Helper filters out early
+                                // rejects after processing all of the reports. (This is an
+                                // optimization intended to reduce latency.) To avoid overcounting
+                                // rejection metrics, the latter rejections take precedence. The
+                                // Leader has the opposite behavior: Early rejections are resolved
+                                // first, so take precedence.
+                                self.metrics()
+                                    .report_counter
+                                    .with_label_values(&[&format!("rejected_{}", failure)])
+                                    .inc();
                             } else {
-                                i += 1;
+                                state_index += 1;
                             }
                         }
 
