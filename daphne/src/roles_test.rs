@@ -422,7 +422,7 @@ impl Test {
             )
             .await;
 
-        // Leader: Handle request form Collector.
+        // Leader: Handle request from Collector.
         self.leader.http_post_collect(&req).await?;
         let resp = self.leader.get_pending_collect_jobs().await?;
         let (collect_id, collect_req) = &resp[0];
@@ -1433,6 +1433,9 @@ async fn e2e_time_interval(version: DapVersion) {
     let query = task_config.query_for_current_batch_window(t.now);
     t.run_col_job(task_id, &query).await.unwrap();
 
+    assert_metrics_include!(t.leader_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
     assert_metrics_include!(t.helper_prometheus_registry, {
         r#"daphne_report_counter{status="aggregated"}"#: 1,
     });
@@ -1460,6 +1463,9 @@ async fn e2e_fixed_size(version: DapVersion) {
     };
     t.run_col_job(task_id, &query).await.unwrap();
 
+    assert_metrics_include!(t.leader_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
     assert_metrics_include!(t.helper_prometheus_registry, {
         r#"daphne_report_counter{status="aggregated"}"#: 1,
     });
@@ -1552,6 +1558,9 @@ async fn e2e_taskprov(version: DapVersion) {
     };
     t.run_col_job(task_id, &query).await.unwrap();
 
+    assert_metrics_include!(t.leader_prometheus_registry, {
+        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    });
     assert_metrics_include!(t.helper_prometheus_registry, {
         r#"daphne_report_counter{status="aggregated"}"#: 1,
     });
