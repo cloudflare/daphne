@@ -501,10 +501,6 @@ impl VdafConfig {
     ///
     /// * `agg_init_req` is the request sent by the Leader.
     ///
-    /// * `early_rejects` is a tableindicating the set of reports in `agg_init_req` that the Helper
-    /// knows in advance it must reject. Each key is the report ID and the corresponding value is
-    /// the transition failure the Helper is to transmit.
-    ///
     /// * `version` is the DapVersion to use.
     pub(crate) async fn handle_agg_init_req(
         &self,

@@ -552,16 +552,16 @@ impl Decode for TransitionFailure {
 impl std::fmt::Display for TransitionFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::BatchCollected => write!(f, "batch-collected({})", *self as u8),
-            Self::ReportReplayed => write!(f, "report-replayed({})", *self as u8),
-            Self::ReportDropped => write!(f, "report-dropped({})", *self as u8),
-            Self::HpkeUnknownConfigId => write!(f, "hpke-unknown-config-id({})", *self as u8),
-            Self::HpkeDecryptError => write!(f, "hpke-decrypt-error({})", *self as u8),
-            Self::VdafPrepError => write!(f, "vdaf-prep-error({})", *self as u8),
-            Self::BatchSaturated => write!(f, "batch-saturated({})", *self as u8),
-            Self::TaskExpired => write!(f, "task-expired({})", *self as u8),
-            Self::UnrecognizedMessage => write!(f, "unrecognized-message({})", *self as u8),
-            Self::ReportTooEarly => write!(f, "report-too-early({})", *self as u8),
+            Self::BatchCollected => write!(f, "batch_collected"),
+            Self::ReportReplayed => write!(f, "report_replayed"),
+            Self::ReportDropped => write!(f, "report_dropped"),
+            Self::HpkeUnknownConfigId => write!(f, "hpke_unknown_config_id"),
+            Self::HpkeDecryptError => write!(f, "hpke_decrypt_error"),
+            Self::VdafPrepError => write!(f, "vdaf_prep_error"),
+            Self::BatchSaturated => write!(f, "batch_saturated"),
+            Self::TaskExpired => write!(f, "task_expired"),
+            Self::UnrecognizedMessage => write!(f, "unrecognized_message"),
+            Self::ReportTooEarly => write!(f, "report_too_early"),
         }
     }
 }
