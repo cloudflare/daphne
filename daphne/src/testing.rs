@@ -946,3 +946,61 @@ macro_rules! async_test_versions {
         )*
     };
 }
+
+/// Helper macro used by `assert_metrics_include`.
+//
+// TODO(cjpatton) Figure out how to bake this into `asssert_metrics_include` so that users don't
+// have to import both macros.
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_metrics_include_auxiliary_function {
+    ($set:expr, $k:tt: $v:expr,) => {{
+        let line = format!("{} {}", $k, $v);
+        $set.insert(line);
+    }};
+
+    ($set:expr, $k:tt: $v:expr, $($ks:tt: $vs:expr),+,) => {{
+        let line = format!("{} {}", $k, $v);
+        $set.insert(line);
+        assert_metrics_include_auxiliary_function!($set, $($ks: $vs),+,)
+    }}
+}
+
+/// Gather metrics from a registry and assert that a list of metrics are present and have the
+/// correct value. For example:
+/// ```
+/// let registry = prometheus::Registry::new();
+///
+/// // ... Register a metric called "report_counter" and use it.
+///
+/// assert_metrics_include!(t.helper_prometheus_registry, {
+///      r#"report_counter{status="aggregated"}"#: 23,
+/// });
+/// ```
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_metrics_include {
+    ($registry:expr, {$($ks:tt: $vs:expr),+,}) => {{
+        use prometheus::{Encoder, TextEncoder};
+        use std::collections::HashSet;
+
+        let mut want: HashSet<String> = HashSet::new();
+        assert_metrics_include_auxiliary_function!(&mut want, $($ks: $vs),+,);
+
+        // Encode the metrics and iterate over each line. For each line, if the line appears in the
+        // list of expected output lines, then remove it.
+        let mut got_buf = Vec::new();
+        let encoder = TextEncoder::new();
+        encoder.encode(&$registry.gather(), &mut got_buf).unwrap();
+        let got_str = String::from_utf8(got_buf).unwrap();
+        for line in got_str.split('\n') {
+            want.remove(line);
+        }
+
+        // The metrics contain the expected lines if the the set is now empty.
+        if !want.is_empty() {
+            panic!("unexpected metrics: got:\n{}\nmust contain:\n{}\n",
+                   got_str, want.into_iter().collect::<Vec<String>>().join("\n"));
+        }
+    }}
+}

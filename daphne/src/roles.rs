@@ -409,7 +409,7 @@ where
                 if let Some(failure) = early_rejects.get(&report.metadata.id) {
                     self.metrics()
                         .report_counter
-                        .with_label_values(&[&format!("rejected_{}", failure)])
+                        .with_label_values(&[&format!("rejected_{failure}")])
                         .inc();
                     return false;
                 }
@@ -428,6 +428,7 @@ where
                 &agg_job_id,
                 part_batch_sel,
                 reports,
+                self.metrics(),
             )
             .await?;
         let (state, agg_init_req) = match transition {
@@ -450,9 +451,13 @@ where
         let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
         // Prepare AggreagteContinueReq.
-        let transition = task_config
-            .vdaf
-            .handle_agg_resp(task_id, &agg_job_id, state, agg_resp)?;
+        let transition = task_config.vdaf.handle_agg_resp(
+            task_id,
+            &agg_job_id,
+            state,
+            agg_resp,
+            self.metrics(),
+        )?;
         let (uncommited, agg_cont_req) = match transition {
             DapLeaderTransition::Uncommitted(uncommited, agg_cont_req) => {
                 (uncommited, agg_cont_req)
@@ -475,9 +480,10 @@ where
         let agg_resp = AggregateResp::get_decoded(&resp.payload)?;
 
         // Commit the output shares.
-        let out_shares = task_config
-            .vdaf
-            .handle_final_agg_resp(uncommited, agg_resp)?;
+        let out_shares =
+            task_config
+                .vdaf
+                .handle_final_agg_resp(uncommited, agg_resp, self.metrics())?;
         let out_shares_count = out_shares.len() as u64;
         self.put_out_shares(task_id, part_batch_sel, out_shares)
             .await?;
@@ -719,7 +725,7 @@ where
 
                 let transition = task_config
                     .vdaf
-                    .handle_agg_init_req(self, task_config, &agg_init_req)
+                    .handle_agg_init_req(self, task_config, &agg_init_req, self.metrics())
                     .await?;
 
                 // Check that helper state with task_id and agg_job_id does not exist.
@@ -766,7 +772,7 @@ where
                                 // first, so take precedence.
                                 self.metrics()
                                     .report_counter
-                                    .with_label_values(&[&format!("rejected_{}", failure)])
+                                    .with_label_values(&[&format!("rejected_{failure}")])
                                     .inc();
                             } else {
                                 state_index += 1;
@@ -813,7 +819,10 @@ where
                     .await?
                     .ok_or(DapAbort::UnrecognizedAggregationJob)?;
                 let part_batch_sel = state.part_batch_sel.clone();
-                let transition = task_config.vdaf.handle_agg_cont_req(state, &agg_cont_req)?;
+                let transition =
+                    task_config
+                        .vdaf
+                        .handle_agg_cont_req(state, &agg_cont_req, self.metrics())?;
 
                 let (agg_resp, out_shares_count) = match transition {
                     DapHelperTransition::Continue(..) => {

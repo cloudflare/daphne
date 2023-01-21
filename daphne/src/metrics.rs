@@ -16,9 +16,9 @@ pub struct DaphneMetrics {
 
 impl DaphneMetrics {
     /// Regstier Daphne metrics with the specified registry.
-    pub fn register(registry: &Registry) -> Result<Self, DapError> {
+    pub fn register(registry: &Registry, prefix: &str) -> Result<Self, DapError> {
         let report_counter = register_int_counter_vec_with_registry!(
-            "daphne_report_counter",
+            format!("{prefix}_report_counter"),
             "Total number reports rejected, aggregated, and collected.",
             &["status"],
             registry

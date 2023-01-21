@@ -12,6 +12,7 @@ use crate::{
         PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, Time, Transition,
         TransitionFailure, TransitionVar,
     },
+    metrics::DaphneMetrics,
     vdaf::{
         prio2::{
             prio2_encode_prepare_message, prio2_helper_prepare_finish, prio2_leader_prepare_finish,
@@ -172,6 +173,30 @@ impl VdafConfig {
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
+        let (public_share, input_shares) = self.produce_input_shares(measurement)?;
+        self.produce_report_with_extensions_for_shares(
+            public_share,
+            input_shares,
+            hpke_config_list,
+            time,
+            task_id,
+            extensions,
+            version,
+        )
+    }
+
+    /// Generate a report for the given public and input shares with the given extensions.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn produce_report_with_extensions_for_shares(
+        &self,
+        public_share: Vec<u8>,
+        mut input_shares: Vec<Vec<u8>>,
+        hpke_config_list: &[HpkeConfig],
+        time: Time,
+        task_id: &Id,
+        extensions: Vec<Extension>,
+        version: DapVersion,
+    ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
         let report_extensions = match version {
             DapVersion::Draft02 => extensions.clone(),
@@ -183,24 +208,19 @@ impl VdafConfig {
             extensions: report_extensions,
         };
 
-        let public_share = Vec::new();
-        let mut encoded_input_shares = match self {
-            Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
-            Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
-        };
         if version != DapVersion::Draft02 {
             let mut encoded: Vec<Vec<u8>> = Vec::new();
-            for share in encoded_input_shares.into_iter() {
+            for share in input_shares.into_iter() {
                 let input_share = PlaintextInputShare {
                     extensions: extensions.clone(),
                     payload: share,
                 };
                 encoded.push(PlaintextInputShare::get_encoded(&input_share));
             }
-            encoded_input_shares = encoded;
+            input_shares = encoded;
         }
 
-        if hpke_config_list.len() != encoded_input_shares.len() {
+        if hpke_config_list.len() != input_shares.len() {
             return Err(DapError::Fatal("unexpected number of HPKE configs".into()));
         }
 
@@ -225,11 +245,9 @@ impl VdafConfig {
         // it here.
         encode_u32_bytes(&mut aad, &public_share);
 
-        let mut encrypted_input_shares = Vec::with_capacity(encoded_input_shares.len());
-        for (i, (hpke_config, input_share_data)) in hpke_config_list
-            .iter()
-            .zip(encoded_input_shares)
-            .enumerate()
+        let mut encrypted_input_shares = Vec::with_capacity(input_shares.len());
+        for (i, (hpke_config, input_share_data)) in
+            hpke_config_list.iter().zip(input_shares).enumerate()
         {
             info[n + 1] = if i == 0 {
                 CTX_ROLE_LEADER
@@ -251,6 +269,19 @@ impl VdafConfig {
             public_share,
             encrypted_input_shares,
         })
+    }
+
+    /// Generate shares for a measurement.
+    pub(crate) fn produce_input_shares(
+        &self,
+        measurement: DapMeasurement,
+    ) -> Result<(Vec<u8>, Vec<Vec<u8>>), DapError> {
+        let public_share = Vec::new();
+        let input_shares = match self {
+            Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
+            Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
+        };
+        Ok((public_share, input_shares))
     }
 
     /// Generate a report for a measurement. This method is run by the Client.
@@ -317,6 +348,10 @@ impl VdafConfig {
     ) -> Result<(VdafState, VdafMessage), DapError> {
         if metadata.time >= task_config.expiration {
             return Err(DapError::Transition(TransitionFailure::TaskExpired));
+        }
+
+        if !public_share.is_empty() {
+            return Err(DapError::Transition(TransitionFailure::VdafPrepError));
         }
 
         let input_share_text = match task_config.version {
@@ -406,6 +441,7 @@ impl VdafConfig {
         agg_job_id: &Id,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
+        metrics: &DaphneMetrics,
     ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -457,9 +493,10 @@ impl VdafConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                //
-                // TODO Emit metric for failure reason
-                Err(DapError::Transition(..)) => (),
+                Err(DapError::Transition(failure)) => metrics
+                    .report_counter
+                    .with_label_values(&[&format!("rejected_{failure}")])
+                    .inc(),
 
                 Err(e) => return Err(DapAbort::Internal(Box::new(e))),
             };
@@ -507,6 +544,7 @@ impl VdafConfig {
         decrypter: &impl HpkeDecrypter<'_>,
         task_config: &DapTaskConfig,
         agg_init_req: &AggregateInitializeReq,
+        metrics: &DaphneMetrics,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let num_reports = agg_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -543,7 +581,13 @@ impl VdafConfig {
                     TransitionVar::Continued(message_data)
                 }
 
-                Err(DapError::Transition(failure_reason)) => TransitionVar::Failed(failure_reason),
+                Err(DapError::Transition(failure)) => {
+                    metrics
+                        .report_counter
+                        .with_label_values(&[&format!("rejected_{failure}")])
+                        .inc();
+                    TransitionVar::Failed(failure)
+                }
 
                 Err(e) => return Err(DapAbort::Internal(Box::new(e))),
             };
@@ -581,6 +625,7 @@ impl VdafConfig {
         agg_job_id: &Id,
         state: DapLeaderState,
         agg_resp: AggregateResp,
+        metrics: &DaphneMetrics,
     ) -> Result<DapLeaderTransition<AggregateContinueReq>, DapAbort> {
         if agg_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
@@ -600,9 +645,13 @@ impl VdafConfig {
                 TransitionVar::Continued(message) => message,
 
                 // Skip report that can't be processed any further.
-                //
-                // TODO Log the reason the report was skipped.
-                TransitionVar::Failed(..) => continue,
+                TransitionVar::Failed(failure) => {
+                    metrics
+                        .report_counter
+                        .with_label_values(&[&format!("rejected_{failure}")])
+                        .inc();
+                    continue;
+                }
 
                 // TODO Log the fact that the helper sent an unexpected message.
                 TransitionVar::Finished => return Err(DapAbort::UnrecognizedMessage),
@@ -646,9 +695,13 @@ impl VdafConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                //
-                // TODO Log the reason the report was skipped.
-                Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => (),
+                Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                    let failure = TransitionFailure::VdafPrepError;
+                    metrics
+                        .report_counter
+                        .with_label_values(&[&format!("rejected_{failure}")])
+                        .inc();
+                }
             };
         }
 
@@ -680,6 +733,7 @@ impl VdafConfig {
         &self,
         state: DapHelperState,
         agg_cont_req: &AggregateContinueReq,
+        metrics: &DaphneMetrics,
     ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
         let mut processed = HashSet::with_capacity(state.seq.len());
         let mut recognized = HashSet::with_capacity(state.seq.len());
@@ -744,7 +798,12 @@ impl VdafConfig {
                     }
 
                     Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
-                        TransitionVar::Failed(TransitionFailure::VdafPrepError)
+                        let failure = TransitionFailure::VdafPrepError;
+                        metrics
+                            .report_counter
+                            .with_label_values(&[&format!("rejected_{failure}")])
+                            .inc();
+                        TransitionVar::Failed(failure)
                     }
                 };
 
@@ -780,6 +839,7 @@ impl VdafConfig {
         &self,
         uncommitted: DapLeaderUncommitted,
         agg_resp: AggregateResp,
+        metrics: &DaphneMetrics,
     ) -> Result<Vec<DapOutputShare>, DapAbort> {
         if agg_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
@@ -801,9 +861,13 @@ impl VdafConfig {
                 TransitionVar::Continued(..) => return Err(DapAbort::UnrecognizedMessage),
 
                 // Skip report that can't be processed any further.
-                //
-                // TODO Log the reason the report was skipped.
-                TransitionVar::Failed(..) => continue,
+                TransitionVar::Failed(failure) => {
+                    metrics
+                        .report_counter
+                        .with_label_values(&[&format!("rejected_{failure}")])
+                        .inc();
+                    continue;
+                }
 
                 TransitionVar::Finished => out_shares.push(out_share),
             };
