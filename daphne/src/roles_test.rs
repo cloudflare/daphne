@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    async_test_version, async_test_versions,
+    assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
+    async_test_versions,
     auth::BearerToken,
     constants::{
         DRAFT02_MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ,
@@ -49,69 +50,16 @@ macro_rules! get_reports {
     }};
 }
 
-// Helper macro used by `assert_metrics_include`.
-macro_rules! build_metrics_list {
-    ($set:expr, $k:tt: $v:expr,) => {{
-        let line = format!("{} {}", $k, $v);
-        $set.insert(line);
-    }};
-
-    ($set:expr, $k:tt: $v:expr, $($ks:tt: $vs:expr),+,) => {{
-        let line = format!("{} {}", $k, $v);
-        $set.insert(line);
-        build_metrics_list!($set, $($ks: $vs),+)
-    }}
-}
-
-// Gather metrics from a registry and assert that a list of metrics are present and have the
-// correct value. For example:
-// ```
-// let registry = prometheus::Registry::new();
-//
-// // ... Register a metric called "report_counter" and use it.
-//
-// assert_metrics_include!(t.helper_prometheus_registry, {
-//      r#"report_counter{status="aggregated"}"#: 23,
-// });
-// ```
-macro_rules! assert_metrics_include {
-    ($registry:expr, {$($ks:tt: $vs:expr),+,}) => {{
-        use prometheus::{Encoder, TextEncoder};
-        use std::collections::HashSet;
-
-        let mut want: HashSet<String> = HashSet::new();
-        build_metrics_list!(&mut want, $($ks: $vs),+,);
-
-        // Encode the metrics and iterate over each line. For each line, if the line appears in the
-        // list of expected output lines, then remove it.
-        let mut got_buf = Vec::new();
-        let encoder = TextEncoder::new();
-        encoder.encode(&$registry.gather(), &mut got_buf).unwrap();
-        let got_str = String::from_utf8(got_buf).unwrap();
-        for line in got_str.split('\n') {
-            want.remove(line);
-        }
-
-        // The metrics contain the expected lines if the the set is now empty.
-        if !want.is_empty() {
-            panic!("unexpected metrics: got:\n{}\nmust contain:\n{}\n",
-                   got_str, want.into_iter().collect::<Vec<String>>().join("\n"));
-        }
-    }}
-}
-
 struct Test {
     now: Time,
     leader: Arc<MockAggregator>,
     helper: Arc<MockAggregator>,
-    #[allow(dead_code)]
-    leader_prometheus_registry: prometheus::Registry,
-    helper_prometheus_registry: prometheus::Registry,
     collector_token: BearerToken,
     time_interval_task_id: Id,
     fixed_size_task_id: Id,
     expired_task_id: Id,
     version: DapVersion,
+    prometheus_registry: prometheus::Registry,
 }
 
 impl Test {
@@ -202,11 +150,12 @@ impl Test {
         let mut taskprov_vdaf_verify_key_init = vec![0; 32];
         rng.fill(&mut taskprov_vdaf_verify_key_init[..]);
 
+        let prometheus_registry = prometheus::Registry::new();
+
         let helper_hpke_receiver_config_list = global_config
             .gen_hpke_receiver_config_list(rng.gen())
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
-        let helper_prometheus_registry = prometheus::Registry::new();
         let helper = Arc::new(MockAggregator {
             global_config: global_config.clone(),
             tasks: Arc::new(Mutex::new(tasks.clone())),
@@ -219,7 +168,7 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
-            metrics: DaphneMetrics::register(&helper_prometheus_registry).unwrap(),
+            metrics: DaphneMetrics::register(&prometheus_registry, "test_helper").unwrap(),
             peer: None,
         });
 
@@ -227,7 +176,6 @@ impl Test {
             .gen_hpke_receiver_config_list(rng.gen())
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
-        let leader_prometheus_registry = prometheus::Registry::new();
         let leader = Arc::new(MockAggregator {
             global_config: global_config.clone(),
             tasks: Arc::new(Mutex::new(tasks.clone())),
@@ -240,7 +188,7 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
-            metrics: DaphneMetrics::register(&leader_prometheus_registry).unwrap(),
+            metrics: DaphneMetrics::register(&prometheus_registry, "test_leader").unwrap(),
             peer: Some(Arc::clone(&helper)),
         });
 
@@ -248,13 +196,12 @@ impl Test {
             now,
             leader,
             helper,
-            leader_prometheus_registry,
-            helper_prometheus_registry,
             collector_token,
             time_interval_task_id,
             fixed_size_task_id,
             expired_task_id,
             version,
+            prometheus_registry,
         }
     }
 
@@ -866,8 +813,8 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
         TransitionVar::Failed(TransitionFailure::ReportReplayed)
     );
 
-    assert_metrics_include!(t.helper_prometheus_registry, {
-        r#"daphne_report_counter{status="rejected_report_replayed"}"#: 1,
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_helper_report_counter{status="rejected_report_replayed"}"#: 1,
     });
 }
 
@@ -920,8 +867,8 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
         TransitionVar::Failed(TransitionFailure::BatchCollected)
     );
 
-    assert_metrics_include!(t.helper_prometheus_registry, {
-        r#"daphne_report_counter{status="rejected_batch_collected"}"#: 1,
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_helper_report_counter{status="rejected_batch_collected"}"#: 1,
     });
 }
 
@@ -1441,11 +1388,9 @@ async fn e2e_time_interval(version: DapVersion) {
     let query = task_config.query_for_current_batch_window(t.now);
     t.run_col_job(task_id, &query).await.unwrap();
 
-    assert_metrics_include!(t.leader_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
-    });
-    assert_metrics_include!(t.helper_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{status="aggregated"}"#: 1,
     });
 }
 
@@ -1471,11 +1416,9 @@ async fn e2e_fixed_size(version: DapVersion) {
     };
     t.run_col_job(task_id, &query).await.unwrap();
 
-    assert_metrics_include!(t.leader_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
-    });
-    assert_metrics_include!(t.helper_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{status="aggregated"}"#: 1,
     });
 }
 
@@ -1566,11 +1509,9 @@ async fn e2e_taskprov(version: DapVersion) {
     };
     t.run_col_job(task_id, &query).await.unwrap();
 
-    assert_metrics_include!(t.leader_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
-    });
-    assert_metrics_include!(t.helper_prometheus_registry, {
-        r#"daphne_report_counter{status="aggregated"}"#: 1,
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{status="aggregated"}"#: 1,
     });
 }
 

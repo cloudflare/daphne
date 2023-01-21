@@ -316,7 +316,7 @@ impl DaphneWorkerState {
 
         // TODO(cjpatton) Push metrics to gateway after handling the request.
         let prometheus_registry = Registry::new();
-        let daphne_metrics = DaphneMetrics::register(&prometheus_registry)
+        let daphne_metrics = DaphneMetrics::register(&prometheus_registry, "daphne_worker")
             .map_err(|e| Error::RustError(format!("failed to register daphne metrics: {}", e)))?;
 
         Ok(Self {

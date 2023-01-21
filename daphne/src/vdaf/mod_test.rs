@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    async_test_version, async_test_versions,
+    assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
+    async_test_versions,
     hpke::HpkeReceiverConfig,
     messages::{
         AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
         HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, PartialBatchSelector,
-        Report, ReportId, Time, Transition, TransitionFailure, TransitionVar,
+        Report, ReportId, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
     },
+    metrics::DaphneMetrics,
     test_version, test_versions, DapAbort, DapAggregateResult, DapAggregateShare, DapError,
     DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted,
     DapMeasurement, DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config,
@@ -173,7 +175,7 @@ fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
 
 test_versions! { roundtrip_report_unsupported_hpke_suite }
 
-async fn agg_init_req(version: DapVersion) {
+async fn produce_agg_init_req(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -201,9 +203,9 @@ async fn agg_init_req(version: DapVersion) {
     }
 }
 
-async_test_versions! { agg_init_req }
+async_test_versions! { produce_agg_init_req }
 
-async fn agg_init_req_fail_hpke_decrypt_err(version: DapVersion) {
+async fn produce_agg_init_req_skip_hpke_decrypt_err(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -214,11 +216,15 @@ async fn agg_init_req_fail_hpke_decrypt_err(version: DapVersion) {
         t.produce_agg_init_req(reports).await,
         DapLeaderTransition::Skip
     );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="rejected_hpke_decrypt_error"}"#: 1,
+    });
 }
 
-async_test_versions! { agg_init_req_fail_hpke_decrypt_err }
+async_test_versions! { produce_agg_init_req_skip_hpke_decrypt_err }
 
-async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id(version: DapVersion) {
+async fn produce_agg_init_req_skip_hpke_unknown_config_id(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -229,11 +235,34 @@ async fn agg_init_req_fail_hpke_decrypt_err_wrong_config_id(version: DapVersion)
         t.produce_agg_init_req(reports).await,
         DapLeaderTransition::Skip
     );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="rejected_hpke_unknown_config_id"}"#: 1,
+    });
 }
 
-async_test_versions! { agg_init_req_fail_hpke_decrypt_err_wrong_config_id }
+async_test_versions! { produce_agg_init_req_skip_hpke_unknown_config_id }
 
-async fn agg_resp_fail_hpke_decrypt_err(version: DapVersion) {
+async fn produce_agg_init_req_skip_vdaf_prep_error(version: DapVersion) {
+    let t = Test::new(TEST_VDAF, version);
+    let reports = vec![
+        t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version),
+        t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version),
+    ];
+
+    assert_matches!(
+        t.produce_agg_init_req(reports).await,
+        DapLeaderTransition::Skip
+    );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="rejected_vdaf_prep_error"}"#: 2,
+    });
+}
+
+async_test_versions! { produce_agg_init_req_skip_vdaf_prep_error }
+
+async fn handle_agg_init_req_hpke_decrypt_err(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -251,11 +280,15 @@ async fn agg_resp_fail_hpke_decrypt_err(version: DapVersion) {
         agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
     );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_helper_report_counter{status="rejected_hpke_decrypt_error"}"#: 1,
+    });
 }
 
-async_test_versions! { agg_resp_fail_hpke_decrypt_err }
+async_test_versions! { handle_agg_init_req_hpke_decrypt_err }
 
-async fn agg_resp_fail_hpke_decrypt_err_wrong_id(version: DapVersion) {
+async fn handle_agg_init_req_hpke_unknown_config_id(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -273,9 +306,58 @@ async fn agg_resp_fail_hpke_decrypt_err_wrong_id(version: DapVersion) {
         agg_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
     );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_helper_report_counter{status="rejected_hpke_unknown_config_id"}"#: 1,
+    });
 }
 
-async_test_versions! { agg_resp_fail_hpke_decrypt_err_wrong_id }
+async_test_versions! { handle_agg_init_req_hpke_unknown_config_id }
+
+async fn handle_agg_init_req_vdaf_prep_error(version: DapVersion) {
+    let mut t = Test::new(TEST_VDAF, version);
+    let report0 =
+        t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version);
+    let report1 =
+        t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version);
+
+    let agg_req = AggregateInitializeReq {
+        task_id: t.task_id.clone(),
+        agg_job_id: t.agg_job_id.clone(),
+        agg_param: Vec::new(),
+        part_batch_sel: PartialBatchSelector::TimeInterval,
+        report_shares: vec![
+            ReportShare {
+                metadata: report0.metadata,
+                public_share: report0.public_share,
+                encrypted_input_share: report0.encrypted_input_shares[1].clone(),
+            },
+            ReportShare {
+                metadata: report1.metadata,
+                public_share: report1.public_share,
+                encrypted_input_share: report1.encrypted_input_shares[1].clone(),
+            },
+        ],
+    };
+
+    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
+
+    assert_eq!(agg_resp.transitions.len(), 2);
+    assert_matches!(
+        agg_resp.transitions[0].var,
+        TransitionVar::Failed(TransitionFailure::VdafPrepError)
+    );
+    assert_matches!(
+        agg_resp.transitions[1].var,
+        TransitionVar::Failed(TransitionFailure::VdafPrepError)
+    );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_helper_report_counter{status="rejected_vdaf_prep_error"}"#: 2,
+    });
+}
+
+async_test_versions! { handle_agg_init_req_vdaf_prep_error }
 
 async fn agg_resp_abort_transition_out_of_order(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
@@ -414,23 +496,21 @@ async_test_versions! { agg_cont_req }
 
 async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
-    let reports = t.produce_reports(vec![
-        DapMeasurement::U64(1),
-        DapMeasurement::U64(1),
-        DapMeasurement::U64(1),
-    ]);
+    let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
+    reports.insert(
+        1,
+        t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), version),
+    );
+
     let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
     let (helper_state, agg_resp) = t
         .handle_agg_init_req(agg_init_req.clone())
         .await
         .unwrap_continue();
 
-    let (_, mut agg_cont_req) = t
+    let (_, agg_cont_req) = t
         .handle_agg_resp(leader_state, agg_resp)
         .unwrap_uncommitted();
-    // Simulate VDAF preparation error (due to the report being invalid, say). The leader will
-    // skip the report without processing it any further.
-    agg_cont_req.transitions.remove(1);
 
     let (helper_output_shares, agg_resp) = t
         .handle_agg_cont_req(helper_state, &agg_cont_req)
@@ -446,6 +526,10 @@ async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
         agg_resp.transitions[1].report_id,
         agg_init_req.report_shares[2].metadata.id
     );
+
+    assert_metrics_include!(t.prometheus_registry, {
+        r#"test_leader_report_counter{status="rejected_vdaf_prep_error"}"#: 1,
+    });
 }
 
 async_test_versions! { agg_cont_req_skip_vdaf_prep_error }
@@ -586,6 +670,9 @@ pub(crate) struct Test {
     helper_hpke_receiver_config: HpkeReceiverConfig,
     client_hpke_config_list: Vec<HpkeConfig>,
     collector_hpke_receiver_config: HpkeReceiverConfig,
+    prometheus_registry: prometheus::Registry,
+    leader_metrics: DaphneMetrics,
+    helper_metrics: DaphneMetrics,
 }
 
 impl Test {
@@ -607,6 +694,9 @@ impl Test {
         let leader_hpke_config = leader_hpke_receiver_config.clone().config;
         let helper_hpke_config = helper_hpke_receiver_config.clone().config;
         let collector_hpke_config = collector_hpke_receiver_config.clone().config;
+        let prometheus_registry = prometheus::Registry::new();
+        let leader_metrics = DaphneMetrics::register(&prometheus_registry, "test_leader").unwrap();
+        let helper_metrics = DaphneMetrics::register(&prometheus_registry, "test_helper").unwrap();
 
         Test {
             now,
@@ -628,6 +718,9 @@ impl Test {
                 vdaf_verify_key,
                 collector_hpke_config,
             },
+            prometheus_registry,
+            leader_metrics,
+            helper_metrics,
         }
     }
 
@@ -651,6 +744,85 @@ impl Test {
         reports
     }
 
+    // Tweak the Helper's share so that decoding succeeds but preparation fails.
+    fn produce_invalid_report_vdaf_prep_failure(
+        &self,
+        measurement: DapMeasurement,
+        version: DapVersion,
+    ) -> Report {
+        let (invalid_public_share, mut invalid_input_shares) = self
+            .task_config
+            .vdaf
+            .produce_input_shares(measurement)
+            .unwrap();
+        invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
+        self.task_config
+            .vdaf
+            .produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
+    }
+
+    // Tweak the public share so that it can't be decoded.
+    fn produce_invalid_report_public_share_decode_failure(
+        &self,
+        measurement: DapMeasurement,
+        version: DapVersion,
+    ) -> Report {
+        let (mut invalid_public_share, invalid_input_shares) = self
+            .task_config
+            .vdaf
+            .produce_input_shares(measurement)
+            .unwrap();
+        invalid_public_share.push(1); // Add spurious byte at the end
+        self.task_config
+            .vdaf
+            .produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
+    }
+
+    // Tweak the input shares so that they can't be decoded.
+    fn produce_invalid_report_input_share_decode_failure(
+        &self,
+        measurement: DapMeasurement,
+        version: DapVersion,
+    ) -> Report {
+        let (invalid_public_share, mut invalid_input_shares) = self
+            .task_config
+            .vdaf
+            .produce_input_shares(measurement)
+            .unwrap();
+        invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
+        invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share
+        self.task_config
+            .vdaf
+            .produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
+    }
+
     async fn produce_agg_init_req(
         &self,
         reports: Vec<Report>,
@@ -664,6 +836,7 @@ impl Test {
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
+                &self.leader_metrics,
             )
             .await
             .unwrap()
@@ -680,6 +853,7 @@ impl Test {
                 &self.helper_hpke_receiver_config,
                 &self.task_config,
                 &agg_init_req,
+                &self.helper_metrics,
             )
             .await
             .unwrap();
@@ -694,7 +868,13 @@ impl Test {
     ) -> DapLeaderTransition<AggregateContinueReq> {
         self.task_config
             .vdaf
-            .handle_agg_resp(&self.task_id, &self.agg_job_id, leader_state, agg_resp)
+            .handle_agg_resp(
+                &self.task_id,
+                &self.agg_job_id,
+                leader_state,
+                agg_resp,
+                &self.leader_metrics,
+            )
             .unwrap()
     }
 
@@ -705,7 +885,13 @@ impl Test {
     ) -> DapAbort {
         self.task_config
             .vdaf
-            .handle_agg_resp(&self.task_id, &self.agg_job_id, leader_state, agg_resp)
+            .handle_agg_resp(
+                &self.task_id,
+                &self.agg_job_id,
+                leader_state,
+                agg_resp,
+                &self.leader_metrics,
+            )
             .err()
             .expect("handle_agg_resp() succeeded; expected failure")
     }
@@ -717,7 +903,7 @@ impl Test {
     ) -> DapHelperTransition<AggregateResp> {
         self.task_config
             .vdaf
-            .handle_agg_cont_req(helper_state, agg_cont_req)
+            .handle_agg_cont_req(helper_state, agg_cont_req, &self.helper_metrics)
             .unwrap()
     }
 
@@ -728,7 +914,7 @@ impl Test {
     ) -> DapAbort {
         self.task_config
             .vdaf
-            .handle_agg_cont_req(helper_state, agg_cont_req)
+            .handle_agg_cont_req(helper_state, agg_cont_req, &self.helper_metrics)
             .err()
             .expect("handle_agg_cont_req() succeeded; expected failure")
     }
@@ -740,7 +926,7 @@ impl Test {
     ) -> Vec<DapOutputShare> {
         self.task_config
             .vdaf
-            .handle_final_agg_resp(leader_uncommitted, agg_resp)
+            .handle_final_agg_resp(leader_uncommitted, agg_resp, &self.leader_metrics)
             .unwrap()
     }
 
