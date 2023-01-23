@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     convert::{TryFrom, TryInto},
-    fmt::Debug,
+    fmt,
     io::{Cursor, Read},
 };
 
@@ -71,9 +71,9 @@ impl AsRef<[u8]> for Id {
     }
 }
 
-impl ToString for Id {
-    fn to_string(&self) -> String {
-        self.to_hex()
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_hex())
     }
 }
 
@@ -87,6 +87,13 @@ pub type Time = u64;
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[allow(missing_docs)]
 pub struct ReportId(pub [u8; 16]);
+
+impl ReportId {
+    /// Return the ID encoded as a hex string.
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.0)
+    }
+}
 
 impl Encode for ReportId {
     fn encode(&self, bytes: &mut Vec<u8>) {
@@ -105,6 +112,12 @@ impl Decode for ReportId {
 impl AsRef<[u8]> for ReportId {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl fmt::Display for ReportId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_hex())
     }
 }
 
