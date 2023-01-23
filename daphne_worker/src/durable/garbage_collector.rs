@@ -6,7 +6,7 @@ use crate::{
     durable::{DurableConnector, DurableOrdered, DurableReference},
     initialize_tracing, int_err,
 };
-use tracing::debug;
+use tracing::trace;
 use worker::*;
 
 pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
@@ -50,7 +50,7 @@ impl DurableObject for GarbageCollector {
 
                 let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
                 queued.put(&self.state).await?;
-                debug!(
+                trace!(
                     "GarbageCollector: scheduled {} instance {} for deletion",
                     queued.as_ref().binding,
                     queued.as_ref().id_hex
@@ -81,9 +81,10 @@ impl DurableObject for GarbageCollector {
                             &(),
                         )
                         .await?;
-                    debug!(
+                    trace!(
                         "GarbageCollector: deleted {} instance {}",
-                        durable_ref.binding, durable_ref.id_hex
+                        durable_ref.binding,
+                        durable_ref.id_hex
                     );
                 }
 

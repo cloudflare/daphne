@@ -3,7 +3,7 @@
 
 use crate::{config::DaphneWorkerConfig, durable::state_get, initialize_tracing, int_err};
 use daphne::{messages::Id, DapVersion};
-use tracing::debug;
+use tracing::trace;
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -102,7 +102,7 @@ impl DurableObject for HelperStateStore {
     async fn alarm(&mut self) -> Result<Response> {
         self.state.storage().delete_all().await?;
         self.alarmed = false;
-        debug!(
+        trace!(
             "HelperStateStore: deleted instance {}",
             self.state.id().to_string()
         );
