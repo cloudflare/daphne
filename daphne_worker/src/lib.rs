@@ -163,7 +163,7 @@ use daphne::{
 use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
 use std::{io, str, sync::Once};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace_span, Instrument};
 use tracing_subscriber::{fmt, layer::*, prelude::*, registry, EnvFilter};
 use worker::*;
 
@@ -236,7 +236,11 @@ impl DaphneWorkerRouter {
             .get_async("/:version/hpke_config", |req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = daph.worker_request_to_dap(req).await?;
-                match daph.http_get_hpke_config(&req).await {
+                match daph
+                    .http_get_hpke_config(&req)
+                    .instrument(trace_span!("hpke_config"))
+                    .await
+                {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => abort(e),
                 }
@@ -258,6 +262,7 @@ impl DaphneWorkerRouter {
 
                 let cmd: InternalTestAddTask = req.json().await?;
                 daph.internal_add_task(daph.state.config.default_version, cmd)
+                    .instrument(trace_span!("task"))
                     .await?;
                 Response::empty()
             });
@@ -269,7 +274,11 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let req = daph.worker_request_to_dap(req).await?;
 
-                        match daph.http_post_upload(&req).await {
+                        match daph
+                            .http_post_upload(&req)
+                            .instrument(trace_span!("upload"))
+                            .await
+                        {
                             Ok(()) => Response::empty(),
                             Err(e) => abort(e),
                         }
@@ -278,7 +287,11 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let req = daph.worker_request_to_dap(req).await?;
 
-                        match daph.http_post_collect(&req).await {
+                        match daph
+                            .http_post_collect(&req)
+                            .instrument(trace_span!("collect"))
+                            .await
+                        {
                             Ok(collect_uri) => {
                                 let mut headers = Headers::new();
                                 headers.set("Location", collect_uri.as_str())?;
@@ -296,7 +309,11 @@ impl DaphneWorkerRouter {
                             let task_id = parse_id!(ctx.param("task_id"));
                             let collect_id = parse_id!(ctx.param("collect_id"));
                             let daph = ctx.data.handler(&ctx.env);
-                            match daph.poll_collect_job(&task_id, &collect_id).await {
+                            match daph
+                                .poll_collect_job(&task_id, &collect_id)
+                                .instrument(trace_span!("poll_collect_job"))
+                                .await
+                            {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
                                     dap_response_to_worker(DapResponse {
                                         media_type: Some(constants::MEDIA_TYPE_COLLECT_RESP),
@@ -318,7 +335,11 @@ impl DaphneWorkerRouter {
                         // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
                         let daph = ctx.data.handler(&ctx.env);
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
-                        match daph.process(&report_sel).await {
+                        match daph
+                            .process(&report_sel)
+                            .instrument(trace_span!("process"))
+                            .await
+                        {
                             Ok(telem) => {
                                 debug!("{:?}", telem);
                                 Response::from_json(&telem)
@@ -335,7 +356,11 @@ impl DaphneWorkerRouter {
                             // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
                             let task_id = parse_id!(ctx.param("task_id"));
                             let daph = ctx.data.handler(&ctx.env);
-                            match daph.internal_current_batch(&task_id).await {
+                            match daph
+                                .internal_current_batch(&task_id)
+                                .instrument(trace_span!("current_batch"))
+                                .await
+                            {
                                 Ok(batch_id) => Response::from_bytes(
                                     batch_id.to_base64url().as_bytes().to_owned(),
                                 ),
@@ -350,7 +375,11 @@ impl DaphneWorkerRouter {
                     let daph = ctx.data.handler(&ctx.env);
                     let req = daph.worker_request_to_dap(req).await?;
 
-                    match daph.http_post_aggregate(&req).await {
+                    match daph
+                        .http_post_aggregate(&req)
+                        .instrument(trace_span!("aggregate"))
+                        .await
+                    {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
@@ -359,7 +388,11 @@ impl DaphneWorkerRouter {
                     let daph = ctx.data.handler(&ctx.env);
                     let req = daph.worker_request_to_dap(req).await?;
 
-                    match daph.http_post_aggregate_share(&req).await {
+                    match daph
+                        .http_post_aggregate_share(&req)
+                        .instrument(trace_span!("aggregate_share"))
+                        .await
+                    {
                         Ok(resp) => dap_response_to_worker(resp),
                         Err(e) => abort(e),
                     }
@@ -372,7 +405,11 @@ impl DaphneWorkerRouter {
             router
                 .post_async("/internal/delete_all", |_req, ctx| async move {
                     let daph = ctx.data.handler(&ctx.env);
-                    match daph.internal_delete_all().await {
+                    match daph
+                        .internal_delete_all()
+                        .instrument(trace_span!("delete_all"))
+                        .await
+                    {
                         Ok(()) => Response::empty(),
                         Err(e) => abort(e.into()),
                     }
@@ -387,6 +424,7 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let cmd: InternalTestEndpointForTask = req.json().await?;
                         daph.internal_endpoint_for_task(daph.state.config.default_version, cmd)
+                            .instrument(trace_span!("endpoint_for_task"))
                             .await
                     },
                 )
@@ -396,13 +434,16 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let cmd: InternalTestEndpointForTask = req.json().await?;
                         let version = daph.extract_version_parameter(&req)?;
-                        daph.internal_endpoint_for_task(version, cmd).await
+                        daph.internal_endpoint_for_task(version, cmd)
+                            .instrument(trace_span!("endpoint_for_task"))
+                            .await
                     },
                 )
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let daph = ctx.data.handler(&ctx.env);
                     let cmd: InternalTestAddTask = req.json().await?;
                     daph.internal_add_task(daph.state.config.default_version, cmd)
+                        .instrument(trace_span!("add_task"))
                         .await?;
                     Response::from_json(&serde_json::json!({
                         "status": "success",
@@ -414,7 +455,9 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let cmd: InternalTestAddTask = req.json().await?;
                         let version = daph.extract_version_parameter(&req)?;
-                        daph.internal_add_task(version, cmd).await?;
+                        daph.internal_add_task(version, cmd)
+                            .instrument(trace_span!("add_task"))
+                            .await?;
                         Response::from_json(&serde_json::json!({
                             "status": "success",
                         }))
