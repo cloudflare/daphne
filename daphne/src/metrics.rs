@@ -9,8 +9,6 @@ use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry
 pub struct DaphneMetrics {
     /// Report metrics. How many reports have been rejected, aggregated, and collected. When
     /// a report is rejected, the failure type is recorded.
-    //
-    // TODO(cjpatton) So far we only count the number of reports aggregated.
     pub(crate) report_counter: IntCounterVec,
 }
 

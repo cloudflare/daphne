@@ -1391,6 +1391,8 @@ async fn e2e_time_interval(version: DapVersion) {
     assert_metrics_include!(t.prometheus_registry, {
         r#"test_leader_report_counter{status="aggregated"}"#: 1,
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{status="collected"}"#: 1,
+        r#"test_helper_report_counter{status="collected"}"#: 1,
     });
 }
 
@@ -1419,6 +1421,8 @@ async fn e2e_fixed_size(version: DapVersion) {
     assert_metrics_include!(t.prometheus_registry, {
         r#"test_leader_report_counter{status="aggregated"}"#: 1,
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{status="collected"}"#: 1,
+        r#"test_helper_report_counter{status="collected"}"#: 1,
     });
 }
 
@@ -1512,6 +1516,8 @@ async fn e2e_taskprov(version: DapVersion) {
     assert_metrics_include!(t.prometheus_registry, {
         r#"test_leader_report_counter{status="aggregated"}"#: 1,
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{status="collected"}"#: 1,
+        r#"test_helper_report_counter{status="collected"}"#: 1,
     });
 }
 
