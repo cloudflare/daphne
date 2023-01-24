@@ -561,6 +561,11 @@ where
         self.mark_collected(&agg_share_req.task_id, &agg_share_req.batch_sel)
             .await?;
 
+        self.metrics()
+            .report_counter
+            .with_label_values(&["collected"])
+            .inc_by(agg_share_req.report_count);
+
         Ok(agg_share_req.report_count)
     }
 
@@ -928,6 +933,11 @@ where
         let agg_share_resp = AggregateShareResp {
             encrypted_agg_share,
         };
+
+        self.metrics()
+            .report_counter
+            .with_label_values(&["collected"])
+            .inc_by(agg_share_req.report_count);
 
         Ok(DapResponse {
             media_type: Some(MEDIA_TYPE_AGG_SHARE_RESP),
