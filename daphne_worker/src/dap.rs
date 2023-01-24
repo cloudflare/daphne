@@ -605,7 +605,7 @@ where
     }
 
     fn metrics(&self) -> &DaphneMetrics {
-        &self.state.daphne_metrics
+        &self.state.metrics.daphne
     }
 }
 

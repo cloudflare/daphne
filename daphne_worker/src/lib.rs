@@ -479,10 +479,20 @@ impl DaphneWorkerRouter {
         };
 
         let start = Date::now().as_millis();
-        let resp = router.run(req, env).await?;
+        let result = router.run(req, env).await;
         let end = Date::now().as_millis();
+
+        state
+            .metrics
+            .http_status_code
+            .with_label_values(&[&format!(
+                "{}",
+                result.as_ref().map_or(500, |resp| resp.status_code())
+            )])
+            .inc();
+
         info!("request completed in {}ms", end - start);
-        Ok(resp)
+        result
     }
 }
 
@@ -634,3 +644,4 @@ pub fn initialize_tracing(env: &Env) {
 mod config;
 mod dap;
 mod durable;
+mod metrics;
