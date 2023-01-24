@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 assert_matches = "1.5.0"
-async-trait = "0.1.62"
+async-trait = "0.1.63"
 base64 = "0.21.0"
 getrandom = { version = "0.2.8", features = ["js"] } # Required for prio
 hex = { version = "0.4.3", features = ["serde"] }
