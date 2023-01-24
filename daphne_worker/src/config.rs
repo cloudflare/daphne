@@ -13,14 +13,15 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
-    int_err, InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
+    int_err,
+    metrics::DaphneWorkerMetrics,
+    InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
 };
 use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
     messages::{decode_base64url_vec, HpkeConfig, Id, ReportMetadata},
-    metrics::DaphneMetrics,
     DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -298,8 +299,8 @@ pub(crate) struct DaphneWorkerState {
     #[allow(dead_code)]
     pub(crate) prometheus_registry: Registry,
 
-    /// Daphne metrics.
-    pub(crate) daphne_metrics: DaphneMetrics,
+    /// Metrics.
+    pub(crate) metrics: DaphneWorkerMetrics,
 }
 
 impl DaphneWorkerState {
@@ -316,8 +317,8 @@ impl DaphneWorkerState {
 
         // TODO(cjpatton) Push metrics to gateway after handling the request.
         let prometheus_registry = Registry::new();
-        let daphne_metrics = DaphneMetrics::register(&prometheus_registry, "daphne_worker")
-            .map_err(|e| Error::RustError(format!("failed to register daphne metrics: {}", e)))?;
+        let metrics = DaphneWorkerMetrics::register(&prometheus_registry, "daphne_worker")
+            .map_err(|e| Error::RustError(format!("failed to register metrics: {}", e)))?;
 
         Ok(Self {
             config,
@@ -327,7 +328,7 @@ impl DaphneWorkerState {
             collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             prometheus_registry,
-            daphne_metrics,
+            metrics,
         })
     }
 

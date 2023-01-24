@@ -13,7 +13,7 @@ pub struct DaphneMetrics {
 }
 
 impl DaphneMetrics {
-    /// Regstier Daphne metrics with the specified registry.
+    /// Register Daphne metrics with the specified registry.
     pub fn register(registry: &Registry, prefix: &str) -> Result<Self, DapError> {
         let report_counter = register_int_counter_vec_with_registry!(
             format!("{prefix}_report_counter"),
