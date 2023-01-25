@@ -562,6 +562,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "tracing-core",
  "tracing-subscriber",
  "url",
  "worker",
