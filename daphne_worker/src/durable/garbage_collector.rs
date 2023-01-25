@@ -6,7 +6,7 @@ use crate::{
     durable::{DurableConnector, DurableOrdered, DurableReference},
     initialize_tracing, int_err,
 };
-use tracing::trace;
+use tracing::{error, trace};
 use worker::*;
 
 pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
@@ -41,17 +41,16 @@ impl DurableObject for GarbageCollector {
                     | durable::BINDING_DAP_LEADER_COL_JOB_QUEUE
                     | durable::BINDING_DAP_HELPER_STATE_STORE => (),
                     s => {
-                        return Err(int_err(format!(
-                            "GarbageCollector: unrecognized binding: {}",
-                            s
-                        )))
+                        let message = format!("GarbageCollector: unrecognized binding: {}", s);
+                        error!("{}", message);
+                        return Err(int_err(message));
                     }
                 };
 
                 let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
                 queued.put(&self.state).await?;
                 trace!(
-                    "GarbageCollector: scheduled {} instance {} for deletion",
+                    "scheduled {} instance {} for deletion",
                     queued.as_ref().binding,
                     queued.as_ref().id_hex
                 );
@@ -82,7 +81,7 @@ impl DurableObject for GarbageCollector {
                         )
                         .await?;
                     trace!(
-                        "GarbageCollector: deleted {} instance {}",
+                        "deleted {} instance {}",
                         durable_ref.binding,
                         durable_ref.id_hex
                     );
@@ -92,11 +91,15 @@ impl DurableObject for GarbageCollector {
                 Response::from_json(&())
             }
 
-            _ => Err(int_err(format!(
-                "GarbageCollector: unexpected request: method={:?}; path={:?}",
-                req.method(),
-                req.path()
-            ))),
+            _ => {
+                let message = format!(
+                    "unexpected request: method={:?}; path={:?}",
+                    req.method(),
+                    req.path()
+                );
+                error!("{}", message);
+                Err(int_err(message))
+            }
         }
     }
 }

@@ -162,9 +162,18 @@ use daphne::{
 };
 use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
-use std::{io, str, sync::Once};
-use tracing::{debug, error, info, trace_span, Instrument};
-use tracing_subscriber::{fmt, layer::*, prelude::*, registry, EnvFilter};
+use std::{fmt::Result as FmtResult, io, str, sync::Once};
+use tracing::{debug, error, event, trace_span, Instrument, Level, Subscriber};
+use tracing_core::span;
+use tracing_subscriber::{
+    fmt,
+    fmt::{format::Writer, time::FormatTime},
+    layer::Context as LayerContext,
+    layer::*,
+    prelude::*,
+    registry, EnvFilter, Layer,
+};
+
 use worker::*;
 
 /// Parameters used by the Leader to select a set of reports for aggregation.
@@ -478,9 +487,11 @@ impl DaphneWorkerRouter {
             router
         };
 
-        let start = Date::now().as_millis();
+        // Note that we do not have a tracing span for the whole request because it typically
+        // reports the same times as the span covering the specific API entry point that the
+        // router creates.  If curious, you can add .instrument(trace_span!("http")) just before
+        // the await and see.
         let result = router.run(req, env).await;
-        let end = Date::now().as_millis();
 
         state
             .metrics
@@ -491,7 +502,6 @@ impl DaphneWorkerRouter {
             )])
             .inc();
 
-        info!("request completed in {}ms", end - start);
         result
     }
 }
@@ -573,6 +583,26 @@ pub(crate) struct InternalTestAddTask {
     task_expiration: Time,
 }
 
+/// WasmTime provides a `tracing_subscriber::fmt::time::FormatTime` implementation that works
+/// using the clock available to WASM code, as the default FormatTime implementation does not
+/// work.
+struct WasmTime {}
+
+impl WasmTime {
+    fn new() -> Self {
+        WasmTime {}
+    }
+}
+
+impl FormatTime for WasmTime {
+    fn format_time(&self, w: &mut Writer<'_>) -> FmtResult {
+        // Chrono is smart and knows how to read the time on everything, including WASM!
+        let now = Utc::now();
+        // We will format the time as ISO-8601 with milliseconds precision and a Z timezone.
+        write!(w, "{}", now.to_rfc3339_opts(SecondsFormat::Millis, true))
+    }
+}
+
 /// LogWriter helps us write to the worker console.
 ///
 /// It provides and io::Write implementation that provides line buffering. It also takes care of
@@ -597,14 +627,7 @@ impl io::Write for LogWriter {
         // We assume the caller is doing line buffering and that any write containing a NL will have
         // it at the end.
         if self.buffer.ends_with('\n') {
-            // Chrono is smart and knows how to read the time on everything, including WASM!
-            let now = Utc::now();
-            // We will format the time as ISO-8601 with milliseconds precision and a Z timezone.
-            console_log!(
-                "{} {}",
-                now.to_rfc3339_opts(SecondsFormat::Millis, true),
-                &self.buffer[..self.buffer.len() - 1]
-            );
+            console_log!("{}", &self.buffer[..self.buffer.len() - 1]);
             self.buffer.clear();
         }
         Ok(buf.len())
@@ -612,6 +635,79 @@ impl io::Write for LogWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// WasmTimingLayer provides a span's elapsed time.
+pub struct WasmTimingLayer {}
+
+impl WasmTimingLayer {
+    fn new() -> Self {
+        WasmTimingLayer {}
+    }
+}
+
+fn milli_now() -> i64 {
+    Date::now().as_millis() as i64
+}
+
+struct Timestamps {
+    busy: i64,
+    entered_at: i64,
+    started_at: i64,
+}
+
+impl Timestamps {
+    fn new() -> Self {
+        Timestamps {
+            busy: 0,
+            entered_at: 0,
+            started_at: milli_now(),
+        }
+    }
+}
+
+impl<S> Layer<S> for WasmTimingLayer
+where
+    S: Subscriber + for<'a> registry::LookupSpan<'a>,
+{
+    fn on_new_span(&self, _attrs: &span::Attributes<'_>, id: &span::Id, ctx: LayerContext<'_, S>) {
+        let span = ctx.span(id).expect("span should exist!");
+        let mut extensions = span.extensions_mut();
+        if extensions.get_mut::<Timestamps>().is_none() {
+            extensions.insert(Timestamps::new());
+        }
+    }
+
+    fn on_enter(&self, id: &span::Id, ctx: LayerContext<'_, S>) {
+        let span = ctx.span(id).expect("span should exist!");
+        let mut extensions = span.extensions_mut();
+        if let Some(timestamps) = extensions.get_mut::<Timestamps>() {
+            timestamps.entered_at = milli_now();
+        }
+    }
+
+    fn on_exit(&self, id: &span::Id, ctx: LayerContext<'_, S>) {
+        let span = ctx.span(id).expect("span should exist!");
+        let mut extensions = span.extensions_mut();
+        if let Some(timestamps) = extensions.get_mut::<Timestamps>() {
+            timestamps.busy += milli_now().saturating_sub(timestamps.entered_at);
+        }
+    }
+
+    fn on_close(&self, id: span::Id, ctx: LayerContext<'_, S>) {
+        let span = ctx.span(&id).expect("span should exist!");
+        let extensions = span.extensions();
+        if let Some(timestamps) = extensions.get::<Timestamps>() {
+            let elapsed = milli_now().saturating_sub(timestamps.started_at);
+            event!(
+                parent: id,
+                Level::INFO,
+                busy = timestamps.busy,
+                elapsed,
+                unit = "ms"
+            );
+        }
     }
 }
 
@@ -635,7 +731,12 @@ pub fn initialize_tracing(env: &Env) {
             Err(_) => "info".to_string(),
         };
         registry()
-            .with(fmt::layer().with_writer(LogWriter::new).without_time())
+            .with(
+                fmt::layer()
+                    .with_writer(LogWriter::new)
+                    .with_timer(WasmTime::new())
+                    .and_then(WasmTimingLayer::new()),
+            )
             .with(EnvFilter::new(filter))
             .init();
     });
