@@ -81,19 +81,18 @@ async fn durable_request<I: Serialize, O: for<'a> Deserialize<'a>>(
 ) -> Result<O> {
     let req = match (&method, data) {
         (Method::Post, Some(data)) => Request::new_with_init(
-            &format!("https://fake-host{}", durable_path),
+            &format!("https://fake-host{durable_path}"),
             RequestInit::new().with_method(Method::Post).with_body(Some(
                 wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
             )),
         )?,
         (Method::Get, None) => Request::new_with_init(
-            &format!("https://fake-host{}", durable_path),
+            &format!("https://fake-host{durable_path}"),
             RequestInit::new().with_method(Method::Get),
         )?,
         _ => {
             return Err(Error::RustError(format!(
-                "durable_request: Unrecognized method: {:?}",
-                method
+                "durable_request: Unrecognized method: {method:?}",
             )));
         }
     };
@@ -194,7 +193,7 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 }
 
 pub(crate) fn durable_name_queue(shard: u64) -> String {
-    format!("queue/{}", shard)
+    format!("queue/{shard}")
 }
 
 pub(crate) fn durable_name_report_store(
@@ -230,7 +229,7 @@ pub(crate) fn durable_name_task(version: &DapVersion, task_id_hex: &str) -> Stri
 fn durable_name_bucket(bucket: &DapBatchBucket<'_>) -> String {
     match bucket {
         DapBatchBucket::TimeInterval { batch_window } => {
-            format!("window/{}", batch_window)
+            format!("window/{batch_window}")
         }
         DapBatchBucket::FixedSize { batch_id } => {
             format!("batch/{}", batch_id.to_hex())
@@ -338,9 +337,9 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
     /// where `<ordinal>` is the value of the counter at the time of creation.
     pub(crate) async fn new_strictly_ordered(state: &State, item: T, prefix: &str) -> Result<Self> {
         // Get the next ordinal.
-        let next_ordinal_key = format!("{}/next_ordinal", prefix);
+        let next_ordinal_key = format!("{prefix}/next_ordinal");
         let mut next_ordinal: u64 = state_get_or_default(state, &next_ordinal_key).await?;
-        let ordinal = format!("order/{}", next_ordinal);
+        let ordinal = format!("order/{next_ordinal}");
 
         // Update the next ordinal.
         next_ordinal += 1;
@@ -393,7 +392,7 @@ async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
     prefix: &str,
     limit: Option<usize>,
 ) -> Result<Vec<DurableOrdered<T>>> {
-    let key_prefix = format!("{}/item/", prefix);
+    let key_prefix = format!("{prefix}/item/");
     let mut opt = ListOptions::new().prefix(&key_prefix);
     if let Some(limit) = limit {
         opt = opt.limit(limit);

@@ -151,7 +151,7 @@ impl HpkeReceiverConfig {
             HpkeKemId::P256HkdfSha256 => KemAlgorithm::DhKemP256,
             HpkeKemId::X25519HkdfSha256 => KemAlgorithm::DhKem25519,
             HpkeKemId::NotImplemented(x) => {
-                return Err(DapError::Fatal(format!("Unsupported KEM ({:?})", x)))
+                return Err(DapError::Fatal(format!("Unsupported KEM ({x:?})")))
             }
         };
         let kdf = KdfAlgorithm::HkdfSha256;
@@ -172,8 +172,7 @@ impl HpkeReceiverConfig {
                 })
             }
             Err(e) => Err(DapError::Fatal(format!(
-                "bad key generation for KEM ({:?}) caused by {:?}",
-                kem_id, e
+                "bad key generation for KEM ({kem_id:?}) caused by {e:?}",
             ))),
         }
     }

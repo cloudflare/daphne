@@ -130,7 +130,7 @@ macro_rules! leader_prep_fin {
         // Compute the leader's output share.
         match $vdaf.prepare_step($leader_state, message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_leader_prepare_finish: {}", ERR_EXPECT_FINISH)
+                panic!("prio3_leader_prepare_finish: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => (out_share, message_data),
         }
@@ -175,7 +175,7 @@ pub(crate) fn prio3_leader_prepare_finish(
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
-        _ => panic!("prio3_leader_prepare_finish: {}", ERR_FIELD_TYPE),
+        _ => panic!("prio3_leader_prepare_finish: {ERR_FIELD_TYPE}"),
     };
 
     Ok((agg_share, outbound))
@@ -195,7 +195,7 @@ macro_rules! helper_prep_fin {
         // Compute the Helper's output share.
         match $vdaf.prepare_step($helper_state, leader_message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_helper_prepare_finish: {}", ERR_EXPECT_FINISH)
+                panic!("prio3_helper_prepare_finish: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => out_share,
         }
@@ -224,7 +224,7 @@ pub(crate) fn prio3_helper_prepare_finish(
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        _ => panic!("prio3_helper_prepare_finish: {}", ERR_FIELD_TYPE),
+        _ => panic!("prio3_helper_prepare_finish: {ERR_FIELD_TYPE}"),
     };
 
     Ok(agg_share)
@@ -245,7 +245,7 @@ pub(crate) fn prio3_append_prepare_state(
         | (Prio3Config::Sum { bits: _ }, VdafState::Prio3Field128(state)) => {
             state.encode(bytes);
         }
-        _ => panic!("prio3_append_prepare_state: {}", ERR_FIELD_TYPE),
+        _ => panic!("prio3_append_prepare_state: {ERR_FIELD_TYPE}"),
     }
     Ok(())
 }

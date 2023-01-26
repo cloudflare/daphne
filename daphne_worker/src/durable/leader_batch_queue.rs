@@ -83,7 +83,7 @@ impl LeaderBatchQueue {
             .await?;
 
         // Generate a random batch ID and write the batch count to the queue.
-        debug!("LeaderBatchQueue: created batch {}", batch_id_hex);
+        debug!("LeaderBatchQueue: created batch {batch_id_hex}");
         Ok(queued.into_item())
     }
 }
@@ -192,5 +192,5 @@ impl DurableObject for LeaderBatchQueue {
 }
 
 fn lookup_key(batch_id_hex: &str) -> String {
-    format!("{}/id/{}", PENDING_PREFIX, batch_id_hex)
+    format!("{PENDING_PREFIX}/id/{batch_id_hex}")
 }
