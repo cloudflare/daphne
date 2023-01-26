@@ -487,7 +487,7 @@ impl DaphneWorkerRouter {
             router
         };
 
-        // Note that we do not have a tracing span for the whole request because it typically
+        // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
         // router creates.  If curious, you can add .instrument(trace_span!("http")) just before
         // the await and see.
