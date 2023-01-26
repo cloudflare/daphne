@@ -85,25 +85,25 @@ impl DapError {
 
 impl From<prometheus::Error> for DapError {
     fn from(e: prometheus::Error) -> Self {
-        Self::Fatal(format!("prometheus: {}", e))
+        Self::Fatal(format!("prometheus: {e}"))
     }
 }
 
 impl From<serde_json::Error> for DapError {
     fn from(e: serde_json::Error) -> Self {
-        Self::Fatal(format!("serde_json: {}", e))
+        Self::Fatal(format!("serde_json: {e}"))
     }
 }
 
 impl From<hex::FromHexError> for DapError {
     fn from(e: hex::FromHexError) -> Self {
-        Self::Fatal(format!("from hex: {}", e))
+        Self::Fatal(format!("from hex: {e}"))
     }
 }
 
 impl From<CodecError> for DapError {
     fn from(e: CodecError) -> Self {
-        Self::Fatal(format!("codec: {}", e))
+        Self::Fatal(format!("codec: {e}"))
     }
 }
 
@@ -231,7 +231,7 @@ impl DapAbort {
         };
 
         ProblemDetails {
-            typ: format!("urn:ietf:params:ppm:dap:error:{}", typ),
+            typ: format!("urn:ietf:params:ppm:dap:error:{typ}"),
             taskid: None,   // TODO interop: Implement as specified.
             instance: None, // TODO interop: Implement as specified.
             detail,

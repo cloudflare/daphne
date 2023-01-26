@@ -39,7 +39,7 @@ pub struct ReportsProcessed {
 impl ReportsProcessed {
     /// Check if the report has been processed. If not, return None; otherwise, return the ID.
     async fn to_checked(&self, report_id_hex: String) -> Result<Option<String>> {
-        let key = format!("processed/{}", report_id_hex);
+        let key = format!("processed/{report_id_hex}");
         let processed: bool = state_set_if_not_exists(&self.state, &key, &true)
             .await?
             .unwrap_or(false);

@@ -94,8 +94,7 @@ pub trait BearerTokenProvider<'a> {
         }
 
         Err(DapError::Fatal(format!(
-            "attempted to authorize request of type '{}'",
-            media_type
+            "attempted to authorize request of type '{media_type}'",
         )))
     }
 

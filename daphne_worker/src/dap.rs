@@ -91,7 +91,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
             .prefix(KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG.to_string())
             .execute()
             .await
-            .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+            .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
 
         let hpke_config_id = if keys.keys.is_empty() {
             // Generate a new HPKE receiver config and store it in KV.
@@ -122,10 +122,10 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
                 kv_store
                     .put(&new_kv_config_key, hpke_receiver_config)
-                    .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+                    .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?
                     .execute()
                     .await
-                    .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+                    .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
             }
 
             hpke_config_id.unwrap()
@@ -196,8 +196,7 @@ fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, 
     }
 
     Err(DapError::Fatal(format!(
-        "malformed kv_store HPKE receiver config key: '{}'",
-        name
+        "malformed kv_store HPKE receiver config key: '{name}'",
     )))
 }
 

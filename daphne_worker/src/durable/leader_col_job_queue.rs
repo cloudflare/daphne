@@ -105,13 +105,10 @@ impl DurableObject for LeaderCollectionJobQueue {
                 let collect_id_hex = collect_id.to_hex();
 
                 // If the the request is new, then put it in the job queue.
-                let pending_key = format!("pending/id/{}", collect_id_hex);
+                let pending_key = format!("pending/id/{collect_id_hex}");
                 let pending: bool = state_get_or_default(&self.state, &pending_key).await?;
-                let processed: Option<CollectResp> = state_get(
-                    &self.state,
-                    &format!("{}/{}", PROCESSED_PREFIX, collect_id_hex),
-                )
-                .await?;
+                let processed: Option<CollectResp> =
+                    state_get(&self.state, &format!("{PROCESSED_PREFIX}/{collect_id_hex}")).await?;
                 if processed.is_none() && !pending {
                     let queued = DurableOrdered::new_strictly_ordered(
                         &self.state,
@@ -147,7 +144,7 @@ impl DurableObject for LeaderCollectionJobQueue {
             (DURABLE_LEADER_COL_JOB_QUEUE_FINISH, Method::Post) => {
                 let (collect_id, collect_resp): (Id, CollectResp) = req.json().await?;
                 let collect_id_hex = collect_id.to_hex();
-                let processed_key = format!("{}/{}", PROCESSED_PREFIX, collect_id_hex);
+                let processed_key = format!("{PROCESSED_PREFIX}/{collect_id_hex}");
                 let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
                 if processed.is_some() {
                     return Err(int_err(
@@ -188,7 +185,7 @@ impl DurableObject for LeaderCollectionJobQueue {
                 let pending = state_get::<String>(&self.state, &pending_lookup_key)
                     .await?
                     .is_some();
-                let processed_key = format!("{}/{}", PROCESSED_PREFIX, collect_id_hex);
+                let processed_key = format!("{PROCESSED_PREFIX}/{collect_id_hex}");
                 let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
                 if let Some(collect_resp) = processed {
                     if pending {
@@ -212,5 +209,5 @@ impl DurableObject for LeaderCollectionJobQueue {
 }
 
 fn lookup_key(collect_id_hex: &str) -> String {
-    format!("{}/id/{}", PENDING_PREFIX, collect_id_hex)
+    format!("{PENDING_PREFIX}/id/{collect_id_hex}")
 }

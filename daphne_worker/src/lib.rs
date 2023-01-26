@@ -523,7 +523,7 @@ pub(crate) fn int_err<S: ToString>(s: S) -> Error {
 /// changes that are on the main branch but not yet released. Thus, synchronizing this dependency
 /// between both crates is not currently feasible.
 pub(crate) fn dap_err(e: Error) -> DapError {
-    DapError::Fatal(format!("worker: {}", e))
+    DapError::Fatal(format!("worker: {e}"))
 }
 
 fn abort(e: DapAbort) -> Result<Response> {

@@ -41,7 +41,7 @@ impl DurableObject for GarbageCollector {
                     | durable::BINDING_DAP_LEADER_COL_JOB_QUEUE
                     | durable::BINDING_DAP_HELPER_STATE_STORE => (),
                     s => {
-                        let message = format!("GarbageCollector: unrecognized binding: {}", s);
+                        let message = format!("GarbageCollector: unrecognized binding: {s}");
                         error!("{}", message);
                         return Err(int_err(message));
                     }

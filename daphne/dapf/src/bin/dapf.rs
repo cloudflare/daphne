@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
             let uri =
                 Url::parse(uri_str).with_context(|| "Leader did not respond with valid URI")?;
 
-            println!("{}", uri);
+            println!("{uri}");
             Ok(())
         }
         Action::CollectPoll { uri, vdaf } => {

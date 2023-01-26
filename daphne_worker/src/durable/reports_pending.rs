@@ -196,7 +196,7 @@ impl DurableObject for ReportsPending {
                 let report_id_hex = report_id_hex_from_report(&report_hex)
                     .ok_or_else(|| int_err("failed to parse report_id from report"))?;
 
-                let key = format!("pending/{}", report_id_hex);
+                let key = format!("pending/{report_id_hex}");
                 let exists = state_set_if_not_exists::<String>(&self.state, &key, &report_hex)
                     .await?
                     .is_some();

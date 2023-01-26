@@ -113,16 +113,14 @@ impl DaphneWorkerConfig {
             "helper" => false,
             other => {
                 return Err(Error::RustError(format!(
-                    "Invalid value for DAP_AGGREGATOR_ROLE: '{}'",
-                    other
+                    "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
                 )))
             }
         };
 
-        let global: DapGlobalConfig = serde_json::from_str(
-            env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
-        )
-        .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {}", e)))?;
+        let global: DapGlobalConfig =
+            serde_json::from_str(env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref())
+                .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {e}")))?;
 
         let default_version =
             DapVersion::from(env.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
@@ -136,7 +134,7 @@ impl DaphneWorkerConfig {
         let collect_id_key = if is_leader {
             let collect_id_key_hex = env
                 .secret("DAP_COLLECT_ID_KEY")
-                .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {}", e))?
+                .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {e}"))?
                 .to_string();
             let collect_id_key =
                 Seed::get_decoded(&hex::decode(collect_id_key_hex).map_err(int_err)?)
@@ -156,7 +154,7 @@ impl DaphneWorkerConfig {
             .to_string()
             .parse()
             .map_err(|err| {
-                Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {}", err))
+                Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {err}"))
             })?;
 
         let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
@@ -165,8 +163,7 @@ impl DaphneWorkerConfig {
                 "dev" => DaphneWorkerDeployment::Dev,
                 s => {
                     return Err(Error::RustError(format!(
-                        "Invalid value for DAP_DEPLOYMENT: {}",
-                        s
+                        "Invalid value for DAP_DEPLOYMENT: {s}",
                     )))
                 }
             }
@@ -174,7 +171,7 @@ impl DaphneWorkerConfig {
             DaphneWorkerDeployment::default()
         };
         if !matches!(deployment, DaphneWorkerDeployment::Prod) {
-            trace!("DAP deployment override applied: {:?}", deployment);
+            trace!("DAP deployment override applied: {deployment:?}");
         }
 
         let taskprov = if global.allow_taskprov {
@@ -209,7 +206,7 @@ impl DaphneWorkerConfig {
         let admin_token = match env.secret("DAP_ADMIN_BEARER_TOKEN") {
             Ok(raw) => Some(BearerToken::from(raw.to_string())),
             Err(err) => {
-                trace!("DAP_ADMIN_BEARER_TOKEN not configured: {:?}", err);
+                trace!("DAP_ADMIN_BEARER_TOKEN not configured: {err:?}");
                 None
             }
         };
@@ -221,8 +218,7 @@ impl DaphneWorkerConfig {
                     .parse()
                     .map_err(|err| {
                         Error::RustError(format!(
-                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {}",
-                            err
+                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
                         ))
                     })?,
             ))
@@ -236,8 +232,7 @@ impl DaphneWorkerConfig {
                 .parse()
                 .map_err(|err| {
                     Error::RustError(format!(
-                        "Failed to parse DAP_PROCESSED_ALARM_SAFETY_INTERVAL: {}",
-                        err
+                        "Failed to parse DAP_PROCESSED_ALARM_SAFETY_INTERVAL: {err}"
                     ))
                 })?,
         );
@@ -318,7 +313,7 @@ impl DaphneWorkerState {
         // TODO(cjpatton) Push metrics to gateway after handling the request.
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, "daphne_worker")
-            .map_err(|e| Error::RustError(format!("failed to register metrics: {}", e)))?;
+            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
 
         Ok(Self {
             config,
@@ -391,7 +386,7 @@ impl<'srv> DaphneWorker<'srv> {
         {
             let guarded_map = map
                 .read()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
+                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
 
             if guarded_map.get(&kv_key_suffix).is_some() {
                 return Ok(Some(Guarded {
@@ -411,13 +406,13 @@ impl<'srv> DaphneWorker<'srv> {
             // used for multiple reports.
             let mut guarded_map = map
                 .write()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {}", e)))?;
+                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {e}")))?;
             guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
         }
 
         let guarded_map = map
             .read()
-            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {}", e)))?;
+            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
 
         if guarded_map.get(kv_key_suffix.as_ref()).is_some() {
             Ok(Some(Guarded {
@@ -533,13 +528,13 @@ impl<'srv> DaphneWorker<'srv> {
             .list()
             .execute()
             .await
-            .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?
+            .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?
             .keys
         {
             kv_store
                 .delete(kv_key.name.as_str())
                 .await
-                .map_err(|e| DapError::Fatal(format!("kv_store: {}", e)))?;
+                .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
             trace!("deleted KV item {}", kv_key.name);
         }
 
@@ -722,7 +717,7 @@ impl<'srv> DaphneWorker<'srv> {
         let version = url_match
             .params
             .get("version")
-            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {}", path)))?;
+            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {path}")))?;
         Ok(DapVersion::from(version))
     }
 
