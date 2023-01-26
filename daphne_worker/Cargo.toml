@@ -20,7 +20,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 async-trait = "0.1.63"
 base64 = "0.21.0"
-chrono = "0.4.23"
+chrono = { version = "0.4.23", default-features = false, features = ["clock", "wasmbind"] }
 daphne = { path = "../daphne" }
 futures = "0.3.25"
 getrandom = { version = "0.2.8", features = ["js"] } # Required for prio
