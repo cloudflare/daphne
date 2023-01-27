@@ -51,7 +51,7 @@ DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "0074a5dd6e9dac501f73f7a961193b2b" # SECRET
 DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
 DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
 DAP_DEFAULT_VERSION = "v03"
-DAP_TRACING = "trace"
+DAP_TRACING = "debug"
 
 [env.leader.durable_objects]
 bindings = [
@@ -113,7 +113,7 @@ DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "0074a5dd6e9dac501f73f7a961193b2b" # SECRET
 DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
 DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
 DAP_DEFAULT_VERSION = "v03"
-DAP_TRACING = "trace"
+DAP_TRACING = "debug"
 
 [env.helper.durable_objects]
 bindings = [

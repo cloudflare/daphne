@@ -789,6 +789,7 @@ where
             )
             .await
             .map_err(dap_err)?;
+        debug!("assigned collect_id {collect_id}");
 
         let url = task_config.as_ref().leader_url.clone();
 

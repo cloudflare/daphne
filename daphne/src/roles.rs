@@ -26,6 +26,7 @@ use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use tracing::debug;
 use url::Url;
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
@@ -270,12 +271,15 @@ where
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
     async fn http_post_upload(&'srv self, req: &'req DapRequest<S>) -> Result<(), DapAbort> {
+        debug!("upload for task {}", req.task_id()?);
+
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
+        debug!("report id is {}", report.metadata.id);
         let task_config = self
             .get_task_config_considering_taskprov(
                 req.version,
@@ -320,6 +324,7 @@ where
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
     async fn http_post_collect(&'srv self, req: &'req DapRequest<S>) -> Result<Url, DapAbort> {
+        debug!("collect for task {}", req.task_id()?);
         let now = self.get_current_time();
 
         // Check whether the DAP version indicated by the sender is supported.
@@ -354,9 +359,9 @@ where
             // batches for a task to be collected concurrently for the same task,
             // we'd need a more complex DO state that allowed us to have batch
             // state go from unassigned -> in-progress -> complete.
-            collect_req.query = Query::FixedSizeByBatchId {
-                batch_id: self.current_batch(req.task_id()?).await?,
-            };
+            let batch_id = self.current_batch(req.task_id()?).await?;
+            debug!("FixedSize batch id is {batch_id}");
+            collect_req.query = Query::FixedSizeByBatchId { batch_id };
         }
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
@@ -505,6 +510,7 @@ where
         task_config: &DapTaskConfig,
         collect_req: &CollectReq,
     ) -> Result<u64, DapAbort> {
+        debug!("collecting id {collect_id}");
         let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self
             .get_agg_share(&collect_req.task_id, &batch_selector)
@@ -594,6 +600,10 @@ where
                 // TODO Consider splitting reports into smaller chunks.
                 // TODO Consider handling tasks in parallel.
                 telem.reports_processed += reports.len() as u64;
+                debug!(
+                    "process {} reports for task {task_id} with selector {part_batch_sel:?}",
+                    reports.len()
+                );
                 if !reports.is_empty() {
                     telem.reports_aggregated += self
                         .run_agg_job(&task_id, task_config.as_ref(), &part_batch_sel, reports)
