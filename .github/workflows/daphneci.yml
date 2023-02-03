@@ -18,12 +18,14 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-          components: clippy
+          components: clippy, rustfmt
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v1
       - name: Linting
         run: cargo clippy -- -D warnings
+      - name: Format
+        run: cargo fmt --all --check
       - name: Building
         run: cargo build --release
       - name: Testing
