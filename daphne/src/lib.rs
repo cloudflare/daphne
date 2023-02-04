@@ -282,7 +282,7 @@ pub struct ProblemDetails {
 }
 
 /// DAP version used for a task.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
@@ -291,6 +291,7 @@ pub enum DapVersion {
     Draft03,
 
     #[serde(other)]
+    #[serde(rename = "unknown_version")]
     Unknown,
 }
 
@@ -311,6 +312,12 @@ impl AsRef<str> for DapVersion {
             DapVersion::Draft03 => "v03",
             _ => panic!("tried to construct string from unknown DAP version"),
         }
+    }
+}
+
+impl std::fmt::Display for DapVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }
 

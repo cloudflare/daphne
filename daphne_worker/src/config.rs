@@ -290,7 +290,7 @@ pub(crate) struct DaphneWorkerState {
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
-    hpke_receiver_configs: Arc<RwLock<HashMap<u8, HpkeReceiverConfig>>>,
+    hpke_receiver_configs: Arc<RwLock<HashMap<HpkeReceiverKvKey, HpkeReceiverConfig>>>,
 
     /// Laeder bearer token per task.
     leader_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
@@ -439,12 +439,12 @@ impl<'srv> DaphneWorker<'srv> {
     /// `hpke_config_id` is cached (if it exists).
     pub(crate) async fn get_hpke_receiver_config(
         &self,
-        hpke_config_id: u8,
+        hpke_receiver_kv_key: HpkeReceiverKvKey,
     ) -> Result<Option<GuardedHpkeReceiverConfig>> {
         self.kv_get_cached(
             &self.state.hpke_receiver_configs,
             KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
-            Cow::Owned(hpke_config_id),
+            Cow::Owned(hpke_receiver_kv_key),
         )
         .await
     }
@@ -793,7 +793,7 @@ impl<K: Clone + Eq + std::hash::Hash, V> Guarded<'_, K, V> {
     }
 }
 
-pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, u8, HpkeReceiverConfig>;
+pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, HpkeReceiverKvKey, HpkeReceiverConfig>;
 
 impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
     fn as_ref(&self) -> &HpkeConfig {
@@ -828,4 +828,60 @@ pub(crate) enum DaphneWorkerDeployment {
     /// will be registered by the garbage collector so that they can be deleted manually using the
     /// internal test API.
     Dev,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub(crate) struct HpkeReceiverKvKey {
+    pub(crate) version: DapVersion,
+    pub(crate) hpke_config_id: u8,
+}
+
+impl HpkeReceiverKvKey {
+    fn parse_from_name(name: &str) -> Option<Self> {
+        let mut iter = name.split('/');
+
+        // Read "{KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG}/version".
+        if iter.next()? != KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG || iter.next()? != "version" {
+            return None;
+        }
+
+        // Read and parse the version.
+        let version = DapVersion::from(iter.next()?);
+        if matches!(version, DapVersion::Unknown) {
+            return None;
+        }
+
+        // Read "config_id".
+        if iter.next()? != "config_id" {
+            return None;
+        }
+
+        // Read and parse the config ID.
+        let hpke_config_id = iter.next()?.parse::<u8>().ok()?;
+
+        // Make sure there is no trailing data.
+        if iter.next().is_some() {
+            return None;
+        }
+
+        Some(HpkeReceiverKvKey {
+            version,
+            hpke_config_id,
+        })
+    }
+
+    pub(crate) fn try_from_name(name: &str) -> std::result::Result<Self, DapError> {
+        Self::parse_from_name(name)
+            .ok_or_else(|| DapError::Fatal(format!("encountored invalid KV name: {name}")))
+    }
+}
+
+impl std::fmt::Display for HpkeReceiverKvKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "version/{}/config_id/{}",
+            self.version, self.hpke_config_id
+        )
+    }
 }

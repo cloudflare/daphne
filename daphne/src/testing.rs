@@ -240,6 +240,7 @@ impl<'a> HpkeDecrypter<'a> for MockAggregator {
 
     async fn get_hpke_config_for(
         &'a self,
+        _version: DapVersion,
         task_id: Option<&Id>,
     ) -> Result<&'a HpkeConfig, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
