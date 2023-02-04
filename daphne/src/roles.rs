@@ -333,6 +333,7 @@ where
         }
 
         if !self.authorized(req).await? {
+            debug!("aborted unathorized collect request");
             return Err(DapAbort::UnauthorizedRequest);
         }
 
@@ -667,6 +668,7 @@ where
         }
 
         if !self.authorized(req).await? {
+            debug!("aborted unathorized aggregate request");
             return Err(DapAbort::UnauthorizedRequest);
         }
 
@@ -813,10 +815,6 @@ where
                 })
             }
             Some(MEDIA_TYPE_AGG_CONT_REQ) => {
-                if !self.authorized(req).await? {
-                    return Err(DapAbort::UnauthorizedRequest);
-                }
-
                 let agg_cont_req = AggregateContinueReq::get_decoded(&req.payload)?;
                 let wrapped_task_config = self
                     .get_task_config_for(Cow::Borrowed(req.task_id()?))
