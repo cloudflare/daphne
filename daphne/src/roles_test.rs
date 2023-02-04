@@ -147,8 +147,7 @@ impl Test {
         let collector_token = BearerToken::from("This is a DIFFERENT token.");
 
         // taskprov: VDAF verification key.
-        let mut taskprov_vdaf_verify_key_init = vec![0; 32];
-        rng.fill(&mut taskprov_vdaf_verify_key_init[..]);
+        let taskprov_vdaf_verify_key_init = rng.gen::<[u8; 32]>();
 
         let prometheus_registry = prometheus::Registry::new();
 

@@ -52,7 +52,7 @@ pub struct TestRunner {
     pub leader_bearer_token: String,
     pub collector_bearer_token: String,
     pub collector_hpke_receiver: HpkeReceiverConfig,
-    pub taskprov_vdaf_verify_key_init: Vec<u8>,
+    pub taskprov_vdaf_verify_key_init: [u8; 32],
     pub taskprov_collector_hpke_receiver: HpkeReceiverConfig,
     pub version: DapVersion,
 }
@@ -135,7 +135,10 @@ impl TestRunner {
             taskprov_version: TaskprovVersion::Draft02,
         };
         let taskprov_vdaf_verify_key_init =
-            hex::decode("0074a5dd6e9dac501f73f7a961193b2b").unwrap();
+            hex::decode("b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18")
+                .unwrap()
+                .try_into()
+                .unwrap();
         let taskprov_collector_hpke_receiver = HpkeReceiverConfig::try_from((
             HpkeConfig {
                 id: 23,
