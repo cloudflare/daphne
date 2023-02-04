@@ -35,7 +35,7 @@ worker = "0.0.12"
 assert_matches = "1.5.0"
 base64 = "0.21.0"
 daphne = { path = "../daphne" }
-futures = "0.3.25"
+futures = "0.3.26"
 hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "0.1.0"
 lazy_static = "1.4.0"
@@ -44,5 +44,5 @@ prio = "0.10.0"
 rand = "0.8.5"
 reqwest = { version = "0.11.14", features = ["json"] }
 ring = "0.16.20"
-tokio = { version = "1.24.2", features = ["full"] }
+tokio = { version = "1.25.0", features = ["full"] }
 url = { version = "2.3.1", features = ["serde"] }
