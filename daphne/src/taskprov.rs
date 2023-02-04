@@ -60,7 +60,7 @@ pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> Result<Id
 /// Extract pseudorandom key from the pre-shared secret used for the "taskprov" extension.
 pub(crate) fn extract_prk_from_verify_key_init(
     version: TaskprovVersion,
-    verify_key_init: &[u8],
+    verify_key_init: &[u8; 32],
 ) -> Prk {
     // The documentation says computing the Salt is expensive, and we use the same PRK all the
     // time, so we compute it once.
@@ -101,7 +101,7 @@ pub(crate) fn expand_prk_into_verify_key(
 #[allow(dead_code)]
 pub(crate) fn compute_vdaf_verify_key(
     version: TaskprovVersion,
-    verify_key_init: &[u8],
+    verify_key_init: &[u8; 32],
     task_id: &Id,
     vdaf_type: VdafType,
 ) -> VdafVerifyKey {
@@ -188,7 +188,7 @@ impl DapTaskConfig {
         taskprov_version: TaskprovVersion,
         task_id: &Id,
         task_config: TaskConfig,
-        vdaf_verify_key_init: &[u8],
+        vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
     ) -> Result<DapTaskConfig, DapError> {
         if task_config.aggregator_endpoints.len() != 2 {

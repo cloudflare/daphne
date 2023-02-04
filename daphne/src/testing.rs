@@ -75,7 +75,7 @@ pub(crate) struct MockAggregator {
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<DapBatchBucketOwned, AggStore>>>>,
     pub(crate) collector_hpke_config: HpkeConfig,
-    pub(crate) taskprov_vdaf_verify_key_init: Vec<u8>,
+    pub(crate) taskprov_vdaf_verify_key_init: [u8; 32],
     pub(crate) metrics: DaphneMetrics,
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,

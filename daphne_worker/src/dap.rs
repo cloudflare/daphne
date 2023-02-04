@@ -325,7 +325,7 @@ where
                 self.state.config.global.taskprov_version,
                 &taskprov_task_id,
                 taskprov_task_config.unwrap(),
-                taskprov.vdaf_verify_key_init.as_ref(),
+                &taskprov.vdaf_verify_key_init,
                 taskprov.hpke_collector_config.as_ref(),
             )?;
 

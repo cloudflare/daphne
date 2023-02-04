@@ -54,7 +54,7 @@ pub(crate) struct TaskprovConfig {
     pub(crate) hpke_collector_config: HpkeConfig,
 
     /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.
-    pub(crate) vdaf_verify_key_init: Vec<u8>,
+    pub(crate) vdaf_verify_key_init: [u8; 32],
 
     /// Leader bearer token for all taskprov tasks
     pub(crate) leader_bearer_token: BearerToken,
@@ -181,9 +181,20 @@ impl DaphneWorkerConfig {
                     .as_ref(),
             )?;
 
+            const DAP_TASKPROV_VDAF_VERIFY_KEY_INIT: &str = "DAP_TASKPROV_VDAF_VERIFY_KEY_INIT";
             let vdaf_verify_key_init =
-                hex::decode(env.secret("DAP_TASKPROV_VDAF_VERIFY_KEY_INIT")?.to_string())
-                    .map_err(int_err)?;
+                hex::decode(env.secret(DAP_TASKPROV_VDAF_VERIFY_KEY_INIT)?.to_string())
+                    .map_err(|e| {
+                        Error::RustError(format!(
+                            "{DAP_TASKPROV_VDAF_VERIFY_KEY_INIT}: Failed to decode hex: {e}"
+                        ))
+                    })?
+                    .try_into()
+                    .map_err(|_| {
+                        Error::RustError(format!(
+                            "{DAP_TASKPROV_VDAF_VERIFY_KEY_INIT}: Incorrect length"
+                        ))
+                    })?;
 
             let leader_bearer_token =
                 BearerToken::from(env.secret("DAP_TASKPROV_LEADER_BEARER_TOKEN")?.to_string());
