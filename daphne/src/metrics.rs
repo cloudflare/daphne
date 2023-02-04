@@ -4,12 +4,18 @@
 //! Daphne metrics.
 
 use crate::DapError;
-use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
+use prometheus::{
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, IntCounterVec,
+    IntGauge, Registry,
+};
 
 pub struct DaphneMetrics {
     /// Report metrics. How many reports have been rejected, aggregated, and collected. When
     /// a report is rejected, the failure type is recorded.
     pub(crate) report_counter: IntCounterVec,
+
+    /// Helper: Number of running aggregation jobs.
+    pub(crate) aggregation_job_gauge: IntGauge,
 }
 
 impl DaphneMetrics {
@@ -22,6 +28,15 @@ impl DaphneMetrics {
             registry
         )?;
 
-        Ok(Self { report_counter })
+        let aggregation_job_gauge = register_int_gauge_with_registry!(
+            format!("{prefix}_aggregation_job_gauge"),
+            "Number of running aggregation jobs.",
+            registry
+        )?;
+
+        Ok(Self {
+            report_counter,
+            aggregation_job_gauge,
+        })
     }
 }

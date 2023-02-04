@@ -815,6 +815,7 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
 
     assert_metrics_include!(t.prometheus_registry, {
         r#"test_helper_report_counter{status="rejected_report_replayed"}"#: 1,
+        r#"test_helper_aggregation_job_gauge"#: 1,
     });
 }
 
@@ -869,6 +870,7 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
 
     assert_metrics_include!(t.prometheus_registry, {
         r#"test_helper_report_counter{status="rejected_batch_collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge"#: 1,
     });
 }
 
@@ -1393,6 +1395,7 @@ async fn e2e_time_interval(version: DapVersion) {
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
         r#"test_leader_report_counter{status="collected"}"#: 1,
         r#"test_helper_report_counter{status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge"#: 0,
     });
 }
 
@@ -1423,6 +1426,7 @@ async fn e2e_fixed_size(version: DapVersion) {
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
         r#"test_leader_report_counter{status="collected"}"#: 1,
         r#"test_helper_report_counter{status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge"#: 0,
     });
 }
 
@@ -1518,6 +1522,7 @@ async fn e2e_taskprov(version: DapVersion) {
         r#"test_helper_report_counter{status="aggregated"}"#: 1,
         r#"test_leader_report_counter{status="collected"}"#: 1,
         r#"test_helper_report_counter{status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge"#: 0,
     });
 }
 
