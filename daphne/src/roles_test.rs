@@ -296,16 +296,18 @@ impl Test {
     }
 
     async fn gen_test_report(&self, task_id: &Id) -> Report {
+        let version = self.leader.unchecked_get_task_config(task_id).await.version;
+
         // Construct HPKE config list.
         let hpke_config_list = [
             self.leader
-                .get_hpke_config_for(Some(task_id))
+                .get_hpke_config_for(version, Some(task_id))
                 .await
                 .unwrap()
                 .as_ref()
                 .clone(),
             self.helper
-                .get_hpke_config_for(Some(task_id))
+                .get_hpke_config_for(version, Some(task_id))
                 .await
                 .unwrap()
                 .as_ref()
@@ -1465,13 +1467,13 @@ async fn e2e_taskprov(version: DapVersion) {
     // Client: Send upload request to Leader.
     let hpke_config_list = [
         t.leader
-            .get_hpke_config_for(Some(&taskprov_id))
+            .get_hpke_config_for(version, Some(&taskprov_id))
             .await
             .unwrap()
             .as_ref()
             .clone(),
         t.helper
-            .get_hpke_config_for(Some(&taskprov_id))
+            .get_hpke_config_for(version, Some(&taskprov_id))
             .await
             .unwrap()
             .as_ref()

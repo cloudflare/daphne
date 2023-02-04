@@ -9,7 +9,7 @@
 use crate::{
     config::{
         DaphneWorker, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
-        KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+        HpkeReceiverKvKey, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
     },
     dap_err,
     durable::{
@@ -82,6 +82,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
     async fn get_hpke_config_for(
         &'srv self,
+        version: DapVersion,
         _task_id: Option<&Id>,
     ) -> std::result::Result<GuardedHpkeReceiverConfig<'srv>, DapError> {
         let kv_store = self.kv().map_err(dap_err)?;
@@ -93,7 +94,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
             .await
             .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
 
-        let hpke_config_id = if keys.keys.is_empty() {
+        let hpke_receiver_kv_key = if keys.keys.is_empty() {
             // Generate a new HPKE receiver config and store it in KV.
             //
             // For now, expect that only one KEM algorithm is supported and that only one config
@@ -117,7 +118,11 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
                 }
                 let new_kv_config_key = format!(
                     "{}/{}",
-                    KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG, hpke_receiver_config.config.id,
+                    KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
+                    HpkeReceiverKvKey {
+                        version,
+                        hpke_config_id: hpke_receiver_config.config.id
+                    },
                 );
 
                 kv_store
@@ -128,10 +133,13 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
                     .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
             }
 
-            hpke_config_id.unwrap()
+            HpkeReceiverKvKey {
+                version,
+                hpke_config_id: hpke_config_id.unwrap(),
+            }
         } else {
             // Return the first HPKE receiver config in the list.
-            parse_hpke_config_id_from_kv_key_name(keys.keys[0].name.as_str())?
+            HpkeReceiverKvKey::try_from_name(keys.keys[0].name.as_str())?
         };
 
         // Fetch the indicated HPKE config from KV.
@@ -139,7 +147,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
         // TODO(cjpatton) Figure out how likely this is to fail if we had to generate a new key
         // pair and write it to KV during this call.
         Ok(self
-            .get_hpke_receiver_config(hpke_config_id)
+            .get_hpke_receiver_config(hpke_receiver_kv_key)
             .await
             .map_err(dap_err)?
             .ok_or_else(|| DapError::fatal("empty HPKE receiver config list"))?)
@@ -147,11 +155,15 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
     async fn can_hpke_decrypt(
         &self,
-        _task_id: &Id,
+        task_id: &Id,
         config_id: u8,
     ) -> std::result::Result<bool, DapError> {
+        let version = self.try_get_task_config(task_id).await?.as_ref().version;
         Ok(self
-            .get_hpke_receiver_config(config_id)
+            .get_hpke_receiver_config(HpkeReceiverKvKey {
+                version,
+                hpke_config_id: config_id,
+            })
             .await
             .map_err(dap_err)?
             .is_some())
@@ -159,13 +171,17 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
     async fn hpke_decrypt(
         &self,
-        _task_id: &Id,
+        task_id: &Id,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
+        let version = self.try_get_task_config(task_id).await?.as_ref().version;
         if let Some(hpke_receiver_config) = self
-            .get_hpke_receiver_config(ciphertext.config_id)
+            .get_hpke_receiver_config(HpkeReceiverKvKey {
+                version,
+                hpke_config_id: ciphertext.config_id,
+            })
             .await
             .map_err(dap_err)?
         {
@@ -179,25 +195,6 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }
     }
-}
-
-fn parse_hpke_config_id_from_kv_key_name(name: &str) -> std::result::Result<u8, DapError> {
-    let mut iter = name.split('/');
-    if let Some(prefix) = iter.next() {
-        if prefix == KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG {
-            if let Some(config_id_str) = iter.next() {
-                if iter.next().is_none() {
-                    if let Ok(config_id) = config_id_str.parse::<u8>() {
-                        return Ok(config_id);
-                    }
-                }
-            }
-        }
-    }
-
-    Err(DapError::Fatal(format!(
-        "malformed kv_store HPKE receiver config key: '{name}'",
-    )))
 }
 
 #[async_trait(?Send)]

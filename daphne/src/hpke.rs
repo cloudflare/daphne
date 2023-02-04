@@ -16,7 +16,7 @@ use crate::{
         decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
         HpkeKemId, Id, TransitionFailure,
     },
-    DapError,
+    DapError, DapVersion,
 };
 use async_trait::async_trait;
 use prio::codec::{CodecError, Decode, Encode};
@@ -98,6 +98,7 @@ pub trait HpkeDecrypter<'a> {
     /// Look up the HPKE configuration to use for the given task ID (if specified).
     async fn get_hpke_config_for(
         &'a self,
+        version: DapVersion,
         task_id: Option<&Id>,
     ) -> Result<Self::WrappedHpkeConfig, DapError>;
 
@@ -206,6 +207,7 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
 
     async fn get_hpke_config_for(
         &'a self,
+        _version: DapVersion,
         _task_id: Option<&Id>,
     ) -> Result<Self::WrappedHpkeConfig, DapError> {
         unreachable!("not implemented");

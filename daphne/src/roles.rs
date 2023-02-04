@@ -157,7 +157,7 @@ where
             id = Some(Id(bytes))
         }
 
-        let hpke_config = self.get_hpke_config_for(id.as_ref()).await?;
+        let hpke_config = self.get_hpke_config_for(req.version, id.as_ref()).await?;
 
         if let Some(task_id) = id {
             let task_config = self
