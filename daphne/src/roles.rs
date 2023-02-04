@@ -807,6 +807,8 @@ where
                     }
                 };
 
+                self.metrics().aggregation_job_gauge.inc();
+
                 Ok(DapResponse {
                     media_type: Some(MEDIA_TYPE_AGG_INIT_RESP),
                     payload: agg_resp.get_encoded(),
@@ -855,6 +857,8 @@ where
                     .report_counter
                     .with_label_values(&["aggregated"])
                     .inc_by(out_shares_count);
+
+                self.metrics().aggregation_job_gauge.dec();
 
                 Ok(DapResponse {
                     media_type: Some(MEDIA_TYPE_AGG_CONT_RESP),
