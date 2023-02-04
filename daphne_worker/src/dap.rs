@@ -894,8 +894,6 @@ where
         let reqwest_req = self
             .state
             .client
-            .as_ref()
-            .ok_or_else(|| DapError::Fatal("helper cannot send HTTP requests".into()))?
             .post(url.as_str())
             .body(payload)
             .headers(headers);
