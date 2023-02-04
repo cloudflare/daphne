@@ -30,7 +30,7 @@ use prio::{
     codec::Decode,
     vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
 };
-use prometheus::Registry;
+use prometheus::{Encoder, Registry};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -39,7 +39,7 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
-use tracing::trace;
+use tracing::{error, trace};
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
@@ -61,6 +61,15 @@ pub(crate) struct TaskprovConfig {
 
     /// Collector bearer token for all taskprov tasks
     pub(crate) collector_bearer_token: BearerToken,
+}
+
+/// Parameters required for pushing Prometheus metrics.
+struct MetricsPushConfig {
+    /// URL of the server to push metrics to.
+    server: Url,
+
+    /// Beaer token to present to the server in the HTTP request.
+    bearer_token: BearerToken,
 }
 
 /// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
@@ -104,6 +113,9 @@ pub(crate) struct DaphneWorkerConfig {
     /// Additional time to wait before deletng an instance of ReportsProcessed. Added to the value
     /// of the `report_storage_epoch_duration` field of the global DAP configuration.
     pub(crate) processed_alarm_safety_interval: Duration,
+
+    /// Metrics push configuration.
+    metrics_push_config: Option<MetricsPushConfig>,
 }
 
 impl DaphneWorkerConfig {
@@ -248,6 +260,33 @@ impl DaphneWorkerConfig {
                 })?,
         );
 
+        const DAP_METRICS_PUSH_SERVER_URL: &str = "DAP_METRICS_PUSH_SERVER_URL";
+        const DAP_METRICS_PUSH_BEARER_TOKEN: &str = "DAP_METRICS_PUSH_BEARER_TOKEN";
+        let metrics_push_config = match (
+            env.var(DAP_METRICS_PUSH_SERVER_URL),
+            env.var(DAP_METRICS_PUSH_BEARER_TOKEN),
+        ) {
+            (Ok(server_str), Ok(bearer_token_str)) => Some(MetricsPushConfig {
+                server: server_str.to_string().parse().map_err(|err| {
+                    Error::RustError(format!(
+                        "Failed to parse {DAP_METRICS_PUSH_SERVER_URL}: {err:?}"
+                    ))
+                })?,
+                bearer_token: BearerToken::from(bearer_token_str.to_string()),
+            }),
+            (Err(..), Err(..)) => None,
+            (Ok(..), Err(..)) => {
+                return Err(Error::RustError(
+                    "failed to configure metrics push: missing bearer token".into(),
+                ))
+            }
+            (Err(..), Ok(..)) => {
+                return Err(Error::RustError(
+                    "failed to configure metrics push: missing server URL".into(),
+                ))
+            }
+        };
+
         Ok(Self {
             global,
             deployment,
@@ -261,6 +300,7 @@ impl DaphneWorkerConfig {
             admin_token,
             helper_state_store_garbage_collect_after_secs,
             processed_alarm_safety_interval,
+            metrics_push_config,
         })
     }
 
@@ -286,7 +326,7 @@ pub(crate) struct DaphneWorkerState {
 
     /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
     /// configured as the DAP Helper.
-    pub(crate) client: Option<reqwest_wasm::Client>,
+    pub(crate) client: reqwest_wasm::Client,
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
@@ -313,13 +353,8 @@ impl DaphneWorkerState {
     pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
         let config = DaphneWorkerConfig::from_worker_env(env)?;
 
-        let client = if config.is_leader {
-            // TODO Configure this client to use HTTPS only, excpet if running in a test
-            // environment.
-            Some(reqwest_wasm::Client::new())
-        } else {
-            None
-        };
+        // TODO Configure this client to use HTTPS only, except if running in a test environment.
+        let client = reqwest_wasm::Client::new();
 
         // TODO(cjpatton) Push metrics to gateway after handling the request.
         let prometheus_registry = Registry::new();
@@ -340,6 +375,50 @@ impl DaphneWorkerState {
 
     pub(crate) fn handler<'srv>(&'srv self, env: &'srv Env) -> DaphneWorker<'srv> {
         DaphneWorker { state: self, env }
+    }
+
+    /// If configured, gather metrics and push to Prometheus server.
+    pub(crate) async fn maybe_push_metrics(&self) -> Result<()> {
+        if let Some(ref metrics_push_config) = self.config.metrics_push_config {
+            // Prepare text exposition of metrics.
+            let mut buf = Vec::new();
+            let encoder = prometheus::TextEncoder::new();
+            let metrics_familes = self.prometheus_registry.gather();
+            encoder
+                .encode(&metrics_familes, &mut buf)
+                .expect("failled to encode metrics");
+            let text_metrics =
+                String::from_utf8(buf).expect("text encoding of metrics is not UTF8");
+
+            // Prepare authorization.
+            let mut headers = reqwest_wasm::header::HeaderMap::new();
+            let bearer_token: &str = metrics_push_config.bearer_token.as_ref();
+            headers.insert(
+                reqwest_wasm::header::HeaderName::from_static("authorization"),
+                reqwest_wasm::header::HeaderValue::from_str(&format!("Bearer {bearer_token}"))
+                    .expect("header value malformed"),
+            );
+
+            let reqwest_resp = self
+                .client
+                .post(metrics_push_config.server.as_str())
+                .body(text_metrics)
+                .headers(headers)
+                .send()
+                .await
+                .map_err(|err| {
+                    Error::RustError(format!("request to metrics server failed: {err:?}"))
+                })?;
+
+            let status = reqwest_resp.status();
+            if status != 200 {
+                error!("unexpected response from metrics server: {reqwest_resp:?}");
+                return Err(Error::RustError(format!(
+                    "metrics push failed with response status {status}",
+                )));
+            }
+        }
+        Ok(())
     }
 }
 

@@ -479,7 +479,7 @@ impl DaphneWorkerRouter {
 
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
-        // router creates.  If curious, you can add .instrument(info_span!("http")) just before
+        // router creates. If curious, you can add .instrument(info_span!("http")) just before
         // the await and see.
         let result = router.run(req, env).await;
 
@@ -491,6 +491,13 @@ impl DaphneWorkerRouter {
                 result.as_ref().map_or(500, |resp| resp.status_code())
             )])
             .inc();
+
+        // Push metrics to Prometheus metrics server, if configured.
+        //
+        // TODO(cjpatton) Figure out how to do this step only after we have responded to the client
+        // so that the request to the metrics server isn't on the hot path. This should be possible
+        // in theory, but I don't know if workers-rs supports it.
+        state.maybe_push_metrics().await?;
 
         result
     }
