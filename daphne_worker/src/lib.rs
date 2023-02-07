@@ -163,7 +163,7 @@ use daphne::{
 use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
 use std::str;
-use tracing::{debug, error, trace_span, Instrument};
+use tracing::{debug, error, info_span, Instrument};
 use worker::*;
 
 /// Parameters used by the Leader to select a set of reports for aggregation.
@@ -237,7 +237,7 @@ impl DaphneWorkerRouter {
                 let req = daph.worker_request_to_dap(req).await?;
                 match daph
                     .http_get_hpke_config(&req)
-                    .instrument(trace_span!("hpke_config"))
+                    .instrument(info_span!("hpke_config"))
                     .await
                 {
                     Ok(req) => dap_response_to_worker(req),
@@ -261,7 +261,7 @@ impl DaphneWorkerRouter {
 
                 let cmd: InternalTestAddTask = req.json().await?;
                 daph.internal_add_task(daph.state.config.default_version, cmd)
-                    .instrument(trace_span!("task"))
+                    .instrument(info_span!("task"))
                     .await?;
                 Response::empty()
             });
@@ -275,7 +275,7 @@ impl DaphneWorkerRouter {
 
                         match daph
                             .http_post_upload(&req)
-                            .instrument(trace_span!("upload"))
+                            .instrument(info_span!("upload"))
                             .await
                         {
                             Ok(()) => Response::empty(),
@@ -288,7 +288,7 @@ impl DaphneWorkerRouter {
 
                         match daph
                             .http_post_collect(&req)
-                            .instrument(trace_span!("collect"))
+                            .instrument(info_span!("collect"))
                             .await
                         {
                             Ok(collect_uri) => {
@@ -310,7 +310,7 @@ impl DaphneWorkerRouter {
                             let daph = ctx.data.handler(&ctx.env);
                             match daph
                                 .poll_collect_job(&task_id, &collect_id)
-                                .instrument(trace_span!("poll_collect_job"))
+                                .instrument(info_span!("poll_collect_job"))
                                 .await
                             {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
@@ -336,7 +336,7 @@ impl DaphneWorkerRouter {
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
                         match daph
                             .process(&report_sel)
-                            .instrument(trace_span!("process"))
+                            .instrument(info_span!("process"))
                             .await
                         {
                             Ok(telem) => {
@@ -357,7 +357,7 @@ impl DaphneWorkerRouter {
                             let daph = ctx.data.handler(&ctx.env);
                             match daph
                                 .internal_current_batch(&task_id)
-                                .instrument(trace_span!("current_batch"))
+                                .instrument(info_span!("current_batch"))
                                 .await
                             {
                                 Ok(batch_id) => Response::from_bytes(
@@ -376,7 +376,7 @@ impl DaphneWorkerRouter {
 
                     match daph
                         .http_post_aggregate(&req)
-                        .instrument(trace_span!("aggregate"))
+                        .instrument(info_span!("aggregate"))
                         .await
                     {
                         Ok(resp) => dap_response_to_worker(resp),
@@ -389,7 +389,7 @@ impl DaphneWorkerRouter {
 
                     match daph
                         .http_post_aggregate_share(&req)
-                        .instrument(trace_span!("aggregate_share"))
+                        .instrument(info_span!("aggregate_share"))
                         .await
                     {
                         Ok(resp) => dap_response_to_worker(resp),
@@ -406,7 +406,7 @@ impl DaphneWorkerRouter {
                     let daph = ctx.data.handler(&ctx.env);
                     match daph
                         .internal_delete_all()
-                        .instrument(trace_span!("delete_all"))
+                        .instrument(info_span!("delete_all"))
                         .await
                     {
                         Ok(()) => Response::empty(),
@@ -423,7 +423,7 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let cmd: InternalTestEndpointForTask = req.json().await?;
                         daph.internal_endpoint_for_task(daph.state.config.default_version, cmd)
-                            .instrument(trace_span!("endpoint_for_task"))
+                            .instrument(info_span!("endpoint_for_task"))
                             .await
                     },
                 )
@@ -434,7 +434,7 @@ impl DaphneWorkerRouter {
                         let cmd: InternalTestEndpointForTask = req.json().await?;
                         let version = daph.extract_version_parameter(&req)?;
                         daph.internal_endpoint_for_task(version, cmd)
-                            .instrument(trace_span!("endpoint_for_task"))
+                            .instrument(info_span!("endpoint_for_task"))
                             .await
                     },
                 )
@@ -442,7 +442,7 @@ impl DaphneWorkerRouter {
                     let daph = ctx.data.handler(&ctx.env);
                     let cmd: InternalTestAddTask = req.json().await?;
                     daph.internal_add_task(daph.state.config.default_version, cmd)
-                        .instrument(trace_span!("add_task"))
+                        .instrument(info_span!("add_task"))
                         .await?;
                     Response::from_json(&serde_json::json!({
                         "status": "success",
@@ -455,7 +455,7 @@ impl DaphneWorkerRouter {
                         let cmd: InternalTestAddTask = req.json().await?;
                         let version = daph.extract_version_parameter(&req)?;
                         daph.internal_add_task(version, cmd)
-                            .instrument(trace_span!("add_task"))
+                            .instrument(info_span!("add_task"))
                             .await?;
                         Response::from_json(&serde_json::json!({
                             "status": "success",
@@ -479,7 +479,7 @@ impl DaphneWorkerRouter {
 
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
-        // router creates.  If curious, you can add .instrument(trace_span!("http")) just before
+        // router creates.  If curious, you can add .instrument(info_span!("http")) just before
         // the await and see.
         let result = router.run(req, env).await;
 
