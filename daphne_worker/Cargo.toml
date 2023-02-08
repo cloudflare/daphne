@@ -38,5 +38,5 @@ tracing = "0.1.37"
 tracing-core = "0.1.30"
 tracing-subscriber = {version = "0.3.16", features = ["env-filter"]}
 url = { version = "2.3.1", features = ["serde"] }
-serde_json = "1.0.91"
+serde_json = "1.0.92"
 worker = "0.0.12"
