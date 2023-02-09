@@ -160,6 +160,7 @@ use daphne::{
     roles::{DapAggregator, DapHelper, DapLeader},
     DapAbort, DapCollectJob, DapError, DapResponse,
 };
+use once_cell::sync::OnceCell;
 use prio::codec::Encode;
 use serde::{Deserialize, Serialize};
 use std::str;
@@ -205,6 +206,8 @@ pub struct DaphneWorkerRouter {
 /// is set. This value can be overrided by DAP_DEFAULT_RESPONSE_HTML.
 pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
+static STATE: OnceCell<DaphneWorkerState> = OnceCell::new();
+
 impl DaphneWorkerRouter {
     /// HTTP request handler for Daphne-Worker.
     ///
@@ -229,9 +232,9 @@ impl DaphneWorkerRouter {
         // it's definitely ready for use even if the caller hasn't done anything.
         initialize_tracing(&env);
 
-        let state = DaphneWorkerState::from_worker_env(&env)?;
+        let state = STATE.get_or_try_init(|| DaphneWorkerState::from_worker_env(&env))?;
 
-        let router = Router::with_data(&state)
+        let router = Router::with_data(state)
             .get_async("/:version/hpke_config", |req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = daph.worker_request_to_dap(req).await?;
