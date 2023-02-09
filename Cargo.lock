@@ -551,6 +551,7 @@ dependencies = [
  "getrandom",
  "hex",
  "matchit 0.7.0",
+ "once_cell",
  "paste",
  "prio",
  "prometheus",
