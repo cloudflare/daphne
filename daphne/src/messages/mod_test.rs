@@ -262,7 +262,7 @@ fn read_vdaf_config() {
         vdaf_config,
         VdafConfig {
             dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
+            var: VdafTypeVar::Prio3Aes128Histogram { buckets },
         }
     );
 }
@@ -298,7 +298,7 @@ fn read_task_config_taskprov_draft02() {
             task_expiration: 0x6352f9a5,
             vdaf_config: VdafConfig {
                 dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio3Aes128Histogram { buckets: buckets },
+                var: VdafTypeVar::Prio3Aes128Histogram { buckets },
             },
         }
     );
