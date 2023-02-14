@@ -892,8 +892,7 @@ impl Test {
                 agg_resp,
                 &self.leader_metrics,
             )
-            .err()
-            .expect("handle_agg_resp() succeeded; expected failure")
+            .expect_err("handle_agg_resp() succeeded; expected failure")
     }
 
     fn handle_agg_cont_req(
@@ -915,8 +914,7 @@ impl Test {
         self.task_config
             .vdaf
             .handle_agg_cont_req(helper_state, agg_cont_req, &self.helper_metrics)
-            .err()
-            .expect("handle_agg_cont_req() succeeded; expected failure")
+            .expect_err("handle_agg_cont_req() succeeded; expected failure")
     }
 
     fn handle_final_agg_resp(

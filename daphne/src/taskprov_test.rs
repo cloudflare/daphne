@@ -32,6 +32,6 @@ fn check_vdaf_key_computation() {
     ];
     match &vk {
         VdafVerifyKey::Prio3(bytes) => assert_eq!(*bytes, expected),
-        _ => assert!(false),
+        _ => unreachable!(),
     }
 }

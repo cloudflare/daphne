@@ -131,13 +131,13 @@ impl Test {
             DapTaskConfig {
                 version,
                 collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-                leader_url: leader_url.clone(),
-                helper_url: helper_url.clone(),
+                leader_url,
+                helper_url,
                 time_precision,
                 expiration: now, // Expires this second
                 min_batch_size: 1,
                 query: DapQueryConfig::TimeInterval,
-                vdaf: vdaf_config.clone(),
+                vdaf: vdaf_config,
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
             },
         );
@@ -166,7 +166,7 @@ impl Test {
             helper_state_store: Arc::new(Mutex::new(HashMap::new())),
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-            taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
+            taskprov_vdaf_verify_key_init,
             metrics: DaphneMetrics::register(&prometheus_registry, "test_helper").unwrap(),
             peer: None,
         });
@@ -176,17 +176,17 @@ impl Test {
             .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
             .expect("failed to generate HPKE receiver config");
         let leader = Arc::new(MockAggregator {
-            global_config: global_config.clone(),
+            global_config,
             tasks: Arc::new(Mutex::new(tasks.clone())),
             hpke_receiver_config_list: leader_hpke_receiver_config_list,
-            leader_token: leader_token.clone(),
+            leader_token,
             collector_token: Some(collector_token.clone()),
             report_store: Arc::new(Mutex::new(HashMap::new())),
             leader_state_store: Arc::new(Mutex::new(HashMap::new())),
             helper_state_store: Arc::new(Mutex::new(HashMap::new())),
             agg_store: Arc::new(Mutex::new(HashMap::new())),
-            collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-            taskprov_vdaf_verify_key_init: taskprov_vdaf_verify_key_init.clone(),
+            collector_hpke_config: collector_hpke_receiver_config.config,
+            taskprov_vdaf_verify_key_init,
             metrics: DaphneMetrics::register(&prometheus_registry, "test_leader").unwrap(),
             peer: Some(Arc::clone(&helper)),
         });
@@ -206,7 +206,7 @@ impl Test {
 
     async fn gen_test_upload_req(&self, report: Report) -> DapRequest<BearerToken> {
         let task_config = self.leader.unchecked_get_task_config(&report.task_id).await;
-        let version = task_config.version.clone();
+        let version = task_config.version;
 
         DapRequest {
             version,
@@ -315,7 +315,7 @@ impl Test {
 
         // Construct report.
         let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-        let report = vdaf_config
+        vdaf_config
             .produce_report(
                 &hpke_config_list,
                 self.now,
@@ -323,9 +323,7 @@ impl Test {
                 DapMeasurement::U64(1),
                 self.version,
             )
-            .unwrap();
-
-        report
+            .unwrap()
     }
 
     async fn run_agg_job(&self, task_id: &Id) -> Result<(), DapAbort> {
@@ -1017,7 +1015,7 @@ async fn poll_collect_job_test_results(version: DapVersion) {
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
     // Collector: Create a CollectReq.
-    let version = task_config.version.clone();
+    let version = task_config.version;
     let req = t
         .collector_authorized_req(
             version,
@@ -1056,7 +1054,7 @@ async fn poll_collect_job_test_results(version: DapVersion) {
     // Expect DapCollectJob::Pending due to pending collect job.
     assert_eq!(
         t.leader
-            .poll_collect_job(task_id, &collect_id)
+            .poll_collect_job(task_id, collect_id)
             .await
             .unwrap(),
         DapCollectJob::Pending
@@ -1064,14 +1062,14 @@ async fn poll_collect_job_test_results(version: DapVersion) {
 
     // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
     t.leader
-        .finish_collect_job(&task_id, &collect_id, &collect_resp)
+        .finish_collect_job(task_id, collect_id, &collect_resp)
         .await
         .unwrap();
 
     // Expect DapCollectJob::Done due to processed collect job.
     assert_matches!(
         t.leader
-            .poll_collect_job(task_id, &collect_id)
+            .poll_collect_job(task_id, collect_id)
             .await
             .unwrap(),
         DapCollectJob::Done(..)

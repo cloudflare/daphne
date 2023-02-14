@@ -23,7 +23,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v1
       - name: Linting
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Format
         run: cargo fmt --all --check
       - name: Building

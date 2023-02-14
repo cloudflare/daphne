@@ -1328,7 +1328,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
         .leader_post_collect_using_token(
             &client,
             collect_req.get_encoded_with_param(&t.version),
-            &"I am the collector!".to_string(), // Keep in sync with wrangler.toml
+            "I am the collector!", // Keep in sync with wrangler.toml
         )
         .await;
     println!("collect_uri: {}", collect_uri);

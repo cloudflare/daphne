@@ -111,7 +111,7 @@ impl TestRunner {
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
 
         let task_config = DapTaskConfig {
-            version: version,
+            version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
             expiration: now + 604800, // one week from now
@@ -150,8 +150,8 @@ impl TestRunner {
             HpkePrivateKey::from(hex::decode("9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e").unwrap())
         )).expect("bad hpke configuration");
 
-        let leader_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
-        let collector_bearer_token = hex::encode(&rng.gen::<[u8; 16]>());
+        let leader_bearer_token = hex::encode(rng.gen::<[u8; 16]>());
+        let collector_bearer_token = hex::encode(rng.gen::<[u8; 16]>());
         let t = Self {
             global_config,
             task_id: task_id.clone(),
@@ -167,10 +167,10 @@ impl TestRunner {
             version,
         };
 
-        let vdaf_verify_key_base64url = encode_base64url(&t.task_config.vdaf_verify_key.as_ref());
+        let vdaf_verify_key_base64url = encode_base64url(t.task_config.vdaf_verify_key.as_ref());
 
         let collector_hpke_config_base64url =
-            encode_base64url(&t.collector_hpke_receiver.config.get_encoded());
+            encode_base64url(t.collector_hpke_receiver.config.get_encoded());
 
         let vdaf = json!({
             "type": "Prio3Aes128Sum",
@@ -271,8 +271,8 @@ impl TestRunner {
         version: DapVersion,
         client: &reqwest::Client,
     ) -> [HpkeConfig; 2] {
-        let raw_leader_hpke_config = self.leader_get_raw_hpke_config(&client).await;
-        let raw_helper_hpke_config = self.helper_get_raw_hpke_config(&client).await;
+        let raw_leader_hpke_config = self.leader_get_raw_hpke_config(client).await;
+        let raw_helper_hpke_config = self.helper_get_raw_hpke_config(client).await;
         match version {
             DapVersion::Draft02 => [
                 HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
@@ -329,6 +329,7 @@ impl TestRunner {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn leader_post_expect_abort(
         &self,
         client: &reqwest::Client,
@@ -382,7 +383,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         data: Vec<u8>,
-        token: &String,
+        token: &str,
     ) -> Url {
         let url = self.leader_url.join("collect").unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
