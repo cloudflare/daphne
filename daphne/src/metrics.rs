@@ -19,17 +19,24 @@ pub struct DaphneMetrics {
 }
 
 impl DaphneMetrics {
-    /// Register Daphne metrics with the specified registry.
-    pub fn register(registry: &Registry, prefix: &str) -> Result<Self, DapError> {
+    /// Register Daphne metrics with the specified registry. If a prefix is provided, then
+    /// "{prefix_}" is prepended to the name.
+    pub fn register(registry: &Registry, prefix: Option<&str>) -> Result<Self, DapError> {
+        let front = if let Some(prefix) = prefix {
+            format!("{prefix}_")
+        } else {
+            "".into()
+        };
+
         let report_counter = register_int_counter_vec_with_registry!(
-            format!("{prefix}_report_counter"),
+            format!("{front}report_counter"),
             "Total number reports rejected, aggregated, and collected.",
             &["status"],
             registry
         )?;
 
         let aggregation_job_gauge = register_int_gauge_with_registry!(
-            format!("{prefix}_aggregation_job_gauge"),
+            format!("{front}aggregation_job_gauge"),
             "Number of running aggregation jobs.",
             registry
         )?;

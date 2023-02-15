@@ -695,8 +695,10 @@ impl Test {
         let helper_hpke_config = helper_hpke_receiver_config.clone().config;
         let collector_hpke_config = collector_hpke_receiver_config.clone().config;
         let prometheus_registry = prometheus::Registry::new();
-        let leader_metrics = DaphneMetrics::register(&prometheus_registry, "test_leader").unwrap();
-        let helper_metrics = DaphneMetrics::register(&prometheus_registry, "test_helper").unwrap();
+        let leader_metrics =
+            DaphneMetrics::register(&prometheus_registry, Some("test_leader")).unwrap();
+        let helper_metrics =
+            DaphneMetrics::register(&prometheus_registry, Some("test_helper")).unwrap();
 
         Test {
             now,

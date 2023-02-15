@@ -16,15 +16,21 @@ pub(crate) struct DaphneWorkerMetrics {
 }
 
 impl DaphneWorkerMetrics {
-    pub(crate) fn register(registry: &Registry, prefix: &str) -> Result<Self, DapError> {
-        let daphne = DaphneMetrics::register(registry, prefix)?;
+    pub(crate) fn register(registry: &Registry, prefix: Option<&str>) -> Result<Self, DapError> {
+        let front = if let Some(prefix) = prefix {
+            format!("{prefix}_")
+        } else {
+            "".into()
+        };
 
         let http_status_code = register_int_counter_vec_with_registry!(
-            format!("{prefix}_http_status_code"),
+            format!("{front}_http_status_code"),
             "HTTP response status code.",
             &["code"],
             registry
         )?;
+
+        let daphne = DaphneMetrics::register(registry, prefix)?;
 
         Ok(Self {
             daphne,
