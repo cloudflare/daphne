@@ -167,7 +167,7 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init,
-            metrics: DaphneMetrics::register(&prometheus_registry, "test_helper").unwrap(),
+            metrics: DaphneMetrics::register(&prometheus_registry, Some("test_helper")).unwrap(),
             peer: None,
         });
 
@@ -187,7 +187,7 @@ impl Test {
             agg_store: Arc::new(Mutex::new(HashMap::new())),
             collector_hpke_config: collector_hpke_receiver_config.config,
             taskprov_vdaf_verify_key_init,
-            metrics: DaphneMetrics::register(&prometheus_registry, "test_leader").unwrap(),
+            metrics: DaphneMetrics::register(&prometheus_registry, Some("test_leader")).unwrap(),
             peer: Some(Arc::clone(&helper)),
         });
 

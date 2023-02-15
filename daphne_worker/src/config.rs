@@ -356,9 +356,8 @@ impl DaphneWorkerState {
         // TODO Configure this client to use HTTPS only, except if running in a test environment.
         let client = reqwest_wasm::Client::new();
 
-        // TODO(cjpatton) Push metrics to gateway after handling the request.
         let prometheus_registry = Registry::new();
-        let metrics = DaphneWorkerMetrics::register(&prometheus_registry, "daphne_worker")
+        let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
             .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
 
         Ok(Self {
