@@ -99,7 +99,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
             //
             // For now, expect that only one KEM algorithm is supported and that only one config
             // will be used at anyone time.
-            if self.state.config.global.supported_hpke_kems.len() != 1 {
+            if self.config().global.supported_hpke_kems.len() != 1 {
                 return Err(DapError::Fatal(
                     "The number of supported HPKE KEMs must be 1".to_string(),
                 ));
@@ -107,8 +107,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
             let mut hpke_config_id = None;
             for it in self
-                .state
-                .config
+                .config()
                 .global
                 .gen_hpke_receiver_config_list(rand::random())
             {
@@ -219,7 +218,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
 
     fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.state.config.taskprov {
+            && match &self.config().taskprov {
                 Some(config) => config.leader_bearer_token == *token,
                 None => false,
             }
@@ -227,7 +226,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
 
     fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
-            && match &self.state.config.taskprov {
+            && match &self.config().taskprov {
                 Some(config) => config.collector_bearer_token == *token,
                 None => false,
             }
@@ -265,7 +264,7 @@ where
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.state.config.global
+        &self.config().global
     }
 
     fn taskprov_opt_in_decision(
@@ -299,7 +298,7 @@ where
         }
         let metadata_ref = metadata.unwrap();
         let taskprov_task_config = get_taskprov_task_config(
-            self.state.config.global.taskprov_version,
+            self.config().global.taskprov_version,
             task_id.as_ref(),
             metadata_ref,
         )?;
@@ -310,8 +309,7 @@ where
                 return Err(bad_request("taskprov is not allowed"));
             }
             let taskprov = self
-                .state
-                .config
+                .config()
                 .taskprov
                 .as_ref()
                 .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
@@ -319,7 +317,7 @@ where
             let taskprov_task_id = task_id.as_ref().clone();
             let task_config = DapTaskConfig::try_from_taskprov(
                 version,
-                self.state.config.global.taskprov_version,
+                self.config().global.taskprov_version,
                 &taskprov_task_id,
                 taskprov_task_config.unwrap(),
                 &taskprov.vdaf_verify_key_init,
@@ -497,7 +495,7 @@ where
             ));
             agg_store_request_bucket.push(bucket);
             for metadata in report_meta {
-                let durable_name = self.state.config.durable_name_report_store(
+                let durable_name = self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
                     metadata,
@@ -631,7 +629,7 @@ where
             .post(
                 BINDING_DAP_REPORTS_PENDING,
                 DURABLE_REPORTS_PENDING_PUT,
-                self.state.config.durable_name_report_store(
+                self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
                     &report.metadata,
@@ -892,7 +890,7 @@ where
         }
 
         let reqwest_req = self
-            .state
+            .isolate_state()
             .client
             .post(url.as_str())
             .body(payload)

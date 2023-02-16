@@ -319,13 +319,12 @@ impl DaphneWorkerConfig {
     }
 }
 
-/// Daphne-Worker state, used for handling a DAP request. Includes long-lived configuration,
-/// metrics, cached responses from KV, etc.
-pub(crate) struct DaphneWorkerState {
+/// Daphne-Worker per-isolate state, which may be used by multiple requests. Includes long-lived configuration,
+/// cached responses from KV, etc.
+pub(crate) struct DaphneWorkerIsolateState {
     pub(crate) config: DaphneWorkerConfig,
 
-    /// HTTP client to use for making requests to the Helper. This is only used if Daphne-Worker is
-    /// configured as the DAP Helper.
+    /// HTTP client to use for making requests.
     pub(crate) client: reqwest_wasm::Client,
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
@@ -340,6 +339,29 @@ pub(crate) struct DaphneWorkerState {
 
     /// Task list.
     tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
+}
+
+impl DaphneWorkerIsolateState {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let config = DaphneWorkerConfig::from_worker_env(env)?;
+
+        // TODO Configure this client to use HTTPS only, except if running in a test environment.
+        let client = reqwest_wasm::Client::new();
+
+        Ok(Self {
+            config,
+            client,
+            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
+            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+}
+
+/// Daphne-Worker per-request state.
+pub(crate) struct DaphneWorkerRequestState<'srv> {
+    pub(crate) isolate_state: &'srv DaphneWorkerIsolateState,
 
     /// Registry for Prometheus metrics collected while handling the request.
     #[allow(dead_code)]
@@ -349,36 +371,26 @@ pub(crate) struct DaphneWorkerState {
     pub(crate) metrics: DaphneWorkerMetrics,
 }
 
-impl DaphneWorkerState {
-    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
-        let config = DaphneWorkerConfig::from_worker_env(env)?;
-
-        // TODO Configure this client to use HTTPS only, except if running in a test environment.
-        let client = reqwest_wasm::Client::new();
-
+impl<'srv> DaphneWorkerRequestState<'srv> {
+    pub(crate) fn new(isolate_state: &'srv DaphneWorkerIsolateState) -> Result<Self> {
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
             .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
 
         Ok(Self {
-            config,
-            client,
-            hpke_receiver_configs: Arc::new(RwLock::new(HashMap::new())),
-            leader_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
-            tasks: Arc::new(RwLock::new(HashMap::new())),
+            isolate_state,
             prometheus_registry,
             metrics,
         })
     }
 
-    pub(crate) fn handler<'srv>(&'srv self, env: &'srv Env) -> DaphneWorker<'srv> {
+    pub(crate) fn handler(&'srv self, env: &'srv Env) -> DaphneWorker<'srv> {
         DaphneWorker { state: self, env }
     }
 
     /// If configured, gather metrics and push to Prometheus server.
     pub(crate) async fn maybe_push_metrics(&self) -> Result<()> {
-        if let Some(ref metrics_push_config) = self.config.metrics_push_config {
+        if let Some(ref metrics_push_config) = self.isolate_state.config.metrics_push_config {
             // Prepare text exposition of metrics.
             let mut buf = Vec::new();
             let encoder = prometheus::TextEncoder::new();
@@ -399,6 +411,7 @@ impl DaphneWorkerState {
             );
 
             let reqwest_resp = self
+                .isolate_state
                 .client
                 .post(metrics_push_config.server.as_str())
                 .body(text_metrics)
@@ -423,7 +436,7 @@ impl DaphneWorkerState {
 
 /// Daphne-Worker, used to handle a DAP request. Constructed from `DaphneWorkerState::handler()`.
 pub(crate) struct DaphneWorker<'srv> {
-    pub(crate) state: &'srv DaphneWorkerState,
+    pub(crate) state: &'srv DaphneWorkerRequestState<'srv>,
     env: &'srv Env,
 }
 
@@ -434,6 +447,14 @@ impl<'srv> DaphneWorker<'srv> {
 
     pub(crate) fn kv(&self) -> Result<KvStore> {
         self.env.kv(KV_BINDING_DAP_CONFIG)
+    }
+
+    pub(crate) fn config(&'srv self) -> &'srv DaphneWorkerConfig {
+        &self.state.isolate_state.config
+    }
+
+    pub(crate) fn isolate_state(&'srv self) -> &'srv DaphneWorkerIsolateState {
+        self.state.isolate_state
     }
 
     /// Set a key/value pair unless the key already exists. If the key exists, then return the current
@@ -520,7 +541,7 @@ impl<'srv> DaphneWorker<'srv> {
         hpke_receiver_kv_key: HpkeReceiverKvKey,
     ) -> Result<Option<GuardedHpkeReceiverConfig>> {
         self.kv_get_cached(
-            &self.state.hpke_receiver_configs,
+            &self.isolate_state().hpke_receiver_configs,
             KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
             Cow::Owned(hpke_receiver_kv_key),
         )
@@ -533,7 +554,7 @@ impl<'srv> DaphneWorker<'srv> {
         task_id: &'a Id,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
-            &self.state.leader_bearer_tokens,
+            &self.isolate_state().leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
             Cow::Borrowed(task_id),
         )
@@ -556,7 +577,7 @@ impl<'srv> DaphneWorker<'srv> {
         task_id: &'a Id,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
-            &self.state.collector_bearer_tokens,
+            &self.isolate_state().collector_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
             Cow::Borrowed(task_id),
         )
@@ -571,8 +592,12 @@ impl<'srv> DaphneWorker<'srv> {
     where
         'srv: 'req,
     {
-        self.kv_get_cached(&self.state.tasks, KV_KEY_PREFIX_TASK_CONFIG, task_id)
-            .await
+        self.kv_get_cached(
+            &self.isolate_state().tasks,
+            KV_KEY_PREFIX_TASK_CONFIG,
+            task_id,
+        )
+        .await
     }
 
     /// Define a task in KV
@@ -669,8 +694,8 @@ impl<'srv> DaphneWorker<'srv> {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response> {
-        if self.state.config.is_leader && !matches!(cmd.role, InternalTestRole::Leader)
-            || !self.state.config.is_leader && !matches!(cmd.role, InternalTestRole::Helper)
+        if self.config().is_leader && !matches!(cmd.role, InternalTestRole::Leader)
+            || !self.config().is_leader && !matches!(cmd.role, InternalTestRole::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -680,7 +705,7 @@ impl<'srv> DaphneWorker<'srv> {
 
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": format!("{}{}/", self.state.config.base_url.path(), version.as_ref()),
+            "endpoint": format!("{}{}/", self.config().base_url.path(), version.as_ref()),
         }))
     }
 
@@ -847,11 +872,11 @@ impl<'srv> DaphneWorker<'srv> {
     }
 
     pub(crate) fn least_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_sub(self.state.config.global.report_storage_epoch_duration)
+        now.saturating_sub(self.config().global.report_storage_epoch_duration)
     }
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_add(self.state.config.global.report_storage_max_future_time_skew)
+        now.saturating_add(self.config().global.report_storage_max_future_time_skew)
     }
 }
 
