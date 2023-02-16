@@ -152,7 +152,10 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 pub use crate::tracing_utils::initialize_tracing;
-use crate::{config::DaphneWorkerState, dap::dap_response_to_worker};
+use crate::{
+    config::{DaphneWorkerIsolateState, DaphneWorkerRequestState},
+    dap::dap_response_to_worker,
+};
 use daphne::{
     auth::BearerToken,
     constants,
@@ -206,7 +209,7 @@ pub struct DaphneWorkerRouter {
 /// is set. This value can be overrided by DAP_DEFAULT_RESPONSE_HTML.
 pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
-static STATE: OnceCell<DaphneWorkerState> = OnceCell::new();
+static ISOLATE_STATE: OnceCell<DaphneWorkerIsolateState> = OnceCell::new();
 
 impl DaphneWorkerRouter {
     /// HTTP request handler for Daphne-Worker.
@@ -232,9 +235,18 @@ impl DaphneWorkerRouter {
         // it's definitely ready for use even if the caller hasn't done anything.
         initialize_tracing(&env);
 
-        let state = STATE.get_or_try_init(|| DaphneWorkerState::from_worker_env(&env))?;
+        #[allow(unused_assignments)]
+        let mut uncached_isolate_state: Option<DaphneWorkerIsolateState> = None;
+        let shared_state = if env.var("DAP_NO_CACHE").is_ok() {
+            debug!("isolate state caching is disabled");
+            uncached_isolate_state = Some(DaphneWorkerIsolateState::from_worker_env(&env)?);
+            uncached_isolate_state.as_ref().unwrap()
+        } else {
+            ISOLATE_STATE.get_or_try_init(|| DaphneWorkerIsolateState::from_worker_env(&env))?
+        };
+        let state = DaphneWorkerRequestState::new(shared_state)?;
 
-        let router = Router::with_data(state)
+        let router = Router::with_data(&state)
             .get_async("/:version/hpke_config", |req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = daph.worker_request_to_dap(req).await?;
@@ -254,16 +266,16 @@ impl DaphneWorkerRouter {
                     .get("X-Daphne-Worker-Admin-Bearer-Token")?
                     .map(BearerToken::from);
 
-                if daph.state.config.admin_token.is_none() {
+                if daph.config().admin_token.is_none() {
                     return Response::error("admin not configured", 400);
                 }
 
-                if admin_token.is_none() || admin_token != daph.state.config.admin_token {
+                if admin_token.is_none() || admin_token != daph.config().admin_token {
                     return Response::error("missing or invalid bearer token for admin", 401);
                 }
 
                 let cmd: InternalTestAddTask = req.json().await?;
-                daph.internal_add_task(daph.state.config.default_version, cmd)
+                daph.internal_add_task(daph.config().default_version, cmd)
                     .instrument(info_span!("task"))
                     .await?;
                 Response::empty()
@@ -425,7 +437,7 @@ impl DaphneWorkerRouter {
                     |mut req, ctx| async move {
                         let daph = ctx.data.handler(&ctx.env);
                         let cmd: InternalTestEndpointForTask = req.json().await?;
-                        daph.internal_endpoint_for_task(daph.state.config.default_version, cmd)
+                        daph.internal_endpoint_for_task(daph.config().default_version, cmd)
                             .instrument(info_span!("endpoint_for_task"))
                             .await
                     },
@@ -444,7 +456,7 @@ impl DaphneWorkerRouter {
                 .post_async("/internal/test/add_task", |mut req, ctx| async move {
                     let daph = ctx.data.handler(&ctx.env);
                     let cmd: InternalTestAddTask = req.json().await?;
-                    daph.internal_add_task(daph.state.config.default_version, cmd)
+                    daph.internal_add_task(daph.config().default_version, cmd)
                         .instrument(info_span!("add_task"))
                         .await?;
                     Response::from_json(&serde_json::json!({
