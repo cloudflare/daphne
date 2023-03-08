@@ -27,11 +27,13 @@ use crate::{
             BatchCount, DURABLE_LEADER_BATCH_QUEUE_ASSIGN, DURABLE_LEADER_BATCH_QUEUE_REMOVE,
         },
         leader_col_job_queue::{
-            DURABLE_LEADER_COL_JOB_QUEUE_FINISH, DURABLE_LEADER_COL_JOB_QUEUE_GET,
-            DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, DURABLE_LEADER_COL_JOB_QUEUE_PUT,
+            CollectQueueRequest, DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
+            DURABLE_LEADER_COL_JOB_QUEUE_GET, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
+            DURABLE_LEADER_COL_JOB_QUEUE_PUT,
         },
         reports_pending::{
-            ReportsPendingResult, DURABLE_REPORTS_PENDING_GET, DURABLE_REPORTS_PENDING_PUT,
+            PendingReport, ReportsPendingResult, DURABLE_REPORTS_PENDING_GET,
+            DURABLE_REPORTS_PENDING_PUT,
         },
         reports_processed::DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
         BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_HELPER_STATE_STORE,
@@ -44,17 +46,18 @@ use crate::{
 use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
-    constants::{media_type_for, sender_for_media_type},
+    constants::sender_for_media_type,
     hpke::HpkeDecrypter,
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, PartialBatchSelector, Report,
-        ReportId, ReportMetadata, TransitionFailure,
+        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
+        PartialBatchSelector, Report, ReportId, ReportMetadata, TaskId, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::{bad_request, get_taskprov_task_config},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender, DapTaskConfig, DapVersion,
+    MetaAggregationJobId,
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
@@ -62,11 +65,8 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, warn};
 use worker::*;
-
-const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
-const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
 pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     let mut headers = Headers::new();
@@ -84,7 +84,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
     async fn get_hpke_config_for(
         &'srv self,
         version: DapVersion,
-        _task_id: Option<&Id>,
+        _task_id: Option<&TaskId>,
     ) -> std::result::Result<GuardedHpkeReceiverConfig<'srv>, DapError> {
         let kv_store = self.kv().map_err(dap_err)?;
         let keys = kv_store
@@ -155,7 +155,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
     async fn can_hpke_decrypt(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         config_id: u8,
     ) -> std::result::Result<bool, DapError> {
         let version = self.try_get_task_config(task_id).await?.as_ref().version;
@@ -171,7 +171,7 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
     async fn hpke_decrypt(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
@@ -203,14 +203,14 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
 
     async fn get_leader_bearer_token_for(
         &'srv self,
-        task_id: &'srv Id,
+        task_id: &'srv TaskId,
     ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
         self.get_leader_bearer_token(task_id).await.map_err(dap_err)
     }
 
     async fn get_collector_bearer_token_for(
         &'srv self,
-        task_id: &'srv Id,
+        task_id: &'srv TaskId,
     ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
         self.get_collector_bearer_token(task_id)
             .await
@@ -245,7 +245,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
 impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
     async fn authorize(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         media_type: &'static str,
         _payload: &[u8],
     ) -> std::result::Result<DaphneWorkerAuth, DapError> {
@@ -366,7 +366,7 @@ where
     async fn get_task_config_considering_taskprov(
         &'srv self,
         version: DapVersion,
-        task_id: Cow<'req, Id>,
+        task_id: Cow<'req, TaskId>,
         metadata: Option<&ReportMetadata>,
     ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
         let found = self
@@ -450,7 +450,7 @@ where
 
     async fn is_batch_overlapping(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
@@ -483,8 +483,8 @@ where
 
     async fn batch_exists(
         &self,
-        task_id: &Id,
-        batch_id: &Id,
+        task_id: &TaskId,
+        batch_id: &BatchId,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
 
@@ -507,7 +507,7 @@ where
 
     async fn put_out_shares(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
     ) -> std::result::Result<(), DapError> {
@@ -534,7 +534,7 @@ where
 
     async fn get_agg_share(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
@@ -561,7 +561,7 @@ where
 
     async fn check_early_reject<'b>(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
     ) -> std::result::Result<HashMap<ReportId, TransitionFailure>, DapError> {
@@ -661,7 +661,7 @@ where
 
     async fn mark_collected(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
@@ -683,23 +683,13 @@ where
         Ok(())
     }
 
-    async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError> {
+    async fn current_batch(&self, task_id: &TaskId) -> std::result::Result<BatchId, DapError> {
         self.internal_current_batch(task_id).await
     }
 
     fn metrics(&self) -> &DaphneMetrics {
         &self.state.metrics.daphne
     }
-}
-
-fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
-    // The task id MUST BE the first 32 bytes of the serialized report; if this
-    // needs to change in the future, then we must change the DO serialization
-    // format to contain a version.
-    let id = Id(report[..32]
-        .try_into()
-        .map_err(|_| DapError::fatal("serialize report is too short"))?);
-    Ok(id)
 }
 
 #[async_trait(?Send)]
@@ -709,10 +699,19 @@ where
 {
     type ReportSelector = DaphneWorkerReportSelector;
 
-    async fn put_report(&self, report: &Report) -> std::result::Result<(), DapError> {
-        let task_config = self.try_get_task_config(&report.task_id).await?;
-        let task_id_hex = report.task_id.to_hex();
-        let report_hex = hex::encode(report.get_encoded_with_param(&task_config.as_ref().version));
+    async fn put_report(
+        &self,
+        report: &Report,
+        task_id: &TaskId,
+    ) -> std::result::Result<(), DapError> {
+        let task_config = self.try_get_task_config(task_id).await?;
+        let task_id_hex = task_id.to_hex();
+        let version = task_config.as_ref().version;
+        let pending_report = PendingReport {
+            version,
+            task_id: task_id.clone(),
+            report_hex: hex::encode(report.get_encoded_with_param(&version)),
+        };
         let res: ReportsPendingResult = self
             .durable()
             .post(
@@ -721,9 +720,9 @@ where
                 self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
-                    &report.metadata,
+                    &report.report_metadata,
                 ),
-                &report_hex,
+                &pending_report,
             )
             .await
             .map_err(dap_err)?;
@@ -744,7 +743,7 @@ where
     async fn get_reports(
         &self,
         report_sel: &DaphneWorkerReportSelector,
-    ) -> std::result::Result<HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>>, DapError>
+    ) -> std::result::Result<HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>>, DapError>
     {
         let durable = self.durable();
         // Read at most `report_sel.max_buckets` buckets from the agg job queue. The result is ordered
@@ -766,9 +765,9 @@ where
         // by task.
         //
         // TODO Figure out if we can safely handle each instance in parallel.
-        let mut reports_per_task: HashMap<Id, Vec<Report>> = HashMap::new();
+        let mut reports_per_task: HashMap<TaskId, Vec<Report>> = HashMap::new();
         for reports_pending_id_hex in res.into_iter() {
-            let reports_from_durable: Vec<String> = durable
+            let reports_from_durable: Vec<PendingReport> = durable
                 .post_by_id_hex(
                     BINDING_DAP_REPORTS_PENDING,
                     DURABLE_REPORTS_PENDING_GET,
@@ -778,23 +777,26 @@ where
                 .await
                 .map_err(dap_err)?;
 
-            for report_hex in reports_from_durable {
-                let report_bytes = hex::decode(&report_hex).map_err(|_| {
+            for pending_report in reports_from_durable {
+                let report_bytes = hex::decode(&pending_report.report_hex).map_err(|_| {
                     DapError::fatal("response from ReportsPending is not valid hex")
                 })?;
-                let task_id = task_id_from_report(&report_bytes)?;
-                let task_config = self.try_get_task_config(&task_id).await?;
-                let report =
-                    Report::get_decoded_with_param(&task_config.as_ref().version, &report_bytes)?;
-                if let Some(reports) = reports_per_task.get_mut(&report.task_id) {
+
+                let version = self
+                    .try_get_task_config(&pending_report.task_id)
+                    .await?
+                    .as_ref()
+                    .version;
+                let report = Report::get_decoded_with_param(&version, &report_bytes)?;
+                if let Some(reports) = reports_per_task.get_mut(&pending_report.task_id) {
                     reports.push(report);
                 } else {
-                    reports_per_task.insert(report.task_id.clone(), vec![report]);
+                    reports_per_task.insert(pending_report.task_id.clone(), vec![report]);
                 }
             }
         }
 
-        let mut reports_per_task_part: HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>> =
+        let mut reports_per_task_part: HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>> =
             HashMap::new();
         for (task_id, mut reports) in reports_per_task.into_iter() {
             let task_config = self
@@ -857,19 +859,25 @@ where
 
     async fn init_collect_job(
         &self,
-        collect_req: &CollectReq,
+        task_id: &TaskId,
+        collect_job_id: &Option<CollectionJobId>,
+        collect_req: &CollectionReq,
     ) -> std::result::Result<Url, DapError> {
-        let task_config = self.try_get_task_config(&collect_req.task_id).await?;
-
+        let task_config = self.try_get_task_config(task_id).await?;
         // Try to put the request into collection job queue. If the request is overlapping
         // with past requests, then abort.
-        let collect_id: Id = self
+        let collect_queue_req = CollectQueueRequest {
+            collect_req: collect_req.clone(),
+            task_id: task_id.clone(),
+            collect_job_id: collect_job_id.clone(),
+        };
+        let collect_id: CollectionJobId = self
             .durable()
             .post(
                 BINDING_DAP_LEADER_COL_JOB_QUEUE,
                 DURABLE_LEADER_COL_JOB_QUEUE_PUT,
                 durable_name_queue(0),
-                &collect_req,
+                &collect_queue_req,
             )
             .await
             .map_err(dap_err)?;
@@ -877,10 +885,11 @@ where
 
         let url = task_config.as_ref().leader_url.clone();
 
+        // Note that we always return the draft02 URI, but draft04 and later ignore it.
         let collect_uri = url
             .join(&format!(
                 "collect/task/{}/req/{}",
-                collect_req.task_id.to_base64url(),
+                task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))
             .map_err(|e| DapError::Fatal(e.to_string()))?;
@@ -890,8 +899,8 @@ where
 
     async fn poll_collect_job(
         &self,
-        _task_id: &Id,
-        collect_id: &Id,
+        task_id: &TaskId,
+        collect_id: &CollectionJobId,
     ) -> std::result::Result<DapCollectJob, DapError> {
         let res: DapCollectJob = self
             .durable()
@@ -899,7 +908,7 @@ where
                 BINDING_DAP_LEADER_COL_JOB_QUEUE,
                 DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
                 durable_name_queue(0),
-                &collect_id,
+                (&task_id, &collect_id),
             )
             .await
             .map_err(dap_err)?;
@@ -908,8 +917,8 @@ where
 
     async fn get_pending_collect_jobs(
         &self,
-    ) -> std::result::Result<Vec<(Id, CollectReq)>, DapError> {
-        let res: Vec<(Id, CollectReq)> = self
+    ) -> std::result::Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError> {
+        let res: Vec<(TaskId, CollectionJobId, CollectionReq)> = self
             .durable()
             .get(
                 BINDING_DAP_LEADER_COL_JOB_QUEUE,
@@ -923,9 +932,9 @@ where
 
     async fn finish_collect_job(
         &self,
-        task_id: &Id,
-        collect_id: &Id,
-        collect_resp: &CollectResp,
+        task_id: &TaskId,
+        collect_id: &CollectionJobId,
+        collect_resp: &Collection,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         let durable = self.durable();
@@ -948,7 +957,7 @@ where
                 BINDING_DAP_LEADER_COL_JOB_QUEUE,
                 DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
                 durable_name_queue(0),
-                (collect_id, collect_resp),
+                (task_id, collect_id, collect_resp),
             )
             .await
             .map_err(dap_err)?;
@@ -959,64 +968,14 @@ where
         &self,
         req: DapRequest<DaphneWorkerAuth>,
     ) -> std::result::Result<DapResponse, DapError> {
-        let (payload, url) = (req.payload, req.url);
+        self.send_http(req, false).await
+    }
 
-        let mut headers = reqwest_wasm::header::HeaderMap::new();
-        if let Some(content_type) = req.media_type {
-            headers.insert(
-                reqwest_wasm::header::CONTENT_TYPE,
-                reqwest_wasm::header::HeaderValue::from_str(content_type)
-                    .map_err(|e| DapError::Fatal(e.to_string()))?,
-            );
-        }
-
-        if let Some(DaphneWorkerAuth::BearerToken(bearer_token)) = req.sender_auth {
-            headers.insert(
-                reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
-                reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref())
-                    .map_err(|e| DapError::Fatal(e.to_string()))?,
-            );
-        }
-
-        let reqwest_req = self
-            .isolate_state()
-            .client
-            .post(url.as_str())
-            .body(payload)
-            .headers(headers);
-
-        let start = Date::now().as_millis();
-        let reqwest_resp = reqwest_req
-            .send()
-            .await
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
-        let end = Date::now().as_millis();
-        info!("request to {} completed in {}ms", url, end - start);
-        let status = reqwest_resp.status();
-        if status == 200 {
-            // Translate the reqwest response into a Worker response.
-            let content_type = reqwest_resp
-                .headers()
-                .get(reqwest_wasm::header::CONTENT_TYPE)
-                .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
-                .to_str()
-                .map_err(|e| DapError::Fatal(e.to_string()))?;
-            let media_type = media_type_for(content_type);
-
-            let payload = reqwest_resp
-                .bytes()
-                .await
-                .map_err(|e| DapError::Fatal(e.to_string()))?
-                .to_vec();
-
-            Ok(DapResponse {
-                payload,
-                media_type,
-            })
-        } else {
-            error!("{}: request failed: {:?}", url, reqwest_resp);
-            Err(DapError::fatal(INT_ERR_PEER_ABORT))
-        }
+    async fn send_http_put(
+        &self,
+        req: DapRequest<DaphneWorkerAuth>,
+    ) -> std::result::Result<DapResponse, DapError> {
+        self.send_http(req, true).await
     }
 }
 
@@ -1027,8 +986,8 @@ where
 {
     async fn put_helper_state(
         &self,
-        task_id: &Id,
-        agg_job_id: &Id,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
         helper_state: &DapHelperState,
     ) -> std::result::Result<(), DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
@@ -1047,8 +1006,8 @@ where
 
     async fn get_helper_state(
         &self,
-        task_id: &Id,
-        agg_job_id: &Id,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
     ) -> std::result::Result<Option<DapHelperState>, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         let res: Option<String> = self

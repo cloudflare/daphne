@@ -8,14 +8,15 @@ use crate::{
     constants,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
-        BatchSelector, CollectReq, CollectResp, HpkeCiphertext, HpkeConfig, Id,
-        PartialBatchSelector, Report, ReportId, ReportMetadata, Time, TransitionFailure,
+        AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
+        Draft02AggregationJobId, HpkeCiphertext, HpkeConfig, PartialBatchSelector, Report,
+        ReportId, ReportMetadata, TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov, DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
     DapGlobalConfig, DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
-    DapTaskConfig, DapVersion,
+    DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -31,9 +32,28 @@ use std::{
 };
 use url::Url;
 
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub(crate) enum MetaAggregationJobIdOwned {
+    Draft02(Draft02AggregationJobId),
+    Draft04(AggregationJobId),
+}
+
+impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
+    fn from(agg_job_id: &MetaAggregationJobId<'_>) -> Self {
+        match agg_job_id {
+            MetaAggregationJobId::Draft02(agg_job_id) => {
+                Self::Draft02(agg_job_id.clone().into_owned())
+            }
+            MetaAggregationJobId::Draft04(agg_job_id) => {
+                Self::Draft04(agg_job_id.clone().into_owned())
+            }
+        }
+    }
+}
+
 #[derive(Eq, Hash, PartialEq)]
 pub(crate) enum DapBatchBucketOwned {
-    FixedSize { batch_id: Id },
+    FixedSize { batch_id: BatchId },
     TimeInterval { batch_window: Time },
 }
 
@@ -62,18 +82,18 @@ impl<'a> DapBatchBucket<'a> {
     }
 }
 
-pub(crate) struct MockAggregatorReportSelector(pub(crate) Id);
+pub(crate) struct MockAggregatorReportSelector(pub(crate) TaskId);
 
 pub(crate) struct MockAggregator {
     pub(crate) global_config: DapGlobalConfig,
-    pub(crate) tasks: Arc<Mutex<HashMap<Id, DapTaskConfig>>>,
+    pub(crate) tasks: Arc<Mutex<HashMap<TaskId, DapTaskConfig>>>,
     pub(crate) hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub(crate) leader_token: BearerToken,
     pub(crate) collector_token: Option<BearerToken>, // Not set by Helper
-    pub(crate) report_store: Arc<Mutex<HashMap<Id, ReportStore>>>,
-    pub(crate) leader_state_store: Arc<Mutex<HashMap<Id, LeaderState>>>,
+    pub(crate) report_store: Arc<Mutex<HashMap<TaskId, ReportStore>>>,
+    pub(crate) leader_state_store: Arc<Mutex<HashMap<TaskId, LeaderState>>>,
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    pub(crate) agg_store: Arc<Mutex<HashMap<Id, HashMap<DapBatchBucketOwned, AggStore>>>>,
+    pub(crate) agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucketOwned, AggStore>>>>,
     pub(crate) collector_hpke_config: HpkeConfig,
     pub(crate) taskprov_vdaf_verify_key_init: [u8; 32],
     pub(crate) metrics: DaphneMetrics,
@@ -89,7 +109,7 @@ impl MockAggregator {
     /// 2) the report has been submitted by the client in the past.
     async fn check_report_early_fail(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         bucket: &DapBatchBucketOwned,
         metadata: &ReportMetadata,
     ) -> Option<TransitionFailure> {
@@ -123,10 +143,14 @@ impl MockAggregator {
     /// Assign the report to a bucket.
     ///
     /// TODO(cjpatton) Figure out if we can avoid returning and owned thing here.
-    async fn assign_report_to_bucket(&self, report: &Report) -> Option<DapBatchBucketOwned> {
+    async fn assign_report_to_bucket(
+        &self,
+        report: &Report,
+        task_id: &TaskId,
+    ) -> Option<DapBatchBucketOwned> {
         let mut rng = thread_rng();
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(&report.task_id))
+            .get_task_config_for(Cow::Borrowed(task_id))
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
@@ -138,7 +162,7 @@ impl MockAggregator {
                     .leader_state_store
                     .lock()
                     .expect("leader_state_store: failed to lock");
-                let leader_state_store = guard.entry(report.task_id.clone()).or_default();
+                let leader_state_store = guard.entry(task_id.clone()).or_default();
 
                 // Assign the report to the first unsaturated batch.
                 for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
@@ -151,7 +175,7 @@ impl MockAggregator {
                 }
 
                 // No unsaturated batch exists, so create a new batch.
-                let batch_id = Id(rng.gen());
+                let batch_id = BatchId(rng.gen());
                 leader_state_store
                     .batch_queue
                     .push_back((batch_id.clone(), 1));
@@ -161,14 +185,18 @@ impl MockAggregator {
             // For time-interval queries, the bucket is the batch window computed by truncating the
             // report timestamp.
             DapQueryConfig::TimeInterval => Some(DapBatchBucketOwned::TimeInterval {
-                batch_window: task_config.truncate_time(report.metadata.time),
+                batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
             }),
         }
     }
 
     /// Return the ID of the batch currently being filled with reports. Panics unless the task is
     /// configured for fixed-size queries.
-    pub(crate) fn current_batch_id(&self, task_id: &Id, task_config: &DapTaskConfig) -> Option<Id> {
+    pub(crate) fn current_batch_id(
+        &self,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+    ) -> Option<BatchId> {
         // Calling current_batch() is only well-defined for fixed-size tasks.
         assert_matches!(task_config.query, DapQueryConfig::FixedSize { .. });
 
@@ -187,7 +215,7 @@ impl MockAggregator {
             .map(|(batch_id, _report_count)| batch_id)
     }
 
-    pub(crate) async fn unchecked_get_task_config(&self, task_id: &Id) -> DapTaskConfig {
+    pub(crate) async fn unchecked_get_task_config(&self, task_id: &TaskId) -> DapTaskConfig {
         self.get_task_config_for(Cow::Borrowed(task_id))
             .await
             .expect("encountered unexpected error")
@@ -201,14 +229,14 @@ impl<'a> BearerTokenProvider<'a> for MockAggregator {
 
     async fn get_leader_bearer_token_for(
         &'a self,
-        _task_id: &'a Id,
+        _task_id: &'a TaskId,
     ) -> Result<Option<&'a BearerToken>, DapError> {
         Ok(Some(&self.leader_token))
     }
 
     async fn get_collector_bearer_token_for(
         &'a self,
-        _task_id: &'a Id,
+        _task_id: &'a TaskId,
     ) -> Result<Option<&'a BearerToken>, DapError> {
         if let Some(ref collector_token) = self.collector_token {
             Ok(Some(collector_token))
@@ -241,7 +269,7 @@ impl<'a> HpkeDecrypter<'a> for MockAggregator {
     async fn get_hpke_config_for(
         &'a self,
         _version: DapVersion,
-        task_id: Option<&Id>,
+        task_id: Option<&TaskId>,
     ) -> Result<&'a HpkeConfig, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
             return Err(DapError::fatal("emtpy HPKE receiver config list"));
@@ -260,13 +288,13 @@ impl<'a> HpkeDecrypter<'a> for MockAggregator {
         Ok(&self.hpke_receiver_config_list[0].config)
     }
 
-    async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {
+    async fn can_hpke_decrypt(&self, _task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
         Ok(self.get_hpke_receiver_config_for(config_id).is_some())
     }
 
     async fn hpke_decrypt(
         &self,
-        _task_id: &Id,
+        _task_id: &TaskId,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
@@ -284,7 +312,7 @@ impl<'a> HpkeDecrypter<'a> for MockAggregator {
 impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         media_type: &'static str,
         _payload: &[u8],
     ) -> Result<BearerToken, DapError> {
@@ -320,7 +348,7 @@ where
     async fn get_task_config_considering_taskprov(
         &'srv self,
         version: DapVersion,
-        task_id: Cow<'req, Id>,
+        task_id: Cow<'req, TaskId>,
         metadata: Option<&ReportMetadata>,
     ) -> Result<Option<DapTaskConfig>, DapError> {
         let taskprov_version = self.global_config.taskprov_version;
@@ -374,7 +402,7 @@ where
 
     async fn is_batch_overlapping(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
         let task_config = self
@@ -400,7 +428,7 @@ where
         Ok(false)
     }
 
-    async fn batch_exists(&self, task_id: &Id, batch_id: &Id) -> Result<bool, DapError> {
+    async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
         let guard = self.agg_store.lock().expect("agg_store: failed to lock");
         if let Some(agg_store) = guard.get(task_id) {
             Ok(agg_store
@@ -415,7 +443,7 @@ where
 
     async fn put_out_shares(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
     ) -> Result<(), DapError> {
@@ -439,7 +467,7 @@ where
 
     async fn get_agg_share(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
         let task_config = self
@@ -467,7 +495,7 @@ where
 
     async fn check_early_reject<'b>(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
     ) -> Result<HashMap<ReportId, TransitionFailure>, DapError> {
@@ -503,7 +531,7 @@ where
 
     async fn mark_collected(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
         let task_config = self.unchecked_get_task_config(task_id).await;
@@ -519,7 +547,7 @@ where
         Ok(())
     }
 
-    async fn current_batch(&self, task_id: &Id) -> std::result::Result<Id, DapError> {
+    async fn current_batch(&self, task_id: &TaskId) -> std::result::Result<BatchId, DapError> {
         let task_config = self.unchecked_get_task_config(task_id).await;
         if let Some(id) = self.current_batch_id(task_id, &task_config) {
             Ok(id)
@@ -542,13 +570,13 @@ where
 {
     async fn put_helper_state(
         &self,
-        task_id: &Id,
-        agg_job_id: &Id,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
         helper_state: &DapHelperState,
     ) -> Result<(), DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: task_id.clone(),
-            agg_job_id: agg_job_id.clone(),
+            agg_job_id_owned: agg_job_id.into(),
         };
 
         let mut helper_state_store_mutex_guard = self
@@ -573,12 +601,12 @@ where
 
     async fn get_helper_state(
         &self,
-        task_id: &Id,
-        agg_job_id: &Id,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
     ) -> Result<Option<DapHelperState>, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: task_id.clone(),
-            agg_job_id: agg_job_id.clone(),
+            agg_job_id_owned: agg_job_id.into(),
         };
 
         let mut helper_state_store_mutex_guard = self
@@ -607,15 +635,15 @@ where
 {
     type ReportSelector = MockAggregatorReportSelector;
 
-    async fn put_report(&self, report: &Report) -> Result<(), DapError> {
+    async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
         let bucket = self
-            .assign_report_to_bucket(report)
+            .assign_report_to_bucket(report, task_id)
             .await
             .expect("could not determine batch for report");
 
         // Check whether Report has been collected or replayed.
         if let Some(transition_failure) = self
-            .check_report_early_fail(&report.task_id, bucket.borrow(), &report.metadata)
+            .check_report_early_fail(task_id, bucket.borrow(), &report.report_metadata)
             .await
         {
             return Err(DapError::Transition(transition_failure));
@@ -627,7 +655,7 @@ where
             .lock()
             .expect("report_store: failed to lock");
         let queue = guard
-            .get_mut(&report.task_id)
+            .get_mut(task_id)
             .expect("report_store: unrecognized task")
             .pending
             .entry(bucket)
@@ -639,7 +667,7 @@ where
     async fn get_reports(
         &self,
         report_sel: &MockAggregatorReportSelector,
-    ) -> Result<HashMap<Id, HashMap<PartialBatchSelector, Vec<Report>>>, DapError> {
+    ) -> Result<HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>>, DapError> {
         let task_id = &report_sel.0;
         let task_config = self.unchecked_get_task_config(task_id).await;
         let mut guard = self
@@ -687,10 +715,15 @@ where
     }
 
     // Called after receiving a CollectReq from Collector.
-    async fn init_collect_job(&self, collect_req: &CollectReq) -> Result<Url, DapError> {
+    async fn init_collect_job(
+        &self,
+        task_id: &TaskId,
+        collect_job_id: &Option<CollectionJobId>,
+        collect_req: &CollectionReq,
+    ) -> Result<Url, DapError> {
         let mut rng = thread_rng();
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(&collect_req.task_id))
+            .get_task_config_for(Cow::Borrowed(task_id))
             .await?
             .ok_or_else(|| DapError::fatal("task not found"))?;
 
@@ -701,20 +734,20 @@ where
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         // Construct a new Collect URI for this CollectReq.
-        let collect_id = Id(rng.gen());
+        let collect_id = collect_job_id
+            .as_ref()
+            .map_or_else(|| CollectionJobId(rng.gen()), |cid| cid.clone());
         let collect_uri = task_config
             .leader_url
             .join(&format!(
                 "collect/task/{}/req/{}",
-                collect_req.task_id.to_base64url(),
+                task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))
             .map_err(|e| DapError::Fatal(e.to_string()))?;
 
         // Store Collect ID and CollectReq into LeaderState.
-        let leader_state = leader_state_store
-            .entry(collect_req.task_id.clone())
-            .or_default();
+        let leader_state = leader_state_store.entry(task_id.clone()).or_default();
         leader_state.collect_ids.push_back(collect_id.clone());
         let collect_job_state = CollectJobState::Pending(collect_req.clone());
         leader_state
@@ -727,8 +760,8 @@ where
     // Called to retrieve completed CollectResp at the request of Collector.
     async fn poll_collect_job(
         &self,
-        task_id: &Id,
-        collect_id: &Id,
+        task_id: &TaskId,
+        collect_id: &CollectionJobId,
     ) -> Result<DapCollectJob, DapError> {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
@@ -750,7 +783,9 @@ where
     }
 
     // Called to retrieve pending CollectReq.
-    async fn get_pending_collect_jobs(&self) -> Result<Vec<(Id, CollectReq)>, DapError> {
+    async fn get_pending_collect_jobs(
+        &self,
+    ) -> Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError> {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
@@ -758,13 +793,13 @@ where
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let mut res = Vec::new();
-        for (_task_id, leader_state) in leader_state_store.iter() {
+        for (task_id, leader_state) in leader_state_store.iter() {
             // Iterate over collect IDs and copy them and their associated requests to the response.
             for collect_id in leader_state.collect_ids.iter() {
                 if let CollectJobState::Pending(collect_req) =
                     leader_state.collect_jobs.get(collect_id).unwrap()
                 {
-                    res.push((collect_id.clone(), collect_req.clone()));
+                    res.push((task_id.clone(), collect_id.clone(), collect_req.clone()));
                 }
             }
         }
@@ -773,9 +808,9 @@ where
 
     async fn finish_collect_job(
         &self,
-        task_id: &Id,
-        collect_id: &Id,
-        collect_resp: &CollectResp,
+        task_id: &TaskId,
+        collect_id: &CollectionJobId,
+        collect_resp: &Collection,
     ) -> Result<(), DapError> {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
@@ -826,7 +861,9 @@ where
             .media_type
             .expect("tried to send request without media type")
         {
-            constants::MEDIA_TYPE_AGG_INIT_REQ | constants::MEDIA_TYPE_AGG_CONT_REQ => Ok(self
+            constants::MEDIA_TYPE_AGG_INIT_REQ
+            | constants::DRAFT02_MEDIA_TYPE_AGG_INIT_REQ
+            | constants::MEDIA_TYPE_AGG_CONT_REQ => Ok(self
                 .peer
                 .as_ref()
                 .expect("peer not configured")
@@ -843,13 +880,31 @@ where
             s => unreachable!("unhandled media type: {}", s),
         }
     }
+
+    async fn send_http_put(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
+        match req
+            .media_type
+            .expect("tried to send request without media type")
+        {
+            constants::MEDIA_TYPE_AGG_INIT_REQ | constants::DRAFT02_MEDIA_TYPE_AGG_INIT_REQ => {
+                Ok(self
+                    .peer
+                    .as_ref()
+                    .expect("peer not configured")
+                    .http_post_aggregate(&req)
+                    .await
+                    .expect("peer aborted unexpectedly"))
+            }
+            s => unreachable!("unhandled media type: {}", s),
+        }
+    }
 }
 
 /// Information associated to a certain helper state for a given task ID and aggregate job ID.
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub(crate) struct HelperStateInfo {
-    task_id: Id,
-    agg_job_id: Id,
+    task_id: TaskId,
+    agg_job_id_owned: MetaAggregationJobIdOwned,
 }
 
 /// Stores the reports received from Clients.
@@ -861,8 +916,8 @@ pub(crate) struct ReportStore {
 
 /// Stores the state of the collect job.
 pub(crate) enum CollectJobState {
-    Pending(CollectReq),
-    Processed(CollectResp),
+    Pending(CollectionReq),
+    Processed(Collection),
 }
 
 /// LeaderState keeps track of the following:
@@ -870,9 +925,9 @@ pub(crate) enum CollectJobState {
 /// * The state of the collect job associated to the Collect ID.
 #[derive(Default)]
 pub(crate) struct LeaderState {
-    collect_ids: VecDeque<Id>,
-    collect_jobs: HashMap<Id, CollectJobState>,
-    batch_queue: VecDeque<(Id, u64)>, // Batch ID, batch size
+    collect_ids: VecDeque<CollectionJobId>,
+    collect_jobs: HashMap<CollectionJobId, CollectJobState>,
+    batch_queue: VecDeque<(BatchId, u64)>, // Batch ID, batch size
 }
 
 /// AggStore keeps track of the following:
@@ -897,7 +952,7 @@ pub(crate) struct AggStore {
 //
 // and
 //
-//     something_draft03
+//     something_draft04
 //
 // that called something(version) with the appropriate version.
 //
@@ -921,7 +976,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             test_version! { $fname, Draft02 }
-            test_version! { $fname, Draft03 }
+            test_version! { $fname, Draft04 }
         )*
     };
 }
@@ -943,7 +998,7 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             async_test_version! { $fname, Draft02 }
-            async_test_version! { $fname, Draft03 }
+            async_test_version! { $fname, Draft04 }
         )*
     };
 }

@@ -103,7 +103,7 @@ async fn janus_helper() {
     assert_eq!(agg_telem.reports_aggregated, 0);
 
     // Get the collect URI.
-    let collect_req = daphne::messages::CollectReq {
+    let collect_req = daphne::messages::CollectionReq {
         task_id: t.task_id.clone(),
         query: daphne::messages::Query::TimeInterval {
             batch_interval: batch_interval.clone(),
@@ -124,7 +124,7 @@ async fn janus_helper() {
     let decrypter: daphne::hpke::HpkeReceiverConfig =
         serde_json::from_str(COLLECTOR_HPKE_RECEIVER_CONFIG).unwrap();
     let collect_resp =
-        daphne::messages::CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+        daphne::messages::Collection::get_decoded(&resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
         .task_config
         .vdaf

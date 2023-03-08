@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{config::DaphneWorkerConfig, durable::state_get, initialize_tracing, int_err};
-use daphne::{messages::Id, DapVersion};
+use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
 use tracing::{trace, warn};
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
     version: &DapVersion,
-    task_id: &Id,
-    agg_job_id: &Id,
+    task_id: &TaskId,
+    agg_job_id: &MetaAggregationJobId,
 ) -> String {
     format!(
         "{}/task/{}/agg_job/{}",

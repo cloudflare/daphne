@@ -7,13 +7,14 @@ use crate::{
     initialize_tracing, int_err,
 };
 use daphne::{
-    messages::{CollectReq, CollectResp, Id},
+    messages::{Collection, CollectionJobId, CollectionReq, TaskId},
     DapCollectJob, DapVersion,
 };
 use prio::{
     codec::ParameterizedEncode,
-    vdaf::prg::{Prg, PrgAes128, SeedStream},
+    vdaf::prg::{Prg, PrgSha3, SeedStream},
 };
+use serde::{Deserialize, Serialize};
 use worker::*;
 
 const PENDING_PREFIX: &str = "pending";
@@ -25,6 +26,14 @@ pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_FINISH: &str =
     "/internal/do/leader_col_job_queue/finish";
 pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT: &str =
     "/internal/do/leader_col_job_queue/get_result";
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct CollectQueueRequest {
+    pub collect_req: CollectionReq,
+    pub task_id: TaskId,
+    pub collect_job_id: Option<CollectionJobId>,
+}
 
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
@@ -39,10 +48,10 @@ pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT: &str =
 /// The schema for data stored in instances of this DO is as follows:
 ///
 /// ```text
-/// [Pending Lookup ID] pending/id/<collect_id> -> String (reference to queue element)
+/// [Pending Lookup ID] pending/id/<collection_job_id> -> String (reference to queue element)
 /// [Pending queue]     pending/next_ordinal -> u64
-/// [Pending queue]     pending/item/order/<order> -> (Id, CollectReq)
-/// [Processed]         processed/<collect_id> -> CollectResp
+/// [Pending queue]     pending/item/order/<order> -> (CollectionJobId, CollectReq)
+/// [Processed]         processed/<collection_job_id> -> CollectResp
 /// ```
 ///
 /// Note that the queue ordinal format is inherited from [`DurableOrdered::new_strictly_ordered`].
@@ -81,55 +90,61 @@ impl DurableObject for LeaderCollectionJobQueue {
             // Input: `collect_req: CollectReq`
             // Output: `Id` (collect job ID)
             (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
-                let collect_req: CollectReq = req.json().await?;
-
-                // Compute the collect job ID, used to derive the collect URI for this request.
-                // This value is computed by applying a pseudorandom function to the request. This
-                // has two desirable properties. First, it makes the collect URI unpredictable,
-                // which prevents clients from enumerating collect URIs. Second, it provides a
-                // stable map from requests to URIs, which prevents us from processing the same
-                // collect request more than once.
-                //
-                // We are serializing the collect_req into binary, and for now we assume the
-                // version is always Draf03 since that works for both Draft02 and Draft03, but
-                // if this structure changes further, then version information will need to be
-                // added to this request.
-                let collect_req_bytes = collect_req.get_encoded_with_param(&DapVersion::Draft03);
-                let mut collect_id_bytes = [0; 32];
-                PrgAes128::seed_stream(
-                    self.config.collect_id_key.as_ref().unwrap(),
-                    &collect_req_bytes,
-                )
-                .fill(&mut collect_id_bytes);
-                let collect_id = Id(collect_id_bytes);
-                let collect_id_hex = collect_id.to_hex();
+                let collect_queue_req: CollectQueueRequest = req.json().await?;
+                let collection_job_id: CollectionJobId =
+                    if let Some(cid) = &collect_queue_req.collect_job_id {
+                        cid.clone()
+                    } else {
+                        // draft02 legacy: Compute the collect job ID, used to derive the collect
+                        // URI for this request. This value is computed by applying a pseudorandom
+                        // function to the request. This has two desirable properties. First, it
+                        // makes the collect URI unpredictable, which prevents clients from
+                        // enumerating collect URIs. Second, it provides a stable map from requests
+                        // to URIs, which prevents us from processing the same collect request more
+                        // than once.
+                        let collect_req_bytes = collect_queue_req
+                            .collect_req
+                            .get_encoded_with_param(&DapVersion::Draft02);
+                        let mut collection_job_id_bytes = [0; 16];
+                        PrgSha3::seed_stream(
+                            self.config.collection_job_id_key.as_ref().unwrap(),
+                            b"collection job id",
+                            &collect_req_bytes,
+                        )
+                        .fill(&mut collection_job_id_bytes);
+                        CollectionJobId(collection_job_id_bytes)
+                    };
 
                 // If the the request is new, then put it in the job queue.
-                let pending_key = format!("pending/id/{collect_id_hex}");
+                let pending_key = pending_key(&collect_queue_req.task_id, &collection_job_id);
+                let processed_key = processed_key(&collect_queue_req.task_id, &collection_job_id);
                 let pending: bool = state_get_or_default(&self.state, &pending_key).await?;
-                let processed: Option<CollectResp> =
-                    state_get(&self.state, &format!("{PROCESSED_PREFIX}/{collect_id_hex}")).await?;
+                let processed: Option<Collection> = state_get(&self.state, &processed_key).await?;
                 if processed.is_none() && !pending {
                     let queued = DurableOrdered::new_strictly_ordered(
                         &self.state,
-                        (collect_id, collect_req),
+                        (
+                            collect_queue_req.task_id,
+                            collection_job_id.clone(),
+                            collect_queue_req.collect_req,
+                        ),
                         PENDING_PREFIX,
                     )
                     .await?;
                     queued.put(&self.state).await?;
                     self.state
                         .storage()
-                        .put(&lookup_key(&collect_id_hex), &queued.key())
+                        .put(&pending_key, &queued.key())
                         .await?;
                 }
-                Response::from_json(&collect_id_hex)
+                Response::from_json(&collection_job_id.to_hex())
             }
 
             // Get the list of pending collection jobs (oldest jobs first).
             //
             // Output: `Vec<(Id, CollectReq)>`
             (DURABLE_LEADER_COL_JOB_QUEUE_GET, Method::Get) => {
-                let queue: Vec<(Id, CollectReq)> =
+                let queue: Vec<(TaskId, CollectionJobId, CollectionReq)> =
                     DurableOrdered::get_all(&self.state, PENDING_PREFIX)
                         .await?
                         .into_iter()
@@ -140,12 +155,15 @@ impl DurableObject for LeaderCollectionJobQueue {
 
             // Remove a collection job from the pending queue and store the CollectResp.
             //
-            // Input: `(collect_id, collect_resp): (Id, CollectResp)`
+            // Input: `(collection_job_id, collect_resp): (Id, CollectResp)`
             (DURABLE_LEADER_COL_JOB_QUEUE_FINISH, Method::Post) => {
-                let (collect_id, collect_resp): (Id, CollectResp) = req.json().await?;
-                let collect_id_hex = collect_id.to_hex();
-                let processed_key = format!("{PROCESSED_PREFIX}/{collect_id_hex}");
-                let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
+                let (task_id, collection_job_id, collect_resp): (
+                    TaskId,
+                    CollectionJobId,
+                    Collection,
+                ) = req.json().await?;
+                let processed_key = processed_key(&task_id, &collection_job_id);
+                let processed: Option<Collection> = state_get(&self.state, &processed_key).await?;
                 if processed.is_some() {
                     return Err(int_err(
                         "LeaderCollectionJobQueue: tried to overwrite collect response",
@@ -153,15 +171,13 @@ impl DurableObject for LeaderCollectionJobQueue {
                 }
 
                 // Remove the collection job from the pending queue.
-                let pending_lookup_key = lookup_key(&collect_id_hex);
-                if let Some(lookup_val) =
-                    state_get::<String>(&self.state, &pending_lookup_key).await?
-                {
+                let pending_key = pending_key(&task_id, &collection_job_id);
+                if let Some(lookup_val) = state_get::<String>(&self.state, &pending_key).await? {
                     self.state.storage().delete(&lookup_val).await?;
                 }
 
                 let mut storage = self.state.storage();
-                let f = storage.delete(&pending_lookup_key);
+                let f = storage.delete(&pending_key);
 
                 // Store the CollectResp.
                 self.state
@@ -176,20 +192,19 @@ impl DurableObject for LeaderCollectionJobQueue {
 
             // Check if a collection job is complete.
             //
-            // Input: `collect_id: Id`
+            // Input: `collection_job_id: Id`
             // Output: `DapCollectionJob`
             (DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, Method::Post) => {
-                let collect_id: Id = req.json().await?;
-                let collect_id_hex = collect_id.to_hex();
-                let pending_lookup_key = lookup_key(&collect_id_hex);
-                let pending = state_get::<String>(&self.state, &pending_lookup_key)
+                let (task_id, collection_job_id): (TaskId, CollectionJobId) = req.json().await?;
+                let pending_key = pending_key(&task_id, &collection_job_id);
+                let pending = state_get::<String>(&self.state, &pending_key)
                     .await?
                     .is_some();
-                let processed_key = format!("{PROCESSED_PREFIX}/{collect_id_hex}");
-                let processed: Option<CollectResp> = state_get(&self.state, &processed_key).await?;
+                let processed_key = processed_key(&task_id, &collection_job_id);
+                let processed: Option<Collection> = state_get(&self.state, &processed_key).await?;
                 if let Some(collect_resp) = processed {
                     if pending {
-                        self.state.storage().delete(&pending_lookup_key).await?;
+                        self.state.storage().delete(&pending_key).await?;
                     }
                     Response::from_json(&DapCollectJob::Done(collect_resp))
                 } else if pending {
@@ -208,6 +223,18 @@ impl DurableObject for LeaderCollectionJobQueue {
     }
 }
 
-fn lookup_key(collect_id_hex: &str) -> String {
-    format!("{PENDING_PREFIX}/id/{collect_id_hex}")
+fn pending_key(task_id: &TaskId, collection_job_id: &CollectionJobId) -> String {
+    format!(
+        "{PENDING_PREFIX}/tasks/{}/collection_jobs/{}",
+        task_id.to_base64url(),
+        collection_job_id.to_base64url()
+    )
+}
+
+fn processed_key(task_id: &TaskId, collection_job_id: &CollectionJobId) -> String {
+    format!(
+        "{PROCESSED_PREFIX}/tasks/{}/collection_jobs/{}",
+        task_id.to_base64url(),
+        collection_job_id.to_base64url()
+    )
 }

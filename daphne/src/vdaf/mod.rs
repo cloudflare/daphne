@@ -7,10 +7,10 @@
 use crate::{
     hpke::HpkeDecrypter,
     messages::{
-        encode_u32_bytes, AggregateContinueReq, AggregateInitializeReq, AggregateResp,
-        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, Id, PartialBatchSelector,
-        PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, Time, Transition,
-        TransitionFailure, TransitionVar,
+        encode_u32_bytes, AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp,
+        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, PartialBatchSelector,
+        PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, TaskId, Time,
+        Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
     vdaf::{
@@ -25,7 +25,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapTaskConfig, DapVersion, VdafConfig,
+    DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedEncode},
@@ -40,9 +40,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryInto};
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
-const CTX_INPUT_SHARE_DRAFT03: &[u8] = b"dap-03 input share";
+const CTX_INPUT_SHARE_DRAFT04: &[u8] = b"dap-04 input share";
 const CTX_AGG_SHARE_DRAFT02: &[u8] = b"dap-02 aggregate share";
-const CTX_AGG_SHARE_DRAFT03: &[u8] = b"dap-03 aggregate share";
+const CTX_AGG_SHARE_DRAFT04: &[u8] = b"dap-04 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -98,9 +98,9 @@ pub(crate) enum VdafAggregateShare {
 impl Encode for VdafAggregateShare {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
-            VdafAggregateShare::Field64(agg_share) => bytes.append(&mut agg_share.into()),
-            VdafAggregateShare::Field128(agg_share) => bytes.append(&mut agg_share.into()),
-            VdafAggregateShare::FieldPrio2(agg_share) => bytes.append(&mut agg_share.into()),
+            VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
+            VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
+            VdafAggregateShare::FieldPrio2(agg_share) => agg_share.encode(bytes),
         }
     }
 }
@@ -168,18 +168,21 @@ impl VdafConfig {
         &self,
         hpke_config_list: &[HpkeConfig],
         time: Time,
-        task_id: &Id,
+        task_id: &TaskId,
         measurement: DapMeasurement,
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
-        let (public_share, input_shares) = self.produce_input_shares(measurement)?;
+        let mut rng = thread_rng();
+        let report_id = ReportId(rng.gen());
+        let (public_share, input_shares) = self.produce_input_shares(measurement, &report_id.0)?;
         self.produce_report_with_extensions_for_shares(
             public_share,
             input_shares,
             hpke_config_list,
             time,
             task_id,
+            &report_id,
             extensions,
             version,
         )
@@ -193,17 +196,17 @@ impl VdafConfig {
         mut input_shares: Vec<Vec<u8>>,
         hpke_config_list: &[HpkeConfig],
         time: Time,
-        task_id: &Id,
+        task_id: &TaskId,
+        report_id: &ReportId,
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
-        let mut rng = thread_rng();
         let report_extensions = match version {
             DapVersion::Draft02 => extensions.clone(),
             _ => vec![],
         };
         let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
+            id: report_id.clone(),
             time,
             extensions: report_extensions,
         };
@@ -226,7 +229,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft03 => CTX_INPUT_SHARE_DRAFT03,
+            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -264,8 +267,8 @@ impl VdafConfig {
         }
 
         Ok(Report {
-            task_id: task_id.clone(),
-            metadata,
+            draft02_task_id: task_id.for_request_payload(&version),
+            report_metadata: metadata,
             public_share,
             encrypted_input_shares,
         })
@@ -275,13 +278,12 @@ impl VdafConfig {
     pub(crate) fn produce_input_shares(
         &self,
         measurement: DapMeasurement,
+        nonce: &[u8; 16],
     ) -> Result<(Vec<u8>, Vec<Vec<u8>>), DapError> {
-        let public_share = Vec::new();
-        let input_shares = match self {
-            Self::Prio3(prio3_config) => prio3_shard(prio3_config, measurement)?,
-            Self::Prio2 { dimension } => prio2_shard(*dimension, measurement)?,
-        };
-        Ok((public_share, input_shares))
+        match self {
+            Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
+            Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
+        }
     }
 
     /// Generate a report for a measurement. This method is run by the Client.
@@ -305,7 +307,7 @@ impl VdafConfig {
         &self,
         hpke_config_list: &[HpkeConfig],
         time: Time,
-        task_id: &Id,
+        task_id: &TaskId,
         measurement: DapMeasurement,
         version: DapVersion,
     ) -> Result<Report, DapError> {
@@ -340,7 +342,7 @@ impl VdafConfig {
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         is_leader: bool,
-        task_id: &Id,
+        task_id: &TaskId,
         task_config: &DapTaskConfig,
         metadata: &ReportMetadata,
         public_share: &[u8],
@@ -350,13 +352,9 @@ impl VdafConfig {
             return Err(DapError::Transition(TransitionFailure::TaskExpired));
         }
 
-        if !public_share.is_empty() {
-            return Err(DapError::Transition(TransitionFailure::VdafPrepError));
-        }
-
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft03 => CTX_INPUT_SHARE_DRAFT03,
+            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -397,7 +395,8 @@ impl VdafConfig {
                     prio3_config,
                     verify_key,
                     agg_id,
-                    metadata.id.as_ref(),
+                    &metadata.id.0,
+                    public_share,
                     &input_share.payload,
                 )?)
             }
@@ -406,7 +405,8 @@ impl VdafConfig {
                     *dimension,
                     verify_key,
                     agg_id,
-                    metadata.id.as_ref(),
+                    &metadata.id.0,
+                    public_share,
                     &input_share.payload,
                 )?)
             }
@@ -433,33 +433,27 @@ impl VdafConfig {
     ///
     /// * `version` is the DapVersion to use.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn produce_agg_init_req(
+    pub(crate) async fn produce_agg_job_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
-        task_id: &Id,
+        task_id: &TaskId,
         task_config: &DapTaskConfig,
-        agg_job_id: &Id,
+        agg_job_id: &MetaAggregationJobId<'_>,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
         metrics: &DaphneMetrics,
-    ) -> Result<DapLeaderTransition<AggregateInitializeReq>, DapAbort> {
+    ) -> Result<DapLeaderTransition<AggregationJobInitReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
         let mut seq = Vec::with_capacity(reports.len());
         for report in reports.into_iter() {
-            if processed.contains(&report.metadata.id) {
+            if processed.contains(&report.report_metadata.id) {
                 return Err(DapError::fatal(
                     "tried to process report sequence with non-unique report IDs",
                 )
                 .into());
             }
-            processed.insert(report.metadata.id.clone());
-
-            if &report.task_id != task_id || report.encrypted_input_shares.len() != 2 {
-                return Err(
-                    DapError::fatal("tried to process report with incorrect task ID").into(),
-                );
-            }
+            processed.insert(report.report_metadata.id.clone());
 
             let (leader_share, helper_share) = {
                 let mut it = report.encrypted_input_shares.into_iter();
@@ -472,7 +466,7 @@ impl VdafConfig {
                     true, // is_leader
                     task_id,
                     task_config,
-                    &report.metadata,
+                    &report.report_metadata,
                     &report.public_share,
                     &leader_share,
                 )
@@ -482,11 +476,11 @@ impl VdafConfig {
                     states.push((
                         step,
                         message,
-                        report.metadata.time,
-                        report.metadata.id.clone(),
+                        report.report_metadata.time,
+                        report.report_metadata.id.clone(),
                     ));
                     seq.push(ReportShare {
-                        metadata: report.metadata,
+                        report_metadata: report.report_metadata,
                         public_share: report.public_share,
                         encrypted_input_share: helper_share,
                     });
@@ -508,9 +502,9 @@ impl VdafConfig {
 
         Ok(DapLeaderTransition::Continue(
             DapLeaderState { seq: states },
-            AggregateInitializeReq {
-                task_id: task_id.clone(),
-                agg_job_id: agg_job_id.clone(),
+            AggregationJobInitReq {
+                draft02_task_id: task_id.for_request_payload(&task_config.version),
+                draft02_agg_job_id: agg_job_id.for_request_payload(),
                 agg_param: Vec::default(),
                 part_batch_sel: part_batch_sel.clone(),
                 report_shares: seq,
@@ -536,33 +530,34 @@ impl VdafConfig {
     ///
     /// * `task_id` indicates the DAP task for which the reports are being processed.
     ///
-    /// * `agg_init_req` is the request sent by the Leader.
+    /// * `agg_job_init_req` is the request sent by the Leader.
     ///
     /// * `version` is the DapVersion to use.
-    pub(crate) async fn handle_agg_init_req(
+    pub(crate) async fn handle_agg_job_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
+        task_id: &TaskId,
         task_config: &DapTaskConfig,
-        agg_init_req: &AggregateInitializeReq,
+        agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
-    ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
-        let num_reports = agg_init_req.report_shares.len();
+    ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
+        let num_reports = agg_job_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut states = Vec::with_capacity(num_reports);
         let mut transitions = Vec::with_capacity(num_reports);
-        for report_share in agg_init_req.report_shares.iter() {
-            if processed.contains(&report_share.metadata.id) {
+        for report_share in agg_job_init_req.report_shares.iter() {
+            if processed.contains(&report_share.report_metadata.id) {
                 return Err(DapAbort::UnrecognizedMessage);
             }
-            processed.insert(report_share.metadata.id.clone());
+            processed.insert(report_share.report_metadata.id.clone());
 
             let var = match self
                 .consume_report_share(
                     decrypter,
                     false, // is_leader
-                    &agg_init_req.task_id,
+                    task_id,
                     task_config,
-                    &report_share.metadata,
+                    &report_share.report_metadata,
                     &report_share.public_share,
                     &report_share.encrypted_input_share,
                 )
@@ -575,8 +570,8 @@ impl VdafConfig {
                     };
                     states.push((
                         step,
-                        report_share.metadata.time,
-                        report_share.metadata.id.clone(),
+                        report_share.report_metadata.time,
+                        report_share.report_metadata.id.clone(),
                     ));
                     TransitionVar::Continued(message_data)
                 }
@@ -593,17 +588,17 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                report_id: report_share.metadata.id.clone(),
+                report_id: report_share.report_metadata.id.clone(),
                 var,
             });
         }
 
         Ok(DapHelperTransition::Continue(
             DapHelperState {
-                part_batch_sel: agg_init_req.part_batch_sel.clone(),
+                part_batch_sel: agg_job_init_req.part_batch_sel.clone(),
                 seq: states,
             },
-            AggregateResp { transitions },
+            AggregationJobResp { transitions },
         ))
     }
 
@@ -618,25 +613,28 @@ impl VdafConfig {
     ///
     /// * `state` is the Leader's current state.
     ///
-    /// * `agg_resp` is the previous aggregate response sent by the Helper.
-    pub(crate) fn handle_agg_resp(
+    /// * `agg_job_resp` is the previous aggregate response sent by the Helper.
+    pub(crate) fn handle_agg_job_resp(
         &self,
-        task_id: &Id,
-        agg_job_id: &Id,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
         state: DapLeaderState,
-        agg_resp: AggregateResp,
+        agg_job_resp: AggregationJobResp,
+        version: DapVersion,
         metrics: &DaphneMetrics,
-    ) -> Result<DapLeaderTransition<AggregateContinueReq>, DapAbort> {
-        if agg_resp.transitions.len() != state.seq.len() {
+    ) -> Result<DapLeaderTransition<AggregationJobContinueReq>, DapAbort> {
+        if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
         }
 
         let mut seq = Vec::with_capacity(state.seq.len());
         let mut states = Vec::with_capacity(state.seq.len());
-        for (helper, (leader_step, leader_message, leader_time, leader_report_id)) in
-            agg_resp.transitions.into_iter().zip(state.seq.into_iter())
+        for (helper, (leader_step, leader_message, leader_time, leader_report_id)) in agg_job_resp
+            .transitions
+            .into_iter()
+            .zip(state.seq.into_iter())
         {
-            // TODO spec: Consider removing the report ID from the AggregateResp.
+            // TODO spec: Consider removing the report ID from the AggregationJobResp.
             if helper.report_id != leader_report_id {
                 return Err(DapAbort::UnrecognizedMessage);
             }
@@ -711,9 +709,14 @@ impl VdafConfig {
 
         Ok(DapLeaderTransition::Uncommitted(
             DapLeaderUncommitted { seq: states },
-            AggregateContinueReq {
-                task_id: task_id.clone(),
-                agg_job_id: agg_job_id.clone(),
+            AggregationJobContinueReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                draft02_agg_job_id: agg_job_id.for_request_payload(),
+                round: if version == DapVersion::Draft02 {
+                    None
+                } else {
+                    Some(1)
+                },
                 transitions: seq,
             },
         ))
@@ -729,18 +732,27 @@ impl VdafConfig {
     /// * `state` is the helper's current state.
     ///
     /// * `agg_cont_req` is the aggregate request sent by the Leader.
-    pub(crate) fn handle_agg_cont_req(
+    pub(crate) fn handle_agg_job_cont_req(
         &self,
         state: DapHelperState,
-        agg_cont_req: &AggregateContinueReq,
+        agg_cont_req: &AggregationJobContinueReq,
         metrics: &DaphneMetrics,
-    ) -> Result<DapHelperTransition<AggregateResp>, DapAbort> {
+    ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
+        if let Some(round) = agg_cont_req.round {
+            if round == 0 {
+                return Err(DapAbort::UnrecognizedMessage);
+            }
+            // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
+            // aggregation-round-skew-recovery.
+            if round != 1 {
+                return Err(DapAbort::RoundMismatch);
+            }
+        }
         let mut processed = HashSet::with_capacity(state.seq.len());
         let mut recognized = HashSet::with_capacity(state.seq.len());
         for (_, _, report_id) in state.seq.iter() {
             recognized.insert(report_id.clone());
         }
-
         let num_reports = state.seq.len();
         let mut transitions = Vec::with_capacity(num_reports);
         let mut out_shares = Vec::with_capacity(num_reports);
@@ -818,7 +830,7 @@ impl VdafConfig {
 
         Ok(DapHelperTransition::Finish(
             out_shares,
-            AggregateResp { transitions },
+            AggregationJobResp { transitions },
         ))
     }
 
@@ -834,24 +846,24 @@ impl VdafConfig {
     /// * `uncommited` is the Leader's current state, i.e., the set of output shares output from
     /// the previous round that have not yet been commmitted to.
     ///
-    /// * `agg_resp` is the previous aggregate response sent by the Helper.
-    pub(crate) fn handle_final_agg_resp(
+    /// * `agg_job_resp` is the previous aggregate response sent by the Helper.
+    pub(crate) fn handle_final_agg_job_resp(
         &self,
         uncommitted: DapLeaderUncommitted,
-        agg_resp: AggregateResp,
+        agg_job_resp: AggregationJobResp,
         metrics: &DaphneMetrics,
     ) -> Result<Vec<DapOutputShare>, DapAbort> {
-        if agg_resp.transitions.len() != uncommitted.seq.len() {
+        if agg_job_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
         }
 
         let mut out_shares = Vec::with_capacity(uncommitted.seq.len());
-        for (helper, (out_share, leader_report_id)) in agg_resp
+        for (helper, (out_share, leader_report_id)) in agg_job_resp
             .transitions
             .into_iter()
             .zip(uncommitted.seq.into_iter())
         {
-            // TODO spec: Consider removing the report ID from the AggregateResp.
+            // TODO spec: Consider removing the report ID from the AggregationJobResp.
             if helper.report_id != leader_report_id {
                 return Err(DapAbort::UnrecognizedMessage);
             }
@@ -893,7 +905,7 @@ impl VdafConfig {
     pub(crate) fn produce_leader_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
         version: DapVersion,
@@ -908,7 +920,7 @@ impl VdafConfig {
     pub(crate) fn produce_helper_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
         agg_share: &DapAggregateShare,
         version: DapVersion,
@@ -936,7 +948,7 @@ impl VdafConfig {
     pub async fn consume_encrypted_agg_shares(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
-        task_id: &Id,
+        task_id: &TaskId,
         batch_sel: &BatchSelector,
         report_count: u64,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
@@ -944,7 +956,7 @@ impl VdafConfig {
     ) -> Result<DapAggregateResult, DapError> {
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Draft03 => CTX_AGG_SHARE_DRAFT03,
+            DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = agg_share_text.len();
@@ -993,7 +1005,7 @@ impl VdafConfig {
 fn produce_encrypted_agg_share(
     is_leader: bool,
     hpke_config: &HpkeConfig,
-    task_id: &Id,
+    task_id: &TaskId,
     batch_sel: &BatchSelector,
     agg_share: &DapAggregateShare,
     version: DapVersion,
@@ -1006,7 +1018,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Draft03 => CTX_AGG_SHARE_DRAFT03,
+        DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
         _ => return Err(unimplemented_version_abort()),
     };
     let n: usize = agg_share_text.len();

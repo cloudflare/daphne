@@ -22,14 +22,17 @@ use daphne::{
     auth::BearerToken,
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{decode_base64url_vec, HpkeConfig, Id, ReportMetadata},
-    DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion,
-    Prio3Config, VdafConfig,
+    messages::{
+        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, HpkeConfig,
+        ReportMetadata, TaskId,
+    },
+    DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse,
+    DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
 };
 use matchit::Router;
 use prio::{
     codec::Decode,
-    vdaf::prg::{Prg, PrgAes128, Seed, SeedStream},
+    vdaf::prg::{Prg, PrgSha3, Seed, SeedStream},
 };
 use prometheus::{Encoder, Registry};
 use serde::{Deserialize, Serialize};
@@ -40,7 +43,7 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
@@ -50,6 +53,9 @@ pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 const DAP_BASE_URL: &str = "DAP_BASE_URL";
+
+const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
+const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
 /// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-02 ("taskprov").
 pub(crate) struct TaskprovConfig {
@@ -87,7 +93,7 @@ pub(crate) struct DaphneWorkerConfig {
     pub(crate) deployment: DaphneWorkerDeployment,
 
     /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
-    pub(crate) collect_id_key: Option<Seed<16>>,
+    pub(crate) collection_job_id_key: Option<Seed<16>>,
 
     /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
     /// to (based on the report ID).
@@ -151,15 +157,16 @@ impl DaphneWorkerConfig {
             None
         };
 
-        let collect_id_key = if is_leader {
-            let collect_id_key_hex = env
-                .secret("DAP_COLLECT_ID_KEY")
-                .map_err(|e| format!("failed to load DAP_COLLECT_ID_KEY: {e}"))?
+        const DAP_COLLECTION_JOB_ID_KEY: &str = "DAP_COLLECTION_JOB_ID_KEY";
+        let collection_job_id_key = if is_leader {
+            let collection_job_id_key_hex = env
+                .secret(DAP_COLLECTION_JOB_ID_KEY)
+                .map_err(|e| format!("failed to load {DAP_COLLECTION_JOB_ID_KEY}: {e}"))?
                 .to_string();
-            let collect_id_key =
-                Seed::get_decoded(&hex::decode(collect_id_key_hex).map_err(int_err)?)
+            let collection_job_id_key =
+                Seed::get_decoded(&hex::decode(collection_job_id_key_hex).map_err(int_err)?)
                     .map_err(int_err)?;
-            Some(collect_id_key)
+            Some(collection_job_id_key)
         } else {
             None
         };
@@ -315,7 +322,7 @@ impl DaphneWorkerConfig {
         Ok(Self {
             global,
             deployment,
-            collect_id_key,
+            collection_job_id_key,
             report_shard_key,
             report_shard_count,
             base_url,
@@ -337,7 +344,12 @@ impl DaphneWorkerConfig {
         metadata: &ReportMetadata,
     ) -> String {
         let mut shard_seed = [0; 8];
-        PrgAes128::seed_stream(&self.report_shard_key, metadata.id.as_ref()).fill(&mut shard_seed);
+        PrgSha3::seed_stream(
+            &self.report_shard_key,
+            b"report shard",
+            metadata.id.as_ref(),
+        )
+        .fill(&mut shard_seed);
         let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
         let epoch = metadata.time - (metadata.time % self.global.report_storage_epoch_duration);
         durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
@@ -357,13 +369,13 @@ pub(crate) struct DaphneWorkerIsolateState {
     hpke_receiver_configs: Arc<RwLock<HashMap<HpkeReceiverKvKey, HpkeReceiverConfig>>>,
 
     /// Laeder bearer token per task.
-    leader_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
+    leader_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
 
     /// Collector bearer token per task.
-    collector_bearer_tokens: Arc<RwLock<HashMap<Id, BearerToken>>>,
+    collector_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
 
     /// Task list.
-    tasks: Arc<RwLock<HashMap<Id, DapTaskConfig>>>,
+    tasks: Arc<RwLock<HashMap<TaskId, DapTaskConfig>>>,
 }
 
 impl DaphneWorkerIsolateState {
@@ -576,7 +588,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Retrieve from KV the Leader's bearer token for the given task.
     pub(crate) async fn get_leader_bearer_token<'a>(
         &'a self,
-        task_id: &'a Id,
+        task_id: &'a TaskId,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
             &self.isolate_state().leader_bearer_tokens,
@@ -589,7 +601,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Set a leader bearer token for the given task.
     pub(crate) async fn set_leader_bearer_token(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         token: &BearerToken,
     ) -> Result<Option<BearerToken>> {
         self.kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_LEADER, task_id, token.clone())
@@ -599,7 +611,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Retrieve from KV the Collector's bearer token for the given task.
     pub(crate) async fn get_collector_bearer_token<'a>(
         &'a self,
-        task_id: &'a Id,
+        task_id: &'a TaskId,
     ) -> Result<Option<GuardedBearerToken>> {
         self.kv_get_cached(
             &self.isolate_state().collector_bearer_tokens,
@@ -612,7 +624,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Retrieve from KV the configuration for the given task.
     pub(crate) async fn get_task_config<'req>(
         &'srv self,
-        task_id: Cow<'req, Id>,
+        task_id: Cow<'req, TaskId>,
     ) -> Result<Option<GuardedDapTaskConfig<'req>>>
     where
         'srv: 'req,
@@ -628,7 +640,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Define a task in KV
     pub(crate) async fn set_task_config(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         task_config: &DapTaskConfig,
     ) -> Result<Option<DapTaskConfig>> {
         self.kv_set_if_not_exists(KV_KEY_PREFIX_TASK_CONFIG, task_id, task_config.clone())
@@ -639,7 +651,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// indicated task is not recognized.
     pub(crate) async fn try_get_task_config<'req>(
         &'srv self,
-        task_id: &'req Id,
+        task_id: &'req TaskId,
     ) -> std::result::Result<GuardedDapTaskConfig<'req>, DapError>
     where
         'srv: 'req,
@@ -685,8 +697,8 @@ impl<'srv> DaphneWorker<'srv> {
     /// applicable to fixed-size tasks.
     pub(crate) async fn internal_current_batch(
         &self,
-        task_id: &Id,
-    ) -> std::result::Result<Id, DapError> {
+        task_id: &TaskId,
+    ) -> std::result::Result<BatchId, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         if !matches!(task_config.as_ref().query, DapQueryConfig::FixedSize { .. }) {
             return Err(DapError::fatal("query type mismatch"));
@@ -752,9 +764,8 @@ impl<'srv> DaphneWorker<'srv> {
         cmd: InternalTestAddTask,
     ) -> Result<()> {
         // Task ID.
-        let task_id_data = decode_base64url_vec(cmd.task_id.as_bytes())
+        let task_id = TaskId::try_from_base64url(&cmd.task_id)
             .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
-        let task_id = Id::get_decoded(&task_id_data).map_err(int_err)?;
 
         // VDAF config.
         let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits) {
@@ -871,10 +882,13 @@ impl<'srv> DaphneWorker<'srv> {
         Ok(DapVersion::from(version))
     }
 
-    pub(crate) async fn worker_request_to_dap(
+    pub(crate) async fn worker_request_to_dap<D>(
         &self,
         mut req: Request,
+        ctx: &RouteContext<D>,
     ) -> Result<DapRequest<DaphneWorkerAuth>> {
+        let version = self.extract_version_parameter(&req)?;
+
         // Determine the authorization method used by the sender.
         let bearer_token = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
         let mut tls_client_auth = req.cf().tls_client_auth();
@@ -903,29 +917,63 @@ impl<'srv> DaphneWorker<'srv> {
         };
 
         let content_type = req.headers().get("Content-Type")?;
+        let media_type = content_type.and_then(|s| constants::media_type_for(&s));
 
-        let media_type = match content_type {
-            Some(s) => constants::media_type_for(&s),
-            None => None,
-        };
-
-        let version = self.extract_version_parameter(&req)?;
         let payload = req.bytes().await?;
 
-        // Parse the task ID from the front of the request payload and use it to look up the
-        // expected bearer token.
-        //
-        // TODO(cjpatton) Add regression tests that ensure each protocol message is prefixed by the
-        // task ID.
-        //
-        // TODO spec: Consider moving the task ID out of the payload. Right now we're parsing it
-        // twice so that we have a reference to the task ID before parsing the entire message.
-        let mut r = Cursor::new(payload.as_ref());
-        let task_id = Id::decode(&mut r).ok();
+        let (task_id, resource) = match version {
+            DapVersion::Draft02 => {
+                // Parse the task ID from the front of the request payload and use it to look up the
+                // expected bearer token.
+                //
+                // TODO(cjpatton) Add regression tests that ensure each protocol message is prefixed by the
+                // task ID.
+                //
+                // TODO spec: Consider moving the task ID out of the payload. Right now we're parsing it
+                // twice so that we have a reference to the task ID before parsing the entire message.
+                let mut r = Cursor::new(payload.as_ref());
+                (TaskId::decode(&mut r).ok(), DapResource::Undefined)
+            }
+            DapVersion::Draft04 => {
+                let task_id = ctx.param("task_id").and_then(TaskId::try_from_base64url);
+                let resource = match media_type {
+                    Some(constants::MEDIA_TYPE_AGG_CONT_REQ)
+                    | Some(constants::MEDIA_TYPE_AGG_INIT_REQ) => {
+                        if let Some(agg_job_id) = ctx
+                            .param("agg_job_id")
+                            .and_then(AggregationJobId::try_from_base64url)
+                        {
+                            DapResource::AggregationJob(agg_job_id)
+                        } else {
+                            // Missing or invalid agg job ID. This should be handled as a bad
+                            // request (undefined resource) by the caller.
+                            DapResource::Undefined
+                        }
+                    }
+                    Some(constants::MEDIA_TYPE_COLLECT_REQ) => {
+                        if let Some(collect_job_id) = ctx
+                            .param("collect_job_id")
+                            .and_then(CollectionJobId::try_from_base64url)
+                        {
+                            DapResource::CollectionJob(collect_job_id)
+                        } else {
+                            // Missing or invalid agg job ID. This should be handled as a bad
+                            // request (undefined resource) by the caller.
+                            DapResource::Undefined
+                        }
+                    }
+                    _ => DapResource::Undefined,
+                };
+
+                (task_id, resource)
+            }
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
 
         Ok(DapRequest {
             version,
             task_id,
+            resource,
             payload,
             url: req.url()?,
             media_type,
@@ -939,6 +987,74 @@ impl<'srv> DaphneWorker<'srv> {
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
         now.saturating_add(self.config().global.report_storage_max_future_time_skew)
+    }
+
+    // Generic HTTP POST/PUT
+    pub(crate) async fn send_http(
+        &self,
+        req: DapRequest<DaphneWorkerAuth>,
+        is_put: bool,
+    ) -> std::result::Result<DapResponse, DapError> {
+        let (payload, url) = (req.payload, req.url);
+
+        let mut headers = reqwest_wasm::header::HeaderMap::new();
+        if let Some(content_type) = req.media_type {
+            headers.insert(
+                reqwest_wasm::header::CONTENT_TYPE,
+                reqwest_wasm::header::HeaderValue::from_str(content_type)
+                    .map_err(|e| DapError::Fatal(e.to_string()))?,
+            );
+        }
+
+        if let Some(DaphneWorkerAuth::BearerToken(bearer_token)) = req.sender_auth {
+            headers.insert(
+                reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
+                reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref())
+                    .map_err(|e| DapError::Fatal(e.to_string()))?,
+            );
+        }
+
+        let client = &self.isolate_state().client;
+        let reqwest_req = if is_put {
+            client.put(url.as_str())
+        } else {
+            client.post(url.as_str())
+        }
+        .body(payload)
+        .headers(headers);
+
+        let start = Date::now().as_millis();
+        let reqwest_resp = reqwest_req
+            .send()
+            .await
+            .map_err(|e| DapError::Fatal(e.to_string()))?;
+        let end = Date::now().as_millis();
+        info!("request to {} completed in {}ms", url, end - start);
+        let status = reqwest_resp.status();
+        if status == 200 {
+            // Translate the reqwest response into a Worker response.
+            let content_type = reqwest_resp
+                .headers()
+                .get(reqwest_wasm::header::CONTENT_TYPE)
+                .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
+                .to_str()
+                .map_err(|e| DapError::Fatal(e.to_string()))?;
+            let media_type = constants::media_type_for(content_type);
+
+            let payload = reqwest_resp
+                .bytes()
+                .await
+                .map_err(|e| DapError::Fatal(e.to_string()))?
+                .to_vec();
+
+            Ok(DapResponse {
+                payload,
+                media_type,
+            })
+        } else {
+            error!("{}: request failed: {:?}", url, reqwest_resp);
+            Err(DapError::fatal(INT_ERR_PEER_ABORT))
+        }
     }
 }
 
@@ -966,7 +1082,7 @@ impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
     }
 }
 
-pub(crate) type GuardedBearerToken<'a> = Guarded<'a, Id, BearerToken>;
+pub(crate) type GuardedBearerToken<'a> = Guarded<'a, TaskId, BearerToken>;
 
 impl AsRef<BearerToken> for GuardedBearerToken<'_> {
     fn as_ref(&self) -> &BearerToken {
@@ -974,7 +1090,7 @@ impl AsRef<BearerToken> for GuardedBearerToken<'_> {
     }
 }
 
-pub(crate) type GuardedDapTaskConfig<'a> = Guarded<'a, Id, DapTaskConfig>;
+pub(crate) type GuardedDapTaskConfig<'a> = Guarded<'a, TaskId, DapTaskConfig>;
 
 impl AsRef<DapTaskConfig> for GuardedDapTaskConfig<'_> {
     fn as_ref(&self) -> &DapTaskConfig {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{int_err, now};
-use daphne::{messages::Id, DapBatchBucket, DapVersion};
+use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -256,20 +256,6 @@ fn durable_name_bucket(bucket: &DapBatchBucket<'_>) -> String {
     }
 }
 
-pub(crate) fn report_id_hex_from_report(report_hex: &str) -> Option<&str> {
-    // task_id (32 bytes)
-    if report_hex.len() < 64 {
-        return None;
-    }
-    let report_hex = &report_hex[64..];
-
-    // metadata.id
-    if report_hex.len() < 32 {
-        return None;
-    }
-    Some(&report_hex[..32])
-}
-
 /// Reference to a DO instance, used by the garbage collector.
 #[derive(Deserialize, Serialize)]
 pub(crate) struct DurableReference {
@@ -281,7 +267,7 @@ pub(crate) struct DurableReference {
 
     /// If applicable, the DAP task ID to which the DO instance is associated.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) task_id: Option<Id>,
+    pub(crate) task_id: Option<TaskId>,
 }
 
 /// An element of a queue stored in a DO instance.

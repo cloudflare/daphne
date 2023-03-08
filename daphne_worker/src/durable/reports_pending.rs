@@ -8,11 +8,12 @@ use crate::{
         leader_agg_job_queue::{
             DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        report_id_hex_from_report, state_get, state_set_if_not_exists, DurableConnector,
-        DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
+        state_get, state_set_if_not_exists, DurableConnector, DurableOrdered,
+        BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
     },
     initialize_tracing, int_err,
 };
+use daphne::{messages::TaskId, DapVersion};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use worker::*;
@@ -25,6 +26,30 @@ pub(crate) const DURABLE_REPORTS_PENDING_PUT: &str = "/internal/do/reports_pendi
 pub(crate) enum ReportsPendingResult {
     Ok,
     ErrReportExists,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct PendingReport {
+    pub(crate) task_id: TaskId,
+    pub(crate) version: DapVersion,
+
+    /// Hex-encdoed, serialized report.
+    //
+    // TODO(cjpatton) Consider changing the type to `Report`. If I recall correctly, this triggers
+    // the serde-wasm-bindgen bug we saw in workers-rs 0.0.12, which should be fixed as of 0.0.15.
+    pub(crate) report_hex: String,
+}
+
+impl PendingReport {
+    pub(crate) fn report_id_hex(&self) -> Option<&str> {
+        match self.version {
+            DapVersion::Draft02 if self.report_hex.len() >= 96 => Some(&self.report_hex[64..96]),
+            DapVersion::Draft04 if self.report_hex.len() >= 32 => Some(&self.report_hex[..32]),
+            DapVersion::Unknown => unreachable!("unhandled version {:?}", self.version),
+            _ => None,
+        }
+    }
 }
 
 /// Durable Object (DO) for storing reports waiting to be processed.
@@ -43,8 +68,8 @@ pub(crate) enum ReportsPendingResult {
 /// The schema for stored reports is as follows:
 ///
 /// ```text
-/// [Pending report]  pending/<report_id> -> String
-/// [Aggregation job] agg_job -> DurableOrdered<String>
+/// [Pending report]  pending/<report_id> -> PendingReport
+/// [Aggregation job] agg_job -> DurableOrdered<PendingReport>
 /// ```
 ///
 /// where `<report_id>` is the ID of the report. The value is the hex-encoded report. The
@@ -82,7 +107,7 @@ impl DurableObject for ReportsPending {
             // Drain the requested number of reports from storage.
             //
             // Input: `reports_requested: usize`
-            // Output: `Vec<String>` (hex-encoded reports)
+            // Output: `Vec<PendingReport>`
             (DURABLE_REPORTS_PENDING_GET, Method::Post) => {
                 let reports_requested: usize = req.json().await?;
                 let opt = ListOptions::new()
@@ -93,9 +118,9 @@ impl DurableObject for ReportsPending {
                 let mut reports = Vec::with_capacity(reports_requested);
                 let mut keys = Vec::with_capacity(reports_requested);
                 while !item.done() {
-                    let (key, report_hex): (String, String) =
+                    let (key, pending_report): (String, PendingReport) =
                         serde_wasm_bindgen::from_value(item.value()).map_err(int_err)?;
-                    reports.push(report_hex);
+                    reports.push(pending_report);
                     keys.push(key);
                     item = iter.next()?;
                 }
@@ -149,15 +174,15 @@ impl DurableObject for ReportsPending {
 
             // Store a report.
             //
-            // Input: `report_hex: String` (hex-encoded report)
-            // Output:  `ReportsPendingResult`
+            // Input: `pending_report: PendingReport`
+            // Output: `ReportsPendingResult`
             (DURABLE_REPORTS_PENDING_PUT, Method::Post) => {
-                let report_hex: String = req.json().await?;
-                let report_id_hex = report_id_hex_from_report(&report_hex)
-                    .ok_or_else(|| int_err("failed to parse report_id from report"))?;
-
+                let pending_report: PendingReport = req.json().await?;
+                let report_id_hex = pending_report
+                    .report_id_hex()
+                    .ok_or_else(|| int_err("failed to parse report ID from report"))?;
                 let key = format!("pending/{report_id_hex}");
-                let exists = state_set_if_not_exists::<String>(&self.state, &key, &report_hex)
+                let exists = state_set_if_not_exists(&self.state, &key, &pending_report)
                     .await?
                     .is_some();
                 if exists {

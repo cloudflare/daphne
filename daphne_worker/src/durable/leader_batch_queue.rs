@@ -6,7 +6,7 @@ use crate::{
     durable::{state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE},
     initialize_tracing, int_err,
 };
-use daphne::messages::Id;
+use daphne::messages::BatchId;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -22,14 +22,14 @@ const PENDING_PREFIX: &str = "pending";
 
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct BatchCount {
-    pub(crate) batch_id: Id,
+    pub(crate) batch_id: BatchId,
     pub(crate) report_count: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LeaderBatchQueueResult {
-    Ok(Id),
+    Ok(BatchId),
     EmptyQueue,
 }
 
@@ -67,7 +67,7 @@ impl LeaderBatchQueue {
         let queued = DurableOrdered::new_strictly_ordered(
             &self.state,
             BatchCount {
-                batch_id: Id(rng.gen()),
+                batch_id: BatchId(rng.gen()),
                 report_count: 0,
             },
             PENDING_PREFIX,

@@ -53,18 +53,31 @@ fn test_prepare(
 ) -> Result<(), VdafError> {
     let mut rng = thread_rng();
     let verify_key = rng.gen();
-    let nonce = b"this is a good nonce";
+    let nonce = [0; 16];
 
     // Shard
-    let encoded_input_shares = prio3_shard(config, measurement).unwrap();
+    let (encoded_public_share, encoded_input_shares) =
+        prio3_shard(config, measurement, &nonce).unwrap();
     assert_eq!(encoded_input_shares.len(), 2);
 
     // Prepare
-    let (leader_state, leader_share) =
-        prio3_prepare_init(config, &verify_key, 0, nonce, &encoded_input_shares[0])?;
+    let (leader_state, leader_share) = prio3_prepare_init(
+        config,
+        &verify_key,
+        0,
+        &nonce,
+        &encoded_public_share,
+        &encoded_input_shares[0],
+    )?;
 
-    let (helper_state, helper_share) =
-        prio3_prepare_init(config, &verify_key, 1, nonce, &encoded_input_shares[1])?;
+    let (helper_state, helper_share) = prio3_prepare_init(
+        config,
+        &verify_key,
+        1,
+        &nonce,
+        &encoded_public_share,
+        &encoded_input_shares[1],
+    )?;
 
     let helper_share_data = prio3_encode_prepare_message(&helper_share);
 

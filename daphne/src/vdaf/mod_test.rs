@@ -6,22 +6,26 @@ use crate::{
     async_test_versions,
     hpke::HpkeReceiverConfig,
     messages::{
-        AggregateContinueReq, AggregateInitializeReq, AggregateResp, BatchSelector, HpkeAeadId,
-        HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Id, Interval, PartialBatchSelector,
-        Report, ReportId, ReportShare, Time, Transition, TransitionFailure, TransitionVar,
+        AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchSelector,
+        HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, Interval,
+        PartialBatchSelector, Report, ReportId, ReportShare, TaskId, Time, Transition,
+        TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
     test_version, test_versions, DapAbort, DapAggregateResult, DapAggregateShare, DapError,
     DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted,
-    DapMeasurement, DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config,
-    VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
+    DapMeasurement, DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion,
+    MetaAggregationJobId, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
 };
 use assert_matches::assert_matches;
 use hpke_rs::HpkePublicKey;
 use paste::paste;
-use prio::vdaf::{
-    prio3::Prio3, Aggregatable, Aggregator as VdafAggregator, Collector as VdafCollector,
-    PrepareTransition,
+use prio::{
+    field::Field64,
+    vdaf::{
+        prio3::Prio3, Aggregatable, AggregateShare, Aggregator as VdafAggregator,
+        Collector as VdafCollector, OutputShare, PrepareTransition,
+    },
 };
 use rand::prelude::*;
 use std::{fmt::Debug, time::SystemTime};
@@ -90,7 +94,7 @@ async fn roundtrip_report(version: DapVersion) {
             true, // is_leader
             &t.task_id,
             &t.task_config,
-            &report.metadata,
+            &report.report_metadata,
             &report.public_share,
             &report.encrypted_input_shares[0],
         )
@@ -103,7 +107,7 @@ async fn roundtrip_report(version: DapVersion) {
             false, // is_leader
             &t.task_id,
             &t.task_config,
-            &report.metadata,
+            &report.report_metadata,
             &report.public_share,
             &report.encrypted_input_shares[1],
         )
@@ -117,7 +121,7 @@ async fn roundtrip_report(version: DapVersion) {
             VdafMessage::Prio3ShareField64(leader_share),
             VdafMessage::Prio3ShareField64(helper_share),
         ) => {
-            let vdaf = Prio3::new_aes128_count(2).unwrap();
+            let vdaf = Prio3::new_count(2).unwrap();
             let message = vdaf
                 .prepare_preprocess([leader_share, helper_share])
                 .unwrap();
@@ -175,7 +179,7 @@ fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
 
 test_versions! { roundtrip_report_unsupported_hpke_suite }
 
-async fn produce_agg_init_req(version: DapVersion) {
+async fn produce_agg_job_init_req(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -183,29 +187,35 @@ async fn produce_agg_init_req(version: DapVersion) {
         DapMeasurement::U64(0),
     ]);
 
-    let (leader_state, agg_init_req) = t
-        .produce_agg_init_req(reports.clone())
+    let (leader_state, agg_job_init_req) = t
+        .produce_agg_job_init_req(reports.clone())
         .await
         .unwrap_continue();
     assert_eq!(leader_state.seq.len(), 3);
-    assert_eq!(agg_init_req.task_id, t.task_id);
-    assert_eq!(agg_init_req.agg_param.len(), 0);
-    assert_eq!(agg_init_req.report_shares.len(), 3);
-    for (report_shares, report) in agg_init_req.report_shares.iter().zip(reports.iter()) {
-        assert_eq!(report_shares.metadata.id, report.metadata.id);
+    assert_eq!(
+        agg_job_init_req.draft02_task_id,
+        t.task_id.for_request_payload(&version)
+    );
+    assert_eq!(agg_job_init_req.agg_param.len(), 0);
+    assert_eq!(agg_job_init_req.report_shares.len(), 3);
+    for (report_shares, report) in agg_job_init_req.report_shares.iter().zip(reports.iter()) {
+        assert_eq!(report_shares.report_metadata.id, report.report_metadata.id);
     }
 
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
     assert_eq!(helper_state.seq.len(), 3);
-    assert_eq!(agg_resp.transitions.len(), 3);
-    for (sub, report) in agg_resp.transitions.iter().zip(reports.iter()) {
-        assert_eq!(sub.report_id, report.metadata.id);
+    assert_eq!(agg_job_resp.transitions.len(), 3);
+    for (sub, report) in agg_job_resp.transitions.iter().zip(reports.iter()) {
+        assert_eq!(sub.report_id, report.report_metadata.id);
     }
 }
 
-async_test_versions! { produce_agg_init_req }
+async_test_versions! { produce_agg_job_init_req }
 
-async fn produce_agg_init_req_skip_hpke_decrypt_err(version: DapVersion) {
+async fn produce_agg_job_init_req_skip_hpke_decrypt_err(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -213,7 +223,7 @@ async fn produce_agg_init_req_skip_hpke_decrypt_err(version: DapVersion) {
     reports[0].encrypted_input_shares[0].payload[0] ^= 1;
 
     assert_matches!(
-        t.produce_agg_init_req(reports).await,
+        t.produce_agg_job_init_req(reports).await,
         DapLeaderTransition::Skip
     );
 
@@ -222,9 +232,9 @@ async fn produce_agg_init_req_skip_hpke_decrypt_err(version: DapVersion) {
     });
 }
 
-async_test_versions! { produce_agg_init_req_skip_hpke_decrypt_err }
+async_test_versions! { produce_agg_job_init_req_skip_hpke_decrypt_err }
 
-async fn produce_agg_init_req_skip_hpke_unknown_config_id(version: DapVersion) {
+async fn produce_agg_job_init_req_skip_hpke_unknown_config_id(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -232,7 +242,7 @@ async fn produce_agg_init_req_skip_hpke_unknown_config_id(version: DapVersion) {
     reports[0].encrypted_input_shares[0].config_id ^= 1;
 
     assert_matches!(
-        t.produce_agg_init_req(reports).await,
+        t.produce_agg_job_init_req(reports).await,
         DapLeaderTransition::Skip
     );
 
@@ -241,9 +251,9 @@ async fn produce_agg_init_req_skip_hpke_unknown_config_id(version: DapVersion) {
     });
 }
 
-async_test_versions! { produce_agg_init_req_skip_hpke_unknown_config_id }
+async_test_versions! { produce_agg_job_init_req_skip_hpke_unknown_config_id }
 
-async fn produce_agg_init_req_skip_vdaf_prep_error(version: DapVersion) {
+async fn produce_agg_job_init_req_skip_vdaf_prep_error(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let reports = vec![
         t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version),
@@ -251,7 +261,7 @@ async fn produce_agg_init_req_skip_vdaf_prep_error(version: DapVersion) {
     ];
 
     assert_matches!(
-        t.produce_agg_init_req(reports).await,
+        t.produce_agg_job_init_req(reports).await,
         DapLeaderTransition::Skip
     );
 
@@ -260,9 +270,9 @@ async fn produce_agg_init_req_skip_vdaf_prep_error(version: DapVersion) {
     });
 }
 
-async_test_versions! { produce_agg_init_req_skip_vdaf_prep_error }
+async_test_versions! { produce_agg_job_init_req_skip_vdaf_prep_error }
 
-async fn handle_agg_init_req_hpke_decrypt_err(version: DapVersion) {
+async fn handle_agg_job_init_req_hpke_decrypt_err(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -270,14 +280,14 @@ async fn handle_agg_init_req_hpke_decrypt_err(version: DapVersion) {
     reports[0].encrypted_input_shares[1].payload[0] ^= 1;
 
     let (_, agg_req) = t
-        .produce_agg_init_req(reports.clone())
+        .produce_agg_job_init_req(reports.clone())
         .await
         .unwrap_continue();
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
+    let (_, agg_job_resp) = t.handle_agg_job_init_req(agg_req).await.unwrap_continue();
 
-    assert_eq!(agg_resp.transitions.len(), 1);
+    assert_eq!(agg_job_resp.transitions.len(), 1);
     assert_matches!(
-        agg_resp.transitions[0].var,
+        agg_job_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
     );
 
@@ -286,9 +296,9 @@ async fn handle_agg_init_req_hpke_decrypt_err(version: DapVersion) {
     });
 }
 
-async_test_versions! { handle_agg_init_req_hpke_decrypt_err }
+async_test_versions! { handle_agg_job_init_req_hpke_decrypt_err }
 
-async fn handle_agg_init_req_hpke_unknown_config_id(version: DapVersion) {
+async fn handle_agg_job_init_req_hpke_unknown_config_id(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
@@ -296,14 +306,14 @@ async fn handle_agg_init_req_hpke_unknown_config_id(version: DapVersion) {
     reports[0].encrypted_input_shares[1].config_id ^= 1;
 
     let (_, agg_req) = t
-        .produce_agg_init_req(reports.clone())
+        .produce_agg_job_init_req(reports.clone())
         .await
         .unwrap_continue();
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
+    let (_, agg_job_resp) = t.handle_agg_job_init_req(agg_req).await.unwrap_continue();
 
-    assert_eq!(agg_resp.transitions.len(), 1);
+    assert_eq!(agg_job_resp.transitions.len(), 1);
     assert_matches!(
-        agg_resp.transitions[0].var,
+        agg_job_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
     );
 
@@ -312,43 +322,43 @@ async fn handle_agg_init_req_hpke_unknown_config_id(version: DapVersion) {
     });
 }
 
-async_test_versions! { handle_agg_init_req_hpke_unknown_config_id }
+async_test_versions! { handle_agg_job_init_req_hpke_unknown_config_id }
 
-async fn handle_agg_init_req_vdaf_prep_error(version: DapVersion) {
+async fn handle_agg_job_init_req_vdaf_prep_error(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let report0 =
         t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version);
     let report1 =
         t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version);
 
-    let agg_req = AggregateInitializeReq {
-        task_id: t.task_id.clone(),
-        agg_job_id: t.agg_job_id.clone(),
+    let agg_req = AggregationJobInitReq {
+        draft02_task_id: t.task_id.for_request_payload(&version),
+        draft02_agg_job_id: t.agg_job_id.for_request_payload(),
         agg_param: Vec::new(),
         part_batch_sel: PartialBatchSelector::TimeInterval,
         report_shares: vec![
             ReportShare {
-                metadata: report0.metadata,
+                report_metadata: report0.report_metadata,
                 public_share: report0.public_share,
                 encrypted_input_share: report0.encrypted_input_shares[1].clone(),
             },
             ReportShare {
-                metadata: report1.metadata,
+                report_metadata: report1.report_metadata,
                 public_share: report1.public_share,
                 encrypted_input_share: report1.encrypted_input_shares[1].clone(),
             },
         ],
     };
 
-    let (_, agg_resp) = t.handle_agg_init_req(agg_req).await.unwrap_continue();
+    let (_, agg_job_resp) = t.handle_agg_job_init_req(agg_req).await.unwrap_continue();
 
-    assert_eq!(agg_resp.transitions.len(), 2);
+    assert_eq!(agg_job_resp.transitions.len(), 2);
     assert_matches!(
-        agg_resp.transitions[0].var,
+        agg_job_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::VdafPrepError)
     );
     assert_matches!(
-        agg_resp.transitions[1].var,
+        agg_job_resp.transitions[1].var,
         TransitionVar::Failed(TransitionFailure::VdafPrepError)
     );
 
@@ -357,84 +367,100 @@ async fn handle_agg_init_req_vdaf_prep_error(version: DapVersion) {
     });
 }
 
-async_test_versions! { handle_agg_init_req_vdaf_prep_error }
+async_test_versions! { handle_agg_job_init_req_vdaf_prep_error }
 
-async fn agg_resp_abort_transition_out_of_order(version: DapVersion) {
+async fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
     // Helper sends transitions out of order.
-    let tmp = agg_resp.transitions[0].clone();
-    agg_resp.transitions[0] = agg_resp.transitions[1].clone();
-    agg_resp.transitions[1] = tmp;
+    let tmp = agg_job_resp.transitions[0].clone();
+    agg_job_resp.transitions[0] = agg_job_resp.transitions[1].clone();
+    agg_job_resp.transitions[1] = tmp;
 
     assert_matches!(
-        t.handle_agg_resp_expect_err(leader_state, agg_resp),
+        t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_resp_abort_transition_out_of_order }
+async_test_versions! { agg_job_resp_abort_transition_out_of_order }
 
-async fn agg_resp_abort_report_id_repeated(version: DapVersion) {
+async fn agg_job_resp_abort_report_id_repeated(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
     // Helper sends a transition twice.
-    let repeated_transition = agg_resp.transitions[0].clone();
-    agg_resp.transitions.push(repeated_transition);
+    let repeated_transition = agg_job_resp.transitions[0].clone();
+    agg_job_resp.transitions.push(repeated_transition);
 
     assert_matches!(
-        t.handle_agg_resp_expect_err(leader_state, agg_resp),
+        t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_resp_abort_report_id_repeated }
+async_test_versions! { agg_job_resp_abort_report_id_repeated }
 
-async fn agg_resp_abort_unrecognized_report_id(version: DapVersion) {
+async fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
     // Helper sent a transition with an unrecognized report ID.
-    agg_resp.transitions.push(Transition {
+    agg_job_resp.transitions.push(Transition {
         report_id: ReportId(rng.gen()),
         var: TransitionVar::Continued(b"whatever".to_vec()),
     });
 
     assert_matches!(
-        t.handle_agg_resp_expect_err(leader_state, agg_resp),
+        t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_resp_abort_unrecognized_report_id }
+async_test_versions! { agg_job_resp_abort_unrecognized_report_id }
 
-async fn agg_resp_abort_invalid_transition(version: DapVersion) {
+async fn agg_job_resp_abort_invalid_transition(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (_, mut agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (_, mut agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
     // Helper sent a transition with an unrecognized report ID.
-    agg_resp.transitions[0].var = TransitionVar::Finished;
+    agg_job_resp.transitions[0].var = TransitionVar::Finished;
 
     assert_matches!(
-        t.handle_agg_resp_expect_err(leader_state, agg_resp),
+        t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_resp_abort_invalid_transition }
+async_test_versions! { agg_job_resp_abort_invalid_transition }
 
-async fn agg_cont_req(version: DapVersion) {
+async fn agg_job_cont_req(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![
         DapMeasurement::U64(1),
@@ -443,20 +469,24 @@ async fn agg_cont_req(version: DapVersion) {
         DapMeasurement::U64(0),
         DapMeasurement::U64(1),
     ]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
-    let (leader_uncommitted, agg_cont_req) = t
-        .handle_agg_resp(leader_state, agg_resp)
+    let (leader_uncommitted, agg_job_cont_req) = t
+        .handle_agg_job_resp(leader_state, agg_job_resp)
         .unwrap_uncommitted();
 
-    let (helper_out_shares, agg_resp) = t
-        .handle_agg_cont_req(helper_state, &agg_cont_req)
+    let (helper_out_shares, agg_job_resp) = t
+        .handle_agg_job_cont_req(helper_state, &agg_job_cont_req)
         .unwrap_finish();
     assert_eq!(helper_out_shares.len(), 5);
-    assert_eq!(agg_resp.transitions.len(), 5);
+    assert_eq!(agg_job_resp.transitions.len(), 5);
 
-    let leader_out_shares = t.handle_final_agg_resp(leader_uncommitted, agg_resp);
+    let leader_out_shares = t.handle_final_agg_job_resp(leader_uncommitted, agg_job_resp);
     assert_eq!(leader_out_shares.len(), 5);
     let num_measurements = leader_out_shares.len();
 
@@ -484,7 +514,7 @@ async fn agg_cont_req(version: DapVersion) {
         })
         .unwrap();
 
-    let vdaf = Prio3::new_aes128_count(2).unwrap();
+    let vdaf = Prio3::new_count(2).unwrap();
     assert_eq!(
         vdaf.unshard(&(), [leader_agg_share, helper_agg_share], num_measurements,)
             .unwrap(),
@@ -492,9 +522,9 @@ async fn agg_cont_req(version: DapVersion) {
     );
 }
 
-async_test_versions! { agg_cont_req }
+async_test_versions! { agg_job_cont_req }
 
-async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
+async fn agg_job_cont_req_skip_vdaf_prep_error(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
     reports.insert(
@@ -502,29 +532,30 @@ async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
         t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), version),
     );
 
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (helper_state, agg_resp) = t
-        .handle_agg_init_req(agg_init_req.clone())
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req.clone())
         .await
         .unwrap_continue();
 
-    let (_, agg_cont_req) = t
-        .handle_agg_resp(leader_state, agg_resp)
+    let (_, agg_job_cont_req) = t
+        .handle_agg_job_resp(leader_state, agg_job_resp)
         .unwrap_uncommitted();
 
-    let (helper_output_shares, agg_resp) = t
-        .handle_agg_cont_req(helper_state, &agg_cont_req)
+    let (helper_output_shares, agg_job_resp) = t
+        .handle_agg_job_cont_req(helper_state, &agg_job_cont_req)
         .unwrap_finish();
 
     assert_eq!(2, helper_output_shares.len());
-    assert_eq!(2, agg_resp.transitions.len());
+    assert_eq!(2, agg_job_resp.transitions.len());
     assert_eq!(
-        agg_resp.transitions[0].report_id,
-        agg_init_req.report_shares[0].metadata.id
+        agg_job_resp.transitions[0].report_id,
+        agg_job_init_req.report_shares[0].report_metadata.id
     );
     assert_eq!(
-        agg_resp.transitions[1].report_id,
-        agg_init_req.report_shares[2].metadata.id
+        agg_job_resp.transitions[1].report_id,
+        agg_job_init_req.report_shares[2].report_metadata.id
     );
 
     assert_metrics_include!(t.prometheus_registry, {
@@ -532,20 +563,24 @@ async fn agg_cont_req_skip_vdaf_prep_error(version: DapVersion) {
     });
 }
 
-async_test_versions! { agg_cont_req_skip_vdaf_prep_error }
+async_test_versions! { agg_job_cont_req_skip_vdaf_prep_error }
 
 async fn agg_cont_abort_unrecognized_report_id(version: DapVersion) {
     let mut rng = thread_rng();
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
-    let (_, mut agg_cont_req) = t
-        .handle_agg_resp(leader_state, agg_resp)
+    let (_, mut agg_job_cont_req) = t
+        .handle_agg_job_resp(leader_state, agg_job_resp)
         .unwrap_uncommitted();
     // Leader sends a Transition with an unrecognized report_id.
-    agg_cont_req.transitions.insert(
+    agg_job_cont_req.transitions.insert(
         1,
         Transition {
             report_id: ReportId(rng.gen()),
@@ -554,67 +589,83 @@ async fn agg_cont_abort_unrecognized_report_id(version: DapVersion) {
     );
 
     assert_matches!(
-        t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
+        t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
         DapAbort::UnrecognizedMessage
     );
 }
 
 async_test_versions! { agg_cont_abort_unrecognized_report_id }
 
-async fn agg_cont_req_abort_transition_out_of_order(version: DapVersion) {
+async fn agg_job_cont_req_abort_transition_out_of_order(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
-    let (_, mut agg_cont_req) = t
-        .handle_agg_resp(leader_state, agg_resp)
+    let (_, mut agg_job_cont_req) = t
+        .handle_agg_job_resp(leader_state, agg_job_resp)
         .unwrap_uncommitted();
     // Leader sends transitions out of order.
-    let tmp = agg_cont_req.transitions[0].clone();
-    agg_cont_req.transitions[0] = agg_cont_req.transitions[1].clone();
-    agg_cont_req.transitions[1] = tmp;
+    let tmp = agg_job_cont_req.transitions[0].clone();
+    agg_job_cont_req.transitions[0] = agg_job_cont_req.transitions[1].clone();
+    agg_job_cont_req.transitions[1] = tmp;
 
     assert_matches!(
-        t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
+        t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_cont_req_abort_transition_out_of_order }
+async_test_versions! { agg_job_cont_req_abort_transition_out_of_order }
 
-async fn agg_cont_req_abort_report_id_repeated(version: DapVersion) {
+async fn agg_job_cont_req_abort_report_id_repeated(version: DapVersion) {
     let mut t = Test::new(TEST_VDAF, version);
     let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-    let (leader_state, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (helper_state, agg_resp) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (leader_state, agg_job_init_req) =
+        t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (helper_state, agg_job_resp) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
-    let (_, mut agg_cont_req) = t
-        .handle_agg_resp(leader_state, agg_resp)
+    let (_, mut agg_job_cont_req) = t
+        .handle_agg_job_resp(leader_state, agg_job_resp)
         .unwrap_uncommitted();
     // Leader sends a transition twice.
-    let repeated_transition = agg_cont_req.transitions[0].clone();
-    agg_cont_req.transitions.push(repeated_transition);
+    let repeated_transition = agg_job_cont_req.transitions[0].clone();
+    agg_job_cont_req.transitions.push(repeated_transition);
 
     assert_matches!(
-        t.handle_agg_cont_req_expect_err(helper_state, &agg_cont_req),
+        t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
         DapAbort::UnrecognizedMessage
     );
 }
 
-async_test_versions! { agg_cont_req_abort_report_id_repeated }
+async_test_versions! { agg_job_cont_req_abort_report_id_repeated }
 
 async fn encrypted_agg_share(version: DapVersion) {
     let t = Test::new(TEST_VDAF, version);
     let leader_agg_share = DapAggregateShare {
         report_count: 50,
+        min_time: 1637359200,
+        max_time: 1637359200,
         checksum: [0; 32],
-        data: Some(VdafAggregateShare::Field64(vec![23.into()].into())),
+        data: Some(VdafAggregateShare::Field64(AggregateShare::from(
+            OutputShare::from(vec![Field64::from(23)]),
+        ))),
     };
     let helper_agg_share = DapAggregateShare {
         report_count: 50,
+        min_time: 1637359200,
+        max_time: 1637359200,
         checksum: [0; 32],
-        data: Some(VdafAggregateShare::Field64(vec![9.into()].into())),
+        data: Some(VdafAggregateShare::Field64(AggregateShare::from(
+            OutputShare::from(vec![Field64::from(9)]),
+        ))),
     };
 
     let batch_selector = BatchSelector::TimeInterval {
@@ -649,8 +700,11 @@ async fn helper_state_serialization(version: DapVersion) {
         DapMeasurement::U64(0),
         DapMeasurement::U64(1),
     ]);
-    let (_, agg_init_req) = t.produce_agg_init_req(reports).await.unwrap_continue();
-    let (want, _) = t.handle_agg_init_req(agg_init_req).await.unwrap_continue();
+    let (_, agg_job_init_req) = t.produce_agg_job_init_req(reports).await.unwrap_continue();
+    let (want, _) = t
+        .handle_agg_job_init_req(agg_job_init_req)
+        .await
+        .unwrap_continue();
 
     let got =
         DapHelperState::get_decoded(TEST_VDAF, &want.get_encoded(TEST_VDAF).unwrap()).unwrap();
@@ -663,8 +717,8 @@ async_test_versions! { helper_state_serialization }
 
 pub(crate) struct Test {
     now: Time,
-    task_id: Id,
-    agg_job_id: Id,
+    task_id: TaskId,
+    agg_job_id: MetaAggregationJobId<'static>,
     task_config: DapTaskConfig,
     leader_hpke_receiver_config: HpkeReceiverConfig,
     helper_hpke_receiver_config: HpkeReceiverConfig,
@@ -682,8 +736,8 @@ impl Test {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let task_id = Id(rng.gen());
-        let agg_job_id = Id(rng.gen());
+        let task_id = TaskId(rng.gen());
+        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
         let vdaf_verify_key = vdaf.gen_verify_key();
         let leader_hpke_receiver_config =
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
@@ -752,10 +806,11 @@ impl Test {
         measurement: DapMeasurement,
         version: DapVersion,
     ) -> Report {
+        let report_id = ReportId(thread_rng().gen());
         let (invalid_public_share, mut invalid_input_shares) = self
             .task_config
             .vdaf
-            .produce_input_shares(measurement)
+            .produce_input_shares(measurement, &report_id.0)
             .unwrap();
         invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
         self.task_config
@@ -766,6 +821,7 @@ impl Test {
                 &self.client_hpke_config_list,
                 self.now,
                 &self.task_id,
+                &report_id,
                 Vec::new(), // extensions
                 version,
             )
@@ -778,10 +834,11 @@ impl Test {
         measurement: DapMeasurement,
         version: DapVersion,
     ) -> Report {
+        let report_id = ReportId(thread_rng().gen());
         let (mut invalid_public_share, invalid_input_shares) = self
             .task_config
             .vdaf
-            .produce_input_shares(measurement)
+            .produce_input_shares(measurement, &report_id.0)
             .unwrap();
         invalid_public_share.push(1); // Add spurious byte at the end
         self.task_config
@@ -792,6 +849,7 @@ impl Test {
                 &self.client_hpke_config_list,
                 self.now,
                 &self.task_id,
+                &report_id,
                 Vec::new(), // extensions
                 version,
             )
@@ -804,10 +862,11 @@ impl Test {
         measurement: DapMeasurement,
         version: DapVersion,
     ) -> Report {
+        let report_id = ReportId(thread_rng().gen());
         let (invalid_public_share, mut invalid_input_shares) = self
             .task_config
             .vdaf
-            .produce_input_shares(measurement)
+            .produce_input_shares(measurement, &report_id.0)
             .unwrap();
         invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
         invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share
@@ -819,19 +878,20 @@ impl Test {
                 &self.client_hpke_config_list,
                 self.now,
                 &self.task_id,
+                &report_id,
                 Vec::new(), // extensions
                 version,
             )
             .unwrap()
     }
 
-    async fn produce_agg_init_req(
+    async fn produce_agg_job_init_req(
         &self,
         reports: Vec<Report>,
-    ) -> DapLeaderTransition<AggregateInitializeReq> {
+    ) -> DapLeaderTransition<AggregationJobInitReq> {
         self.task_config
             .vdaf
-            .produce_agg_init_req(
+            .produce_agg_job_init_req(
                 &self.leader_hpke_receiver_config,
                 &self.task_id,
                 &self.task_config,
@@ -844,86 +904,89 @@ impl Test {
             .unwrap()
     }
 
-    async fn handle_agg_init_req(
+    async fn handle_agg_job_init_req(
         &mut self,
-        agg_init_req: AggregateInitializeReq,
-    ) -> DapHelperTransition<AggregateResp> {
+        agg_job_init_req: AggregationJobInitReq,
+    ) -> DapHelperTransition<AggregationJobResp> {
         self.task_config
             .vdaf
-            .handle_agg_init_req(
+            .handle_agg_job_init_req(
                 &self.helper_hpke_receiver_config,
+                &self.task_id,
                 &self.task_config,
-                &agg_init_req,
+                &agg_job_init_req,
                 &self.helper_metrics,
             )
             .await
             .unwrap()
     }
 
-    fn handle_agg_resp(
+    fn handle_agg_job_resp(
         &self,
         leader_state: DapLeaderState,
-        agg_resp: AggregateResp,
-    ) -> DapLeaderTransition<AggregateContinueReq> {
+        agg_job_resp: AggregationJobResp,
+    ) -> DapLeaderTransition<AggregationJobContinueReq> {
         self.task_config
             .vdaf
-            .handle_agg_resp(
+            .handle_agg_job_resp(
                 &self.task_id,
                 &self.agg_job_id,
                 leader_state,
-                agg_resp,
+                agg_job_resp,
+                self.task_config.version,
                 &self.leader_metrics,
             )
             .unwrap()
     }
 
-    fn handle_agg_resp_expect_err(
+    fn handle_agg_job_resp_expect_err(
         &self,
         leader_state: DapLeaderState,
-        agg_resp: AggregateResp,
+        agg_job_resp: AggregationJobResp,
     ) -> DapAbort {
         self.task_config
             .vdaf
-            .handle_agg_resp(
+            .handle_agg_job_resp(
                 &self.task_id,
                 &self.agg_job_id,
                 leader_state,
-                agg_resp,
+                agg_job_resp,
+                self.task_config.version,
                 &self.leader_metrics,
             )
-            .expect_err("handle_agg_resp() succeeded; expected failure")
+            .expect_err("handle_agg_job_resp() succeeded; expected failure")
     }
 
-    fn handle_agg_cont_req(
+    fn handle_agg_job_cont_req(
         &self,
         helper_state: DapHelperState,
-        agg_cont_req: &AggregateContinueReq,
-    ) -> DapHelperTransition<AggregateResp> {
+        agg_job_cont_req: &AggregationJobContinueReq,
+    ) -> DapHelperTransition<AggregationJobResp> {
         self.task_config
             .vdaf
-            .handle_agg_cont_req(helper_state, agg_cont_req, &self.helper_metrics)
+            .handle_agg_job_cont_req(helper_state, agg_job_cont_req, &self.helper_metrics)
             .unwrap()
     }
 
-    fn handle_agg_cont_req_expect_err(
+    fn handle_agg_job_cont_req_expect_err(
         &self,
         helper_state: DapHelperState,
-        agg_cont_req: &AggregateContinueReq,
+        agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapAbort {
         self.task_config
             .vdaf
-            .handle_agg_cont_req(helper_state, agg_cont_req, &self.helper_metrics)
-            .expect_err("handle_agg_cont_req() succeeded; expected failure")
+            .handle_agg_job_cont_req(helper_state, agg_job_cont_req, &self.helper_metrics)
+            .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
 
-    fn handle_final_agg_resp(
+    fn handle_final_agg_job_resp(
         &self,
         leader_uncommitted: DapLeaderUncommitted,
-        agg_resp: AggregateResp,
+        agg_job_resp: AggregationJobResp,
     ) -> Vec<DapOutputShare> {
         self.task_config
             .vdaf
-            .handle_final_agg_resp(leader_uncommitted, agg_resp, &self.leader_metrics)
+            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, &self.leader_metrics)
             .unwrap()
     }
 
@@ -996,8 +1059,14 @@ impl Test {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let (leader_state, agg_init) = self.produce_agg_init_req(reports).await.unwrap_continue();
-        let (helper_state, agg_resp) = self.handle_agg_init_req(agg_init).await.unwrap_continue();
+        let (leader_state, agg_init) = self
+            .produce_agg_job_init_req(reports)
+            .await
+            .unwrap_continue();
+        let (helper_state, agg_job_resp) = self
+            .handle_agg_job_init_req(agg_init)
+            .await
+            .unwrap_continue();
         let got = DapHelperState::get_decoded(
             &self.task_config.vdaf,
             &helper_state
@@ -1008,12 +1077,12 @@ impl Test {
         assert_eq!(got, helper_state);
 
         let (uncommitted, agg_cont) = self
-            .handle_agg_resp(leader_state, agg_resp)
+            .handle_agg_job_resp(leader_state, agg_job_resp)
             .unwrap_uncommitted();
-        let (helper_out_shares, agg_resp) = self
-            .handle_agg_cont_req(helper_state, &agg_cont)
+        let (helper_out_shares, agg_job_resp) = self
+            .handle_agg_job_cont_req(helper_state, &agg_cont)
             .unwrap_finish();
-        let leader_out_shares = self.handle_final_agg_resp(uncommitted, agg_resp);
+        let leader_out_shares = self.handle_final_agg_job_resp(uncommitted, agg_job_resp);
         let report_count = u64::try_from(leader_out_shares.len()).unwrap();
 
         // Leader: Aggregation
