@@ -8,8 +8,8 @@ use daphne::{
     constants::MEDIA_TYPE_COLLECT_REQ,
     hpke::HpkeReceiverConfig,
     messages::{
-        decode_base64url, encode_base64url, Duration, HpkeAeadId, HpkeConfig, HpkeConfigList,
-        HpkeKdfId, HpkeKemId, Id, Interval,
+        encode_base64url, BatchId, CollectionJobId, Duration, HpkeAeadId, HpkeConfig,
+        HpkeConfigList, HpkeKdfId, HpkeKemId, Interval, TaskId,
     },
     taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
@@ -44,7 +44,7 @@ struct InternalTestAddTaskResult {
 #[allow(dead_code)]
 pub struct TestRunner {
     pub global_config: DapGlobalConfig,
-    pub task_id: Id,
+    pub task_id: TaskId,
     pub task_config: DapTaskConfig,
     pub now: u64,
     pub leader_url: Url,
@@ -84,13 +84,13 @@ impl TestRunner {
             .unwrap()
             .as_secs();
 
-        let task_id = Id(rng.gen());
+        let task_id = TaskId(rng.gen());
 
         // When running in a local development environment, override the hostname of each
         // aggregator URL with 127.0.0.1.
         let version_path = match version {
             DapVersion::Draft02 => "v02",
-            DapVersion::Draft03 => "v03",
+            DapVersion::Draft04 => "v04",
             _ => panic!("unimplemented DapVersion"),
         };
         let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
@@ -251,7 +251,7 @@ impl TestRunner {
     }
 
     pub fn batch_interval(&self) -> Interval {
-        let start = self.now - (self.now % self.task_config.time_precision);
+        let start = self.task_config.quantized_time_lower_bound(self.now);
         Interval {
             start,
             duration: self.task_config.time_precision * 2,
@@ -377,13 +377,112 @@ impl TestRunner {
         );
     }
 
+    /// Send a PUT request or, if draft02 is in use, a POST request.
+    pub async fn leader_put_expect_ok(
+        &self,
+        client: &reqwest::Client,
+        path: &str,
+        media_type: &str,
+        data: Vec<u8>,
+    ) {
+        // draft02 always POSTs
+        if self.version == DapVersion::Draft02 {
+            return self
+                .leader_post_expect_ok(client, path, media_type, data)
+                .await;
+        }
+        let url = self.leader_url.join(path).unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        let resp = client
+            .put(url.as_str())
+            .body(data)
+            .send()
+            .await
+            .expect("request failed");
+
+        assert_eq!(
+            reqwest::StatusCode::from_u16(200).unwrap(),
+            resp.status(),
+            "unexpected response status: {:?}",
+            resp.text().await.unwrap()
+        );
+    }
+
+    /// Send a PUT request or, if draft02 is in use, a POST request, and expect an abort.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn leader_put_expect_abort(
+        &self,
+        client: &reqwest::Client,
+        dap_auth_token: Option<&str>,
+        path: &str,
+        media_type: &str,
+        data: Vec<u8>,
+        expected_status: u16,
+        expected_err_type: &str,
+    ) {
+        // draft02 always POSTs
+        if self.version == DapVersion::Draft02 {
+            return self
+                .leader_post_expect_abort(
+                    client,
+                    dap_auth_token,
+                    path,
+                    media_type,
+                    data,
+                    expected_status,
+                    expected_err_type,
+                )
+                .await;
+        }
+
+        let url = self.leader_url.join(path).unwrap();
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        if let Some(token) = dap_auth_token {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-auth-token"),
+                reqwest::header::HeaderValue::from_str(token).unwrap(),
+            );
+        }
+
+        let resp = client
+            .put(url.as_str())
+            .body(data)
+            .headers(headers)
+            .send()
+            .await
+            .expect("request failed");
+
+        assert_eq!(
+            reqwest::StatusCode::from_u16(expected_status).unwrap(),
+            resp.status(),
+            "unexpected response status: {:?}",
+            resp.text().await.unwrap()
+        );
+
+        assert_eq!(
+            resp.headers().get("Content-Type").unwrap(),
+            "application/problem+json"
+        );
+
+        let problem_details: serde_json::Value = resp.json().await.unwrap();
+        let got = problem_details.as_object().unwrap().get("type").unwrap();
+        assert_eq!(
+            got,
+            &format!("urn:ietf:params:ppm:dap:error:{}", expected_err_type)
+        );
+    }
+
     pub async fn leader_post_collect_using_token(
         &self,
         client: &reqwest::Client,
         data: Vec<u8>,
         token: &str,
     ) -> Url {
-        let url = self.leader_url.join("collect").unwrap();
+        let url_suffix = self.collect_url_suffix();
+        let url = self.leader_url.join(&url_suffix).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -393,22 +492,36 @@ impl TestRunner {
             reqwest::header::HeaderName::from_static("dap-auth-token"),
             reqwest::header::HeaderValue::from_str(token).unwrap(),
         );
-        let resp = client
-            .post(url.as_str())
+        let builder = if self.version == DapVersion::Draft02 {
+            client.post(url.as_str())
+        } else {
+            client.put(url.as_str())
+        };
+        let resp = builder
             .body(data)
             .headers(headers)
             .send()
             .await
             .expect("request failed");
 
+        let expected_status = if self.version == DapVersion::Draft02 {
+            303
+        } else {
+            201
+        };
+
         assert_eq!(
             resp.status(),
-            303,
+            expected_status,
             "request failed: {:?}",
             resp.text().await.unwrap()
         );
-        let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
-        collect_uri.parse().unwrap()
+        if self.version == DapVersion::Draft02 {
+            let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
+            collect_uri.parse().unwrap()
+        } else {
+            url
+        }
     }
 
     pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
@@ -422,7 +535,7 @@ impl TestRunner {
         client: &reqwest::Client,
         report_sel: &DaphneWorkerReportSelector,
     ) -> DapLeaderProcessTelemetry {
-        // Replace path "/v02" with "/internal/process".
+        // Replace path "/v04" with "/internal/process".
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
 
@@ -453,7 +566,7 @@ impl TestRunner {
         } else {
             self.helper_url.clone()
         };
-        url.set_path(path); // Overwrites the version path (i.e., "/v02")
+        url.set_path(path); // Overwrites the version path (i.e., "/v04")
         let resp = client
             .post(url.clone())
             .json(data)
@@ -492,7 +605,7 @@ impl TestRunner {
     }
 
     #[allow(dead_code)]
-    pub async fn internal_current_batch(&self, task_id: &Id) -> Id {
+    pub async fn internal_current_batch(&self, task_id: &TaskId) -> BatchId {
         let client = self.http_client();
         let mut url = self.leader_url.clone();
         url.set_path(&format!(
@@ -506,11 +619,62 @@ impl TestRunner {
             .expect("request failed");
         if resp.status() == 200 {
             let batch_id_base64url = resp.text().await.unwrap();
-            let batch_id = Id(decode_base64url(batch_id_base64url.as_bytes())
-                .expect("Failed to parse URL-safe base64 batch ID"));
-            batch_id
+            BatchId::try_from_base64url(batch_id_base64url)
+                .expect("Failed to parse URL-safe base64 batch ID")
         } else {
             panic!("request to {} failed: response: {:?}", url, resp);
+        }
+    }
+
+    pub fn upload_path_for_task(&self, id: &TaskId) -> String {
+        match self.version {
+            DapVersion::Draft02 => "upload".to_string(),
+            DapVersion::Draft04 => format!("tasks/{}/reports", id.to_base64url()),
+            _ => unreachable!("unknown version"),
+        }
+    }
+
+    pub fn upload_path(&self) -> String {
+        self.upload_path_for_task(&self.task_id)
+    }
+
+    pub fn collect_url_suffix(&self) -> String {
+        if self.version == DapVersion::Draft02 {
+            "collect".to_string()
+        } else {
+            let mut rng = thread_rng();
+            let collect_job_id = CollectionJobId(rng.gen());
+            format!(
+                "tasks/{}/collection_jobs/{}",
+                self.task_id.to_base64url(),
+                collect_job_id.to_base64url()
+            )
+        }
+    }
+
+    pub async fn poll_collection_url(
+        &self,
+        client: &reqwest::Client,
+        url: &Url,
+    ) -> reqwest::Response {
+        let builder = if self.version == DapVersion::Draft02 {
+            client.get(url.as_str())
+        } else {
+            client.post(url.as_str())
+        };
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static(MEDIA_TYPE_COLLECT_REQ),
+        );
+        builder.headers(headers).send().await.unwrap()
+    }
+
+    pub fn collect_task_id_field(&self) -> Option<TaskId> {
+        if self.version == DapVersion::Draft02 {
+            Some(self.task_id.clone())
+        } else {
+            None
         }
     }
 }
@@ -680,7 +844,7 @@ async fn post_internal_delete_all(
     base_url: &Url,
     batch_interval: &Interval,
 ) {
-    // Replace path "/v02" with "/internal/delete_all".
+    // Replace path "/v04" with "/internal/delete_all".
     let mut url = base_url.clone();
     url.set_path("internal/delete_all");
 

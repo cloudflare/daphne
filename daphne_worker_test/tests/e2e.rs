@@ -11,18 +11,19 @@ use daphne::{
         taskprov::{
             DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
         },
-        BatchSelector, CollectReq, CollectResp, Extension, HpkeCiphertext, Id, Interval, Query,
-        Report, ReportId, ReportMetadata,
+        BatchSelector, Collection, CollectionReq, Extension, HpkeCiphertext, Interval, Query,
+        Report, ReportId, ReportMetadata, TaskId,
     },
     taskprov::{compute_task_id, TaskprovVersion},
     DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
 use paste::paste;
-use prio::codec::{Decode, Encode, ParameterizedEncode};
+use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
+use std::cmp::{max, min};
 use test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 use url::Url;
 
@@ -89,7 +90,7 @@ async fn e2e_leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v03/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v04/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -130,7 +131,7 @@ async fn e2e_helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v03/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v04/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -184,7 +185,7 @@ async fn e2e_leader_upload(version: DapVersion) {
     let mut rng = thread_rng();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
-    let path = "upload";
+    let path = t.upload_path();
 
     // Generate and upload a report.
     let report = t
@@ -198,19 +199,19 @@ async fn e2e_leader_upload(version: DapVersion) {
             version,
         )
         .unwrap();
-    t.leader_post_expect_ok(
+    t.leader_put_expect_ok(
         &client,
-        path,
+        &path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded_with_param(&version),
     )
     .await;
 
     // Try uploading the same report a second time (expect failure due to repeated ID.
-    t.leader_post_expect_abort(
+    t.leader_put_expect_abort(
         &client,
         None, // dap_auth_token
-        path,
+        &path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded_with_param(&version),
         400,
@@ -219,17 +220,19 @@ async fn e2e_leader_upload(version: DapVersion) {
     .await;
 
     // Try uploading a report with the incorrect task ID.
-    t.leader_post_expect_abort(
+    let bad_id = TaskId(rng.gen());
+    let bad_path = t.upload_path_for_task(&bad_id);
+    t.leader_put_expect_abort(
         &client,
         None, // dap_auth_token
-        path,
+        &bad_path,
         constants::MEDIA_TYPE_REPORT,
         t.task_config
             .vdaf
             .produce_report(
                 &hpke_config_list,
                 t.now,
-                &Id(rng.gen()),
+                &bad_id,
                 DapMeasurement::U64(999),
                 version,
             )
@@ -253,10 +256,10 @@ async fn e2e_leader_upload(version: DapVersion) {
         )
         .unwrap();
     report.encrypted_input_shares[0].config_id ^= 0xff;
-    t.leader_post_expect_abort(
+    t.leader_put_expect_abort(
         &client,
         None, // dap_auth_token
-        path,
+        &path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded_with_param(&version),
         400,
@@ -265,10 +268,10 @@ async fn e2e_leader_upload(version: DapVersion) {
     .await;
 
     // Try uploading a malformed report.
-    t.leader_post_expect_abort(
+    t.leader_put_expect_abort(
         &client,
         None, // dap_auth_token
-        path,
+        &path,
         constants::MEDIA_TYPE_REPORT,
         b"junk data".to_vec(),
         400,
@@ -288,10 +291,10 @@ async fn e2e_leader_upload(version: DapVersion) {
             version,
         )
         .unwrap();
-    t.leader_post_expect_abort(
+    t.leader_put_expect_abort(
         &client,
         None, // dap_auth_token
-        path,
+        &path,
         constants::MEDIA_TYPE_REPORT,
         report.get_encoded_with_param(&version),
         400,
@@ -302,13 +305,17 @@ async fn e2e_leader_upload(version: DapVersion) {
     // Upload a fixed report. This is a sanity check to make sure that the test resets the Leader's
     // state each time the test is run. If it didn't, this would result in an error due to the
     // report ID being repeated.
-    let url = t.leader_url.join(path).unwrap();
-    let resp = client
-        .post(url.as_str())
+    let url = t.leader_url.join(&path).unwrap();
+    let builder = match t.version {
+        DapVersion::Draft02 => client.post(url.as_str()),
+        DapVersion::Draft04 => client.put(url.as_str()),
+        _ => unreachable!("unhandled version {}", t.version),
+    };
+    let resp = builder
         .body(
             Report {
-                task_id: t.task_id.clone(),
-                metadata: ReportMetadata {
+                draft02_task_id: t.task_id.for_request_payload(&version),
+                report_metadata: ReportMetadata {
                     id: ReportId([1; 16]),
                     time: t.now,
                     extensions: Vec::default(),
@@ -515,6 +522,7 @@ async fn e2e_leader_upload_taskprov() {
 
 async fn e2e_internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
+    let path = t.upload_path();
 
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
@@ -530,9 +538,9 @@ async fn e2e_internal_leader_process(version: DapVersion) {
     let mut rng = thread_rng();
     for _ in 0..report_sel.max_reports + 3 {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -577,14 +585,15 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
     let client = t.http_client();
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
+    let path = t.upload_path();
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..7 {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -625,14 +634,19 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
 
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
+    let path = t.upload_path();
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
+    let mut time_min = u64::MAX;
+    let mut time_max = 0u64;
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        time_min = min(time_min, now);
+        time_max = max(time_max, now);
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -650,8 +664,8 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     }
 
     // Get the collect URI.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -663,7 +677,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     println!("collect_uri: {}", collect_uri);
 
     // Poll the collect URI before the CollectResp is ready.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 202, "response: {:?}", resp);
 
     // The reports are aggregated in the background.
@@ -690,10 +704,11 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     );
 
     // Poll the collect URI.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
 
-    let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+    let collection =
+        Collection::get_decoded_with_param(&t.version, &resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
         .task_config
         .vdaf
@@ -703,8 +718,8 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
             &BatchSelector::TimeInterval {
                 batch_interval: batch_interval.clone(),
             },
-            collect_resp.report_count,
-            collect_resp.encrypted_agg_shares.clone(),
+            collection.report_count,
+            collection.encrypted_agg_shares.clone(),
             version,
         )
         .await
@@ -714,11 +729,24 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
         DapAggregateResult::U128(t.task_config.min_batch_size as u128)
     );
 
+    if version != DapVersion::Draft02 {
+        // Check that the time interval for the reports is correct.
+        let interval = collection.interval.as_ref().unwrap();
+        let low = t.task_config.quantized_time_lower_bound(time_min);
+        let high = t.task_config.quantized_time_upper_bound(time_max);
+        assert!(low < high);
+        assert_eq!(interval.start, low);
+        assert_eq!(interval.duration, high - low);
+    }
+
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
     // GET semantics.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
+    assert_eq!(
+        resp.bytes().await.unwrap(),
+        collection.get_encoded_with_param(&version)
+    );
 
     // NOTE Our Leader doesn't check if a report is stale until it is ready to process it. As such,
     // It won't tell the Client at this point that its report is stale. Delaying this check allows
@@ -750,14 +778,15 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
     let client = t.http_client();
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
+    let path = t.upload_path();
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -787,8 +816,8 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
     );
 
     // ... then the collect request is issued ...
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -813,14 +842,15 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let batch_interval = t.batch_interval();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
+    let path = t.upload_path();
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size - 1 {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -838,8 +868,8 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     }
 
     // Get the collect URI.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -871,7 +901,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     assert_eq!(agg_telem.reports_collected, 0);
 
     // Poll the collect URI before the CollectResp is ready.
-    let resp = client.get(collect_uri).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 202);
 }
 
@@ -882,17 +912,21 @@ async fn e2e_leader_collect_abort_unknown_request(version: DapVersion) {
     let client = t.http_client();
 
     // Poll collect URI for an unknown collect request.
-    let fake_id = Id([0; 32]);
-    let collect_uri = t
-        .leader_url
-        .join(&format!(
-            "collect/task/{}/req/{}",
-            fake_id.to_base64url(),
-            fake_id.to_base64url()
-        ))
-        .unwrap();
-    let resp = client.get(collect_uri).send().await.unwrap();
-    assert_eq!(resp.status(), 400);
+    let fake_task_id = TaskId([0; 32]);
+    let fake_collection_job_id = TaskId([0; 32]);
+    let url_suffix = if t.version == DapVersion::Draft02 {
+        format!("collect/task/{fake_task_id}/req/{fake_collection_job_id}")
+    } else {
+        format!("/tasks/{fake_task_id}/collection_jobs/{fake_collection_job_id}")
+    };
+    let expected_status = if t.version == DapVersion::Draft02 {
+        400
+    } else {
+        404
+    };
+    let collect_uri = t.leader_url.join(&url_suffix).unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
+    assert_eq!(resp.status(), expected_status);
 }
 
 async_test_versions! { e2e_leader_collect_abort_unknown_request }
@@ -901,15 +935,14 @@ async fn e2e_leader_collect_accept_global_config_max_batch_duration(version: Dap
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = Interval {
-        start: t.now
-            - (t.now % t.task_config.time_precision)
+        start: t.task_config.quantized_time_lower_bound(t.now)
             - t.global_config.max_batch_duration / 2,
         duration: t.global_config.max_batch_duration,
     };
 
     // Maximum allowed batch duration.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval { batch_interval },
         agg_param: Vec::new(),
     };
@@ -924,11 +957,11 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
-    let path = "collect";
+    let path = &t.collect_url_suffix();
 
     // Start of batch interval does not align with time_precision.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start + 1,
@@ -937,20 +970,33 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    t.leader_post_expect_abort(
-        &client,
-        Some(&t.collector_bearer_token),
-        path,
-        constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded_with_param(&t.version),
-        400,
-        "batchInvalid",
-    )
-    .await;
+    if t.version == DapVersion::Draft02 {
+        t.leader_post_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchInvalid",
+        )
+        .await;
+    } else {
+        t.leader_put_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchInvalid",
+        )
+        .await;
+    }
 
     // Batch interval duration does not align wiht min_batch_duration.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start,
@@ -959,16 +1005,29 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    t.leader_post_expect_abort(
-        &client,
-        Some(&t.collector_bearer_token),
-        path,
-        constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded_with_param(&t.version),
-        400,
-        "batchInvalid",
-    )
-    .await;
+    if t.version == DapVersion::Draft02 {
+        t.leader_post_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchInvalid",
+        )
+        .await;
+    } else {
+        t.leader_put_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchInvalid",
+        )
+        .await;
+    }
 }
 
 async_test_versions! { e2e_leader_collect_abort_invalid_batch_interval }
@@ -978,14 +1037,15 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     let batch_interval = t.batch_interval();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
+    let path = t.upload_path();
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -1003,8 +1063,8 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     }
 
     // Get the collect URI.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -1042,8 +1102,8 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     // NOTE: Since DURABLE_LEADER_COL_JOB_QUEUE_PUT has a mechanism to reject CollectReq
     // with the EXACT SAME content as previous requests, we need to tweak the request
     // a little bit.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start,
@@ -1052,16 +1112,30 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
         },
         agg_param: Vec::new(),
     };
-    t.leader_post_expect_abort(
-        &client,
-        Some(&t.collector_bearer_token),
-        "collect",
-        constants::MEDIA_TYPE_COLLECT_REQ,
-        collect_req.get_encoded_with_param(&t.version),
-        400,
-        "batchOverlap",
-    )
-    .await;
+    let path = t.collect_url_suffix();
+    if t.version == DapVersion::Draft02 {
+        t.leader_post_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            &path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchOverlap",
+        )
+        .await;
+    } else {
+        t.leader_put_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            &path,
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            collect_req.get_encoded_with_param(&t.version),
+            400,
+            "batchOverlap",
+        )
+        .await;
+    }
 }
 
 async_test_versions! { e2e_leader_collect_abort_overlapping_batch_interval }
@@ -1075,6 +1149,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
         return;
     }
     let t = TestRunner::fixed_size(version).await;
+    let path = t.upload_path();
     let report_sel = DaphneWorkerReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: 100,
@@ -1085,9 +1160,9 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
 
     // Clients: Upload reports.
     for _ in 0..t.task_config.min_batch_size {
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -1123,8 +1198,8 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     let batch_id = t.internal_current_batch(&t.task_id).await;
 
     // Collector: Get the collect URI.
-    let collect_req = CollectReq {
-        task_id: t.task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
         query: if use_current {
             Query::FixedSizeCurrentBatch
         } else {
@@ -1140,7 +1215,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     println!("collect_uri: {}", collect_uri);
 
     // Collector: Poll the collect URI before the CollectResp is ready.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 202, "response: {:?}", resp);
 
     // ... Aggregators run processing loop.
@@ -1153,10 +1228,11 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     );
 
     // Collector: Poll the collect URI.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
 
-    let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+    let collection =
+        Collection::get_decoded_with_param(&t.version, &resp.bytes().await.unwrap()).unwrap();
     let agg_res = t
         .task_config
         .vdaf
@@ -1166,8 +1242,8 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
             &BatchSelector::FixedSizeByBatchId {
                 batch_id: batch_id.clone(),
             },
-            collect_resp.report_count,
-            collect_resp.encrypted_agg_shares.clone(),
+            collection.report_count,
+            collection.encrypted_agg_shares.clone(),
             version,
         )
         .await
@@ -1179,15 +1255,18 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
 
     // Collector: Poll the collect URI once more. Expect the response to be the same as the first,
     // per HTTP GET semantics.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
+    assert_eq!(
+        resp.bytes().await.unwrap(),
+        collection.get_encoded_with_param(&t.version)
+    );
 
     // Clients: Upload reports.
     for _ in 0..2 {
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             t.task_config
                 .vdaf
@@ -1217,23 +1296,43 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     assert_ne!(batch_id, prev_batch_id);
 
     // Collector: Try CollectReq with out-dated batch ID.
-    t.leader_post_expect_abort(
-        &client,
-        Some(&t.collector_bearer_token),
-        "collect",
-        constants::MEDIA_TYPE_COLLECT_REQ,
-        CollectReq {
-            task_id: t.task_id.clone(),
-            query: Query::FixedSizeByBatchId {
-                batch_id: prev_batch_id.clone(),
-            },
-            agg_param: Vec::new(),
-        }
-        .get_encoded_with_param(&t.version),
-        400,
-        "batchOverlap",
-    )
-    .await;
+    if t.version == DapVersion::Draft02 {
+        t.leader_post_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            &t.collect_url_suffix(),
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            CollectionReq {
+                draft02_task_id: t.collect_task_id_field(),
+                query: Query::FixedSizeByBatchId {
+                    batch_id: prev_batch_id.clone(),
+                },
+                agg_param: Vec::new(),
+            }
+            .get_encoded_with_param(&t.version),
+            400,
+            "batchOverlap",
+        )
+        .await;
+    } else {
+        t.leader_put_expect_abort(
+            &client,
+            Some(&t.collector_bearer_token),
+            &t.collect_url_suffix(),
+            constants::MEDIA_TYPE_COLLECT_REQ,
+            CollectionReq {
+                draft02_task_id: t.collect_task_id_field(),
+                query: Query::FixedSizeByBatchId {
+                    batch_id: prev_batch_id.clone(),
+                },
+                agg_param: Vec::new(),
+            }
+            .get_encoded_with_param(&t.version),
+            400,
+            "batchOverlap",
+        )
+        .await;
+    }
 }
 
 async fn e2e_fixed_size_no_current(version: DapVersion) {
@@ -1288,6 +1387,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
         &t.taskprov_collector_hpke_receiver.config,
     )
     .unwrap();
+    let path = t.upload_path_for_task(&task_id);
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -1296,9 +1396,9 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
             payload: payload.clone(),
         }];
         let now = rng.gen_range(t.report_interval(&batch_interval));
-        t.leader_post_expect_ok(
+        t.leader_put_expect_ok(
             &client,
-            "upload",
+            &path,
             constants::MEDIA_TYPE_REPORT,
             task_config
                 .vdaf
@@ -1317,8 +1417,8 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     }
 
     // Get the collect URI.
-    let collect_req = CollectReq {
-        task_id: task_id.clone(),
+    let collect_req = CollectionReq {
+        draft02_task_id: Some(task_id.clone()),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -1334,7 +1434,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     println!("collect_uri: {}", collect_uri);
 
     // Poll the collect URI before the CollectResp is ready.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 202, "response: {:?}", resp);
 
     // The reports are aggregated in the background.
@@ -1361,10 +1461,11 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     );
 
     // Poll the collect URI.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
 
-    let collect_resp = CollectResp::get_decoded(&resp.bytes().await.unwrap()).unwrap();
+    let collection =
+        Collection::get_decoded_with_param(&t.version, &resp.bytes().await.unwrap()).unwrap();
     let agg_res = task_config
         .vdaf
         .consume_encrypted_agg_shares(
@@ -1373,8 +1474,8 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
             &BatchSelector::TimeInterval {
                 batch_interval: batch_interval.clone(),
             },
-            collect_resp.report_count,
-            collect_resp.encrypted_agg_shares.clone(),
+            collection.report_count,
+            collection.encrypted_agg_shares.clone(),
             version,
         )
         .await
@@ -1386,9 +1487,12 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
     // GET semantics.
-    let resp = client.get(collect_uri.as_str()).send().await.unwrap();
+    let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.bytes().await.unwrap(), collect_resp.get_encoded());
+    assert_eq!(
+        resp.bytes().await.unwrap(),
+        collection.get_encoded_with_param(&t.version)
+    );
 }
 
 async_test_version! { e2e_leader_collect_taskprov_ok, Draft02 }

@@ -6,10 +6,10 @@ use clap::{Parser, Subcommand};
 use daphne::{
     constants,
     hpke::HpkeReceiverConfig,
-    messages::{decode_base64url, BatchSelector, CollectReq, CollectResp, HpkeConfig, Id, Query},
+    messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, Query, TaskId},
     DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
 };
-use prio::codec::{Decode, ParameterizedEncode};
+use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use reqwest::blocking::{Client, ClientBuilder};
 use std::{
     io::{stdin, Read},
@@ -151,8 +151,12 @@ async fn main() -> Result<()> {
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             // Construct collect request.
-            let collect_req = CollectReq {
-                task_id,
+            let collect_req = CollectionReq {
+                draft02_task_id: if version == DapVersion::Draft02 {
+                    Some(task_id)
+                } else {
+                    None
+                },
                 query,
                 agg_param: Vec::default(),
             };
@@ -212,7 +216,7 @@ async fn main() -> Result<()> {
             let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
-            let collect_resp = CollectResp::get_decoded(&resp.bytes()?)?;
+            let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes()?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
                     receiver,
@@ -230,15 +234,14 @@ async fn main() -> Result<()> {
     }
 }
 
-fn parse_id(id_str: &str) -> Result<Id> {
-    let id_bytes = decode_base64url(id_str.as_bytes())
+fn parse_id(id_str: &str) -> Result<TaskId> {
+    TaskId::try_from_base64url(id_str)
         .ok_or_else(|| anyhow!("failed to decode ID"))
-        .with_context(|| "expected URL-safe, base64 string")?;
-    Ok(Id(id_bytes))
+        .with_context(|| "expected URL-safe, base64 string")
 }
 
 // TODO(cjpatton) Refactor integration tests to use this method.
-fn get_hpke_config(http_client: &Client, task_id: &Id, base_url: &str) -> Result<HpkeConfig> {
+fn get_hpke_config(http_client: &Client, task_id: &TaskId, base_url: &str) -> Result<HpkeConfig> {
     let url = Url::parse(base_url)
         .with_context(|| "failed to parse base URL")?
         .join("hpke_config")?;

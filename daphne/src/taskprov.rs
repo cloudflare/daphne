@@ -4,7 +4,7 @@
 use crate::{
     messages::{
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
-        Extension, HpkeConfig, Id, ReportMetadata,
+        Extension, HpkeConfig, ReportMetadata, TaskId,
     },
     vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
@@ -35,16 +35,16 @@ pub(crate) const TASK_PROV_SALT_DRAFT02: [u8; 32] = [
     0x74, 0x01, 0x7a, 0x52, 0xcb, 0x4c, 0xf6, 0x39, 0xfb, 0x83, 0xe0, 0x47, 0x72, 0x3a, 0x0f, 0xfe,
 ];
 
-fn compute_task_id_draft02(serialized: &[u8]) -> Id {
+fn compute_task_id_draft02(serialized: &[u8]) -> TaskId {
     let d = digest::digest(&digest::SHA256, serialized);
     let dref = d.as_ref();
     let mut b: [u8; 32] = [0; 32];
     b[..32].copy_from_slice(&dref[..32]);
-    Id(b)
+    TaskId(b)
 }
 
 /// Compute the task id of a serialized task config.
-pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> Result<Id, DapError> {
+pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> Result<TaskId, DapError> {
     match version {
         TaskprovVersion::Draft02 => Ok(compute_task_id_draft02(serialized)),
         TaskprovVersion::Unknown => Err(DapError::fatal(
@@ -74,7 +74,7 @@ pub(crate) fn extract_prk_from_verify_key_init(
 /// Expand a pseudorandom key into the VDAF verification key for a given task.
 pub(crate) fn expand_prk_into_verify_key(
     prk: &Prk,
-    task_id: &Id,
+    task_id: &TaskId,
     vdaf_type: VdafType,
 ) -> VdafVerifyKey {
     let info = [task_id.as_ref()];
@@ -102,7 +102,7 @@ pub(crate) fn expand_prk_into_verify_key(
 pub(crate) fn compute_vdaf_verify_key(
     version: TaskprovVersion,
     verify_key_init: &[u8; 32],
-    task_id: &Id,
+    task_id: &TaskId,
     vdaf_type: VdafType,
 ) -> VdafVerifyKey {
     expand_prk_into_verify_key(
@@ -119,7 +119,7 @@ pub fn bad_request(detail: &str) -> DapError {
 /// Check for a taskprov extension in the report, and return it if found.
 pub fn get_taskprov_task_config(
     version: TaskprovVersion,
-    task_id: &Id,
+    task_id: &TaskId,
     metadata: &ReportMetadata,
 ) -> Result<Option<TaskConfig>, DapError> {
     let taskprovs: Vec<&Extension> = metadata
@@ -186,7 +186,7 @@ impl DapTaskConfig {
     pub fn try_from_taskprov(
         dap_version: DapVersion,
         taskprov_version: TaskprovVersion,
-        task_id: &Id,
+        task_id: &TaskId,
         task_config: TaskConfig,
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
@@ -217,7 +217,7 @@ impl DapTaskConfig {
 
 impl ReportMetadata {
     /// Does this metatdata have a taskprov extension and does it match the specified id?
-    pub fn is_taskprov(&self, version: TaskprovVersion, task_id: &Id) -> bool {
+    pub fn is_taskprov(&self, version: TaskprovVersion, task_id: &TaskId) -> bool {
         // Don't check for taskprov usage if we don't know the version.
         if matches!(version, TaskprovVersion::Unknown) {
             return false;

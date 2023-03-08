@@ -5,7 +5,7 @@
 
 use crate::{
     constants::sender_for_media_type,
-    messages::{constant_time_eq, Id},
+    messages::{constant_time_eq, TaskId},
     DapError, DapRequest, DapSender,
 };
 use async_trait::async_trait;
@@ -58,13 +58,13 @@ pub trait BearerTokenProvider<'a> {
     /// Fetch the Leader's bearer token for the given task, if the task is recognized.
     async fn get_leader_bearer_token_for(
         &'a self,
-        task_id: &'a Id,
+        task_id: &'a TaskId,
     ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
 
     /// Fetch the Collector's bearer token for the given task, if the task is recognized.
     async fn get_collector_bearer_token_for(
         &'a self,
-        task_id: &'a Id,
+        task_id: &'a TaskId,
     ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
 
     /// Returns true if the given bearer token matches the leader token configured for the "taskprov" extension.
@@ -77,7 +77,7 @@ pub trait BearerTokenProvider<'a> {
     /// media type.
     async fn authorize_with_bearer_token(
         &'a self,
-        task_id: &'a Id,
+        task_id: &'a TaskId,
         media_type: &'static str,
     ) -> Result<Self::WrappedBearerToken, DapError> {
         if matches!(sender_for_media_type(media_type), Some(DapSender::Leader)) {

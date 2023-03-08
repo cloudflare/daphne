@@ -8,15 +8,16 @@ use crate::{
     VdafMessage, VdafState,
 };
 use prio::{
-    codec::{CodecError, Encode, ParameterizedDecode},
+    codec::{Encode, ParameterizedDecode},
     vdaf::{
         prio3::{
             Prio3, Prio3InputShare, Prio3PrepareMessage, Prio3PrepareShare, Prio3PrepareState,
+            Prio3PublicShare,
         },
         AggregateShare, Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
-use std::{convert::TryFrom, io::Cursor};
+use std::io::Cursor;
 
 const ERR_EXPECT_FINISH: &str = "unexpected transition (continued)";
 const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
@@ -24,16 +25,19 @@ const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
 macro_rules! shard {
     (
         $vdaf:ident,
-        $measurement:expr
+        $measurement:expr,
+        $nonce:expr
     ) => {{
         // Split measurement into input shares.
-        let (_public_share, input_shares) = $vdaf.shard($measurement)?;
+        let (public_share, input_shares) = $vdaf.shard($measurement, $nonce)?;
 
-        // Encode input shares.
-        input_shares
-            .iter()
-            .map(|input_share| input_share.get_encoded())
-            .collect()
+        (
+            public_share.get_encoded(),
+            input_shares
+                .iter()
+                .map(|input_share| input_share.get_encoded())
+                .collect(),
+        )
     }};
 }
 
@@ -41,19 +45,20 @@ macro_rules! shard {
 pub(crate) fn prio3_shard(
     config: &Prio3Config,
     measurement: DapMeasurement,
-) -> Result<Vec<Vec<u8>>, VdafError> {
+    nonce: &[u8; 16],
+) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
     match (&config, measurement) {
         (Prio3Config::Count, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_aes128_count(2)?;
-            Ok(shard!(vdaf, &measurement))
+            let vdaf = Prio3::new_count(2)?;
+            Ok(shard!(vdaf, &measurement, nonce))
         }
         (Prio3Config::Histogram { buckets }, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
-            Ok(shard!(vdaf, &(measurement as u128)))
+            let vdaf = Prio3::new_histogram(2, buckets)?;
+            Ok(shard!(vdaf, &(measurement as u128), nonce))
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
-            Ok(shard!(vdaf, &(measurement as u128)))
+            let vdaf = Prio3::new_sum(2, *bits)?;
+            Ok(shard!(vdaf, &(measurement as u128), nonce))
         }
         _ => panic!("prio3_shard: unexpected VDAF config"),
     }
@@ -64,15 +69,26 @@ macro_rules! prep_init {
         $vdaf:ident,
         $verify_key:expr,
         $agg_id:expr,
-        $nonce_data:expr,
+        $nonce:expr,
+        $public_share_data:expr,
         $input_share_data:expr
     ) => {{
+        // Parse the public share.
+        let public_share = Prio3PublicShare::get_decoded_with_param(&$vdaf, $public_share_data)?;
+
         // Parse the input share.
         let input_share =
             Prio3InputShare::get_decoded_with_param(&(&$vdaf, $agg_id), $input_share_data)?;
 
         // Run the prepare-init algorithm, returning the initial state.
-        $vdaf.prepare_init($verify_key, $agg_id, &(), $nonce_data, &(), &input_share)?
+        $vdaf.prepare_init(
+            $verify_key,
+            $agg_id,
+            &(),
+            $nonce,
+            &public_share,
+            &input_share,
+        )?
     }};
 }
 
@@ -81,29 +97,51 @@ pub(crate) fn prio3_prepare_init(
     config: &Prio3Config,
     verify_key: &[u8; 16],
     agg_id: usize,
-    nonce_data: &[u8],
+    nonce: &[u8; 16],
+    public_share_data: &[u8],
     input_share_data: &[u8],
 ) -> Result<(VdafState, VdafMessage), VdafError> {
     match &config {
         Prio3Config::Count => {
-            let vdaf = Prio3::new_aes128_count(2)?;
-            let (state, share) = prep_init!(vdaf, verify_key, agg_id, nonce_data, input_share_data);
+            let vdaf = Prio3::new_count(2)?;
+            let (state, share) = prep_init!(
+                vdaf,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data
+            );
             Ok((
                 VdafState::Prio3Field64(state),
                 VdafMessage::Prio3ShareField64(share),
             ))
         }
         Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
-            let (state, share) = prep_init!(vdaf, verify_key, agg_id, nonce_data, input_share_data);
+            let vdaf = Prio3::new_histogram(2, buckets)?;
+            let (state, share) = prep_init!(
+                vdaf,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data
+            );
             Ok((
                 VdafState::Prio3Field128(state),
                 VdafMessage::Prio3ShareField128(share),
             ))
         }
         Prio3Config::Sum { bits } => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
-            let (state, share) = prep_init!(vdaf, verify_key, agg_id, nonce_data, input_share_data);
+            let vdaf = Prio3::new_sum(2, *bits)?;
+            let (state, share) = prep_init!(
+                vdaf,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data
+            );
             Ok((
                 VdafState::Prio3Field128(state),
                 VdafMessage::Prio3ShareField128(share),
@@ -150,7 +188,7 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafState::Prio3Field64(state),
             VdafMessage::Prio3ShareField64(share),
         ) => {
-            let vdaf = Prio3::new_aes128_count(2)?;
+            let vdaf = Prio3::new_count(2)?;
             let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
             let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -160,7 +198,7 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafState::Prio3Field128(state),
             VdafMessage::Prio3ShareField128(share),
         ) => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
+            let vdaf = Prio3::new_histogram(2, buckets)?;
             let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -170,7 +208,7 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafState::Prio3Field128(state),
             VdafMessage::Prio3ShareField128(share),
         ) => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
+            let vdaf = Prio3::new_sum(2, *bits)?;
             let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -210,17 +248,17 @@ pub(crate) fn prio3_helper_prepare_finish(
 ) -> Result<VdafAggregateShare, VdafError> {
     let agg_share = match (&config, state) {
         (Prio3Config::Count, VdafState::Prio3Field64(state)) => {
-            let vdaf = Prio3::new_aes128_count(2)?;
+            let vdaf = Prio3::new_count(2)?;
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
         (Prio3Config::Histogram { buckets }, VdafState::Prio3Field128(state)) => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
+            let vdaf = Prio3::new_histogram(2, buckets)?;
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
         (Prio3Config::Sum { bits }, VdafState::Prio3Field128(state)) => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
+            let vdaf = Prio3::new_sum(2, *bits)?;
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -258,19 +296,19 @@ pub(crate) fn prio3_decode_prepare_state(
 ) -> Result<VdafState, VdafError> {
     match config {
         Prio3Config::Count => {
-            let vdaf = Prio3::new_aes128_count(2)?;
+            let vdaf = Prio3::new_count(2)?;
             Ok(VdafState::Prio3Field64(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
         Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
+            let vdaf = Prio3::new_histogram(2, buckets)?;
             Ok(VdafState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
         Prio3Config::Sum { bits } => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
+            let vdaf = Prio3::new_sum(2, *bits)?;
             Ok(VdafState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -295,8 +333,7 @@ macro_rules! unshard {
     ) => {{
         let mut agg_shares = Vec::with_capacity($vdaf.num_aggregators());
         for data in $agg_shares.into_iter() {
-            let agg_share = AggregateShare::try_from(data.as_ref())
-                .map_err(|e| CodecError::Other(Box::new(e)))?;
+            let agg_share = AggregateShare::get_decoded_with_param(&(&$vdaf, &()), data.as_ref())?;
             agg_shares.push(agg_share)
         }
         $vdaf.unshard(&(), agg_shares, $num_measurements)
@@ -311,17 +348,17 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
 ) -> Result<DapAggregateResult, VdafError> {
     match &config {
         Prio3Config::Count => {
-            let vdaf = Prio3::new_aes128_count(2)?;
+            let vdaf = Prio3::new_count(2)?;
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64(agg_res))
         }
         Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_aes128_histogram(2, buckets)?;
+            let vdaf = Prio3::new_histogram(2, buckets)?;
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
         Prio3Config::Sum { bits } => {
-            let vdaf = Prio3::new_aes128_sum(2, *bits)?;
+            let vdaf = Prio3::new_sum(2, *bits)?;
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128(agg_res))
         }

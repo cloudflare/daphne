@@ -14,7 +14,7 @@ use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 use crate::{
     messages::{
         decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
-        HpkeKemId, Id, TransitionFailure,
+        HpkeKemId, TaskId, TransitionFailure,
     },
     DapError, DapVersion,
 };
@@ -99,16 +99,16 @@ pub trait HpkeDecrypter<'a> {
     async fn get_hpke_config_for(
         &'a self,
         version: DapVersion,
-        task_id: Option<&Id>,
+        task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig, DapError>;
 
     /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
-    async fn can_hpke_decrypt(&self, task_id: &Id, config_id: u8) -> Result<bool, DapError>;
+    async fn can_hpke_decrypt(&self, task_id: &TaskId, config_id: u8) -> Result<bool, DapError>;
 
     /// Decrypt the given HPKE ciphertext using the given info and AAD string.
     async fn hpke_decrypt(
         &self,
-        task_id: &Id,
+        task_id: &TaskId,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
@@ -208,18 +208,18 @@ impl<'a> HpkeDecrypter<'a> for HpkeReceiverConfig {
     async fn get_hpke_config_for(
         &'a self,
         _version: DapVersion,
-        _task_id: Option<&Id>,
+        _task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig, DapError> {
         unreachable!("not implemented");
     }
 
-    async fn can_hpke_decrypt(&self, _task_id: &Id, config_id: u8) -> Result<bool, DapError> {
+    async fn can_hpke_decrypt(&self, _task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
         Ok(config_id == self.config.id)
     }
 
     async fn hpke_decrypt(
         &self,
-        _task_id: &Id,
+        _task_id: &TaskId,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,

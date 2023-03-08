@@ -37,26 +37,29 @@
 use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
-        BatchSelector, CollectResp, Duration, HpkeConfig, Id, Interval, PartialBatchSelector,
-        ReportId, ReportMetadata, Time, TransitionFailure,
+        AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
+        Draft02AggregationJobId, Duration, HpkeConfig, HpkeKemId, Interval, PartialBatchSelector,
+        ReportId, ReportMetadata, TaskId, Time, TransitionFailure,
     },
+    taskprov::TaskprovVersion,
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
         VdafAggregateShare, VdafError, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
-use messages::HpkeKemId;
 use prio::{
     codec::{CodecError, Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
 };
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
+    cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::Debug,
 };
-use taskprov::TaskprovVersion;
 use url::Url;
 
 /// DAP errors.
@@ -175,6 +178,11 @@ pub enum DapAbort {
     #[error("reportTooLate")]
     ReportTooLate,
 
+    /// Round mismatch. The aggregators disagree on the current round of the VDAF preparation protocol.
+    /// This abort occurs during the aggregation sub-protocol.
+    #[error("roundMismatch")]
+    RoundMismatch,
+
     /// Stale report. Sent in response to an upload request containing a report pertaining to a
     /// batch that has already been collected.
     #[error("staleReport")]
@@ -217,6 +225,7 @@ impl DapAbort {
             | Self::InvalidProtocolVersion
             | Self::InvalidTask
             | Self::QueryMismatch
+            | Self::RoundMismatch
             | Self::MissingTaskId
             | Self::ReplayedReport
             | Self::ReportTooLate
@@ -287,8 +296,8 @@ pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
 
-    #[serde(rename = "v03")]
-    Draft03,
+    #[serde(rename = "v04")]
+    Draft04,
 
     #[serde(other)]
     #[serde(rename = "unknown_version")]
@@ -299,7 +308,7 @@ impl From<&str> for DapVersion {
     fn from(version: &str) -> Self {
         match version {
             "v02" => DapVersion::Draft02,
-            "v03" => DapVersion::Draft03,
+            "v04" => DapVersion::Draft04,
             _ => DapVersion::Unknown,
         }
     }
@@ -309,7 +318,7 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft02 => "v02",
-            DapVersion::Draft03 => "v03",
+            DapVersion::Draft04 => "v04",
             _ => panic!("tried to construct string from unknown DAP version"),
         }
     }
@@ -432,7 +441,7 @@ impl DapQueryConfig {
 /// bucket, which is the batch determined by the batch ID (i.e., the partial batch selector).
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub enum DapBatchBucket<'a> {
-    FixedSize { batch_id: &'a Id },
+    FixedSize { batch_id: &'a BatchId },
     TimeInterval { batch_window: Time },
 }
 
@@ -476,7 +485,7 @@ impl DapTaskConfig {
     /// numbre of seconds since the beginning of UNIX time.
     #[cfg(test)]
     pub fn query_for_current_batch_window(&self, now: u64) -> crate::messages::Query {
-        let start = now - (now % self.time_precision);
+        let start = self.quantized_time_lower_bound(now);
         crate::messages::Query::TimeInterval {
             batch_interval: crate::messages::Interval {
                 start,
@@ -485,8 +494,15 @@ impl DapTaskConfig {
         }
     }
 
-    pub(crate) fn truncate_time(&self, time: Time) -> Time {
+    /// Return the greatest multiple of the time_precision which is less than or equal to the
+    /// specified time.
+    pub fn quantized_time_lower_bound(&self, time: Time) -> Time {
         time - (time % self.time_precision)
+    }
+
+    /// Return the least multiple of the time_precision which is greater than the specified time.
+    pub fn quantized_time_upper_bound(&self, time: Time) -> Time {
+        self.quantized_time_lower_bound(time) + self.time_precision
     }
 
     /// Compute the "batch span" of a set of output shares and, for each buckent in the span,
@@ -506,7 +522,7 @@ impl DapTaskConfig {
         for out_share in out_shares.into_iter() {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                    batch_window: self.truncate_time(out_share.time),
+                    batch_window: self.quantized_time_lower_bound(out_share.time),
                 },
                 PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
                     DapBatchBucket::FixedSize { batch_id }
@@ -516,6 +532,8 @@ impl DapTaskConfig {
             let agg_share = span.entry(bucket).or_default();
             agg_share.merge(DapAggregateShare {
                 report_count: 1,
+                min_time: out_share.time,
+                max_time: out_share.time,
                 checksum: out_share.checksum,
                 data: Some(out_share.data),
             })?;
@@ -569,7 +587,7 @@ impl DapTaskConfig {
         for metadata in report_meta {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                    batch_window: self.truncate_time(metadata.time),
+                    batch_window: self.quantized_time_lower_bound(metadata.time),
                 },
                 PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
                     DapBatchBucket::FixedSize { batch_id }
@@ -707,6 +725,8 @@ pub struct DapOutputShare {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DapAggregateShare {
     pub(crate) report_count: u64,
+    pub(crate) min_time: Time,
+    pub(crate) max_time: Time,
     pub(crate) checksum: [u8; 32],
     pub(crate) data: Option<VdafAggregateShare>,
 }
@@ -744,6 +764,18 @@ impl DapAggregateShare {
             _ => return Err(DapError::fatal("invalid aggregate share merge")),
         };
 
+        if self.report_count == 0 {
+            // No interval yet, just copy other's interval
+            self.min_time = other.min_time;
+            self.max_time = other.max_time;
+        } else if other.report_count > 0 {
+            // Note that we don't merge if other.report_count == 0, as in that case the timestamps
+            // are 0 too, and thus bad to merge!
+            self.min_time = min(self.min_time, other.min_time);
+            self.max_time = max(self.max_time, other.max_time);
+        } else {
+            // Do nothing!
+        }
         self.report_count += other.report_count;
         for (x, y) in self.checksum.iter_mut().zip(other.checksum) {
             *x ^= y;
@@ -759,6 +791,8 @@ impl DapAggregateShare {
     /// Set the aggregate share to zero.
     pub fn reset(&mut self) {
         self.report_count = 0;
+        self.min_time = 0;
+        self.max_time = 0;
         self.checksum = [0; 32];
         self.data = None;
     }
@@ -771,6 +805,8 @@ impl DapAggregateShare {
         for out_share in out_shares.into_iter() {
             agg_share.merge(DapAggregateShare {
                 report_count: 1,
+                min_time: out_share.time,
+                max_time: out_share.time,
                 checksum: out_share.checksum,
                 data: Some(out_share.data),
             })?;
@@ -812,7 +848,7 @@ pub enum DapHelperTransition<M: Debug> {
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {
     Prio3(Prio3Config),
-    Prio2 { dimension: u32 },
+    Prio2 { dimension: usize },
 }
 
 impl std::str::FromStr for VdafConfig {
@@ -837,7 +873,7 @@ pub enum Prio3Config {
 
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
     /// 2^bits)`.
-    Sum { bits: u32 },
+    Sum { bits: usize },
 }
 
 /// DAP sender role.
@@ -848,24 +884,87 @@ pub enum DapSender {
     Leader,
 }
 
+/// Types of resources associated with DAP tasks.
+#[derive(Debug)]
+pub enum DapResource {
+    /// Aggregation job resource.
+    AggregationJob(AggregationJobId),
+
+    /// Collection job resource.
+    CollectionJob(CollectionJobId),
+
+    /// Undefined (or undetermined) resource.
+    ///
+    /// The resource of a DAP request is undefined if there is not a unique object (in the context
+    /// of a DAP task) that the request pertains to. For example:
+    ///
+    ///   * The Client->Aggregator request for the HPKE config or to upload a report
+    ///   * The Leader->Helper request for an aggregate share
+    ///
+    /// The resource of a DAP request is undetermined if its identifier could not be parsed from
+    /// request path.
+    ///
+    /// draft02 compatibility: In draft02, the resource of a DAP request is undetermined until the
+    /// request payload is parsed. Defer detrmination of the resource until then.
+    Undefined,
+}
+
 /// DAP request.
 #[derive(Debug)]
 pub struct DapRequest<S> {
+    /// Protocol version indicated by the request.
     pub version: DapVersion,
+
+    /// Request media type, sent in the "content-type" header of the HTTP request.
     pub media_type: Option<&'static str>,
-    pub task_id: Option<Id>,
+
+    /// ID of the task with which the request is associated. This field is optional, since some
+    /// requests may apply to all tasks, e.g., the request for the HPKE configuration.
+    pub task_id: Option<TaskId>,
+
+    /// The resource with which this request is associated.
+    pub resource: DapResource,
+
+    /// Request payload.
     pub payload: Vec<u8>,
+
+    /// Requst path (i.e., URL).
     pub url: Url,
+
+    /// Sender authorization, e.g., a bearer token.
     pub sender_auth: Option<S>,
 }
 
 impl<S> DapRequest<S> {
-    pub(crate) fn task_id(&self) -> Result<&Id, DapAbort> {
+    /// Return the task ID, handling a missing ID as a user error.
+    pub fn task_id(&self) -> Result<&TaskId, DapAbort> {
         if let Some(ref id) = self.task_id {
             Ok(id)
-        } else {
-            // Handle missing task ID as decoding failure.
+        } else if self.version == DapVersion::Draft02 {
+            // draft02: Handle missing task ID as decoding failure. Normally the task ID would be
+            // encoded by the message payload; it may be missing becvause parsing failed earlier on
+            // in the request.
             Err(DapAbort::UnrecognizedMessage)
+        } else {
+            // Handle missing task ID as a bad request. The task ID is normally conveyed by the
+            // request path; if missing at this point, it is because it was missing or couldn't be
+            // parsed from the request path.
+            Err(DapAbort::BadRequest("missing or malformed task ID".into()))
+        }
+    }
+
+    /// Return the collection job ID, handling a missing ID as a user error.
+    ///
+    /// Note: the semantics of this method is only well-defined if the caller is the Collector and
+    /// the version in use is not draft02. If the caller is not the Collector, or draft02 is in
+    /// use, we exepct the collection job ID to be missing.
+    pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
+        if let DapResource::CollectionJob(ref collection_job_id) = self.resource {
+            Ok(collection_job_id)
+        } else {
+            Err(DapAbort::BadRequest(
+                "missing or malformed collection job ID".into(),
+            ))
         }
     }
 }
@@ -881,7 +980,7 @@ pub struct DapResponse {
 #[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapCollectJob {
-    Done(CollectResp),
+    Done(Collection),
     Pending,
     Unknown,
 }
@@ -899,6 +998,64 @@ pub struct DapLeaderProcessTelemetry {
 
     /// The number of reports processed.
     pub reports_processed: u64,
+}
+
+/// draft02 compatibility: A logical aggregation job ID. In the latest draft, this is a 32-byte
+/// string included in the HTTP request payload; in draft04, this is a 16-byte string included in
+/// the HTTP request path. This type unifies these into one type so that any protocol logic that
+/// is agnostic to these details can use the same object.
+pub enum MetaAggregationJobId<'a> {
+    Draft02(Cow<'a, Draft02AggregationJobId>),
+    Draft04(Cow<'a, AggregationJobId>),
+}
+
+impl MetaAggregationJobId<'_> {
+    /// Generate a random ID of the type required for the version.
+    pub(crate) fn gen_for_version(version: &DapVersion) -> Self {
+        let mut rng = thread_rng();
+        match version {
+            DapVersion::Draft02 => Self::Draft02(Cow::Owned(Draft02AggregationJobId(rng.gen()))),
+            DapVersion::Draft04 => Self::Draft04(Cow::Owned(AggregationJobId(rng.gen()))),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        }
+    }
+
+    /// Convert this aggregation job ID into to the type that would be included in the payload of
+    /// the HTTP request request.
+    pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
+        match self {
+            Self::Draft02(agg_job_id) => Some(agg_job_id.clone().into_owned()),
+            Self::Draft04(..) => None,
+        }
+    }
+
+    /// Convert this aggregation job ID into the type taht would be included in the HTTP request
+    /// path.
+    pub(crate) fn for_request_path(&self) -> DapResource {
+        match self {
+            // In draft02, the aggregation job ID is not determined until the payload is parsed.
+            Self::Draft02(..) => DapResource::Undefined,
+            Self::Draft04(agg_job_id) => {
+                DapResource::AggregationJob(agg_job_id.clone().into_owned())
+            }
+        }
+    }
+
+    /// Convert this aggregation job ID into hex.
+    pub fn to_hex(&self) -> String {
+        match self {
+            Self::Draft02(agg_job_id) => agg_job_id.to_hex(),
+            Self::Draft04(agg_job_id) => agg_job_id.to_hex(),
+        }
+    }
+
+    /// Convert this aggregation job ID into base64url form.
+    pub fn to_base64url(&self) -> String {
+        match self {
+            Self::Draft02(agg_job_id) => agg_job_id.to_base64url(),
+            Self::Draft04(agg_job_id) => agg_job_id.to_base64url(),
+        }
+    }
 }
 
 pub mod auth;

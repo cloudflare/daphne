@@ -35,45 +35,75 @@ const FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
 // Known extension types.
 const EXTENSION_TASKPROV: u16 = 0xff00;
 
-/// The identifier for a DAP task.
-#[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Id(#[serde(with = "hex")] pub [u8; 32]);
+// Serde doesn't support derivations from const generics properly, so we have to use a macro.
+macro_rules! id_struct {
+    ($sname:ident, $len:expr, $doc:expr) => {
+        #[doc=$doc]
+        #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
+        pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
 
-impl Id {
-    /// Return the URL-safe, base64 encoding of the task ID.
-    pub fn to_base64url(&self) -> String {
-        encode_base64url(self.0)
-    }
+        impl $sname {
+            /// Return the URL-safe, base64 encoding of the ID.
+            pub fn to_base64url(&self) -> String {
+                encode_base64url(self.0)
+            }
 
-    /// Return the ID encoded as a hex string.
-    pub fn to_hex(&self) -> String {
-        hex::encode(self.0)
-    }
+            /// Return the ID encoded as a hex string.
+            pub fn to_hex(&self) -> String {
+                hex::encode(self.0)
+            }
+
+            /// Decode from URL-safe, base64.
+            pub fn try_from_base64url<T: AsRef<str>>(id_base64url: T) -> Option<Self> {
+                Some($sname(decode_base64url(id_base64url.as_ref())?))
+            }
+        }
+
+        impl Encode for $sname {
+            fn encode(&self, bytes: &mut Vec<u8>) {
+                bytes.extend_from_slice(&self.0);
+            }
+        }
+
+        impl Decode for $sname {
+            fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+                let mut data = [0; $len];
+                bytes.read_exact(&mut data[..])?;
+                Ok($sname(data))
+            }
+        }
+
+        impl AsRef<[u8]> for $sname {
+            fn as_ref(&self) -> &[u8] {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $sname {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.to_hex())
+            }
+        }
+    };
 }
 
-impl Encode for Id {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        bytes.extend_from_slice(&self.0);
-    }
-}
+id_struct!(AggregationJobId, 16, "Aggregation Job ID");
+id_struct!(BatchId, 32, "Batch ID");
+id_struct!(CollectionJobId, 16, "Collection Job ID");
+id_struct!(Draft02AggregationJobId, 32, "Aggregation Job ID");
+id_struct!(ReportId, 16, "Report ID (draft02)");
+id_struct!(TaskId, 32, "Task ID");
 
-impl Decode for Id {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let mut data = [0; 32];
-        bytes.read_exact(&mut data[..])?;
-        Ok(Id(data))
-    }
-}
-
-impl AsRef<[u8]> for Id {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_hex())
+impl TaskId {
+    /// draft02 compatibility: Convert the task ID to the field that would be added to the DAP
+    /// request for the given version. In draft02, the task ID is generally included in the HTTP
+    /// request payload; in draft04, the task ID is included in the HTTP request path.
+    pub fn for_request_payload(&self, version: &DapVersion) -> Option<TaskId> {
+        match version {
+            DapVersion::Draft02 => Some(self.clone()),
+            DapVersion::Draft04 => None,
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        }
     }
 }
 
@@ -82,44 +112,6 @@ pub type Duration = u64;
 
 /// The timestamp sent in a [`Report`].
 pub type Time = u64;
-
-/// A report ID.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
-#[allow(missing_docs)]
-pub struct ReportId(pub [u8; 16]);
-
-impl ReportId {
-    /// Return the ID encoded as a hex string.
-    pub fn to_hex(&self) -> String {
-        hex::encode(self.0)
-    }
-}
-
-impl Encode for ReportId {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        bytes.extend_from_slice(&self.0);
-    }
-}
-
-impl Decode for ReportId {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let mut id = [0; 16];
-        bytes.read_exact(&mut id)?;
-        Ok(ReportId(id))
-    }
-}
-
-impl AsRef<[u8]> for ReportId {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl fmt::Display for ReportId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_hex())
-    }
-}
 
 /// Report extensions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -172,7 +164,7 @@ pub struct ReportMetadata {
     pub id: ReportId,
     pub time: Time,
 
-    /// Report extensions, only used in draft-02. In draft-03 and above, extensions are carried in encrypted input share.
+    /// Report extensions, only used in draft02. In draft-03 and above, extensions are carried in encrypted input share.
     pub extensions: Vec<Extension>,
 }
 
@@ -183,7 +175,7 @@ impl ParameterizedEncode<DapVersion> for ReportMetadata {
         if matches!(version, DapVersion::Draft02) {
             encode_u16_items(bytes, &(), &self.extensions);
         } else if !self.extensions.is_empty() {
-            panic!("tried to encode extensions in the ReportMetadata for DAP > draft-02")
+            panic!("tried to encode extensions in the ReportMetadata for DAP > draft02")
         }
     }
 }
@@ -220,16 +212,22 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[allow(missing_docs)]
 pub struct Report {
-    pub task_id: Id,
-    pub metadata: ReportMetadata,
+    pub draft02_task_id: Option<TaskId>, // Set in draft02
+    pub report_metadata: ReportMetadata,
     pub public_share: Vec<u8>,
     pub encrypted_input_shares: Vec<HpkeCiphertext>,
 }
 
 impl ParameterizedEncode<DapVersion> for Report {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.task_id.encode(bytes);
-        self.metadata.encode_with_param(version, bytes);
+        if *version == DapVersion::Draft02 {
+            if let Some(id) = &self.draft02_task_id {
+                id.encode(bytes);
+            } else {
+                unreachable!("draft02: tried to serialize Report with missing task ID");
+            }
+        }
+        self.report_metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
         encode_u32_items(bytes, &(), &self.encrypted_input_shares);
     }
@@ -240,28 +238,33 @@ impl ParameterizedDecode<DapVersion> for Report {
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let draft02_task_id = if *version == DapVersion::Draft02 {
+            Some(TaskId::decode(bytes)?)
+        } else {
+            None
+        };
         Ok(Self {
-            task_id: Id::decode(bytes)?,
-            metadata: ReportMetadata::decode_with_param(version, bytes)?,
+            draft02_task_id,
+            report_metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
             encrypted_input_shares: decode_u32_items(&(), bytes)?,
         })
     }
 }
 
-/// An initial aggregate sub-request sent in an [`AggregateInitializeReq`]. The contents of this
+/// An initial aggregate sub-request sent in an [`AggregationJobInitReq`]. The contents of this
 /// structure pertain to a single report.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[allow(missing_docs)]
 pub struct ReportShare {
-    pub metadata: ReportMetadata,
+    pub report_metadata: ReportMetadata,
     pub public_share: Vec<u8>,
     pub encrypted_input_share: HpkeCiphertext,
 }
 
 impl ParameterizedEncode<DapVersion> for ReportShare {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.metadata.encode_with_param(version, bytes);
+        self.report_metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
         self.encrypted_input_share.encode(bytes);
     }
@@ -273,7 +276,7 @@ impl ParameterizedDecode<DapVersion> for ReportShare {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
-            metadata: ReportMetadata::decode_with_param(version, bytes)?,
+            report_metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
             encrypted_input_share: HpkeCiphertext::decode(bytes)?,
         })
@@ -281,12 +284,12 @@ impl ParameterizedDecode<DapVersion> for ReportShare {
 }
 
 /// Batch parameter conveyed to the Helper by the Leader in the aggregation sub-protocol. Used to
-/// identify which batch the reports in the [`AggregateInitializeReq`] are intended for.
+/// identify which batch the reports in the [`AggregationJobInitReq`] are intended for.
 #[derive(Clone, Debug, Eq, Deserialize, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PartialBatchSelector {
     TimeInterval,
-    FixedSizeByBatchId { batch_id: Id },
+    FixedSizeByBatchId { batch_id: BatchId },
 }
 
 impl From<BatchSelector> for PartialBatchSelector {
@@ -315,7 +318,7 @@ impl Decode for PartialBatchSelector {
         match u8::decode(bytes)? {
             QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
             QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
-                batch_id: Id::decode(bytes)?,
+                batch_id: BatchId::decode(bytes)?,
             }),
             _ => Err(CodecError::UnexpectedValue),
         }
@@ -327,7 +330,7 @@ impl Decode for PartialBatchSelector {
 #[serde(rename_all = "snake_case")]
 pub enum BatchSelector {
     TimeInterval { batch_interval: Interval },
-    FixedSizeByBatchId { batch_id: Id },
+    FixedSizeByBatchId { batch_id: BatchId },
 }
 
 impl Encode for BatchSelector {
@@ -352,7 +355,7 @@ impl Decode for BatchSelector {
                 batch_interval: Interval::decode(bytes)?,
             }),
             QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
-                batch_id: Id::decode(bytes)?,
+                batch_id: BatchId::decode(bytes)?,
             }),
             _ => Err(CodecError::UnexpectedValue),
         }
@@ -383,41 +386,55 @@ impl TryFrom<Query> for BatchSelector {
 
 /// Aggregate initialization request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AggregateInitializeReq {
-    pub task_id: Id,
-    pub agg_job_id: Id,
+pub struct AggregationJobInitReq {
+    pub draft02_task_id: Option<TaskId>, // Set in draft02
+    pub draft02_agg_job_id: Option<Draft02AggregationJobId>, // Set in draft02
     pub agg_param: Vec<u8>,
     pub part_batch_sel: PartialBatchSelector,
     pub report_shares: Vec<ReportShare>,
 }
 
-impl ParameterizedEncode<DapVersion> for AggregateInitializeReq {
+impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.task_id.encode(bytes);
-        self.agg_job_id.encode(bytes);
         match version {
-            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
-            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
-            _ => unreachable!("unimplemented version"),
+            DapVersion::Draft02 => {
+                self.draft02_task_id
+                    .as_ref()
+                    .expect("draft02: missing task ID")
+                    .encode(bytes);
+                self.draft02_agg_job_id
+                    .as_ref()
+                    .expect("draft02: missing aggregation job ID")
+                    .encode(bytes);
+                encode_u16_bytes(bytes, &self.agg_param);
+            }
+            DapVersion::Draft04 => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         self.part_batch_sel.encode(bytes);
         encode_u32_items(bytes, version, &self.report_shares);
     }
 }
 
-impl ParameterizedDecode<DapVersion> for AggregateInitializeReq {
+impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
     fn decode_with_param(
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let (draft02_task_id, draft02_agg_job_id, agg_param) = match version {
+            DapVersion::Draft02 => (
+                Some(TaskId::decode(bytes)?),
+                Some(Draft02AggregationJobId::decode(bytes)?),
+                decode_u16_bytes(bytes)?,
+            ),
+            DapVersion::Draft04 => (None, None, decode_u32_bytes(bytes)?),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
+
         Ok(Self {
-            task_id: Id::decode(bytes)?,
-            agg_job_id: Id::decode(bytes)?,
-            agg_param: match version {
-                DapVersion::Draft02 => decode_u16_bytes(bytes)?,
-                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
-                _ => unreachable!("unimplemented version"),
-            },
+            draft02_task_id,
+            draft02_agg_job_id,
+            agg_param,
             part_batch_sel: PartialBatchSelector::decode(bytes)?,
             report_shares: decode_u32_items(version, bytes)?,
         })
@@ -426,25 +443,56 @@ impl ParameterizedDecode<DapVersion> for AggregateInitializeReq {
 
 /// Aggregate continuation request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AggregateContinueReq {
-    pub task_id: Id,
-    pub agg_job_id: Id,
+pub struct AggregationJobContinueReq {
+    pub draft02_task_id: Option<TaskId>, // Set in draft02
+    pub draft02_agg_job_id: Option<Draft02AggregationJobId>, // Set in draft02
+    pub round: Option<u16>,              // Not set in draft02
     pub transitions: Vec<Transition>,
 }
 
-impl Encode for AggregateContinueReq {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.task_id.encode(bytes);
-        self.agg_job_id.encode(bytes);
+impl ParameterizedEncode<DapVersion> for AggregationJobContinueReq {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+        match version {
+            DapVersion::Draft02 => {
+                self.draft02_task_id
+                    .as_ref()
+                    .expect("draft02: missing task ID")
+                    .encode(bytes);
+                self.draft02_agg_job_id
+                    .as_ref()
+                    .expect("draft02: missing aggregation job ID")
+                    .encode(bytes);
+            }
+            DapVersion::Draft04 => {
+                self.round
+                    .as_ref()
+                    .expect("draft04: missing round")
+                    .encode(bytes);
+            }
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
         encode_u32_items(bytes, &(), &self.transitions);
     }
 }
 
-impl Decode for AggregateContinueReq {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for AggregationJobContinueReq {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        let (draft02_task_id, draft02_agg_job_id, round) = match version {
+            DapVersion::Draft02 => (
+                Some(TaskId::decode(bytes)?),
+                Some(Draft02AggregationJobId::decode(bytes)?),
+                None,
+            ),
+            DapVersion::Draft04 => (None, None, Some(u16::decode(bytes)?)),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
         Ok(Self {
-            task_id: Id::decode(bytes)?,
-            agg_job_id: Id::decode(bytes)?,
+            draft02_task_id,
+            draft02_agg_job_id,
+            round,
             transitions: decode_u32_items(&(), bytes)?,
         })
     }
@@ -453,8 +501,7 @@ impl Decode for AggregateContinueReq {
 /// Transition message. This conveyes a message sent from one Aggregator to another during the
 /// preparation phase of VDAF evaluation.
 //
-// TODO spec: This is called `PrepareStep` in draft-ietf-ppm-dap-03. This is confusing because it
-// overloads a term used in draft-irtf-cfrg-draft-02.
+// TODO Consider renaming this to `PrepareStep` to align with draft04.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transition {
     pub report_id: ReportId,
@@ -582,17 +629,17 @@ impl std::fmt::Display for TransitionFailure {
 /// An aggregate response sent from the Helper to the Leader.
 #[derive(Debug, PartialEq, Eq, Default)]
 #[allow(missing_docs)]
-pub struct AggregateResp {
+pub struct AggregationJobResp {
     pub transitions: Vec<Transition>,
 }
 
-impl Encode for AggregateResp {
+impl Encode for AggregationJobResp {
     fn encode(&self, bytes: &mut Vec<u8>) {
         encode_u32_items(bytes, &(), &self.transitions);
     }
 }
 
-impl Decode for AggregateResp {
+impl Decode for AggregationJobResp {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             transitions: decode_u32_items(&(), bytes)?,
@@ -636,7 +683,7 @@ impl Decode for Interval {
 #[serde(rename_all = "snake_case")]
 pub enum Query {
     TimeInterval { batch_interval: Interval },
-    FixedSizeByBatchId { batch_id: Id },
+    FixedSizeByBatchId { batch_id: BatchId },
     FixedSizeCurrentBatch,
 }
 
@@ -677,13 +724,13 @@ impl ParameterizedDecode<DapVersion> for Query {
             QUERY_TYPE_FIXED_SIZE => {
                 if *decoding_parameter == DapVersion::Draft02 {
                     Ok(Self::FixedSizeByBatchId {
-                        batch_id: Id::decode(bytes)?,
+                        batch_id: BatchId::decode(bytes)?,
                     })
                 } else {
                     let subtype = u8::decode(bytes)?;
                     match subtype {
                         FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID => Ok(Self::FixedSizeByBatchId {
-                            batch_id: Id::decode(bytes)?,
+                            batch_id: BatchId::decode(bytes)?,
                         }),
                         FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH => Ok(Self::FixedSizeCurrentBatch),
                         _ => Err(CodecError::UnexpectedValue),
@@ -707,35 +754,49 @@ impl Default for Query {
 //
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub struct CollectReq {
-    pub task_id: Id,
+pub struct CollectionReq {
+    pub draft02_task_id: Option<TaskId>, // Set in draft02
     pub query: Query,
     pub agg_param: Vec<u8>,
 }
 
-impl ParameterizedEncode<DapVersion> for CollectReq {
+impl ParameterizedEncode<DapVersion> for CollectionReq {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.task_id.encode(bytes);
+        match version {
+            DapVersion::Draft02 => {
+                self.draft02_task_id
+                    .as_ref()
+                    .expect("draft02: missing task ID")
+                    .encode(bytes);
+            }
+            DapVersion::Draft04 => {}
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        }
         self.query.encode_with_param(version, bytes);
         match version {
             DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
-            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::Draft04 => encode_u32_bytes(bytes, &self.agg_param),
             _ => panic!("unimplemented DapVersion"),
         };
     }
 }
 
-impl ParameterizedDecode<DapVersion> for CollectReq {
+impl ParameterizedDecode<DapVersion> for CollectionReq {
     fn decode_with_param(
-        decoding_parameter: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let draft02_task_id = match version {
+            DapVersion::Draft02 => Some(TaskId::decode(bytes)?),
+            DapVersion::Draft04 => None,
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
         Ok(Self {
-            task_id: Id::decode(bytes)?,
-            query: Query::decode_with_param(decoding_parameter, bytes)?,
-            agg_param: match decoding_parameter {
+            draft02_task_id,
+            query: Query::decode_with_param(version, bytes)?,
+            agg_param: match version {
                 DapVersion::Draft02 => decode_u16_bytes(bytes)?,
-                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
+                DapVersion::Draft04 => decode_u32_bytes(bytes)?,
                 _ => panic!("unimplemented DapVersion"),
             },
         })
@@ -746,25 +807,44 @@ impl ParameterizedDecode<DapVersion> for CollectReq {
 //
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub struct CollectResp {
+pub struct Collection {
     pub part_batch_sel: PartialBatchSelector,
     pub report_count: u64,
+    pub interval: Option<Interval>, // Not set in draft02
     pub encrypted_agg_shares: Vec<HpkeCiphertext>,
 }
 
-impl Encode for CollectResp {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for Collection {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.part_batch_sel.encode(bytes);
         self.report_count.encode(bytes);
+        match version {
+            DapVersion::Draft02 => {}
+            DapVersion::Draft04 => {
+                self.interval
+                    .as_ref()
+                    .expect("draft04: missing interval")
+                    .encode(bytes);
+            }
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
         encode_u32_items(bytes, &(), &self.encrypted_agg_shares);
     }
 }
 
-impl Decode for CollectResp {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for Collection {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
             part_batch_sel: PartialBatchSelector::decode(bytes)?,
             report_count: u64::decode(bytes)?,
+            interval: match version {
+                DapVersion::Draft02 => None,
+                DapVersion::Draft04 => Some(Interval::decode(bytes)?),
+                _ => panic!("unimplemented DapVersion"),
+            },
             encrypted_agg_shares: decode_u32_items(&(), bytes)?,
         })
     }
@@ -775,7 +855,7 @@ impl Decode for CollectResp {
 // TODO Add serialization tests.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AggregateShareReq {
-    pub task_id: Id,
+    pub draft02_task_id: Option<TaskId>, // Set in draft02
     pub batch_sel: BatchSelector,
     pub agg_param: Vec<u8>,
     pub report_count: u64,
@@ -784,12 +864,20 @@ pub struct AggregateShareReq {
 
 impl ParameterizedEncode<DapVersion> for AggregateShareReq {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.task_id.encode(bytes);
-        self.batch_sel.encode_with_param(version, bytes);
         match version {
-            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
-            DapVersion::Draft03 => encode_u32_bytes(bytes, &self.agg_param),
-            _ => panic!("unimplemented DapVersion"),
+            DapVersion::Draft02 => {
+                self.draft02_task_id
+                    .as_ref()
+                    .expect("draft02: missing task ID")
+                    .encode(bytes);
+                self.batch_sel.encode_with_param(version, bytes);
+                encode_u16_bytes(bytes, &self.agg_param);
+            }
+            DapVersion::Draft04 => {
+                self.batch_sel.encode_with_param(version, bytes);
+                encode_u32_bytes(bytes, &self.agg_param);
+            }
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
@@ -798,17 +886,26 @@ impl ParameterizedEncode<DapVersion> for AggregateShareReq {
 
 impl ParameterizedDecode<DapVersion> for AggregateShareReq {
     fn decode_with_param(
-        decoding_parameter: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let (draft02_task_id, batch_sel, agg_param) = match version {
+            DapVersion::Draft02 => (
+                Some(TaskId::decode(bytes)?),
+                BatchSelector::decode_with_param(version, bytes)?,
+                decode_u16_bytes(bytes)?,
+            ),
+            DapVersion::Draft04 => (
+                None,
+                BatchSelector::decode_with_param(version, bytes)?,
+                decode_u32_bytes(bytes)?,
+            ),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
         Ok(Self {
-            task_id: Id::decode(bytes)?,
-            batch_sel: BatchSelector::decode_with_param(decoding_parameter, bytes)?,
-            agg_param: match decoding_parameter {
-                DapVersion::Draft02 => decode_u16_bytes(bytes)?,
-                DapVersion::Draft03 => decode_u32_bytes(bytes)?,
-                _ => panic!("unimplemented DapVersion"),
-            },
+            draft02_task_id,
+            batch_sel,
+            agg_param,
             report_count: u64::decode(bytes)?,
             checksum: {
                 let mut checksum = [0u8; 32];
@@ -823,17 +920,17 @@ impl ParameterizedDecode<DapVersion> for AggregateShareReq {
 //
 // TODO Add serialization tests.
 #[derive(Debug)]
-pub struct AggregateShareResp {
+pub struct AggregateShare {
     pub encrypted_agg_share: HpkeCiphertext,
 }
 
-impl Encode for AggregateShareResp {
+impl Encode for AggregateShare {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.encrypted_agg_share.encode(bytes);
     }
 }
 
-impl Decode for AggregateShareResp {
+impl Decode for AggregateShare {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
             encrypted_agg_share: HpkeCiphertext::decode(bytes)?,
@@ -1112,7 +1209,9 @@ pub fn encode_base64url<T: AsRef<[u8]>>(input: T) -> String {
 }
 
 /// Decode the input as a URL-safe, base64 encoding of an `OUT_LEN`-length byte string.
-pub fn decode_base64url<T: AsRef<[u8]>, const OUT_LEN: usize>(input: T) -> Option<[u8; OUT_LEN]> {
+pub(crate) fn decode_base64url<T: AsRef<[u8]>, const OUT_LEN: usize>(
+    input: T,
+) -> Option<[u8; OUT_LEN]> {
     let mut bytes = [0; OUT_LEN];
     // NOTE(cjpatton) It would be better to use `decode_slice` here, but this function uses a
     // conservative estimate of the decoded length (`decoded_len_estimate`). See
