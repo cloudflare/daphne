@@ -6,6 +6,7 @@
 //! Daphne-Worker configuration.
 
 use crate::{
+    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod},
     dap_err,
     durable::{
         durable_name_report_store, durable_name_task,
@@ -39,7 +40,7 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
@@ -56,11 +57,11 @@ pub(crate) struct TaskprovConfig {
     /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.
     pub(crate) vdaf_verify_key_init: [u8; 32],
 
-    /// Leader bearer token for all taskprov tasks
-    pub(crate) leader_bearer_token: BearerToken,
+    /// Leader, Helper: Method for authorizing Leader requests.
+    pub(crate) leader_auth: DaphneWorkerAuthMethod,
 
-    /// Collector bearer token for all taskprov tasks
-    pub(crate) collector_bearer_token: BearerToken,
+    /// Leader: Method for authorizing Collector requests.
+    pub(crate) collector_auth: Option<DaphneWorkerAuthMethod>,
 }
 
 /// Parameters required for pushing Prometheus metrics.
@@ -208,19 +209,36 @@ impl DaphneWorkerConfig {
                         ))
                     })?;
 
-            let leader_bearer_token =
-                BearerToken::from(env.secret("DAP_TASKPROV_LEADER_BEARER_TOKEN")?.to_string());
+            const DAP_TASKPROV_LEADER_AUTH: &str = "DAP_TASKPROV_LEADER_AUTH";
+            let leader_auth =
+                serde_json::from_str(env.var(DAP_TASKPROV_LEADER_AUTH)?.to_string().as_ref())
+                    .map_err(|e| {
+                        error!("DaphneWorkerConfig: error parsing {DAP_TASKPROV_LEADER_AUTH}: {e}");
+                        e
+                    })?;
 
-            let collector_bearer_token = BearerToken::from(
-                env.secret("DAP_TASKPROV_COLLECTOR_BEARER_TOKEN")?
-                    .to_string(),
-            );
+            let collector_auth = if is_leader {
+                const DAP_TASKPROV_COLLECTOR_AUTH: &str = "DAP_TASKPROV_COLLECTOR_AUTH";
+                Some(
+                    serde_json::from_str(
+                        env.var(DAP_TASKPROV_COLLECTOR_AUTH)?.to_string().as_ref(),
+                    )
+                    .map_err(|e| {
+                        error!(
+                            "DaphneWorkerConfig: error parsing {DAP_TASKPROV_COLLECTOR_AUTH}: {e}"
+                        );
+                        e
+                    })?,
+                )
+            } else {
+                None
+            };
 
             Some(TaskprovConfig {
                 hpke_collector_config,
                 vdaf_verify_key_init,
-                leader_bearer_token,
-                collector_bearer_token,
+                leader_auth,
+                collector_auth,
             })
         } else {
             None
@@ -838,8 +856,34 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn worker_request_to_dap(
         &self,
         mut req: Request,
-    ) -> Result<DapRequest<BearerToken>> {
-        let sender_auth = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
+    ) -> Result<DapRequest<DaphneWorkerAuth>> {
+        // Determine the authorization method used by the sender.
+        let bearer_token = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
+        let mut tls_client_auth = req.cf().tls_client_auth();
+        if let Some(auth) = &tls_client_auth {
+            // The runtime gives us a tls_client_auth whether the communication was secured by it or
+            // not, so if a certificate wasn't presented or isn't valid, treat it as if it weren't
+            // there. We don't think the runtime would deliver a verified value that wasn't SUCCESS if a
+            // certificate had been presented, but we're not sure so we are checking. One can argue
+            // that a bad certificate should cause a definitive rejection rather than simply ignoring
+            // the certificate.
+            if auth.cert_presented() != "1" || auth.cert_verified() != "SUCCESS" {
+                tls_client_auth = None;
+            }
+        }
+        let sender_auth = match (bearer_token, tls_client_auth) {
+            (Some(bearer_token), None) => Some(DaphneWorkerAuth::BearerToken(bearer_token)),
+            (None, Some(tls_client_auth)) => Some(DaphneWorkerAuth::CfTlsClientAuth {
+                cert_issuer: tls_client_auth.cert_issuer_dn_rfc2253(),
+                cert_subject: tls_client_auth.cert_subject_dn_rfc2253(),
+            }),
+            (None, None) => None, // No authorization method provided
+            (Some(..), Some(..)) => {
+                debug!("ambiguous authorization method: both a bearer token and TLS client cert were provided");
+                None
+            }
+        };
+
         let content_type = req.headers().get("Content-Type")?;
 
         let media_type = match content_type {

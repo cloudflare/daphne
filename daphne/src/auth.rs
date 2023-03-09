@@ -4,12 +4,9 @@
 //! DAP request authorization.
 
 use crate::{
-    constants::{
-        media_type_from_leader, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_INIT_REQ,
-        MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
-    },
+    constants::sender_for_media_type,
     messages::{constant_time_eq, Id},
-    DapError, DapRequest,
+    DapError, DapRequest, DapSender,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -83,7 +80,7 @@ pub trait BearerTokenProvider<'a> {
         task_id: &'a Id,
         media_type: &'static str,
     ) -> Result<Self::WrappedBearerToken, DapError> {
-        if media_type_from_leader(media_type) {
+        if matches!(sender_for_media_type(media_type), Some(DapSender::Leader)) {
             let token = self
                 .get_leader_bearer_token_for(task_id)
                 .await?
@@ -99,9 +96,9 @@ pub trait BearerTokenProvider<'a> {
     }
 
     /// Check that the bearer token carried by a request can be used to authorize that request.
-    async fn bearer_token_authorized(
+    async fn bearer_token_authorized<T: AsRef<BearerToken>>(
         &'a self,
-        req: &'a DapRequest<BearerToken>,
+        req: &'a DapRequest<T>,
     ) -> Result<bool, DapError> {
         if req.task_id.is_none() {
             // Can't authorize request with missing task ID.
@@ -113,26 +110,26 @@ pub trait BearerTokenProvider<'a> {
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
         // for BearerToken` with `TryFrom<String>` so that a `DapError` can be returned if the
         // token is not formatted properly.
-        if matches!(
-            req.media_type,
-            Some(MEDIA_TYPE_AGG_INIT_REQ)
-                | Some(MEDIA_TYPE_AGG_CONT_REQ)
-                | Some(MEDIA_TYPE_AGG_SHARE_REQ)
-        ) {
-            if let Some(ref got) = req.sender_auth {
-                if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
-                    return Ok(got == expected.as_ref());
+        if let Some(media_type) = req.media_type {
+            if matches!(sender_for_media_type(media_type), Some(DapSender::Leader)) {
+                if let Some(ref got) = req.sender_auth {
+                    if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
+                        return Ok(got.as_ref() == expected.as_ref());
+                    }
+                    return Ok(self.is_taskprov_leader_bearer_token(got.as_ref()));
                 }
-                return Ok(self.is_taskprov_leader_bearer_token(got));
             }
-        }
 
-        if matches!(req.media_type, Some(MEDIA_TYPE_COLLECT_REQ)) {
-            if let Some(ref got) = req.sender_auth {
-                if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
-                    return Ok(got == expected.as_ref());
+            if matches!(
+                sender_for_media_type(media_type),
+                Some(DapSender::Collector)
+            ) {
+                if let Some(ref got) = req.sender_auth {
+                    if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
+                        return Ok(got.as_ref() == expected.as_ref());
+                    }
+                    return Ok(self.is_taskprov_collector_bearer_token(got.as_ref()));
                 }
-                return Ok(self.is_taskprov_collector_bearer_token(got));
             }
         }
 

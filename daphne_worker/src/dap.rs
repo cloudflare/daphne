@@ -7,6 +7,7 @@
 //! draft-ietf-ppm-dap-03.
 
 use crate::{
+    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod},
     config::{
         DaphneWorker, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
         HpkeReceiverKvKey, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
@@ -43,7 +44,7 @@ use crate::{
 use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
-    constants,
+    constants::{media_type_for, sender_for_media_type},
     hpke::HpkeDecrypter,
     messages::{
         BatchSelector, CollectReq, CollectResp, HpkeCiphertext, Id, PartialBatchSelector, Report,
@@ -53,7 +54,7 @@ use daphne::{
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::{bad_request, get_taskprov_task_config},
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
+    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender, DapTaskConfig, DapVersion,
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
@@ -61,7 +62,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use worker::*;
 
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
@@ -219,7 +220,7 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
     fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
             && match &self.config().taskprov {
-                Some(config) => config.leader_bearer_token == *token,
+                Some(config) => config.leader_auth.as_ref() == token,
                 None => false,
             }
     }
@@ -227,30 +228,40 @@ impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
     fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
         self.get_global_config().allow_taskprov
             && match &self.config().taskprov {
-                Some(config) => config.collector_bearer_token == *token,
+                Some(config) => {
+                    config
+                        .collector_auth
+                        .as_ref()
+                        .expect("collector authorization method not set")
+                        .as_ref()
+                        == token
+                }
                 None => false,
             }
     }
 }
 
 #[async_trait(?Send)]
-impl DapAuthorizedSender<BearerToken> for DaphneWorker<'_> {
+impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
     async fn authorize(
         &self,
         task_id: &Id,
         media_type: &'static str,
         _payload: &[u8],
-    ) -> std::result::Result<BearerToken, DapError> {
-        Ok(self
-            .authorize_with_bearer_token(task_id, media_type)
-            .await?
-            .value()
-            .clone())
+    ) -> std::result::Result<DaphneWorkerAuth, DapError> {
+        // TODO Add support for authorizing the request with TLS client certificates:
+        // https://developers.cloudflare.com/workers/runtime-apis/mtls/
+        Ok(DaphneWorkerAuth::BearerToken(
+            self.authorize_with_bearer_token(task_id, media_type)
+                .await?
+                .value()
+                .clone(),
+        ))
     }
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for DaphneWorker<'srv>
+impl<'srv, 'req> DapAggregator<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
@@ -258,9 +269,83 @@ where
 
     async fn authorized(
         &self,
-        req: &DapRequest<BearerToken>,
+        req: &DapRequest<DaphneWorkerAuth>,
     ) -> std::result::Result<bool, DapError> {
-        self.bearer_token_authorized(req).await
+        match req.sender_auth {
+            Some(DaphneWorkerAuth::BearerToken(..)) => self.bearer_token_authorized(req).await,
+            Some(DaphneWorkerAuth::CfTlsClientAuth {
+                ref cert_issuer,
+                ref cert_subject,
+            }) => {
+                if let Some(ref taskprov_config) = self.config().taskprov {
+                    let sender = if let Some(media_type) = req.media_type {
+                        sender_for_media_type(media_type)
+                    } else {
+                        warn!("request denied due to unknown media type");
+                        return Ok(false);
+                    };
+
+                    let (valid_cert_issuer, valid_cert_subjects) = match sender {
+                        Some(DapSender::Leader) => match taskprov_config.leader_auth {
+                            DaphneWorkerAuthMethod::CfTlsClientAuth {
+                                ref valid_cert_issuer,
+                                ref valid_cert_subjects,
+                            } => (valid_cert_issuer, valid_cert_subjects),
+                            _ => {
+                                warn!("request from Leader denied due to unexpected authorization method (did not expect TLS client auth)");
+                                return Ok(false);
+                            }
+                        },
+                        Some(DapSender::Collector) => match taskprov_config.collector_auth {
+                            Some(DaphneWorkerAuthMethod::CfTlsClientAuth {
+                                ref valid_cert_issuer,
+                                ref valid_cert_subjects,
+                            }) => (valid_cert_issuer, valid_cert_subjects),
+                            Some(..) => {
+                                warn!("request from Collector denied due to unexpected authorization method (did not expect TLS client auth)");
+                                return Ok(false);
+                            }
+                            None => {
+                                warn!(
+                                    "request from Collector denied: no authorization method configured"
+                                );
+                                return Ok(false);
+                            }
+                        },
+                        Some(DapSender::Client) | None => {
+                            // DapAggregator::authorized() is only called on requests from senders
+                            // that require authoriztion. These include the Collector and the
+                            // Leader; currently the Client does not require authorization. If at
+                            // some point we need this, we would check it here.
+                            warn!("request denied from unexpected sender ({sender:?})");
+                            return Ok(false);
+                        }
+                    };
+
+                    if cert_issuer != valid_cert_issuer
+                        || !valid_cert_subjects.contains(cert_subject)
+                    {
+                        warn!("request denied due to unexpected subject or issuer in TLS client certificate");
+                        debug!("issuer is '{cert_issuer}'; expected '{valid_cert_issuer}'");
+                        debug!(
+                            "subject is '{cert_subject}'; expected one of {valid_cert_subjects:?}"
+                        );
+                        return Ok(false);
+                    }
+
+                    return Ok(true);
+                } else {
+                    warn!("request denied: authorization method unavailable");
+                    // We currently only support usage of the TLS client authentication with the
+                    // taskprov extension.
+                    Ok(false)
+                }
+            }
+            None => {
+                warn!("request denied: no authorization provided");
+                Ok(false)
+            }
+        }
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {
@@ -334,9 +419,13 @@ where
             //
             // TODO(bhalleycf) Note that this is generating KV garbage that will
             // need collection at some point.
-            self.set_leader_bearer_token(&taskprov_task_id, taskprov.leader_bearer_token.as_ref())
-                .await
-                .map_err(dap_err)?;
+            if let DaphneWorkerAuthMethod::BearerToken(ref leader_bearer_token) =
+                taskprov.leader_auth
+            {
+                self.set_leader_bearer_token(&taskprov_task_id, leader_bearer_token)
+                    .await
+                    .map_err(dap_err)?;
+            }
 
             // Write the task config to the KV.
             //
@@ -614,7 +703,7 @@ fn task_id_from_report(report: &[u8]) -> std::result::Result<Id, DapError> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for DaphneWorker<'srv>
+impl<'srv, 'req> DapLeader<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
@@ -868,7 +957,7 @@ where
 
     async fn send_http_post(
         &self,
-        req: DapRequest<BearerToken>,
+        req: DapRequest<DaphneWorkerAuth>,
     ) -> std::result::Result<DapResponse, DapError> {
         let (payload, url) = (req.payload, req.url);
 
@@ -881,7 +970,7 @@ where
             );
         }
 
-        if let Some(bearer_token) = req.sender_auth {
+        if let Some(DaphneWorkerAuth::BearerToken(bearer_token)) = req.sender_auth {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
                 reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref())
@@ -912,7 +1001,7 @@ where
                 .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
                 .map_err(|e| DapError::Fatal(e.to_string()))?;
-            let media_type = constants::media_type_for(content_type);
+            let media_type = media_type_for(content_type);
 
             let payload = reqwest_resp
                 .bytes()
@@ -932,7 +1021,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for DaphneWorker<'srv>
+impl<'srv, 'req> DapHelper<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {

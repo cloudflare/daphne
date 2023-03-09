@@ -48,8 +48,12 @@ DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
 # The secret key for the HPKE collector public key, recorded here for testing convenience:
 #     9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e   # SECRET
 DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18" # SECRET
-DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
-DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
+DAP_TASKPROV_LEADER_AUTH = """{
+  "bearer_token": "I am the leader!"
+}""" # SECRET
+DAP_TASKPROV_COLLECTOR_AUTH = """{
+  "bearer_token": "I am the collector!"
+}""" # SECRET
 DAP_DEFAULT_VERSION = "v03"
 DAP_TRACING = "debug"
 
@@ -110,8 +114,9 @@ DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
 # The secret key for the HPKE collector public key, recorded here for testing convenience:
 #     9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e   # SECRET
 DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18" # SECRET
-DAP_TASKPROV_LEADER_BEARER_TOKEN = "I am the leader!" # SECRET
-DAP_TASKPROV_COLLECTOR_BEARER_TOKEN = "I am the collector!" # SECRET
+DAP_TASKPROV_LEADER_AUTH = """{
+  "bearer_token": "I am the leader!"
+}""" # SECRET
 DAP_DEFAULT_VERSION = "v03"
 DAP_TRACING = "debug"
 

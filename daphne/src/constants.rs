@@ -3,6 +3,8 @@
 
 //! Constants used in the DAP protocol.
 
+use crate::DapSender;
+
 // Media types for HTTP requests.
 //
 // TODO spec: Decide if media type should be enforced. (We currently don't.) In any case, it may be
@@ -37,10 +39,15 @@ pub fn media_type_for(content_type: &str) -> Option<&'static str> {
     }
 }
 
-/// Returns true if the given media type is for a DAP request sent by the Leader.
-pub(crate) fn media_type_from_leader(media_type: &'static str) -> bool {
-    matches!(
-        media_type,
-        MEDIA_TYPE_AGG_INIT_REQ | MEDIA_TYPE_AGG_CONT_REQ | MEDIA_TYPE_AGG_SHARE_REQ
-    )
+/// Return the sender that would send a message with the given media type (or none if the sender
+/// can't be determined).
+pub fn sender_for_media_type(media_type: &'static str) -> Option<DapSender> {
+    match media_type {
+        DRAFT02_MEDIA_TYPE_HPKE_CONFIG | MEDIA_TYPE_REPORT => Some(DapSender::Client),
+        MEDIA_TYPE_COLLECT_REQ => Some(DapSender::Collector),
+        MEDIA_TYPE_AGG_INIT_REQ | MEDIA_TYPE_AGG_CONT_REQ | MEDIA_TYPE_AGG_SHARE_REQ => {
+            Some(DapSender::Leader)
+        }
+        _ => None,
+    }
 }
