@@ -848,8 +848,7 @@ impl Test {
         &mut self,
         agg_init_req: AggregateInitializeReq,
     ) -> DapHelperTransition<AggregateResp> {
-        let agg_resp = self
-            .task_config
+        self.task_config
             .vdaf
             .handle_agg_init_req(
                 &self.helper_hpke_receiver_config,
@@ -858,9 +857,7 @@ impl Test {
                 &self.helper_metrics,
             )
             .await
-            .unwrap();
-
-        agg_resp
+            .unwrap()
     }
 
     fn handle_agg_resp(
