@@ -60,8 +60,7 @@ pub struct TestRunner {
 #[allow(dead_code)]
 impl TestRunner {
     pub async fn default_with_version(version: DapVersion) -> Self {
-        let t = Self::with(version, &DapQueryConfig::TimeInterval).await;
-        t
+        Self::with(version, &DapQueryConfig::TimeInterval).await
     }
 
     pub async fn default() -> Self {
@@ -69,14 +68,13 @@ impl TestRunner {
     }
 
     pub async fn fixed_size(version: DapVersion) -> Self {
-        let t = Self::with(
+        Self::with(
             version,
             &DapQueryConfig::FixedSize {
                 max_batch_size: MAX_BATCH_SIZE,
             },
         )
-        .await;
-        t
+        .await
     }
 
     async fn with(version: DapVersion, query_config: &DapQueryConfig) -> Self {
