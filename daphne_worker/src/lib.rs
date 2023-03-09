@@ -596,6 +596,9 @@ pub(crate) struct InternalTestAddTask {
     task_expiration: Time,
 }
 
+mod auth;
+#[cfg(test)]
+mod auth_test;
 mod config;
 mod dap;
 mod durable;

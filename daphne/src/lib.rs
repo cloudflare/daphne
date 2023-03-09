@@ -840,6 +840,14 @@ pub enum Prio3Config {
     Sum { bits: u32 },
 }
 
+/// DAP sender role.
+#[derive(Debug)]
+pub enum DapSender {
+    Client,
+    Collector,
+    Leader,
+}
+
 /// DAP request.
 #[derive(Debug)]
 pub struct DapRequest<S> {
