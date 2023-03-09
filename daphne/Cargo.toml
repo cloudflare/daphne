@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 assert_matches = "1.5.0"
-async-trait = "0.1.64"
+async-trait = "0.1.66"
 base64 = "0.21.0"
 getrandom = { version = "0.2.8", features = ["js"] } # Required for prio
 hex = { version = "0.4.3", features = ["serde"] }
@@ -28,16 +28,16 @@ hpke-rs-crypto = { version = "0.1.1" }
 hpke-rs-rust-crypto = { version = "0.1.1"}
 lazy_static = "1.4.0"
 matchit = "0.7.0"
-paste = "1.0.11"
+paste = "1.0.12"
 prio = { version = "0.10.0", features = ["prio2"] }
 prometheus = "0.13.3"
 rand = "0.8.5"
 ring = "0.16.20"
-serde = { version = "1.0.152", features = ["derive"] }
-serde_json = "1.0.92"
-thiserror = "1.0.38"
+serde = { version = "1.0.154", features = ["derive"] }
+serde_json = "1.0.94"
+thiserror = "1.0.39"
 tracing = "0.1.37"
 url = { version = "2.3.1", features = ["serde"] }
 
 [dev-dependencies]
-tokio = { version = "1.25.0", features = ["rt", "macros"] }
+tokio = { version = "1.26.0", features = ["rt", "macros"] }
