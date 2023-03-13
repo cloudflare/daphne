@@ -29,7 +29,7 @@ daphne_worker = { path = "../daphne_worker" }
 serde = { version = "1.0.154", features = ["derive"] }
 serde_json = "1.0.94"
 tracing = "0.1.37"
-worker = "0.0.12"
+worker = "0.0.14"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
