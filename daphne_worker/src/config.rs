@@ -45,7 +45,7 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{error, info, trace};
 use worker::{kv::KvStore, *};
 
 pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
@@ -930,31 +930,17 @@ impl<'srv> DaphneWorker<'srv> {
         let version = self.extract_version_parameter(&req)?;
 
         // Determine the authorization method used by the sender.
-        let bearer_token = req.headers().get("DAP-Auth-Token")?.map(BearerToken::from);
-        let mut tls_client_auth = req.cf().tls_client_auth();
-        if let Some(auth) = &tls_client_auth {
-            // The runtime gives us a tls_client_auth whether the communication was secured by it or
-            // not, so if a certificate wasn't presented or isn't valid, treat it as if it weren't
-            // there. We don't think the runtime would deliver a verified value that wasn't SUCCESS if a
-            // certificate had been presented, but we're not sure so we are checking. One can argue
-            // that a bad certificate should cause a definitive rejection rather than simply ignoring
-            // the certificate.
-            if auth.cert_presented() != "1" || auth.cert_verified() != "SUCCESS" {
-                tls_client_auth = None;
-            }
-        }
-        let sender_auth = match (bearer_token, tls_client_auth) {
-            (Some(bearer_token), None) => Some(DaphneWorkerAuth::BearerToken(bearer_token)),
-            (None, Some(tls_client_auth)) => Some(DaphneWorkerAuth::CfTlsClientAuth {
-                cert_issuer: tls_client_auth.cert_issuer_dn_rfc2253(),
-                cert_subject: tls_client_auth.cert_subject_dn_rfc2253(),
-            }),
-            (None, None) => None, // No authorization method provided
-            (Some(..), Some(..)) => {
-                debug!("ambiguous authorization method: both a bearer token and TLS client cert were provided");
-                None
-            }
-        };
+        let sender_auth = Some(DaphneWorkerAuth {
+            bearer_token: req.headers().get("DAP-Auth-Token")?.map(BearerToken::from),
+
+            // The runtime gives us a cf_tls_client_auth whether the communication was secured by
+            // it or not, so if a certificate wasn't presented, treat it as if it weren't there.
+            // Literal "1" indicates that a certificate was presented.
+            cf_tls_client_auth: req
+                .cf()
+                .tls_client_auth()
+                .filter(|auth| auth.cert_presented() == "1"),
+        });
 
         let content_type = req.headers().get("Content-Type")?;
         let media_type = DapMediaType::from_str_for_version(version, content_type.as_deref());
@@ -1056,7 +1042,7 @@ impl<'srv> DaphneWorker<'srv> {
             })?,
         );
 
-        if let Some(DaphneWorkerAuth::BearerToken(bearer_token)) = req.sender_auth {
+        if let Some(bearer_token) = req.sender_auth.and_then(|auth| auth.bearer_token) {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
                 reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref()).map_err(
