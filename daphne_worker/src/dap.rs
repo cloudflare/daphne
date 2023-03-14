@@ -7,7 +7,7 @@
 //! draft-ietf-ppm-dap-03.
 
 use crate::{
-    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod},
+    auth::DaphneWorkerAuth,
     config::{
         DaphneWorker, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
         HpkeReceiverKvKey, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
@@ -258,14 +258,17 @@ impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
         media_type: &DapMediaType,
         _payload: &[u8],
     ) -> std::result::Result<DaphneWorkerAuth, DapError> {
-        // TODO Add support for authorizing the request with TLS client certificates:
-        // https://developers.cloudflare.com/workers/runtime-apis/mtls/
-        Ok(DaphneWorkerAuth::BearerToken(
-            self.authorize_with_bearer_token(task_id, media_type)
-                .await?
-                .value()
-                .clone(),
-        ))
+        Ok(DaphneWorkerAuth {
+            bearer_token: Some(
+                self.authorize_with_bearer_token(task_id, media_type)
+                    .await?
+                    .value()
+                    .clone(),
+            ),
+            // TODO Consider adding support for authorizing the request with TLS client
+            // certificates: https://developers.cloudflare.com/workers/runtime-apis/mtls/
+            cf_tls_client_auth: None,
+        })
     }
 }
 
@@ -280,72 +283,72 @@ where
         &self,
         req: &DapRequest<DaphneWorkerAuth>,
     ) -> std::result::Result<Option<String>, DapError> {
-        match req.sender_auth {
-            Some(DaphneWorkerAuth::BearerToken(..)) => self.bearer_token_authorized(req).await,
-            Some(DaphneWorkerAuth::CfTlsClientAuth {
-                ref cert_issuer,
-                ref cert_subject,
-            }) => {
-                if let Some(ref taskprov_config) = self.config().taskprov {
-                    let (valid_cert_issuer, valid_cert_subjects) = match req.media_type.sender() {
-                        Some(DapSender::Leader) => match taskprov_config.leader_auth {
-                            DaphneWorkerAuthMethod::CfTlsClientAuth {
-                                ref valid_cert_issuer,
-                                ref valid_cert_subjects,
-                            } => (valid_cert_issuer, valid_cert_subjects),
-                            _ => {
-                                return Ok(Some("Request from Leader denied due to unexpected authorization method (did not expect TLS client auth).".into()));
-                            }
-                        },
-                        Some(DapSender::Collector) => match taskprov_config.collector_auth {
-                            Some(DaphneWorkerAuthMethod::CfTlsClientAuth {
-                                ref valid_cert_issuer,
-                                ref valid_cert_subjects,
-                            }) => (valid_cert_issuer, valid_cert_subjects),
-                            Some(..) => {
-                                return Ok(Some("Request from Collector denied due to unexpected authorization method (did not expect TLS client auth).".into()));
-                            }
-                            None => {
-                                return Ok(Some("Request from Collector denied: no authorization method configured.".into()));
-                            }
-                        },
-                        Some(sender) => {
-                            // DapAggregator::authorized() is only called on requests from senders
-                            // that require authoriztion. These include the Collector and the
-                            // Leader; currently the Client does not require authorization. If at
-                            // some point we need this, we would check it here.
-                            return Ok(Some(format!(
-                                "Request denied from unexpected sender ({sender:?})."
-                            )));
-                        }
-                        None => {
-                            return Ok(Some(
-                                "Request denied because the sender could not be determined.".into(),
-                            ));
-                        }
-                    };
+        let mut authorized = false;
 
-                    if cert_issuer != valid_cert_issuer
-                        || !valid_cert_subjects.contains(cert_subject)
-                    {
-                        debug!("issuer is '{cert_issuer}'; expected '{valid_cert_issuer}'");
-                        debug!(
-                            "subject is '{cert_subject}'; expected one of {valid_cert_subjects:?}"
-                        );
-                        return Ok(Some("Request denied due to unexpected subject or issuer in TLS client certificate.".into()));
-                    }
+        let Some(ref sender_auth) = req.sender_auth else {
+            return Ok(Some("Missing authorization.".into()));
+        };
 
-                    // Authorize requestl.
-                    Ok(None)
-                } else {
-                    // We currently only support usage of the TLS client authentication with the
-                    // taskprov extension.
-                    return Ok(Some(
-                        "Request denied: authorization method unavailable.".into(),
-                    ));
-                }
+        // If a bearer token is present, verify that it can be used to authorize the request.
+        if sender_auth.bearer_token.is_some() {
+            if let Some(unauthorized_reason) = self.bearer_token_authorized(req).await? {
+                return Ok(Some(unauthorized_reason));
             }
-            None => Ok(Some("request denied: no authorization provided".into())),
+            authorized = true;
+        }
+
+        // If a TLS client certificate is present, verify that it is valid and that the issuer and
+        // subject are trusted.
+        if let Some(ref cf_tls_client_auth) = sender_auth.cf_tls_client_auth {
+            // TODO(cjpatton) Add support for TLS client authentication for non-Taskprov tasks.
+            let Some(ref taskprov_config) = self.config().taskprov else {
+                return Ok(Some(
+                    "TLS client authentication is currently only supported with Taskprov.".into(),
+                ));
+            };
+
+            // Check that that the certificate is valid. This is indicated bylLiteral "SUCCESS".
+            let cert_verified = cf_tls_client_auth.cert_verified();
+            if cert_verified != "SUCCESS" {
+                return Ok(Some(format!("Invalid TLS certificate ({cert_verified}).")));
+            }
+
+            // Resolve the trusted certificate issuers and subjects for this request.
+            let sender = req.media_type.sender();
+            let trusted_certs = if let (Some(DapSender::Leader), Some(ref trusted_certs)) =
+                (sender, &taskprov_config.leader_auth.cf_tls_client_auth)
+            {
+                trusted_certs
+            } else if let (Some(DapSender::Collector), Some(ref trusted_certs)) = (
+                sender,
+                taskprov_config
+                    .collector_auth
+                    .as_ref()
+                    .and_then(|auth| auth.cf_tls_client_auth.as_ref()),
+            ) {
+                trusted_certs
+            } else {
+                let unauthorized_reason =
+                    format!("TLS client authentication is not configured for sender ({sender:?}.");
+                return Ok(Some(unauthorized_reason));
+            };
+
+            let cert_issuer = cf_tls_client_auth.cert_issuer_dn_rfc2253();
+            let cert_subject = cf_tls_client_auth.cert_subject_dn_rfc2253();
+            if !trusted_certs.iter().any(|trusted_cert| {
+                trusted_cert.issuer == cert_issuer && trusted_cert.subject == cert_subject
+            }) {
+                return Ok(Some(format!(
+                    r#"Unexpected issuer "{cert_issuer}" and subject "{cert_subject}"."#
+                )));
+            }
+            authorized = true;
+        }
+
+        if authorized {
+            Ok(None)
+        } else {
+            Ok(Some("No suitable authorization method was found.".into()))
         }
     }
 
@@ -426,9 +429,7 @@ where
             //
             // TODO(bhalleycf) Note that this is generating KV garbage that will
             // need collection at some point.
-            if let DaphneWorkerAuthMethod::BearerToken(ref leader_bearer_token) =
-                taskprov.leader_auth
-            {
+            if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
                 self.set_leader_bearer_token(&taskprov_task_id, leader_bearer_token)
                     .await
                     .map_err(dap_err)?;

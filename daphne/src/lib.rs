@@ -728,7 +728,7 @@ pub enum Prio3Config {
 }
 
 /// DAP sender role.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum DapSender {
     Client,
     Collector,
