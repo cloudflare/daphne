@@ -16,7 +16,7 @@ COPY daphne ./daphne
 WORKDIR /tmp/dap_test/daphne_worker_test
 RUN wrangler publish --dry-run
 
-FROM alpine:3.16
+FROM alpine:3.16 AS test
 RUN apk add --update npm bash
 RUN npm install -g n && \
     n 18.4.0
@@ -25,3 +25,11 @@ COPY --from=builder /tmp/dap_test/daphne_worker_test/wrangler.toml /wrangler.tom
 COPY --from=builder /tmp/dap_test/daphne_worker_test/build/worker/* /build/worker/
 # `-B ""` to skip build command.
 ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", ""]
+
+FROM test AS helper
+
+ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "--wrangler-env=helper"]
+
+FROM test AS leader
+
+ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "--wrangler-env=leader"]

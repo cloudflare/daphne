@@ -13,9 +13,9 @@ services:
       - "8787"
     build:
       context: .
-      dockerfile: daphne_worker_test/docker/miniflare.Dockerfile
+      dockerfile: docker/miniflare.Dockerfile
+      target: leader
     command:
-      - "--wrangler-env=leader"
       - "--port=8787"
       - "--global-random"
   helper:
@@ -25,9 +25,9 @@ services:
       - "8788"
     build:
       context: .
-      dockerfile: daphne_worker_test/docker/miniflare.Dockerfile
+      dockerfile: docker/miniflare.Dockerfile
+      target: helper
     command:
-      - "--wrangler-env=helper"
       - "--port=8788"
       - "--global-random"
   test:
