@@ -36,6 +36,7 @@ jobs:
       - name: Checking out
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
       - name: 🏷️ Docker meta
+        id: meta
         uses: docker/metadata-action@507c2f2dc502c992ad446e3d7a5dfbe311567a96 # v4.3.0
         with:
           images: |
