@@ -60,4 +60,5 @@ jobs:
           file: ./docker/miniflare.Dockerfile
           target: helper
           push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
