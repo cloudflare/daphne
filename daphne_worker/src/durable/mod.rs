@@ -140,8 +140,25 @@ macro_rules! ensure_garbage_collected {
 macro_rules! ensure_alarmed {
     ($object:expr, $lifetime:expr) => {{
         if !$object.alarmed {
-            if $object.state.storage().get_alarm().await?.is_none() {
-                $object.state.storage().set_alarm($lifetime).await?;
+            let result = $object.state.storage().get_alarm().await;
+            match result {
+                Ok(existing) => {
+                    if existing.is_none() {
+                        $object.state.storage().set_alarm($lifetime).await?;
+                    }
+                }
+                Err(e) => {
+                    if !matches!(
+                        $object.config.deployment,
+                        crate::config::DaphneWorkerDeployment::Dev
+                    ) {
+                        // We only return an error if not in the "dev" deployment as
+                        // the experimental-local dev environment doesn't have
+                        // working get_alarm() and set_alarm() yet, so we want to
+                        // ignore errors in that case.
+                        return Result::Err(e);
+                    }
+                }
             }
             $object.alarmed = true;
         }
