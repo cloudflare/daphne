@@ -6,7 +6,7 @@ compatibility_date = "2022-10-14"
 command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build"
 
 [[rules]]
-globs = [ "**/*.wasm" ]
+globs = ["**/*.wasm"]
 type = "CompiledWasm"
 fallthrough = false
 
@@ -59,20 +59,20 @@ DAP_TRACING = "debug"
 
 [env.leader.durable_objects]
 bindings = [
-  { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
-  { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
-  { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
-  { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
-  { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
-  { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
-  { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
+    { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+    { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
+    { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
+    { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
+    { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+    { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
+    { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
 
 [[env.leader.kv_namespaces]]
 binding = "DAP_CONFIG"
-id = "<ignored>"         # TODO(cjpatton) Figure out how to pick this.
-preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
+id = "24c4dc92d5cf4680e508fe18eb8f0281"         # TODO(cjpatton) Figure out how to pick this.
+preview_id = "24c4dc92d5cf4680e508fe18eb8f0281" # TODO(cjpatton) Figure out how to pick this.
 
 
 #
@@ -122,28 +122,28 @@ DAP_TRACING = "debug"
 
 [env.helper.durable_objects]
 bindings = [
-  { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
-  { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
-  { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
-  { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
+    { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+    { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+    { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+    { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
 
 [[env.helper.kv_namespaces]]
-  binding = "DAP_CONFIG"
-  id = "<ignored>"         # TODO(cjpatton) Figure out how to pick this.
-  preview_id = "<ignored>" # TODO(cjpatton) Figure out how to pick this.
+binding = "DAP_CONFIG"
+id = "5d9c69a19f90be2dbcce95eb6f0a338a"         # TODO(cjpatton) Figure out how to pick this.
+preview_id = "5d9c69a19f90be2dbcce95eb6f0a338a" # TODO(cjpatton) Figure out how to pick this.
 
 
 [[migrations]]
 tag = "v1"
 new_classes = [
-  "AggregateStore",
-  "HelperStateStore",
-  "LeaderAggregationJobQueue",
-  "LeaderBatchQueue",
-  "LeaderCollectionJobQueue",
-  "GarbageCollector",
-  "ReportsPending",
-  "ReportsProcessed",
+    "AggregateStore",
+    "HelperStateStore",
+    "LeaderAggregationJobQueue",
+    "LeaderBatchQueue",
+    "LeaderCollectionJobQueue",
+    "GarbageCollector",
+    "ReportsPending",
+    "ReportsProcessed",
 ]
