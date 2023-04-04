@@ -146,7 +146,7 @@ bindings = [
 [[env.helper.kv_namespaces]]
 binding = "DAP_CONFIG"
 # See the comments in the leader section for the meaning of these
-# fields.  Note that a different name shoudl be used when
+# fields.  Note that a different name should be used when
 # creating the helper's namespace, as the id needs to be different from
 # the leader's or there will be errors and cross contamination if both
 # a leader and a helper exist.
