@@ -148,10 +148,12 @@ macro_rules! ensure_alarmed {
                     }
                 }
                 Err(e) => {
-                    if !matches!(
+                    if matches!(
                         $object.config.deployment,
                         crate::config::DaphneWorkerDeployment::Dev
                     ) {
+                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it")
+                    } else {
                         // We only return an error if not in the "dev" deployment as
                         // the experimental-local dev environment doesn't have
                         // working get_alarm() and set_alarm() yet, so we want to

@@ -3,7 +3,7 @@
 
 use crate::{config::DaphneWorkerConfig, durable::state_get, initialize_tracing, int_err};
 use daphne::{messages::Id, DapVersion};
-use tracing::trace;
+use tracing::{trace, warn};
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
