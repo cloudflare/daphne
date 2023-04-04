@@ -49,6 +49,8 @@ pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/coll
 pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
 pub(crate) const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
+const DAP_BASE_URL: &str = "DAP_BASE_URL";
+
 /// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-02 ("taskprov").
 pub(crate) struct TaskprovConfig {
     /// HPKE collector configuration for all taskprov tasks.
@@ -94,8 +96,9 @@ pub(crate) struct DaphneWorkerConfig {
     /// Shard count, the number of report storage shards. This should be a power of 2.
     report_shard_count: u64,
 
-    /// Base URL of the Aggregator (unversioned).
-    base_url: Url,
+    /// draft-dcook-ppm-dap-interop-test-design: Base URL of the Aggregator (unversioned). If set,
+    /// this field is used for endpoint configuration for interop testing.
+    base_url: Option<Url>,
 
     /// Optional: draft-wang-ppm-dap-taskprov-02 configuration. If not configured, then taskprov
     /// will be disabled.
@@ -138,11 +141,15 @@ impl DaphneWorkerConfig {
         let default_version =
             DapVersion::from(env.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
 
-        let base_url: Url = env
-            .var("DAP_BASE_URL")?
-            .to_string()
-            .parse()
-            .map_err(int_err)?;
+        let base_url = if let Ok(base_url) = env.var(DAP_BASE_URL) {
+            let base_url: Url = base_url
+                .to_string()
+                .parse()
+                .map_err(|e| Error::RustError(format!("failed to parse {DAP_BASE_URL}: {e}")))?;
+            Some(base_url)
+        } else {
+            None
+        };
 
         let collect_id_key = if is_leader {
             let collect_id_key_hex = env
@@ -721,9 +728,20 @@ impl<'srv> DaphneWorker<'srv> {
             }));
         }
 
+        let path = self
+            .config()
+            .base_url
+            .as_ref()
+            .ok_or_else(|| {
+                Error::RustError(format!(
+                    "Environment variable {DAP_BASE_URL} not configured"
+                ))
+            })?
+            .path();
+
         Response::from_json(&serde_json::json!({
             "status": "success",
-            "endpoint": format!("{}{}/", self.config().base_url.path(), version.as_ref()),
+            "endpoint": format!("{path}{}/", version.as_ref()),
         }))
     }
 
