@@ -8,6 +8,7 @@ use crate::{
 };
 use futures::future::try_join_all;
 use std::time::Duration;
+use tracing::warn;
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
