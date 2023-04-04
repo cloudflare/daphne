@@ -71,8 +71,22 @@ bindings = [
 
 [[env.leader.kv_namespaces]]
 binding = "DAP_CONFIG"
-id = "24c4dc92d5cf4680e508fe18eb8f0281"         # TODO(cjpatton) Figure out how to pick this.
-preview_id = "24c4dc92d5cf4680e508fe18eb8f0281" # TODO(cjpatton) Figure out how to pick this.
+# KV bindings are in a looked up in a namespace identified by a 16-byte id number.
+# This number is assigned by calling
+#
+#    wrangler kv:namespace create <NAME>
+#
+# for some unique name you specify, and it returns a unique id number to use.
+# Here we should use something like "leader" for the <NAME>.
+id = "<assign-one-for-the-leader>"
+# A "preview id" is an id used when running in "wrangler dev" mode locally, and
+# can just be made up.  We generated the number below with the following python
+# code:
+#
+#    import secrets
+#    print(secrets.token_hex(16))
+#
+preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
 
 
 #
@@ -131,8 +145,15 @@ bindings = [
 
 [[env.helper.kv_namespaces]]
 binding = "DAP_CONFIG"
-id = "5d9c69a19f90be2dbcce95eb6f0a338a"         # TODO(cjpatton) Figure out how to pick this.
-preview_id = "5d9c69a19f90be2dbcce95eb6f0a338a" # TODO(cjpatton) Figure out how to pick this.
+# See the comments in the leader section for the meaning of these
+# fields.  Note that a different name shoudl be used when
+# creating the helper's namespace, as the id needs to be different from
+# the leader's or there will be errors and cross contamination if both
+# a leader and a helper exist.
+id = "<assign-one-for-the-helper>"
+# This is another unique id generated using the method for preview_id
+# described above.
+preview_id = "5d9c69a19f90be2dbcce95eb6f0a338a"
 
 
 [[migrations]]
