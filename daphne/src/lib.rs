@@ -868,6 +868,10 @@ impl<S> DapRequest<S> {
             Err(DapAbort::UnrecognizedMessage)
         }
     }
+
+    pub(crate) fn host(&self) -> String {
+        self.url.host_str().unwrap_or("").to_string()
+    }
 }
 
 /// DAP response.

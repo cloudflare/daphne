@@ -789,7 +789,7 @@ where
                                 // first, so take precedence.
                                 self.metrics()
                                     .report_counter
-                                    .with_label_values(&[&format!("rejected_{failure}")])
+                                    .with_label_values(&[&req.host(), &format!("rejected_{failure}")])
                                     .inc();
                             } else {
                                 state_index += 1;
