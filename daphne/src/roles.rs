@@ -4,12 +4,7 @@
 //! Trait definitions for Daphne backends.
 
 use crate::{
-    constants::{
-        versioned_media_type_for, DRAFT02_MEDIA_TYPE_AGG_CONT_REQ, DRAFT02_MEDIA_TYPE_AGG_INIT_REQ,
-        DRAFT02_MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_AGG_CONT_REQ, MEDIA_TYPE_AGG_CONT_RESP,
-        MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_INIT_RESP, MEDIA_TYPE_AGG_SHARE_REQ,
-        MEDIA_TYPE_AGG_SHARE_RESP, MEDIA_TYPE_HPKE_CONFIG_LIST,
-    },
+    constants::DapMediaType,
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, decode_base64url, AggregateShare, AggregateShareReq,
@@ -38,7 +33,7 @@ pub trait DapAuthorizedSender<S> {
     async fn authorize(
         &self,
         task_id: &TaskId,
-        media_type: &'static str,
+        media_type: &DapMediaType,
         payload: &[u8],
     ) -> Result<S, DapError>;
 }
@@ -176,24 +171,24 @@ where
             }
         }
 
-        match req.version {
-            DapVersion::Draft02 => Ok(DapResponse {
-                media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
-                payload: hpke_config.as_ref().get_encoded(),
-            }),
+        let payload = match req.version {
+            DapVersion::Draft02 => hpke_config.as_ref().get_encoded(),
             DapVersion::Draft04 => {
                 let hpke_config_list = HpkeConfigList {
                     hpke_configs: vec![hpke_config.as_ref().clone()],
                 };
-                Ok(DapResponse {
-                    media_type: Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
-                    payload: hpke_config_list.get_encoded(),
-                })
+                hpke_config_list.get_encoded()
             }
-            // This is just to keep the compiler happy as we excluded DapVersion::Unknown
-            // with an InvalidProtocolError at the top of the function.
-            DapVersion::Unknown => unreachable!("unknown DapVersion"),
-        }
+            // This is just to keep the compiler happy as we excluded DapVersion::Unknown with an
+            // InvalidProtocolError at the top of the function.
+            _ => unreachable!("unhandled version {:?}", req.version),
+        };
+
+        Ok(DapResponse {
+            version: req.version,
+            media_type: DapMediaType::HpkeConfigList,
+            payload,
+        })
     }
 
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
@@ -208,7 +203,8 @@ macro_rules! leader_post {
         $task_id:expr,
         $task_config:expr,
         $path:expr,
-        $media_type:expr,
+        $req_media_type:expr,
+        $resp_media_type:expr,
         $resource:expr,
         $req_data:expr,
         $is_put:expr
@@ -217,20 +213,29 @@ macro_rules! leader_post {
             .helper_url
             .join($path)
             .map_err(|e| DapError::Fatal(e.to_string()))?;
+
         let req = DapRequest {
-            version: $task_config.version.clone(),
-            media_type: Some($media_type),
+            version: $task_config.version,
+            media_type: $req_media_type,
             task_id: Some($task_id.clone()),
             resource: $resource,
             payload: $req_data,
             url,
-            sender_auth: Some($role.authorize(&$task_id, $media_type, &$req_data).await?),
+            sender_auth: Some(
+                $role
+                    .authorize(&$task_id, &$req_media_type, &$req_data)
+                    .await?,
+            ),
         };
-        if $is_put {
+
+        let resp = if $is_put {
             $role.send_http_put(req).await?
         } else {
             $role.send_http_post(req).await?
-        }
+        };
+
+        check_response_content_type(&resp, $resp_media_type)?;
+        resp
     }};
 }
 
@@ -300,6 +305,8 @@ where
             return Err(DapAbort::InvalidProtocolVersion);
         }
 
+        check_request_content_type(req, DapMediaType::Report)?;
+
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         debug!("report id is {}", report.report_metadata.id);
         let task_config = self
@@ -354,6 +361,8 @@ where
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
         }
+
+        check_request_content_type(req, DapMediaType::CollectReq)?;
 
         if !self.authorized(req).await? {
             debug!("aborted unathorized collect request");
@@ -498,7 +507,8 @@ where
             task_id,
             task_config,
             &url_path,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_INIT_REQ).unwrap(),
+            DapMediaType::AggregationJobInitReq,
+            DapMediaType::AggregationJobResp,
             agg_job_id.for_request_path(),
             agg_job_init_req.get_encoded_with_param(&task_config.version),
             is_put
@@ -530,7 +540,8 @@ where
             task_id,
             task_config,
             &url_path,
-            MEDIA_TYPE_AGG_CONT_REQ,
+            DapMediaType::AggregationJobContinueReq,
+            DapMediaType::agg_job_cont_resp_for_version(task_config.version),
             agg_job_id.for_request_path(),
             agg_job_cont_req.get_encoded_with_param(&task_config.version),
             false
@@ -607,7 +618,8 @@ where
             task_id,
             task_config,
             &url_path,
-            MEDIA_TYPE_AGG_SHARE_REQ,
+            DapMediaType::AggregateShareReq,
+            DapMediaType::AggregateShare,
             DapResource::Undefined,
             agg_share_req.get_encoded_with_param(&task_config.version),
             false
@@ -753,7 +765,7 @@ where
         let task_id = req.task_id()?;
 
         match req.media_type {
-            Some(MEDIA_TYPE_AGG_INIT_REQ) | Some(DRAFT02_MEDIA_TYPE_AGG_INIT_REQ) => {
+            DapMediaType::AggregationJobInitReq => {
                 let agg_job_init_req =
                     AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)?;
 
@@ -913,11 +925,12 @@ where
                 self.metrics().aggregation_job_gauge.inc();
 
                 Ok(DapResponse {
-                    media_type: versioned_media_type_for(&req.version, MEDIA_TYPE_AGG_INIT_RESP),
+                    version: req.version,
+                    media_type: DapMediaType::AggregationJobResp,
                     payload: agg_job_resp.get_encoded(),
                 })
             }
-            Some(MEDIA_TYPE_AGG_CONT_REQ) | Some(DRAFT02_MEDIA_TYPE_AGG_CONT_REQ) => {
+            DapMediaType::AggregationJobContinueReq => {
                 let agg_job_cont_req =
                     AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)?;
                 let wrapped_task_config = self
@@ -982,7 +995,8 @@ where
                 self.metrics().aggregation_job_gauge.dec();
 
                 Ok(DapResponse {
-                    media_type: Some(MEDIA_TYPE_AGG_CONT_RESP),
+                    version: req.version,
+                    media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
                     payload: agg_job_resp.get_encoded(),
                 })
             }
@@ -1005,6 +1019,8 @@ where
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::InvalidProtocolVersion);
         }
+
+        check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
         if !self.authorized(req).await? {
             return Err(DapAbort::UnauthorizedRequest);
@@ -1077,7 +1093,8 @@ where
             .inc_by(agg_share_req.report_count);
 
         Ok(DapResponse {
-            media_type: versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_SHARE_RESP),
+            version: req.version,
+            media_type: DapMediaType::AggregateShare,
             payload: agg_share_resp.get_encoded(),
         })
     }
@@ -1194,5 +1211,36 @@ pub fn early_metadata_check(
         Some(TransitionFailure::ReportTooEarly)
     } else {
         None
+    }
+}
+
+fn check_response_content_type(resp: &DapResponse, expected: DapMediaType) -> Result<(), DapError> {
+    let want_str = expected
+        .as_str_for_version(resp.version)
+        .expect("could not determine string representation for expected content-type");
+
+    if resp.media_type != expected {
+        if let Some(got_str) = resp.media_type.as_str_for_version(resp.version) {
+            Err(DapError::Fatal(format!(
+                "response from peer has unexpected content-type: got {got_str}; want {want_str}",
+            )))
+        } else {
+            Err(DapError::fatal(
+                "response from peer has no content-type: expected {want_str}",
+            ))
+        }
+    } else {
+        Ok(())
+    }
+}
+
+fn check_request_content_type<S>(
+    req: &DapRequest<S>,
+    expected: DapMediaType,
+) -> Result<(), DapAbort> {
+    if req.media_type != expected {
+        Err(DapAbort::content_type(req, expected))
+    } else {
+        Ok(())
     }
 }

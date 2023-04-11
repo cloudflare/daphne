@@ -5,11 +5,7 @@ use crate::{
     assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
     async_test_versions,
     auth::BearerToken,
-    constants::{
-        versioned_media_type_for, DRAFT02_MEDIA_TYPE_HPKE_CONFIG, MEDIA_TYPE_AGG_CONT_REQ,
-        MEDIA_TYPE_AGG_INIT_REQ, MEDIA_TYPE_AGG_SHARE_REQ, MEDIA_TYPE_COLLECT_REQ,
-        MEDIA_TYPE_REPORT,
-    },
+    constants::DapMediaType,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         taskprov, AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
@@ -216,7 +212,7 @@ impl Test {
 
         DapRequest {
             version,
-            media_type: Some(MEDIA_TYPE_REPORT),
+            media_type: DapMediaType::Report,
             task_id: Some(task_id.clone()),
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version),
@@ -245,7 +241,7 @@ impl Test {
             task_id,
             Some(&agg_job_id),
             task_config.version,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_INIT_REQ).unwrap(),
+            DapMediaType::AggregationJobInitReq,
             AggregationJobInitReq {
                 draft02_task_id: task_id.for_request_payload(&version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
@@ -271,7 +267,7 @@ impl Test {
             task_id,
             Some(agg_job_id),
             task_config.version,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_CONT_REQ).unwrap(),
+            DapMediaType::AggregationJobContinueReq,
             AggregationJobContinueReq {
                 draft02_task_id: task_id.for_request_payload(&task_config.version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
@@ -316,7 +312,7 @@ impl Test {
             task_id,
             None,
             task_config.version,
-            MEDIA_TYPE_AGG_SHARE_REQ,
+            DapMediaType::AggregateShareReq,
             AggregateShareReq {
                 draft02_task_id: task_id.for_request_payload(&task_config.version),
                 batch_sel: BatchSelector::default(),
@@ -392,7 +388,7 @@ impl Test {
         let req = self
             .collector_authorized_req(
                 task_config.version,
-                versioned_media_type_for(&task_config.version, MEDIA_TYPE_COLLECT_REQ).unwrap(),
+                DapMediaType::CollectReq,
                 task_id,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&task_config.version),
@@ -421,20 +417,20 @@ impl Test {
         task_id: &TaskId,
         agg_job_id: Option<&MetaAggregationJobId<'_>>,
         version: DapVersion,
-        media_type: &'static str,
+        media_type: DapMediaType,
         msg: M,
         url: Url,
     ) -> DapRequest<BearerToken> {
         let payload = msg.get_encoded_with_param(&version);
         let sender_auth = Some(
             self.leader
-                .authorize(task_id, media_type, &payload)
+                .authorize(task_id, &media_type, &payload)
                 .await
                 .unwrap(),
         );
         DapRequest {
             version,
-            media_type: Some(media_type),
+            media_type,
             task_id: Some(task_id.clone()),
             resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
             payload,
@@ -448,20 +444,20 @@ impl Test {
         task_id: &TaskId,
         agg_job_id: Option<&MetaAggregationJobId<'_>>,
         version: DapVersion,
-        media_type: &'static str,
+        media_type: DapMediaType,
         msg: M,
         url: Url,
     ) -> DapRequest<BearerToken> {
         let payload = msg.get_encoded_with_param(&version);
         let sender_auth = Some(
             self.leader
-                .authorize(task_id, media_type, &payload)
+                .authorize(task_id, &media_type, &payload)
                 .await
                 .unwrap(),
         );
         DapRequest {
             version,
-            media_type: Some(media_type),
+            media_type,
             task_id: Some(task_id.clone()),
             resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
             payload,
@@ -473,7 +469,7 @@ impl Test {
     async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
         &self,
         version: DapVersion,
-        media_type: &'static str,
+        media_type: DapMediaType,
         task_id: &TaskId,
         msg: M,
         url: Url,
@@ -482,7 +478,7 @@ impl Test {
         let collect_job_id = CollectionJobId(rng.gen());
         DapRequest {
             version,
-            media_type: Some(media_type),
+            media_type,
             task_id: Some(task_id.clone()),
             resource: if version == DapVersion::Draft02 {
                 DapResource::Undefined
@@ -510,7 +506,7 @@ async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
             task_id,
             Some(&agg_job_id),
             task_config.version,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_INIT_REQ).unwrap(),
+            DapMediaType::AggregationJobInitReq,
             AggregationJobInitReq {
                 draft02_task_id: task_id.for_request_payload(&version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
@@ -667,7 +663,7 @@ async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
     let task_id = TaskId(rng.gen());
     let req = DapRequest {
         version: DapVersion::Draft02,
-        media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
+        media_type: DapMediaType::HpkeConfigList,
         payload: Vec::new(),
         task_id: Some(task_id.clone()),
         resource: DapResource::Undefined,
@@ -691,7 +687,7 @@ async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
     let t = Test::new(version);
     let req = DapRequest {
         version: DapVersion::Draft02,
-        media_type: Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
+        media_type: DapMediaType::HpkeConfigList,
         task_id: Some(t.time_interval_task_id.clone()),
         resource: DapResource::Undefined,
         payload: Vec::new(),
@@ -770,7 +766,7 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
             &t.time_interval_task_id,
             None,
             task_config.version,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_SHARE_REQ).unwrap(),
+            DapMediaType::AggregateShareReq,
             AggregateShareReq {
                 draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
                 batch_sel: BatchSelector::FixedSizeByBatchId {
@@ -798,7 +794,7 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
             &t.fixed_size_task_id,
             None,
             task_config.version,
-            versioned_media_type_for(&task_config.version, MEDIA_TYPE_AGG_SHARE_REQ).unwrap(),
+            DapMediaType::AggregateShareReq,
             AggregateShareReq {
                 draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
                 batch_sel: BatchSelector::FixedSizeByBatchId {
@@ -836,7 +832,7 @@ async fn http_post_collect_unauthorized_request(version: DapVersion) {
     };
     let mut req = DapRequest {
         version: task_config.version,
-        media_type: versioned_media_type_for(&task_config.version, MEDIA_TYPE_COLLECT_REQ),
+        media_type: DapMediaType::CollectReq,
         task_id: Some(task_id.clone()),
         resource: if version == DapVersion::Draft02 {
             DapResource::Undefined
@@ -1091,7 +1087,7 @@ async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
     let report_invalid_task_id = t.gen_test_report(task_id).await;
     let req = DapRequest {
         version: task_config.version,
-        media_type: Some(MEDIA_TYPE_REPORT),
+        media_type: DapMediaType::Report,
         task_id: Some(TaskId([0; 32])),
         resource: DapResource::Undefined,
         payload: report_invalid_task_id.get_encoded_with_param(&task_config.version),
@@ -1129,7 +1125,7 @@ async fn http_post_upload_task_expired(version: DapVersion) {
     let report = t.gen_test_report(task_id).await;
     let req = DapRequest {
         version: task_config.version,
-        media_type: Some(MEDIA_TYPE_REPORT),
+        media_type: DapMediaType::Report,
         task_id: Some(task_id.clone()),
         resource: DapResource::Undefined,
         payload: report.get_encoded_with_param(&version),
@@ -1186,7 +1182,7 @@ async fn poll_collect_job_test_results(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             CollectionReq {
                 draft02_task_id: task_id.for_request_payload(&version),
@@ -1262,7 +1258,7 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             CollectionReq {
                 draft02_task_id: task_id.for_request_payload(&version),
@@ -1289,7 +1285,7 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             CollectionReq {
                 draft02_task_id: task_id.for_request_payload(&version),
@@ -1317,7 +1313,7 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             CollectionReq {
                 draft02_task_id: task_id.for_request_payload(&version),
@@ -1353,7 +1349,7 @@ async fn http_post_collect_succeed_max_batch_interval(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             CollectionReq {
                 draft02_task_id: task_id.for_request_payload(&version),
@@ -1421,7 +1417,7 @@ async fn http_post_collect_success(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             task_id,
             collector_collect_req.clone(),
             task_config.leader_url.join("collect").unwrap(),
@@ -1466,7 +1462,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             task_config.version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             &t.time_interval_task_id,
             CollectionReq {
                 draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
@@ -1491,7 +1487,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
     let req = t
         .collector_authorized_req(
             task_config.version,
-            MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             &t.fixed_size_task_id,
             CollectionReq {
                 draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
@@ -1668,7 +1664,7 @@ async fn e2e_taskprov(version: DapVersion) {
 
     let req = DapRequest {
         version,
-        media_type: Some(MEDIA_TYPE_REPORT),
+        media_type: DapMediaType::Report,
         task_id: Some(taskprov_id.clone()),
         resource: DapResource::Undefined,
         payload: report.get_encoded_with_param(&version),

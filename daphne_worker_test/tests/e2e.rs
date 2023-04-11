@@ -6,7 +6,8 @@
 mod test_runner;
 
 use daphne::{
-    async_test_versions, constants,
+    async_test_versions,
+    constants::DapMediaType,
     messages::{
         taskprov::{
             DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
@@ -202,7 +203,7 @@ async fn e2e_leader_upload(version: DapVersion) {
     t.leader_put_expect_ok(
         &client,
         &path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
     )
     .await;
@@ -212,7 +213,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         None, // dap_auth_token
         &path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "replayedReport",
@@ -226,7 +227,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         None, // dap_auth_token
         &bad_path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         t.task_config
             .vdaf
             .produce_report(
@@ -260,7 +261,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         None, // dap_auth_token
         &path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "unrecognizedHpkeConfig",
@@ -272,7 +273,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         None, // dap_auth_token
         &path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         b"junk data".to_vec(),
         400,
         "unrecognizedMessage",
@@ -295,7 +296,7 @@ async fn e2e_leader_upload(version: DapVersion) {
         &client,
         None, // dap_auth_token
         &path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "reportTooLate",
@@ -306,6 +307,15 @@ async fn e2e_leader_upload(version: DapVersion) {
     // state each time the test is run. If it didn't, this would result in an error due to the
     // report ID being repeated.
     let url = t.leader_url.join(&path).unwrap();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        DapMediaType::Report
+            .as_str_for_version(version)
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
         DapVersion::Draft04 => client.put(url.as_str()),
@@ -336,6 +346,7 @@ async fn e2e_leader_upload(version: DapVersion) {
             }
             .get_encoded_with_param(&version),
         )
+        .headers(headers)
         .send()
         .await
         .expect("request failed");
@@ -404,7 +415,7 @@ async fn e2e_leader_upload_taskprov() {
     t.leader_post_expect_ok(
         &client,
         path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
     )
     .await;
@@ -431,7 +442,7 @@ async fn e2e_leader_upload_taskprov() {
         &client,
         None, // dap_auth_token
         path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "unrecognizedTask",
@@ -463,7 +474,7 @@ async fn e2e_leader_upload_taskprov() {
         &client,
         None, // dap_auth_token
         path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "unrecognizedMessage",
@@ -512,7 +523,7 @@ async fn e2e_leader_upload_taskprov() {
         &client,
         None, // dap_auth_token
         path,
-        constants::MEDIA_TYPE_REPORT,
+        DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
         "badRequest",
@@ -541,7 +552,7 @@ async fn e2e_internal_leader_process(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -594,7 +605,7 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -647,7 +658,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -758,7 +769,7 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     //      &client,
     //      None, // dap_auth_token
     //      "upload",
-    //      constants::MEDIA_TYPE_REPORT,
+    //      DapMediaType::Report,
     //      t.task_config.vdaf
     //          .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
     //          .unwrap()
@@ -787,7 +798,7 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -851,7 +862,7 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -975,7 +986,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             &client,
             Some(&t.collector_bearer_token),
             path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchInvalid",
@@ -986,7 +997,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             &client,
             Some(&t.collector_bearer_token),
             path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchInvalid",
@@ -1010,7 +1021,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             &client,
             Some(&t.collector_bearer_token),
             path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchInvalid",
@@ -1021,7 +1032,7 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             &client,
             Some(&t.collector_bearer_token),
             path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchInvalid",
@@ -1046,7 +1057,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1118,7 +1129,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
             &client,
             Some(&t.collector_bearer_token),
             &path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchOverlap",
@@ -1129,7 +1140,7 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
             &client,
             Some(&t.collector_bearer_token),
             &path,
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
             "batchOverlap",
@@ -1163,7 +1174,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1267,7 +1278,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1301,7 +1312,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
             &client,
             Some(&t.collector_bearer_token),
             &t.collect_url_suffix(),
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
                 query: Query::FixedSizeByBatchId {
@@ -1319,7 +1330,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
             &client,
             Some(&t.collector_bearer_token),
             &t.collect_url_suffix(),
-            constants::MEDIA_TYPE_COLLECT_REQ,
+            DapMediaType::CollectReq,
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
                 query: Query::FixedSizeByBatchId {
@@ -1399,7 +1410,7 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
         t.leader_put_expect_ok(
             &client,
             &path,
-            constants::MEDIA_TYPE_REPORT,
+            DapMediaType::Report,
             task_config
                 .vdaf
                 .produce_report_with_extensions(

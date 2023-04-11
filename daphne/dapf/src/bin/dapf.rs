@@ -4,7 +4,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use daphne::{
-    constants,
+    constants::DapMediaType,
     hpke::HpkeReceiverConfig,
     messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, Query, TaskId},
     DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
@@ -123,7 +123,12 @@ async fn main() -> Result<()> {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_static(constants::MEDIA_TYPE_REPORT),
+                reqwest::header::HeaderValue::from_str(
+                    DapMediaType::Report
+                        .as_str_for_version(version)
+                        .expect("failed to construct content-type value"),
+                )
+                .expect("failecd to construct content-type header"),
             );
             let resp = http_client
                 .post(Url::parse(leader_url)?.join("upload")?)
@@ -164,7 +169,12 @@ async fn main() -> Result<()> {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_static(constants::MEDIA_TYPE_COLLECT_REQ),
+                reqwest::header::HeaderValue::from_str(
+                    DapMediaType::CollectReq
+                        .as_str_for_version(version)
+                        .expect("failed to construct content-type value"),
+                )
+                .expect("failed to construct content-type hader"),
             );
             if let Some(ref token) = cli.bearer_token {
                 headers.insert(

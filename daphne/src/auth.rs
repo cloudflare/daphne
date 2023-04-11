@@ -4,12 +4,13 @@
 //! DAP request authorization.
 
 use crate::{
-    constants::sender_for_media_type,
+    constants::DapMediaType,
     messages::{constant_time_eq, TaskId},
     DapError, DapRequest, DapSender,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// A bearer token used for authorizing DAP requests.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -78,9 +79,9 @@ pub trait BearerTokenProvider<'a> {
     async fn authorize_with_bearer_token(
         &'a self,
         task_id: &'a TaskId,
-        media_type: &'static str,
+        media_type: &DapMediaType,
     ) -> Result<Self::WrappedBearerToken, DapError> {
-        if matches!(sender_for_media_type(media_type), Some(DapSender::Leader)) {
+        if matches!(media_type.sender(), Some(DapSender::Leader)) {
             let token = self
                 .get_leader_bearer_token_for(task_id)
                 .await?
@@ -91,7 +92,7 @@ pub trait BearerTokenProvider<'a> {
         }
 
         Err(DapError::Fatal(format!(
-            "attempted to authorize request of type '{media_type}'",
+            "attempted to authorize request of type '{media_type:?}'",
         )))
     }
 
@@ -110,30 +111,29 @@ pub trait BearerTokenProvider<'a> {
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
         // for BearerToken` with `TryFrom<String>` so that a `DapError` can be returned if the
         // token is not formatted properly.
-        if let Some(media_type) = req.media_type {
-            if matches!(sender_for_media_type(media_type), Some(DapSender::Leader)) {
-                if let Some(ref got) = req.sender_auth {
-                    if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
-                        return Ok(got.as_ref() == expected.as_ref());
-                    }
-                    return Ok(self.is_taskprov_leader_bearer_token(got.as_ref()));
+        if matches!(req.media_type.sender(), Some(DapSender::Leader)) {
+            if let Some(ref got) = req.sender_auth {
+                if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
+                    return Ok(got.as_ref() == expected.as_ref());
                 }
+                return Ok(self.is_taskprov_leader_bearer_token(got.as_ref()));
             }
+        }
 
-            if matches!(
-                sender_for_media_type(media_type),
-                Some(DapSender::Collector)
-            ) {
-                if let Some(ref got) = req.sender_auth {
-                    if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
-                        return Ok(got.as_ref() == expected.as_ref());
-                    }
-                    return Ok(self.is_taskprov_collector_bearer_token(got.as_ref()));
+        if matches!(req.media_type.sender(), Some(DapSender::Collector)) {
+            if let Some(ref got) = req.sender_auth {
+                if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
+                    return Ok(got.as_ref() == expected.as_ref());
                 }
+                return Ok(self.is_taskprov_collector_bearer_token(got.as_ref()));
             }
         }
 
         // Deny request with unhandled or unknown media type.
+        warn!(
+            "request denied because of unhandled media type {:?}",
+            req.media_type
+        );
         Ok(false)
     }
 }

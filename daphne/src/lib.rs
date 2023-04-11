@@ -48,6 +48,7 @@ use crate::{
         VdafAggregateShare, VdafError, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
+use constants::DapMediaType;
 use prio::{
     codec::{CodecError, Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
@@ -244,6 +245,21 @@ impl DapAbort {
             taskid: None,   // TODO interop: Implement as specified.
             instance: None, // TODO interop: Implement as specified.
             detail,
+        }
+    }
+
+    /// Abort due to unexpected value for HTTP content-type header.
+    pub fn content_type<S>(req: &DapRequest<S>, expected: DapMediaType) -> Self {
+        let want_str = expected
+            .as_str_for_version(req.version)
+            .expect("could not resolve content-type for expected media type");
+
+        if let Some(got_str) = req.media_type.as_str_for_version(req.version) {
+            Self::BadRequest(format!(
+                "unexpected content-type: got {got_str}; want {want_str}"
+            ))
+        } else {
+            Self::BadRequest(format!("missing content-type: expected {want_str}"))
         }
     }
 }
@@ -881,6 +897,7 @@ pub enum Prio3Config {
 pub enum DapSender {
     Client,
     Collector,
+    Helper,
     Leader,
 }
 
@@ -916,7 +933,7 @@ pub struct DapRequest<S> {
     pub version: DapVersion,
 
     /// Request media type, sent in the "content-type" header of the HTTP request.
-    pub media_type: Option<&'static str>,
+    pub media_type: DapMediaType,
 
     /// ID of the task with which the request is associated. This field is optional, since some
     /// requests may apply to all tasks, e.g., the request for the HPKE configuration.
@@ -972,7 +989,8 @@ impl<S> DapRequest<S> {
 /// DAP response.
 #[derive(Debug)]
 pub struct DapResponse {
-    pub media_type: Option<&'static str>,
+    pub version: DapVersion,
+    pub media_type: DapMediaType,
     pub payload: Vec<u8>,
 }
 
@@ -1060,6 +1078,8 @@ impl MetaAggregationJobId<'_> {
 
 pub mod auth;
 pub mod constants;
+#[cfg(test)]
+pub mod constants_test;
 pub mod hpke;
 #[cfg(test)]
 mod hpke_test;
