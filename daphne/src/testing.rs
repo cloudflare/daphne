@@ -5,7 +5,7 @@
 
 use crate::{
     auth::{BearerToken, BearerTokenProvider},
-    constants,
+    constants::DapMediaType,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
@@ -313,7 +313,7 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
         task_id: &TaskId,
-        media_type: &'static str,
+        media_type: &DapMediaType,
         _payload: &[u8],
     ) -> Result<BearerToken, DapError> {
         Ok(self
@@ -857,36 +857,8 @@ where
     }
 
     async fn send_http_post(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
-        match req
-            .media_type
-            .expect("tried to send request without media type")
-        {
-            constants::MEDIA_TYPE_AGG_INIT_REQ
-            | constants::DRAFT02_MEDIA_TYPE_AGG_INIT_REQ
-            | constants::MEDIA_TYPE_AGG_CONT_REQ => Ok(self
-                .peer
-                .as_ref()
-                .expect("peer not configured")
-                .http_post_aggregate(&req)
-                .await
-                .expect("peer aborted unexpectedly")),
-            constants::MEDIA_TYPE_AGG_SHARE_REQ => Ok(self
-                .peer
-                .as_ref()
-                .expect("peer not configured")
-                .http_post_aggregate_share(&req)
-                .await
-                .expect("peer aborted unexpectedly")),
-            s => unreachable!("unhandled media type: {}", s),
-        }
-    }
-
-    async fn send_http_put(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
-        match req
-            .media_type
-            .expect("tried to send request without media type")
-        {
-            constants::MEDIA_TYPE_AGG_INIT_REQ | constants::DRAFT02_MEDIA_TYPE_AGG_INIT_REQ => {
+        match req.media_type {
+            DapMediaType::AggregationJobInitReq | DapMediaType::AggregationJobContinueReq => {
                 Ok(self
                     .peer
                     .as_ref()
@@ -895,7 +867,28 @@ where
                     .await
                     .expect("peer aborted unexpectedly"))
             }
-            s => unreachable!("unhandled media type: {}", s),
+            DapMediaType::AggregateShareReq => Ok(self
+                .peer
+                .as_ref()
+                .expect("peer not configured")
+                .http_post_aggregate_share(&req)
+                .await
+                .expect("peer aborted unexpectedly")),
+            _ => unreachable!("unhandled media type: {:?}", req.media_type),
+        }
+    }
+
+    async fn send_http_put(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
+        if req.media_type == DapMediaType::AggregationJobInitReq {
+            Ok(self
+                .peer
+                .as_ref()
+                .expect("peer not configured")
+                .http_post_aggregate(&req)
+                .await
+                .expect("peer aborted unexpectedly"))
+        } else {
+            unreachable!("unhandled media type: {:?}", req.media_type)
         }
     }
 }

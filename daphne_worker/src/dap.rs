@@ -46,7 +46,7 @@ use crate::{
 use async_trait::async_trait;
 use daphne::{
     auth::{BearerToken, BearerTokenProvider},
-    constants::sender_for_media_type,
+    constants::DapMediaType,
     hpke::HpkeDecrypter,
     messages::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
@@ -70,9 +70,17 @@ use worker::*;
 
 pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
     let mut headers = Headers::new();
-    if let Some(media_type) = resp.media_type {
-        headers.set("Content-Type", media_type)?;
-    }
+    headers.set(
+        "Content-Type",
+        resp.media_type
+            .as_str_for_version(resp.version)
+            .ok_or_else(|| {
+                Error::RustError(format!(
+                    "failed to construct content-type for media type {:?} and version {:?}",
+                    resp.media_type, resp.version
+                ))
+            })?,
+    )?;
     let worker_resp = Response::from_bytes(resp.payload)?.with_headers(headers);
     Ok(worker_resp)
 }
@@ -246,7 +254,7 @@ impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
     async fn authorize(
         &self,
         task_id: &TaskId,
-        media_type: &'static str,
+        media_type: &DapMediaType,
         _payload: &[u8],
     ) -> std::result::Result<DaphneWorkerAuth, DapError> {
         // TODO Add support for authorizing the request with TLS client certificates:
@@ -278,14 +286,7 @@ where
                 ref cert_subject,
             }) => {
                 if let Some(ref taskprov_config) = self.config().taskprov {
-                    let sender = if let Some(media_type) = req.media_type {
-                        sender_for_media_type(media_type)
-                    } else {
-                        warn!("request denied due to unknown media type");
-                        return Ok(false);
-                    };
-
-                    let (valid_cert_issuer, valid_cert_subjects) = match sender {
+                    let (valid_cert_issuer, valid_cert_subjects) = match req.media_type.sender() {
                         Some(DapSender::Leader) => match taskprov_config.leader_auth {
                             DaphneWorkerAuthMethod::CfTlsClientAuth {
                                 ref valid_cert_issuer,
@@ -312,12 +313,16 @@ where
                                 return Ok(false);
                             }
                         },
-                        Some(DapSender::Client) | None => {
+                        Some(sender) => {
                             // DapAggregator::authorized() is only called on requests from senders
                             // that require authoriztion. These include the Collector and the
                             // Leader; currently the Client does not require authorization. If at
                             // some point we need this, we would check it here.
                             warn!("request denied from unexpected sender ({sender:?})");
+                            return Ok(false);
+                        }
+                        None => {
+                            warn!("request denied becuase the sender could not be determined");
                             return Ok(false);
                         }
                     };

@@ -5,7 +5,7 @@
 
 use assert_matches::assert_matches;
 use daphne::{
-    constants::MEDIA_TYPE_COLLECT_REQ,
+    constants::DapMediaType,
     hpke::HpkeReceiverConfig,
     messages::{
         encode_base64url, BatchId, CollectionJobId, Duration, HpkeAeadId, HpkeConfig,
@@ -306,15 +306,23 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         path: &str,
-        media_type: &str,
+        media_type: DapMediaType,
         data: Vec<u8>,
     ) {
         let url = self.leader_url.join(path).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            media_type
+                .as_str_for_version(self.version)
+                .unwrap()
+                .parse()
+                .unwrap(),
+        );
         let resp = client
             .post(url.as_str())
             .body(data)
+            .headers(headers)
             .send()
             .await
             .expect("request failed");
@@ -333,7 +341,7 @@ impl TestRunner {
         client: &reqwest::Client,
         dap_auth_token: Option<&str>,
         path: &str,
-        media_type: &str,
+        media_type: DapMediaType,
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
@@ -341,7 +349,14 @@ impl TestRunner {
         let url = self.leader_url.join(path).unwrap();
 
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            media_type
+                .as_str_for_version(self.version)
+                .unwrap()
+                .parse()
+                .unwrap(),
+        );
         if let Some(token) = dap_auth_token {
             headers.insert(
                 reqwest::header::HeaderName::from_static("dap-auth-token"),
@@ -382,7 +397,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         path: &str,
-        media_type: &str,
+        media_type: DapMediaType,
         data: Vec<u8>,
     ) {
         // draft02 always POSTs
@@ -393,10 +408,19 @@ impl TestRunner {
         }
         let url = self.leader_url.join(path).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            media_type
+                .as_str_for_version(self.version)
+                .unwrap()
+                .parse()
+                .unwrap(),
+        );
+
         let resp = client
             .put(url.as_str())
             .body(data)
+            .headers(headers)
             .send()
             .await
             .expect("request failed");
@@ -416,7 +440,7 @@ impl TestRunner {
         client: &reqwest::Client,
         dap_auth_token: Option<&str>,
         path: &str,
-        media_type: &str,
+        media_type: DapMediaType,
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
@@ -439,7 +463,14 @@ impl TestRunner {
         let url = self.leader_url.join(path).unwrap();
 
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CONTENT_TYPE, media_type.parse().unwrap());
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            media_type
+                .as_str_for_version(self.version)
+                .unwrap()
+                .parse()
+                .unwrap(),
+        );
         if let Some(token) = dap_auth_token {
             headers.insert(
                 reqwest::header::HeaderName::from_static("dap-auth-token"),
@@ -486,7 +517,12 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_static(MEDIA_TYPE_COLLECT_REQ),
+            reqwest::header::HeaderValue::from_str(
+                DapMediaType::CollectReq
+                    .as_str_for_version(self.version)
+                    .unwrap(),
+            )
+            .unwrap(),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static("dap-auth-token"),
@@ -665,7 +701,12 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_static(MEDIA_TYPE_COLLECT_REQ),
+            reqwest::header::HeaderValue::from_str(
+                DapMediaType::CollectReq
+                    .as_str_for_version(self.version)
+                    .unwrap(),
+            )
+            .unwrap(),
         );
         builder.headers(headers).send().await.unwrap()
     }

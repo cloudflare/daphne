@@ -158,10 +158,10 @@ use crate::{
 };
 use daphne::{
     auth::BearerToken,
-    constants::{self, versioned_media_type_for},
+    constants::DapMediaType,
     messages::{CollectionJobId, Duration, TaskId, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
-    DapAbort, DapCollectJob, DapError, DapResponse,
+    DapAbort, DapCollectJob, DapError, DapResponse, DapVersion,
 };
 use once_cell::sync::OnceCell;
 use prio::codec::ParameterizedEncode;
@@ -324,10 +324,8 @@ impl DaphneWorkerRouter {
                             {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
                                     dap_response_to_worker(DapResponse {
-                                        media_type: versioned_media_type_for(
-                                            &version,
-                                            constants::MEDIA_TYPE_COLLECT_RESP,
-                                        ),
+                                        version: DapVersion::Draft02,
+                                        media_type: DapMediaType::Collection,
                                         payload: collect_resp.get_encoded_with_param(&version),
                                     })
                                 }
@@ -362,7 +360,6 @@ impl DaphneWorkerRouter {
                         "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
                         |req, ctx| async move {
                             let daph = ctx.data.handler(&ctx.env);
-                            let version = daph.extract_version_parameter(&req)?;
                             let req = daph.worker_request_to_dap(req, &ctx).await?;
                             let task_id = match req.task_id() {
                                 Ok(id) => id,
@@ -380,11 +377,9 @@ impl DaphneWorkerRouter {
                             {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
                                     dap_response_to_worker(DapResponse {
-                                        media_type: versioned_media_type_for(
-                                            &version,
-                                            constants::MEDIA_TYPE_COLLECT_RESP,
-                                        ),
-                                        payload: collect_resp.get_encoded_with_param(&version),
+                                        version: req.version,
+                                        media_type: DapMediaType::Collection,
+                                        payload: collect_resp.get_encoded_with_param(&req.version),
                                     })
                                 }
                                 Ok(DapCollectJob::Pending) => {

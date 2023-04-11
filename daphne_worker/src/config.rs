@@ -20,7 +20,7 @@ use crate::{
 };
 use daphne::{
     auth::BearerToken,
-    constants,
+    constants::DapMediaType,
     hpke::HpkeReceiverConfig,
     messages::{
         decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, HpkeConfig,
@@ -917,7 +917,7 @@ impl<'srv> DaphneWorker<'srv> {
         };
 
         let content_type = req.headers().get("Content-Type")?;
-        let media_type = content_type.and_then(|s| constants::media_type_for(&s));
+        let media_type = DapMediaType::from_str_for_version(version, content_type.as_deref());
 
         let payload = req.bytes().await?;
 
@@ -937,8 +937,8 @@ impl<'srv> DaphneWorker<'srv> {
             DapVersion::Draft04 => {
                 let task_id = ctx.param("task_id").and_then(TaskId::try_from_base64url);
                 let resource = match media_type {
-                    Some(constants::MEDIA_TYPE_AGG_CONT_REQ)
-                    | Some(constants::MEDIA_TYPE_AGG_INIT_REQ) => {
+                    DapMediaType::AggregationJobInitReq
+                    | DapMediaType::AggregationJobContinueReq => {
                         if let Some(agg_job_id) = ctx
                             .param("agg_job_id")
                             .and_then(AggregationJobId::try_from_base64url)
@@ -950,7 +950,7 @@ impl<'srv> DaphneWorker<'srv> {
                             DapResource::Undefined
                         }
                     }
-                    Some(constants::MEDIA_TYPE_COLLECT_REQ) => {
+                    DapMediaType::CollectReq => {
                         if let Some(collect_job_id) = ctx
                             .param("collect_job_id")
                             .and_then(CollectionJobId::try_from_base64url)
@@ -998,19 +998,30 @@ impl<'srv> DaphneWorker<'srv> {
         let (payload, url) = (req.payload, req.url);
 
         let mut headers = reqwest_wasm::header::HeaderMap::new();
-        if let Some(content_type) = req.media_type {
-            headers.insert(
-                reqwest_wasm::header::CONTENT_TYPE,
-                reqwest_wasm::header::HeaderValue::from_str(content_type)
-                    .map_err(|e| DapError::Fatal(e.to_string()))?,
-            );
-        }
+
+        let content_type = req
+            .media_type
+            .as_str_for_version(req.version)
+            .ok_or_else(|| {
+                DapError::Fatal(format!(
+                    "failed to construct content-type from media type {:?} and version {:?}",
+                    req.media_type, req.version
+                ))
+            })?;
+
+        headers.insert(
+            reqwest_wasm::header::CONTENT_TYPE,
+            reqwest_wasm::header::HeaderValue::from_str(content_type).map_err(|e| {
+                DapError::Fatal(format!("failed to construct content-type header: {e}"))
+            })?,
+        );
 
         if let Some(DaphneWorkerAuth::BearerToken(bearer_token)) = req.sender_auth {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
-                reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref())
-                    .map_err(|e| DapError::Fatal(e.to_string()))?,
+                reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref()).map_err(
+                    |e| DapError::Fatal(format!("failed to construct dap-auth-token header: {e}")),
+                )?,
             );
         }
 
@@ -1039,7 +1050,7 @@ impl<'srv> DaphneWorker<'srv> {
                 .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
                 .map_err(|e| DapError::Fatal(e.to_string()))?;
-            let media_type = constants::media_type_for(content_type);
+            let media_type = DapMediaType::from_str_for_version(req.version, Some(content_type));
 
             let payload = reqwest_resp
                 .bytes()
@@ -1048,11 +1059,28 @@ impl<'srv> DaphneWorker<'srv> {
                 .to_vec();
 
             Ok(DapResponse {
+                version: req.version,
                 payload,
                 media_type,
             })
         } else {
             error!("{}: request failed: {:?}", url, reqwest_resp);
+            if status == 400 {
+                if let Some(content_type) = reqwest_resp
+                    .headers()
+                    .get(reqwest_wasm::header::CONTENT_TYPE)
+                {
+                    if content_type == "application/problem+json" {
+                        error!(
+                            "Problem details: {}",
+                            reqwest_resp
+                                .text()
+                                .await
+                                .map_err(|e| DapError::Fatal(e.to_string()))?
+                        );
+                    }
+                }
+            }
             Err(DapError::fatal(INT_ERR_PEER_ABORT))
         }
     }
