@@ -134,7 +134,7 @@ pub enum DapAbort {
 
     /// Batch mismatch. Sent in response to an AggregateShareReq.
     #[error("batchMismatch")]
-    BatchMismatch,
+    BatchMismatch { detail: String, task_id: TaskId },
 
     /// Batch overlap. Sent in response to an CollectReq for which the Leader detects the same
     /// Collector requesting an aggregate share which it has collected in the past.
@@ -216,11 +216,10 @@ impl DapAbort {
         let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
         let title = self.title().map(ToString::to_string);
         let (task_id, detail) = match self {
-            Self::BatchInvalid { detail, task_id } | Self::InvalidTask { detail, task_id } => {
-                (Some(task_id), Some(detail))
-            }
-            Self::BatchMismatch
-            | Self::BatchOverlap
+            Self::BatchInvalid { detail, task_id }
+            | Self::InvalidTask { detail, task_id }
+            | Self::BatchMismatch { detail, task_id } => (Some(task_id), Some(detail)),
+            Self::BatchOverlap
             | Self::InvalidBatchSize
             | Self::QueryMismatch
             | Self::RoundMismatch
@@ -276,7 +275,9 @@ impl DapAbort {
     fn title(&self) -> Option<&'static str> {
         match self {
             Self::BatchInvalid { .. } => Some("Batch boundary check failed"),
-            Self::BatchMismatch => None,
+            Self::BatchMismatch { .. } => {
+                Some("Aggregators disagree on the set of reports in the batch")
+            }
             Self::BatchOverlap => None,
             Self::InvalidBatchSize => None,
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
