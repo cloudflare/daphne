@@ -907,7 +907,7 @@ impl<'srv> DaphneWorker<'srv> {
             (Some(bearer_token), None) => Some(DaphneWorkerAuth::BearerToken(bearer_token)),
             (None, Some(tls_client_auth)) => Some(DaphneWorkerAuth::CfTlsClientAuth {
                 cert_issuer: tls_client_auth.cert_issuer_dn_rfc2253(),
-                cert_subject: tls_client_auth.cert_subject_dn_rfc225(),
+                cert_subject: tls_client_auth.cert_subject_dn_rfc2253(),
             }),
             (None, None) => None, // No authorization method provided
             (Some(..), Some(..)) => {
