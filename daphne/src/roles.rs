@@ -1151,7 +1151,10 @@ where
                 || batch_interval.duration % task_config.time_precision != 0
                 || batch_interval.duration < task_config.time_precision
             {
-                return Err(DapAbort::BatchInvalid);
+                return Err(DapAbort::BatchInvalid {
+                    detail: format!("The queried batch interval ({batch_interval:?}) is too small or its boundaries are misaligned. The time precision for this task is {}s.", task_config.time_precision),
+                    task_id: task_id.clone(),
+                });
             }
 
             if batch_interval.duration > global_config.max_batch_duration {
@@ -1178,7 +1181,13 @@ where
             //
             // Consider removing this callback once we resolve DAP issue #342.
             if !agg.batch_exists(task_id, batch_id).await? {
-                return Err(DapAbort::BatchInvalid);
+                return Err(DapAbort::BatchInvalid {
+                    detail: format!(
+                        "The queried batch ({}) does not exist.",
+                        batch_id.to_base64url()
+                    ),
+                    task_id: task_id.clone(),
+                });
             }
         }
         _ => return Err(DapAbort::QueryMismatch),

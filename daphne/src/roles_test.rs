@@ -809,7 +809,7 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
         .await;
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
-        DapAbort::BatchInvalid
+        DapAbort::BatchInvalid { .. }
     );
 }
 
@@ -1501,7 +1501,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
         .await;
     assert_matches!(
         t.leader.http_post_collect(&req).await.unwrap_err(),
-        DapAbort::BatchInvalid
+        DapAbort::BatchInvalid { .. }
     );
 }
 
