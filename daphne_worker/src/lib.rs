@@ -365,13 +365,24 @@ impl DaphneWorkerRouter {
                                 Ok(id) => id,
                                 Err(e) => return abort(e),
                             };
-                            let collect_job_id = match req.collection_job_id() {
-                                Ok(id) => id,
-                                Err(e) => return abort(e),
-                            };
+                            // We cannot check a resource here as the resource is set via
+                            // media type, and there is no media type when polling.
+                            //
+                            // We can unwrap() here as the parameter really must exist.
+                            let collect_job_id_base64url = ctx.param("collect_job_id").unwrap();
+                            let collect_job_id =
+                                match CollectionJobId::try_from_base64url(collect_job_id_base64url)
+                                {
+                                    Some(id) => id,
+                                    None => {
+                                        return abort(DapAbort::BadRequest(
+                                            "malformed collect id".into(),
+                                        ))
+                                    }
+                                };
 
                             match daph
-                                .poll_collect_job(task_id, collect_job_id)
+                                .poll_collect_job(task_id, &collect_job_id)
                                 .instrument(info_span!("poll_collect_job"))
                                 .await
                             {
