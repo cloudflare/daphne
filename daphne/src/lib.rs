@@ -150,9 +150,10 @@ pub enum DapAbort {
     #[error("invalidBatchSize")]
     InvalidBatchSize,
 
-    /// Invalid DAP task.  Sent when a server opts out of a taskprov task configuration.
+    /// draft-wang-ppm-dap-taskprov-02: Invalid DAP task. Sent when a server opts out of a
+    /// taskprov task configuration.
     #[error("invalidTask")]
-    InvalidTask,
+    InvalidTask { detail: String, task_id: TaskId },
 
     /// Request with missing task ID.
     #[error("missingTaskID")]
@@ -215,11 +216,12 @@ impl DapAbort {
         let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
         let title = self.title().map(ToString::to_string);
         let (task_id, detail) = match self {
-            Self::BatchInvalid { detail, task_id } => (Some(task_id), Some(detail)),
+            Self::BatchInvalid { detail, task_id } | Self::InvalidTask { detail, task_id } => {
+                (Some(task_id), Some(detail))
+            }
             Self::BatchMismatch
             | Self::BatchOverlap
             | Self::InvalidBatchSize
-            | Self::InvalidTask
             | Self::QueryMismatch
             | Self::RoundMismatch
             | Self::MissingTaskId
@@ -277,7 +279,7 @@ impl DapAbort {
             Self::BatchMismatch => None,
             Self::BatchOverlap => None,
             Self::InvalidBatchSize => None,
-            Self::InvalidTask => None,
+            Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
             Self::QueryMismatch => None,
             Self::RoundMismatch => None,
             Self::MissingTaskId => None,

@@ -357,12 +357,12 @@ where
         &self.config().global
     }
 
-    fn taskprov_opt_in_decision(
+    fn taskprov_opt_out_reason(
         &self,
         _task_config: &DapTaskConfig,
-    ) -> std::result::Result<bool, DapError> {
+    ) -> std::result::Result<Option<String>, DapError> {
         // For now we always opt-in.
-        Ok(true)
+        Ok(None)
     }
 
     /// Get an existing task (whether an ordinary task or a previously created
@@ -415,8 +415,11 @@ where
             )?;
 
             // This is the opt-in / opt-out decision point.
-            if !self.taskprov_opt_in_decision(&task_config)? {
-                return Err(DapError::Abort(daphne::DapAbort::InvalidTask));
+            if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
+                return Err(DapError::Abort(daphne::DapAbort::InvalidTask {
+                    detail: reason,
+                    task_id: task_id.into_owned(),
+                }));
             }
 
             // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
