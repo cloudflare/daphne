@@ -1508,7 +1508,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
 async_test_versions! { http_post_collect_invalid_query }
 
 // Test HTTP POST requests with a wrong DAP version.
-async fn http_post_fail_wrong_dap_version(version: DapVersion) {
+async fn http_post_fail_unknown_version(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1520,10 +1520,10 @@ async fn http_post_fail_wrong_dap_version(version: DapVersion) {
     req.url = task_config.leader_url.join("upload").unwrap();
 
     let err = t.leader.http_post_upload(&req).await.unwrap_err();
-    assert_matches!(err, DapAbort::InvalidProtocolVersion);
+    assert_matches!(err, DapAbort::BadRequest(details) => assert_eq!(details, "DAP version of request is not recognized"));
 }
 
-async_test_versions! { http_post_fail_wrong_dap_version }
+async_test_versions! { http_post_fail_unknown_version }
 
 async fn http_post_upload(version: DapVersion) {
     let t = Test::new(version);

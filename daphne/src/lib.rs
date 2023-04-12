@@ -147,10 +147,6 @@ pub enum DapAbort {
     #[error("{0}")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
-    /// Invalid DAP version. Sent in response to requests for an unsupported (or unknown) DAP version.
-    #[error("invalidProtocolVersion")]
-    InvalidProtocolVersion,
-
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
     /// AggregateShareReq.
     #[error("invalidBatchSize")]
@@ -223,7 +219,6 @@ impl DapAbort {
             | Self::BatchMismatch
             | Self::BatchOverlap
             | Self::InvalidBatchSize
-            | Self::InvalidProtocolVersion
             | Self::InvalidTask
             | Self::QueryMismatch
             | Self::RoundMismatch
@@ -261,6 +256,18 @@ impl DapAbort {
         } else {
             Self::BadRequest(format!("missing content-type: expected {want_str}"))
         }
+    }
+
+    #[inline]
+    pub(crate) fn version_mismatch(indicated: DapVersion, expected: DapVersion) -> Self {
+        DapAbort::BadRequest(format!(
+            "DAP version of request does not match task: got {indicated:?}; want {expected:?}"
+        ))
+    }
+
+    #[inline]
+    pub(crate) fn version_unknown() -> Self {
+        DapAbort::BadRequest("DAP version of request is not recognized".into())
     }
 }
 
