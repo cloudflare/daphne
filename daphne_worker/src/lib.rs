@@ -645,20 +645,21 @@ pub(crate) fn dap_err(e: Error) -> DapError {
 }
 
 fn abort(e: DapAbort) -> Result<Response> {
-    match &e {
-        DapAbort::Internal(..) => {
-            error!("internal error: {}", e.to_string());
-            Err(Error::RustError("internalError".to_string()))
-        }
-        _ => {
-            debug!("abort: {}", e.to_string());
-            let mut headers = Headers::new();
-            headers.set("Content-Type", "application/problem+json")?;
-            Ok(Response::from_json(&e.to_problem_details())?
-                .with_status(400)
-                .with_headers(headers))
-        }
-    }
+    let status = if matches!(e, DapAbort::Internal(..)) {
+        500
+    } else {
+        400
+    };
+    let problem_details = e.to_problem_details();
+    error!(
+        "request aborted: {}",
+        serde_json::to_string(&problem_details)?
+    );
+    let mut headers = Headers::new();
+    headers.set("Content-Type", "application/problem+json")?;
+    Ok(Response::from_json(&problem_details)?
+        .with_status(status)
+        .with_headers(headers))
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
