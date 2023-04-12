@@ -769,8 +769,8 @@ impl<'srv> DaphneWorker<'srv> {
 
         // VDAF config.
         let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits) {
-            ("Prio3Aes128Count", None) => VdafConfig::Prio3(Prio3Config::Count),
-            ("Prio3Aes128Sum", Some(bits)) => {
+            ("Prio3Count", None) => VdafConfig::Prio3(Prio3Config::Count),
+            ("Prio3Sum", Some(bits)) => {
                 let bits = bits.parse().map_err(int_err)?;
                 VdafConfig::Prio3(Prio3Config::Sum { bits })
             }
@@ -778,7 +778,7 @@ impl<'srv> DaphneWorker<'srv> {
         };
 
         // VDAF verificaiton key.
-        let vdaf_verify_key_data = decode_base64url_vec(cmd.verify_key.as_bytes())
+        let vdaf_verify_key_data = decode_base64url_vec(cmd.vdaf_verify_key.as_bytes())
             .ok_or_else(|| int_err("VDAF verify key is not valid URL-safe base64"))?;
         let vdaf_verify_key = vdaf
             .get_decoded_verify_key(&vdaf_verify_key_data)
