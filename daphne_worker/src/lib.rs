@@ -650,7 +650,7 @@ fn abort(e: DapAbort) -> Result<Response> {
     } else {
         400
     };
-    let problem_details = e.to_problem_details();
+    let problem_details = e.into_problem_details();
     error!(
         "request aborted: {}",
         serde_json::to_string(&problem_details)?

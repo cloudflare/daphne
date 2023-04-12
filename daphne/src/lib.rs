@@ -125,14 +125,12 @@ impl From<VdafError> for DapError {
 #[derive(Debug, thiserror::Error)]
 pub enum DapAbort {
     /// Bad request. Sent in response to an HTTP request that couldn't be handled preoprly.
-    //
-    // TODO spec: Decide whether to specify this.
     #[error("badRequest")]
     BadRequest(String),
 
     /// Invalid batch. Sent in response to a CollectReq or AggregateShareReq.
     #[error("batchInvalid")]
-    BatchInvalid,
+    BatchInvalid { detail: String, task_id: TaskId },
 
     /// Batch mismatch. Sent in response to an AggregateShareReq.
     #[error("batchMismatch")]
@@ -144,7 +142,7 @@ pub enum DapAbort {
     BatchOverlap,
 
     /// Internal error.
-    #[error("{0}")]
+    #[error("internalError")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
@@ -213,10 +211,12 @@ pub enum DapAbort {
 impl DapAbort {
     /// Construct a problem details JSON object for this abort. `url` is the URL to which the
     /// request was targeted and `task_id` is the associated TaskID.
-    pub fn to_problem_details(&self) -> ProblemDetails {
-        let (typ, detail) = match self {
-            Self::BatchInvalid
-            | Self::BatchMismatch
+    pub fn into_problem_details(self) -> ProblemDetails {
+        let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
+        let title = self.title().map(ToString::to_string);
+        let (task_id, detail) = match self {
+            Self::BatchInvalid { detail, task_id } => (Some(task_id), Some(detail)),
+            Self::BatchMismatch
             | Self::BatchOverlap
             | Self::InvalidBatchSize
             | Self::InvalidTask
@@ -230,14 +230,15 @@ impl DapAbort {
             | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
-            | Self::UnrecognizedTask => (self.to_string(), None),
-            Self::BadRequest(s) => ("badRequest".to_string(), Some(s.clone())),
-            Self::Internal(e) => ("internalError".to_string(), Some(e.to_string())),
+            | Self::UnrecognizedTask => (None, None),
+            Self::BadRequest(s) => (None, Some(s)),
+            Self::Internal(e) => (None, Some(e.to_string())),
         };
 
         ProblemDetails {
-            typ: format!("urn:ietf:params:ppm:dap:error:{typ}"),
-            taskid: None,   // TODO interop: Implement as specified.
+            typ,
+            title,
+            task_id: task_id.map(|id| id.to_base64url()),
             instance: None, // TODO interop: Implement as specified.
             detail,
         }
@@ -268,6 +269,29 @@ impl DapAbort {
     #[inline]
     pub(crate) fn version_unknown() -> Self {
         DapAbort::BadRequest("DAP version of request is not recognized".into())
+    }
+
+    fn title(&self) -> Option<&'static str> {
+        match self {
+            Self::BatchInvalid { .. } => Some("Batch boundary check failed"),
+            Self::BatchMismatch => None,
+            Self::BatchOverlap => None,
+            Self::InvalidBatchSize => None,
+            Self::InvalidTask => None,
+            Self::QueryMismatch => None,
+            Self::RoundMismatch => None,
+            Self::MissingTaskId => None,
+            Self::ReplayedReport => None,
+            Self::ReportTooLate => None,
+            Self::StaleReport => None,
+            Self::UnauthorizedRequest => None,
+            Self::UnrecognizedAggregationJob => None,
+            Self::UnrecognizedHpkeConfig => None,
+            Self::UnrecognizedMessage => None,
+            Self::UnrecognizedTask => None,
+            Self::BadRequest(..) => None,
+            Self::Internal(..) => None,
+        }
     }
 }
 
@@ -302,13 +326,13 @@ impl From<TransitionFailure> for DapAbort {
 pub struct ProblemDetails {
     #[serde(rename = "type")]
     pub typ: String,
-
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) taskid: Option<String>,
-
+    pub title: Option<String>,
+    #[serde(rename = "taskid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instance: Option<String>,
-
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
