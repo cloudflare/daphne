@@ -341,8 +341,12 @@ where
         &self.global_config
     }
 
-    fn taskprov_opt_in_decision(&self, _task_config: &DapTaskConfig) -> Result<bool, DapError> {
-        Ok(true)
+    fn taskprov_opt_out_reason(
+        &self,
+        _task_config: &DapTaskConfig,
+    ) -> Result<Option<String>, DapError> {
+        // Always opt-in.
+        Ok(None)
     }
 
     async fn get_task_config_considering_taskprov(
@@ -376,8 +380,11 @@ where
                 let mut tasks = self.tasks.lock().expect("tasks: lock failed");
                 if tasks.get(task_id.as_ref()).is_none() {
                     // Decide whether to opt-in to the task.
-                    if !self.taskprov_opt_in_decision(&task_config)? {
-                        return Err(DapError::Abort(DapAbort::InvalidTask));
+                    if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
+                        return Err(DapError::Abort(DapAbort::InvalidTask {
+                            detail: reason,
+                            task_id: task_id.into_owned(),
+                        }));
                     }
 
                     tasks

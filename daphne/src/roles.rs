@@ -55,9 +55,13 @@ where
 
     /// Decide whether to opt-in or out-out of a task provisioned via taskprov.
     ///
-    /// Returning `Ok(true)` opts in, returning `Ok(false)` opts out, and any error is
-    /// also an opt out, but that error code is used instead of InvalidTask.
-    fn taskprov_opt_in_decision(&self, task_config: &DapTaskConfig) -> Result<bool, DapError>;
+    /// If the return value is `None`, then the decision is to opt-in. If the return value is
+    /// `Some(reason)`, then the decision is to opt-out; `reason` conveys details about how the
+    /// decision was rached (e.g.., the minimum batch size is too smal).
+    fn taskprov_opt_out_reason(
+        &self,
+        task_config: &DapTaskConfig,
+    ) -> Result<Option<String>, DapError>;
 
     /// Look up the DAP task configuration for the given task ID.
     ///
