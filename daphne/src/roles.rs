@@ -140,7 +140,7 @@ where
     ) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_unknown());
         }
 
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
@@ -167,7 +167,10 @@ where
 
             // Check whether the DAP version in the request matches the task config.
             if task_config.as_ref().version != req.version {
-                return Err(DapAbort::InvalidProtocolVersion);
+                return Err(DapAbort::version_mismatch(
+                    req.version,
+                    task_config.as_ref().version,
+                ));
             }
         }
 
@@ -179,8 +182,8 @@ where
                 };
                 hpke_config_list.get_encoded()
             }
-            // This is just to keep the compiler happy as we excluded DapVersion::Unknown with an
-            // InvalidProtocolError at the top of the function.
+            // This is just to keep the compiler happy as we excluded DapVersion::Unknown by
+            // aborting at the top of the function.
             _ => unreachable!("unhandled version {:?}", req.version),
         };
 
@@ -302,7 +305,7 @@ where
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_unknown());
         }
 
         check_request_content_type(req, DapMediaType::Report)?;
@@ -320,7 +323,10 @@ where
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.as_ref().version != req.version {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_mismatch(
+                req.version,
+                task_config.as_ref().version,
+            ));
         }
 
         if report.encrypted_input_shares.len() != 2 {
@@ -359,7 +365,7 @@ where
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_unknown());
         }
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
@@ -379,7 +385,7 @@ where
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_mismatch(req.version, task_config.version));
         }
 
         if collect_req.query == Query::FixedSizeCurrentBatch {
@@ -754,7 +760,7 @@ where
     ) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_unknown());
         }
 
         if !self.authorized(req).await? {
@@ -832,7 +838,7 @@ where
 
                 // Check whether the DAP version in the request matches the task config.
                 if task_config.version != req.version {
-                    return Err(DapAbort::InvalidProtocolVersion);
+                    return Err(DapAbort::version_mismatch(req.version, task_config.version));
                 }
 
                 // Ensure we know which batch the request pertains to.
@@ -941,7 +947,7 @@ where
 
                 // Check whether the DAP version in the request matches the task config.
                 if task_config.version != req.version {
-                    return Err(DapAbort::InvalidProtocolVersion);
+                    return Err(DapAbort::version_mismatch(req.version, task_config.version));
                 }
 
                 // draft02 compatibility: In draft02, the aggregation job ID is parsed from the
@@ -1017,7 +1023,7 @@ where
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_unknown());
         }
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
@@ -1037,7 +1043,7 @@ where
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::InvalidProtocolVersion);
+            return Err(DapAbort::version_mismatch(req.version, task_config.version));
         }
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
