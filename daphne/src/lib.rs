@@ -219,11 +219,14 @@ impl DapAbort {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id } => (Some(task_id), Some(detail)),
+            Self::MissingTaskId => (
+                None,
+                Some("A task ID must be specified in the query parameter of the request.".into()),
+            ),
             Self::BatchOverlap
             | Self::InvalidBatchSize
             | Self::QueryMismatch
             | Self::RoundMismatch
-            | Self::MissingTaskId
             | Self::ReplayedReport
             | Self::ReportTooLate
             | Self::StaleReport
@@ -283,7 +286,7 @@ impl DapAbort {
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
             Self::QueryMismatch => None,
             Self::RoundMismatch => None,
-            Self::MissingTaskId => None,
+            Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
             Self::ReplayedReport => None,
             Self::ReportTooLate => None,
             Self::StaleReport => None,
