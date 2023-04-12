@@ -686,7 +686,7 @@ pub(crate) struct InternalTestAddTask {
     #[serde(skip_serializing_if = "Option::is_none")]
     collector_authentication_token: Option<String>,
     role: InternalTestRole,
-    verify_key: String, // base64url
+    vdaf_verify_key: String, // base64url
     query_type: u8,
     min_batch_size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

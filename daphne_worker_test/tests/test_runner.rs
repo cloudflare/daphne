@@ -171,7 +171,7 @@ impl TestRunner {
             encode_base64url(t.collector_hpke_receiver.config.get_encoded());
 
         let vdaf = json!({
-            "type": "Prio3Aes128Sum",
+            "type": "Prio3Sum",
             "bits": assert_matches!(
                 t.task_config.vdaf,
                 VdafConfig::Prio3(Prio3Config::Sum{ bits }) => format!("{bits}")
@@ -197,7 +197,7 @@ impl TestRunner {
             "leader_authentication_token": t.leader_bearer_token.clone(),
             "collector_authentication_token": t.collector_bearer_token.clone(),
             "role": "leader",
-            "verify_key": vdaf_verify_key_base64url,
+            "vdaf_verify_key": vdaf_verify_key_base64url,
             "query_type": query_type,
             "min_batch_size": t.task_config.min_batch_size,
             "max_batch_size": max_batch_size,
@@ -223,7 +223,7 @@ impl TestRunner {
             "vdaf": vdaf.clone(),
             "leader_authentication_token": t.leader_bearer_token.clone(),
             "role": "helper",
-            "verify_key": vdaf_verify_key_base64url,
+            "vdaf_verify_key": vdaf_verify_key_base64url,
             "query_type": query_type,
             "min_batch_size": t.task_config.min_batch_size,
             "max_batch_size": max_batch_size,

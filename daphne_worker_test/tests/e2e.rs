@@ -1513,9 +1513,9 @@ async fn e2e_helper_admin_add_task(version: DapVersion) {
         "time_precision": 3600,
         "vdaf": {
             "bits":"10",
-            "type":"Prio3Aes128Sum"
+            "type":"Prio3Sum"
         },
-        "verify_key": "y4e6alnJMQ0MZTvdJRJx5Q"
+        "vdaf_verify_key": "y4e6alnJMQ0MZTvdJRJx5Q"
     });
 
     let url = Url::parse("http://127.0.0.1:8788/task").unwrap();
