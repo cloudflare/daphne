@@ -1066,11 +1066,18 @@ where
             .get_agg_share(task_id, &agg_share_req.batch_sel)
             .await?;
 
-        // Check that we have aggreagted the same set of reports as the leader.
+        // Check that we have aggreagted the same set of reports as the Leader.
         if agg_share_req.report_count != agg_share.report_count
             || !constant_time_eq(&agg_share_req.checksum, &agg_share.checksum)
         {
-            return Err(DapAbort::BatchMismatch);
+            return Err(DapAbort::BatchMismatch{
+                detail: format!("Either the report count or checksum does not match: the Leader computed {} and {}; the Helper computed {} and {}.",
+                    agg_share_req.report_count,
+                    hex::encode(agg_share_req.checksum),
+                    agg_share.report_count,
+                    hex::encode(agg_share.checksum)),
+                task_id: task_id.clone(),
+            });
         }
 
         // Check the batch size.
