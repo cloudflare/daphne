@@ -1218,7 +1218,7 @@ where
 
     // Check that the batch does not overlap with any previously collected batch.
     if batch_overlapping.await? {
-        return Err(DapAbort::BatchOverlap);
+        return Err(DapAbort::batch_overlap(task_id, batch_sel));
     }
 
     Ok(())

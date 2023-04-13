@@ -490,7 +490,7 @@ where
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             if let Some(inner_agg_store) = agg_store.get(&bucket.to_owned_bucket()) {
                 if inner_agg_store.collected {
-                    return Err(DapError::Abort(DapAbort::BatchOverlap));
+                    return Err(DapError::Abort(DapAbort::batch_overlap(task_id, batch_sel)));
                 } else {
                     agg_share.merge(inner_agg_store.agg_share.clone())?;
                 }
