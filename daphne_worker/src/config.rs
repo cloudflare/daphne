@@ -19,6 +19,7 @@ use crate::{
     InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
 };
 use daphne::{
+    aborts::DapAbort,
     auth::BearerToken,
     constants::DapMediaType,
     hpke::HpkeReceiverConfig,
@@ -26,8 +27,8 @@ use daphne::{
         decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, HpkeConfig,
         ReportMetadata, TaskId,
     },
-    DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse,
-    DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
+    DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapVersion, Prio3Config, VdafConfig,
 };
 use matchit::Router;
 use prio::{

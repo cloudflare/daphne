@@ -4,10 +4,11 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use daphne::{
+    aborts::ProblemDetails,
     constants::DapMediaType,
     hpke::HpkeReceiverConfig,
     messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, Query, TaskId},
-    DapMeasurement, DapVersion, ProblemDetails, VdafConfig,
+    DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use reqwest::blocking::{Client, ClientBuilder};
