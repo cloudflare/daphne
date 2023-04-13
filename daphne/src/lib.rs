@@ -216,7 +216,7 @@ impl DapAbort {
     /// request was targeted and `task_id` is the associated TaskID.
     pub fn into_problem_details(self) -> ProblemDetails {
         let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
-        let title = self.title().map(ToString::to_string);
+        let title = self.title().to_string();
         let (task_id, detail, agg_job_id_base64url) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
@@ -329,28 +329,24 @@ impl DapAbort {
         }
     }
 
-    fn title(&self) -> Option<&'static str> {
+    fn title(&self) -> &'static str {
         match self {
-            Self::BatchInvalid { .. } => Some("Batch boundary check failed"),
-            Self::BatchMismatch { .. } => {
-                Some("Aggregators disagree on the set of reports in the batch")
-            }
-            Self::BatchOverlap { .. } => Some("The selected batch overlaps with a previous batch"),
-            Self::InvalidBatchSize { .. } => Some("Batch size is invalid"),
-            Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
-            Self::QueryMismatch { .. } => Some("Query type does not match the task"),
-            Self::RoundMismatch { .. } => {
-                Some("Aggregation round indicated by peer does not match host")
-            }
-            Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
-            Self::ReportRejected { .. } => Some("Report rejected"),
-            Self::ReportTooLate => Some("The requested task expires after report timestamp"),
-            Self::UnauthorizedRequest { .. } => Some("Request authorization failed"),
-            Self::UnrecognizedAggregationJob { .. } => Some("Unrecognized aggregation job"),
-            Self::UnrecognizedMessage => None,
-            Self::UnrecognizedTask => None,
-            Self::BadRequest(..) => None,
-            Self::Internal(..) => None,
+            Self::BatchInvalid { .. } => "Batch boundary check failed",
+            Self::BatchMismatch { .. } => "Aggregators disagree on the set of reports in the batch",
+            Self::BatchOverlap { .. } => "The selected batch overlaps with a previous batch",
+            Self::InvalidBatchSize { .. } => "Batch size is invalid",
+            Self::InvalidTask { .. } => "Opted out of Taskprov task",
+            Self::QueryMismatch { .. } => "Query type does not match the task",
+            Self::RoundMismatch { .. } => "Aggregation round indicated by peer does not match host",
+            Self::MissingTaskId => "Request for HPKE configuration with unspecified task",
+            Self::ReportRejected { .. } => "Report rejected",
+            Self::ReportTooLate => "The requested task expires after report timestamp",
+            Self::UnauthorizedRequest { .. } => "Request authorization failed",
+            Self::UnrecognizedAggregationJob { .. } => "Unrecognized aggregation job",
+            Self::UnrecognizedMessage => "Failed to parse the request body",
+            Self::UnrecognizedTask => "Task indicated by request is not recognized",
+            Self::BadRequest(..) => "Invalid request",
+            Self::Internal(..) => "Internal server error",
         }
     }
 }
@@ -376,8 +372,7 @@ impl From<CodecError> for DapAbort {
 pub struct ProblemDetails {
     #[serde(rename = "type")]
     pub typ: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub title: String,
     #[serde(rename = "taskid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) task_id: Option<String>,
