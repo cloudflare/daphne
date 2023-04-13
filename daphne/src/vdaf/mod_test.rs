@@ -964,7 +964,13 @@ impl Test {
     ) -> DapHelperTransition<AggregationJobResp> {
         self.task_config
             .vdaf
-            .handle_agg_job_cont_req(helper_state, agg_job_cont_req, &self.helper_metrics)
+            .handle_agg_job_cont_req(
+                &self.task_id,
+                &self.agg_job_id,
+                helper_state,
+                agg_job_cont_req,
+                &self.helper_metrics,
+            )
             .unwrap()
     }
 
@@ -975,7 +981,13 @@ impl Test {
     ) -> DapAbort {
         self.task_config
             .vdaf
-            .handle_agg_job_cont_req(helper_state, agg_job_cont_req, &self.helper_metrics)
+            .handle_agg_job_cont_req(
+                &self.task_id,
+                &self.agg_job_id,
+                helper_state,
+                agg_job_cont_req,
+                &self.helper_metrics,
+            )
             .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
 

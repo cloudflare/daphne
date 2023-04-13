@@ -981,6 +981,8 @@ where
                     .ok_or(DapAbort::UnrecognizedAggregationJob)?;
                 let part_batch_sel = state.part_batch_sel.clone();
                 let transition = task_config.vdaf.handle_agg_job_cont_req(
+                    task_id,
+                    &agg_job_id,
                     state,
                     &agg_job_cont_req,
                     self.metrics(),
