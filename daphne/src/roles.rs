@@ -592,7 +592,7 @@ where
         // Check the batch size. If not not ready, then return early.
         //
         // TODO Consider logging this error, as it should never happen.
-        if !task_config.is_report_count_compatible(leader_agg_share.report_count)? {
+        if !task_config.is_report_count_compatible(task_id, leader_agg_share.report_count)? {
             return Ok(0);
         }
 
@@ -1083,10 +1083,16 @@ where
 
         // Check the batch size.
         if !task_config
-            .is_report_count_compatible(agg_share.report_count)
+            .is_report_count_compatible(task_id, agg_share.report_count)
             .unwrap_or(false)
         {
-            return Err(DapAbort::InvalidBatchSize);
+            return Err(DapAbort::InvalidBatchSize {
+                detail: format!(
+                    "Report count ({}) is less than minimum ({})",
+                    agg_share.report_count, task_config.min_batch_size
+                ),
+                task_id: task_id.clone(),
+            });
         }
 
         // Mark each aggregated report as collected.
