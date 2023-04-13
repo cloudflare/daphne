@@ -104,8 +104,7 @@ impl DapAbort {
     /// Construct a problem details JSON object for this abort. `url` is the URL to which the
     /// request was targeted and `task_id` is the associated TaskID.
     pub fn into_problem_details(self) -> ProblemDetails {
-        let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
-        let title = self.title().to_string();
+        let (title, typ) = self.title_and_type();
         let (task_id, detail, agg_job_id_base64url) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
@@ -218,25 +217,56 @@ impl DapAbort {
         }
     }
 
-    fn title(&self) -> &'static str {
-        match self {
-            Self::BatchInvalid { .. } => "Batch boundary check failed",
-            Self::BatchMismatch { .. } => "Aggregators disagree on the set of reports in the batch",
-            Self::BatchOverlap { .. } => "The selected batch overlaps with a previous batch",
-            Self::InvalidBatchSize { .. } => "Batch size is invalid",
-            Self::InvalidTask { .. } => "Opted out of Taskprov task",
-            Self::QueryMismatch { .. } => "Query type does not match the task",
-            Self::RoundMismatch { .. } => "Aggregation round indicated by peer does not match host",
-            Self::MissingTaskId => "Request for HPKE configuration with unspecified task",
-            Self::ReportRejected { .. } => "Report rejected",
-            Self::ReportTooLate => "The requested task expires after report timestamp",
-            Self::UnauthorizedRequest { .. } => "Request authorization failed",
-            Self::UnrecognizedAggregationJob { .. } => "Unrecognized aggregation job",
-            Self::UnrecognizedMessage => "Failed to parse the request body",
-            Self::UnrecognizedTask => "Task indicated by request is not recognized",
-            Self::BadRequest(..) => "Invalid request",
-            Self::Internal(..) => "Internal server error",
-        }
+    fn title_and_type(&self) -> (String, Option<String>) {
+        let (title, dap_abort_type) = match self {
+            Self::BatchInvalid { .. } => ("Batch boundary check failed", Some(self.to_string())),
+            Self::BatchMismatch { .. } => (
+                "Aggregators disagree on the set of reports in the batch",
+                Some(self.to_string()),
+            ),
+            Self::BatchOverlap { .. } => (
+                "The selected batch overlaps with a previous batch",
+                Some(self.to_string()),
+            ),
+            Self::InvalidBatchSize { .. } => ("Batch size is invalid", Some(self.to_string())),
+            Self::InvalidTask { .. } => ("Opted out of Taskprov task", Some(self.to_string())),
+            Self::QueryMismatch { .. } => {
+                ("Query type does not match the task", Some(self.to_string()))
+            }
+            Self::RoundMismatch { .. } => (
+                "Aggregation round indicated by peer does not match host",
+                Some(self.to_string()),
+            ),
+            Self::MissingTaskId => (
+                "Request for HPKE configuration with unspecified task",
+                Some(self.to_string()),
+            ),
+            Self::ReportRejected { .. } => ("Report rejected", Some(self.to_string())),
+            Self::ReportTooLate => (
+                "The requested task expires after report timestamp",
+                Some(self.to_string()),
+            ),
+            Self::UnauthorizedRequest { .. } => {
+                ("Request authorization failed", Some(self.to_string()))
+            }
+            Self::UnrecognizedAggregationJob { .. } => {
+                ("Unrecognized aggregation job", Some(self.to_string()))
+            }
+            Self::UnrecognizedMessage => {
+                ("Failed to parse the request body", Some(self.to_string()))
+            }
+            Self::UnrecognizedTask => (
+                "Task indicated by request is not recognized",
+                Some(self.to_string()),
+            ),
+            Self::BadRequest(..) => ("Invalid request", None),
+            Self::Internal(..) => ("Internal server error", None),
+        };
+
+        (
+            title.to_string(),
+            dap_abort_type.map(|t| format!("urn:ietf:params:ppm:dap:error:{t}")),
+        )
     }
 }
 
@@ -259,10 +289,11 @@ impl From<CodecError> for DapAbort {
 /// A problem details document compatible with RFC 7807.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProblemDetails {
-    #[serde(rename = "type")]
-    pub typ: String,
-    pub title: String,
     #[serde(rename = "taskid")]
+    pub title: String,
+    #[serde(rename = "type")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) task_id: Option<String>,
     #[serde(rename = "aggregationjobid")]
