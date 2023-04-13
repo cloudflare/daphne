@@ -985,10 +985,12 @@ where
                     _ => unreachable!("unhandled resource {:?}", req.resource),
                 };
 
-                let state = self
-                    .get_helper_state(task_id, &agg_job_id)
-                    .await?
-                    .ok_or(DapAbort::UnrecognizedAggregationJob)?;
+                let state = self.get_helper_state(task_id, &agg_job_id).await?.ok_or(
+                    DapAbort::UnrecognizedAggregationJob {
+                        task_id: task_id.clone(),
+                        agg_job_id_base64url: agg_job_id.to_base64url(),
+                    },
+                )?;
                 let part_batch_sel = state.part_batch_sel.clone();
                 let transition = task_config.vdaf.handle_agg_job_cont_req(
                     task_id,

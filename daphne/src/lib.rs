@@ -179,7 +179,7 @@ pub enum DapAbort {
     RoundMismatch {
         detail: String,
         task_id: TaskId,
-        // draft02 compatibility: The ID"s definition (i.e., length in bytes) depends on which
+        // draft02 compatibility: The ID's definition (i.e., length in bytes) depends on which
         // protocol is in use, hence the need for the `MetaAggregationJobId` type for representing
         // the union of both To avoid having to propgate the lifetime parameter to `DapAbort`, we
         // encode it right away.
@@ -193,7 +193,14 @@ pub enum DapAbort {
     /// Unrecognized aggregation job. Sent in response to an AggregateContinueReq for which the
     /// Helper does not recognize the indicated aggregation job.
     #[error("unrecognizedAggregationJob")]
-    UnrecognizedAggregationJob,
+    UnrecognizedAggregationJob {
+        task_id: TaskId,
+        // draft02 compatibility: The ID's definition (i.e., length in bytes) depends on which
+        // protocol is in use, hence the need for the `MetaAggregationJobId` type for representing
+        // the union of both To avoid having to propgate the lifetime parameter to `DapAbort`, we
+        // encode it right away.
+        agg_job_id_base64url: String,
+    },
 
     /// Unrecognized HPKE config. Sent in response to an upload request for which the leader share
     /// is encrypted using an unrecognized HPKE configuration.
@@ -238,8 +245,15 @@ impl DapAbort {
                 task_id,
                 agg_job_id_base64url,
             } => (Some(task_id), Some(detail), Some(agg_job_id_base64url)),
+            Self::UnrecognizedAggregationJob {
+                task_id,
+                agg_job_id_base64url,
+            } => (
+                Some(task_id),
+                Some("The request indicates an aggregation job that does not exist.".into()),
+                Some(agg_job_id_base64url),
+            ),
             Self::ReportTooLate
-            | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
             | Self::UnrecognizedTask => (None, None, None),
@@ -340,7 +354,7 @@ impl DapAbort {
             Self::ReportRejected { .. } => Some("Report rejected"),
             Self::ReportTooLate => Some("The requested task expires after report timestamp"),
             Self::UnauthorizedRequest { .. } => Some("Request authorization failed"),
-            Self::UnrecognizedAggregationJob => None,
+            Self::UnrecognizedAggregationJob { .. } => Some("Unrecognized aggregation job"),
             Self::UnrecognizedHpkeConfig => None,
             Self::UnrecognizedMessage => None,
             Self::UnrecognizedTask => None,
