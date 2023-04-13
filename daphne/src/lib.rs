@@ -139,7 +139,7 @@ pub enum DapAbort {
     /// Batch overlap. Sent in response to an CollectReq for which the Leader detects the same
     /// Collector requesting an aggregate share which it has collected in the past.
     #[error("batchOverlap")]
-    BatchOverlap,
+    BatchOverlap { detail: String, task_id: TaskId },
 
     /// Internal error.
     #[error("internalError")]
@@ -213,14 +213,14 @@ impl DapAbort {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id }
+            | Self::BatchOverlap { detail, task_id }
             | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail)),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
             ),
             Self::ReportRejected { detail } => (None, Some(detail)),
-            Self::BatchOverlap
-            | Self::InvalidBatchSize
+            Self::InvalidBatchSize
             | Self::RoundMismatch
             | Self::ReportTooLate
             | Self::UnauthorizedRequest
@@ -269,6 +269,17 @@ impl DapAbort {
     }
 
     #[inline]
+    pub(crate) fn batch_overlap(task_id: &TaskId, batch_sel: &BatchSelector) -> Self {
+        Self::BatchOverlap {
+            detail: format!(
+                "The batch indicated by the request: {}",
+                serde_json::to_string(batch_sel).expect("failed to JSON-encode the batch selector while constructing a \"batchOverlap\" abort"),
+            ),
+            task_id: task_id.clone(),
+        }
+    }
+
+    #[inline]
     pub(crate) fn query_mismatch(
         task_id: &TaskId,
         query_type_for_task: impl std::fmt::Display,
@@ -280,6 +291,7 @@ impl DapAbort {
         }
     }
 
+    #[inline]
     pub fn report_rejected(failure_reason: TransitionFailure) -> Self {
         let detail = match failure_reason {
             TransitionFailure::BatchCollected => {
@@ -302,7 +314,7 @@ impl DapAbort {
             Self::BatchMismatch { .. } => {
                 Some("Aggregators disagree on the set of reports in the batch")
             }
-            Self::BatchOverlap => None,
+            Self::BatchOverlap { .. } => Some("The selected batch overlaps with a previous batch"),
             Self::InvalidBatchSize => None,
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
             Self::QueryMismatch { .. } => Some("Query type does not match the task"),

@@ -1395,7 +1395,7 @@ async fn http_post_collect_fail_overlapping_batch_interval(version: DapVersion) 
     // run a second collect job (expect failure due to overlapping batch).
     assert_matches!(
         t.run_col_job(task_id, &query).await.unwrap_err(),
-        DapAbort::BatchOverlap
+        DapAbort::BatchOverlap { .. }
     );
 }
 
