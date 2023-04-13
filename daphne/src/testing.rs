@@ -333,7 +333,10 @@ where
     // clones the task config as needed.
     type WrappedDapTaskConfig = DapTaskConfig;
 
-    async fn authorized(&self, req: &DapRequest<BearerToken>) -> Result<bool, DapError> {
+    async fn unauthorized_reason(
+        &self,
+        req: &DapRequest<BearerToken>,
+    ) -> Result<Option<String>, DapError> {
         self.bearer_token_authorized(req).await
     }
 

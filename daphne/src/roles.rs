@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, error};
 use url::Url;
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
@@ -48,7 +48,11 @@ where
     type WrappedDapTaskConfig: AsRef<DapTaskConfig>;
 
     /// Decide whether the given DAP request is authorized.
-    async fn authorized(&self, req: &DapRequest<S>) -> Result<bool, DapError>;
+    ///
+    /// If the return value is `None`, then the request is authorized. If the return value is
+    /// `Some(reason)`, then the request is denied and `reason` conveys details about how the
+    /// decision was reached.
+    async fn unauthorized_reason(&self, req: &DapRequest<S>) -> Result<Option<String>, DapError>;
 
     /// Look up the DAP global configuration.
     fn get_global_config(&self) -> &DapGlobalConfig;
@@ -57,7 +61,7 @@ where
     ///
     /// If the return value is `None`, then the decision is to opt-in. If the return value is
     /// `Some(reason)`, then the decision is to opt-out; `reason` conveys details about how the
-    /// decision was rached (e.g.., the minimum batch size is too smal).
+    /// decision was reached (e.g.., the minimum batch size is too smal).
     fn taskprov_opt_out_reason(
         &self,
         task_config: &DapTaskConfig,
@@ -374,9 +378,12 @@ where
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
 
-        if !self.authorized(req).await? {
-            debug!("aborted unathorized collect request");
-            return Err(DapAbort::UnauthorizedRequest);
+        if let Some(reason) = self.unauthorized_reason(req).await? {
+            error!("aborted unauthorized collect request: {reason}");
+            return Err(DapAbort::UnauthorizedRequest {
+                detail: reason,
+                task_id: task_id.clone(),
+            });
         }
 
         let mut collect_req =
@@ -767,12 +774,15 @@ where
             return Err(DapAbort::version_unknown());
         }
 
-        if !self.authorized(req).await? {
-            debug!("aborted unauthorized aggregate request");
-            return Err(DapAbort::UnauthorizedRequest);
-        }
-
         let task_id = req.task_id()?;
+
+        if let Some(reason) = self.unauthorized_reason(req).await? {
+            error!("aborted unauthorized collect request: {reason}");
+            return Err(DapAbort::UnauthorizedRequest {
+                detail: reason,
+                task_id: task_id.clone(),
+            });
+        }
 
         match req.media_type {
             DapMediaType::AggregationJobInitReq => {
@@ -1035,11 +1045,15 @@ where
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        if !self.authorized(req).await? {
-            return Err(DapAbort::UnauthorizedRequest);
-        }
-
         let task_id = req.task_id()?;
+
+        if let Some(reason) = self.unauthorized_reason(req).await? {
+            error!("aborted unauthorized collect request: {reason}");
+            return Err(DapAbort::UnauthorizedRequest {
+                detail: reason,
+                task_id: task_id.clone(),
+            });
+        }
 
         let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)?;
         let wrapped_task_config = self
