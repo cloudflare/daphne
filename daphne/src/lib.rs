@@ -176,7 +176,15 @@ pub enum DapAbort {
     /// Round mismatch. The aggregators disagree on the current round of the VDAF preparation protocol.
     /// This abort occurs during the aggregation sub-protocol.
     #[error("roundMismatch")]
-    RoundMismatch,
+    RoundMismatch {
+        detail: String,
+        task_id: TaskId,
+        // draft02 compatibility: The ID"s definition (i.e., length in bytes) depends on which
+        // protocol is in use, hence the need for the `MetaAggregationJobId` type for representing
+        // the union of both To avoid having to propgate the lifetime parameter to `DapAbort`, we
+        // encode it right away.
+        agg_job_id_base64url: String,
+    },
 
     /// Unauthorized HTTP request.
     #[error("unauthorizedRequest")]
@@ -209,33 +217,40 @@ impl DapAbort {
     pub fn into_problem_details(self) -> ProblemDetails {
         let typ = format!("urn:ietf:params:ppm:dap:error:{}", self);
         let title = self.title().map(ToString::to_string);
-        let (task_id, detail) = match self {
+        let (task_id, detail, agg_job_id_base64url) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id }
             | Self::BatchOverlap { detail, task_id }
             | Self::InvalidBatchSize { detail, task_id }
-            | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail)),
+            | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail), None),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
+                None,
             ),
-            Self::ReportRejected { detail } => (None, Some(detail)),
-            Self::RoundMismatch
-            | Self::ReportTooLate
+            Self::BadRequest(detail) | Self::ReportRejected { detail } => {
+                (None, Some(detail), None)
+            }
+            Self::RoundMismatch {
+                detail,
+                task_id,
+                agg_job_id_base64url,
+            } => (Some(task_id), Some(detail), Some(agg_job_id_base64url)),
+            Self::ReportTooLate
             | Self::UnauthorizedRequest
             | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
-            | Self::UnrecognizedTask => (None, None),
-            Self::BadRequest(detail) => (None, Some(detail)),
-            Self::Internal(e) => (None, Some(e.to_string())),
+            | Self::UnrecognizedTask => (None, None, None),
+            Self::Internal(e) => (None, Some(e.to_string()), None),
         };
 
         ProblemDetails {
             typ,
             title,
             task_id: task_id.map(|id| id.to_base64url()),
+            agg_job_id: agg_job_id_base64url,
             instance: None, // TODO interop: Implement as specified.
             detail,
         }
@@ -318,7 +333,9 @@ impl DapAbort {
             Self::InvalidBatchSize { .. } => Some("Batch size is invalid"),
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
             Self::QueryMismatch { .. } => Some("Query type does not match the task"),
-            Self::RoundMismatch => None,
+            Self::RoundMismatch { .. } => {
+                Some("Aggregation round indicated by peer does not match host")
+            }
             Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
             Self::ReportRejected { .. } => Some("Report rejected"),
             Self::ReportTooLate => Some("The requested task expires after report timestamp"),
@@ -359,6 +376,9 @@ pub struct ProblemDetails {
     #[serde(rename = "taskid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) task_id: Option<String>,
+    #[serde(rename = "aggregationjobid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) agg_job_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instance: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1098,6 +1118,7 @@ pub struct DapLeaderProcessTelemetry {
 /// string included in the HTTP request payload; in draft04, this is a 16-byte string included in
 /// the HTTP request path. This type unifies these into one type so that any protocol logic that
 /// is agnostic to these details can use the same object.
+#[derive(Clone, Debug)]
 pub enum MetaAggregationJobId<'a> {
     Draft02(Cow<'a, Draft02AggregationJobId>),
     Draft04(Cow<'a, AggregationJobId>),

@@ -610,7 +610,7 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
         .await;
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
-        Err(DapAbort::RoundMismatch)
+        Err(DapAbort::RoundMismatch { .. })
     );
 }
 

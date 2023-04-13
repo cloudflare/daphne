@@ -734,6 +734,8 @@ impl VdafConfig {
     /// * `agg_cont_req` is the aggregate request sent by the Leader.
     pub(crate) fn handle_agg_job_cont_req(
         &self,
+        task_id: &TaskId,
+        agg_job_id: &MetaAggregationJobId,
         state: DapHelperState,
         agg_cont_req: &AggregationJobContinueReq,
         metrics: &DaphneMetrics,
@@ -745,7 +747,11 @@ impl VdafConfig {
             // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
             // aggregation-round-skew-recovery.
             if round != 1 {
-                return Err(DapAbort::RoundMismatch);
+                return Err(DapAbort::RoundMismatch {
+                    detail: format!("The request indicates round {round}; round 1 was expected."),
+                    task_id: task_id.clone(),
+                    agg_job_id_base64url: agg_job_id.to_base64url(),
+                });
             }
         }
         let mut processed = HashSet::with_capacity(state.seq.len());
