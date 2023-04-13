@@ -202,13 +202,6 @@ pub enum DapAbort {
         agg_job_id_base64url: String,
     },
 
-    /// Unrecognized HPKE config. Sent in response to an upload request for which the leader share
-    /// is encrypted using an unrecognized HPKE configuration.
-    //
-    // TODO spec: Rename this error type.
-    #[error("unrecognizedHpkeConfig")]
-    UnrecognizedHpkeConfig,
-
     /// Unrecognized message. Sent in response to a malformed or unexpected message.
     #[error("unrecognizedMessage")]
     UnrecognizedMessage,
@@ -253,10 +246,9 @@ impl DapAbort {
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id_base64url),
             ),
-            Self::ReportTooLate
-            | Self::UnrecognizedHpkeConfig
-            | Self::UnrecognizedMessage
-            | Self::UnrecognizedTask => (None, None, None),
+            Self::ReportTooLate | Self::UnrecognizedMessage | Self::UnrecognizedTask => {
+                (None, None, None)
+            }
             Self::Internal(e) => (None, Some(e.to_string()), None),
         };
 
@@ -355,7 +347,6 @@ impl DapAbort {
             Self::ReportTooLate => Some("The requested task expires after report timestamp"),
             Self::UnauthorizedRequest { .. } => Some("Request authorization failed"),
             Self::UnrecognizedAggregationJob { .. } => Some("Unrecognized aggregation job"),
-            Self::UnrecognizedHpkeConfig => None,
             Self::UnrecognizedMessage => None,
             Self::UnrecognizedTask => None,
             Self::BadRequest(..) => None,
