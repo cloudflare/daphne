@@ -16,8 +16,6 @@ use daphne::{
     Prio3Config, VdafConfig,
 };
 use daphne_worker::DaphneWorkerReportSelector;
-#[cfg(feature = "test_janus")]
-use futures::channel::oneshot::Sender;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
@@ -25,8 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::ops::Range;
 use std::time::SystemTime;
-#[cfg(feature = "test_janus")]
-use tokio::task::JoinHandle;
 use url::Url;
 
 const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
@@ -717,125 +713,6 @@ impl TestRunner {
         } else {
             None
         }
-    }
-}
-
-#[cfg(feature = "test_janus")]
-pub struct JanusServerHandle {
-    shutdown_sender: Sender<()>,
-    server_handle: JoinHandle<()>,
-
-    // Once `db_handle` goes out of scope, the ephemeral postgres DB is torn down.
-    #[allow(dead_code)]
-    db_handle: janus_server::datastore::test_util::DbHandle,
-}
-
-#[cfg(feature = "test_janus")]
-impl JanusServerHandle {
-    pub async fn shutdown(self) {
-        self.shutdown_sender.send(()).unwrap();
-        self.server_handle.await.unwrap();
-    }
-}
-
-#[cfg(feature = "test_janus")]
-impl TestRunner {
-    pub async fn janus_helper() -> (Self, JanusServerHandle) {
-        let t = Self::with(
-            GLOBAL_CONFIG,
-            JANUS_HELPER_TASK,
-            LEADER_TASK_LIST,
-            JANUS_HELPER_TASK_LIST,
-        )
-        .await;
-        post_internal_delete_all(&t.http_client(), &t.leader_url, &t.batch_interval()).await;
-
-        let task_id = janus_core::message::TaskId::get_decoded(t.task_id.as_ref()).unwrap();
-        let aggregator_endpoints = vec![t.leader_url.clone(), t.helper_url.clone()];
-        let vdaf = assert_matches!(t.task_config.vdaf, daphne::VdafConfig::Prio3(ref prio3_config) => {
-            assert_matches!(prio3_config, daphne::Prio3Config::Sum{ bits } =>
-                janus_server::task::VdafInstance::Real(janus_core::task::VdafInstance::Prio3Aes128Sum{ bits: *bits }
-            ))
-        });
-
-        let task_list_object: serde_json::Value =
-            serde_json::from_str(JANUS_HELPER_TASK_LIST).unwrap();
-        let task_config_object = task_list_object.get(JANUS_HELPER_TASK).unwrap();
-
-        let config: daphne::messages::HpkeConfig = serde_json::from_value(
-            task_config_object
-                .get("collector_hpke_config")
-                .unwrap()
-                .clone(),
-        )
-        .unwrap();
-        let collector_hpke_config =
-            janus_core::message::HpkeConfig::get_decoded(&config.get_encoded()).unwrap();
-
-        let vdaf_verify_key = hex::decode(
-            task_config_object
-                .get("vdaf_verify_key")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-        )
-        .unwrap();
-
-        let leader_bearer_token = janus_server::task::AggregatorAuthenticationToken::from(
-            JANUS_HELPER_TASK_LEADER_BEARER_TOKEN.as_bytes().to_vec(),
-        );
-
-        let (hpke_config, hpke_sk) =
-            janus_core::hpke::test_util::generate_hpke_config_and_private_key();
-
-        let task = janus_server::task::Task::new(
-            task_id,
-            aggregator_endpoints,
-            vdaf,
-            janus_core::message::Role::Helper,
-            vec![vdaf_verify_key],
-            1, // max_batch_lifetime
-            t.task_config.min_batch_size,
-            janus_core::message::Duration::from_seconds(t.task_config.time_precision),
-            janus_core::message::Duration::from_seconds(0), // clock skew tolerance
-            collector_hpke_config,
-            vec![leader_bearer_token],
-            [(hpke_config, hpke_sk)],
-        )
-        .unwrap();
-
-        let aggregator_clock = janus_core::time::test_util::MockClock::new(
-            janus_core::message::Time::from_seconds_since_epoch(t.now),
-        );
-        let (datastore, db_handle) =
-            janus_server::datastore::test_util::ephemeral_datastore(aggregator_clock.clone()).await;
-        let datastore = Arc::new(datastore);
-        datastore
-            .run_tx(|tx| {
-                let task = task.clone();
-                Box::pin(async move { tx.put_task(&task).await })
-            })
-            .await
-            .unwrap();
-
-        let (shutdown_sender, shutdown_receiver) = futures::channel::oneshot::channel();
-        let shutdown_receiver = async move { shutdown_receiver.await.unwrap_or_default() };
-        let (_addr, server) = janus_server::aggregator::aggregator_server(
-            datastore,
-            aggregator_clock,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), JANUS_HELPER_PORT),
-            shutdown_receiver,
-        )
-        .unwrap();
-
-        (
-            t,
-            JanusServerHandle {
-                shutdown_sender,
-                server_handle: tokio::spawn(server),
-                db_handle,
-            },
-        )
     }
 }
 

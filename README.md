@@ -28,8 +28,7 @@ The [repository](https://github.com/cloudflare/daphne) contains three crates:
 
 * `daphne_worker_test` -- Defines a deployment of Daphne-Worker for testing
   changes locally. It also implements integration tests for Daphne and
-  Daphne-Worker and interop tests with
-  [Janus](https://github.com/divviup/janus).
+  Daphne-Worker.
 
 ## Testing
 
@@ -42,6 +41,9 @@ Integration tests can be run via docker-compose.
 ```
 docker-compose up --build --abort-on-container-exit --exit-code-from test
 ```
+
+For integration tests with [Janus](https://github.com/divviup/janus), see the
+[DAP Interop Test Runner](https://github.com/divergentdave/dap-interop-test-runner).
 
 ## Acknowledgements
 

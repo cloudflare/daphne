@@ -16,7 +16,6 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["console_error_panic_hook"]
 test_e2e = []
-test_janus = []
 
 [dependencies]
 cfg-if = "1.0.0"
