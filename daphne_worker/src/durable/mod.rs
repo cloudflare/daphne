@@ -5,6 +5,7 @@ use crate::{int_err, now};
 use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cmp::min;
 use worker::*;
 
 pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
@@ -19,6 +20,20 @@ pub(crate) const BINDING_DAP_HELPER_STATE_STORE: &str = "DAP_HELPER_STATE_STORE"
 pub(crate) const BINDING_DAP_GARBAGE_COLLECTOR: &str = "DAP_GARBAGE_COLLECTOR";
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
+
+// The maximum number of keys to get at once in a list command.
+//
+// The DO API does not say that there is any limit on the number of keys it is willing to return
+// other than overall DO/worker memory, which it warns you not to exceed. Imposing some sort of
+// limit is a good idea, lest we get DoS'd by a task configuration with a large value.
+//
+// Currently the value is set to 128, as the miniflare environment will fail with more than this.
+// This appears to be a miniflare bug and not part of the API.
+//
+// We have not been able to replicate failures with wrangler2 in local or experimental-local mode.
+//
+// TODO(bhalley) does this need to be configurable?
+const MAX_KEYS: usize = 128;
 
 /// Used to send HTTP requests to a durable object (DO) instance.
 pub(crate) struct DurableConnector<'a> {
@@ -400,7 +415,8 @@ async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
     let key_prefix = format!("{prefix}/item/");
     let mut opt = ListOptions::new().prefix(&key_prefix);
     if let Some(limit) = limit {
-        opt = opt.limit(limit);
+        // Note we impose an upper limit on the user's specified limit.
+        opt = opt.limit(min(limit, MAX_KEYS));
     }
     let iter = state.storage().list_with_options(opt).await?.entries();
     let mut js_item = iter.next()?;
