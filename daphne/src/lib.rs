@@ -165,7 +165,7 @@ pub enum DapAbort {
 
     /// Report rejected. Sent in response to an upload request containing a Report that the Leader
     /// would reject during the aggregation sub-protocol.
-    #[error("reportReplayed")]
+    #[error("reportRejected")]
     ReportRejected { detail: String },
 
     /// Report too late. Sent in response to an upload request for a task that is known to have
