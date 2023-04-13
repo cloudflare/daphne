@@ -163,11 +163,10 @@ pub enum DapAbort {
     #[error("queryMismatch")]
     QueryMismatch { detail: String, task_id: TaskId },
 
-    /// Replayed report. Sent in response to an upload request containing a Report that has been replayed.
-    //
-    // TODO spec: Define this error type.
-    #[error("replayedReport")]
-    ReplayedReport,
+    /// Report rejected. Sent in response to an upload request containing a Report that the Leader
+    /// would reject during the aggregation sub-protocol.
+    #[error("reportReplayed")]
+    ReportRejected { detail: String },
 
     /// Report too late. Sent in response to an upload request for a task that is known to have
     /// expired.
@@ -178,11 +177,6 @@ pub enum DapAbort {
     /// This abort occurs during the aggregation sub-protocol.
     #[error("roundMismatch")]
     RoundMismatch,
-
-    /// Stale report. Sent in response to an upload request containing a report pertaining to a
-    /// batch that has already been collected.
-    #[error("staleReport")]
-    StaleReport,
 
     /// Unauthorized HTTP request.
     #[error("unauthorizedRequest")]
@@ -224,18 +218,17 @@ impl DapAbort {
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
             ),
+            Self::ReportRejected { detail } => (None, Some(detail)),
             Self::BatchOverlap
             | Self::InvalidBatchSize
             | Self::RoundMismatch
-            | Self::ReplayedReport
             | Self::ReportTooLate
-            | Self::StaleReport
             | Self::UnauthorizedRequest
             | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
             | Self::UnrecognizedTask => (None, None),
-            Self::BadRequest(s) => (None, Some(s)),
+            Self::BadRequest(detail) => (None, Some(detail)),
             Self::Internal(e) => (None, Some(e.to_string())),
         };
 
@@ -287,6 +280,22 @@ impl DapAbort {
         }
     }
 
+    pub fn report_rejected(failure_reason: TransitionFailure) -> Self {
+        let detail = match failure_reason {
+            TransitionFailure::BatchCollected => {
+                "The report pertains to a batch that has already been collected."
+            }
+            TransitionFailure::ReportReplayed => {
+                "A report with the same ID was uploaded previously."
+            }
+            _ => return DapError::Fatal(format!("Attempted to construct a \"reportRejected\" abort with unexpected transition failure: {failure_reason:?}")).into(),
+        };
+
+        Self::ReportRejected {
+            detail: detail.into(),
+        }
+    }
+
     fn title(&self) -> Option<&'static str> {
         match self {
             Self::BatchInvalid { .. } => Some("Batch boundary check failed"),
@@ -299,9 +308,8 @@ impl DapAbort {
             Self::QueryMismatch { .. } => Some("Query type does not match the task"),
             Self::RoundMismatch => None,
             Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
-            Self::ReplayedReport => None,
+            Self::ReportRejected { .. } => Some("Report rejected"),
             Self::ReportTooLate => None,
-            Self::StaleReport => None,
             Self::UnauthorizedRequest => None,
             Self::UnrecognizedAggregationJob => None,
             Self::UnrecognizedHpkeConfig => None,
@@ -317,8 +325,8 @@ impl From<DapError> for DapAbort {
     fn from(e: DapError) -> Self {
         match e {
             e @ DapError::Fatal(..) => Self::Internal(Box::new(e)),
-            DapError::Abort(e) => e,
-            DapError::Transition(t) => Self::from(t),
+            DapError::Abort(abort) => abort,
+            DapError::Transition(failure_reason) => Self::report_rejected(failure_reason),
         }
     }
 }
@@ -326,16 +334,6 @@ impl From<DapError> for DapAbort {
 impl From<CodecError> for DapAbort {
     fn from(_e: CodecError) -> Self {
         Self::UnrecognizedMessage
-    }
-}
-
-impl From<TransitionFailure> for DapAbort {
-    fn from(failure_reason: TransitionFailure) -> Self {
-        match failure_reason {
-            TransitionFailure::BatchCollected => Self::StaleReport,
-            TransitionFailure::ReportReplayed => Self::ReplayedReport,
-            _ => DapError::fatal("unhandled transition failure").into(),
-        }
     }
 }
 
