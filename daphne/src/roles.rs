@@ -349,7 +349,9 @@ where
             .can_hpke_decrypt(req.task_id()?, report.encrypted_input_shares[0].config_id)
             .await?
         {
-            return Err(DapAbort::UnrecognizedHpkeConfig);
+            return Err(DapAbort::ReportRejected {
+                detail: "No current HPKE configuration matches the indicated ID.".into(),
+            });
         }
 
         // Check that the task has not expired.
