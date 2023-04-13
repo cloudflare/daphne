@@ -148,7 +148,7 @@ pub enum DapAbort {
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
     /// AggregateShareReq.
     #[error("invalidBatchSize")]
-    InvalidBatchSize,
+    InvalidBatchSize { detail: String, task_id: TaskId },
 
     /// draft-wang-ppm-dap-taskprov-02: Invalid DAP task. Sent when a server opts out of a
     /// taskprov task configuration.
@@ -214,14 +214,14 @@ impl DapAbort {
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id }
             | Self::BatchOverlap { detail, task_id }
+            | Self::InvalidBatchSize { detail, task_id }
             | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail)),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
             ),
             Self::ReportRejected { detail } => (None, Some(detail)),
-            Self::InvalidBatchSize
-            | Self::RoundMismatch
+            Self::RoundMismatch
             | Self::ReportTooLate
             | Self::UnauthorizedRequest
             | Self::UnrecognizedAggregationJob
@@ -315,7 +315,7 @@ impl DapAbort {
                 Some("Aggregators disagree on the set of reports in the batch")
             }
             Self::BatchOverlap { .. } => Some("The selected batch overlaps with a previous batch"),
-            Self::InvalidBatchSize => None,
+            Self::InvalidBatchSize { .. } => Some("Batch size is invalid"),
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
             Self::QueryMismatch { .. } => Some("Query type does not match the task"),
             Self::RoundMismatch => None,
@@ -685,14 +685,22 @@ impl DapTaskConfig {
         Ok(span)
     }
 
-    /// Check if the batch is ready to aggregate based on the report count. Returns an error if the
-    /// report count is too large.
-    pub(crate) fn is_report_count_compatible(&self, report_count: u64) -> Result<bool, DapAbort> {
+    /// Check if the batch size is too small. Returns an error if the report count is too large.
+    pub(crate) fn is_report_count_compatible(
+        &self,
+        task_id: &TaskId,
+        report_count: u64,
+    ) -> Result<bool, DapAbort> {
         match self.query {
             DapQueryConfig::TimeInterval => (),
             DapQueryConfig::FixedSize { max_batch_size } => {
                 if report_count > max_batch_size {
-                    return Err(DapAbort::InvalidBatchSize);
+                    return Err(DapAbort::InvalidBatchSize {
+                        detail: format!(
+                            "Report count ({report_count}) exceeds maximum ({max_batch_size})"
+                        ),
+                        task_id: task_id.clone(),
+                    });
                 }
             }
         };
