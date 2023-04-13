@@ -65,7 +65,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
 };
-use tracing::{debug, warn};
+use tracing::debug;
 use worker::*;
 
 pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
@@ -275,10 +275,10 @@ where
 {
     type WrappedDapTaskConfig = GuardedDapTaskConfig<'req>;
 
-    async fn authorized(
+    async fn unauthorized_reason(
         &self,
         req: &DapRequest<DaphneWorkerAuth>,
-    ) -> std::result::Result<bool, DapError> {
+    ) -> std::result::Result<Option<String>, DapError> {
         match req.sender_auth {
             Some(DaphneWorkerAuth::BearerToken(..)) => self.bearer_token_authorized(req).await,
             Some(DaphneWorkerAuth::CfTlsClientAuth {
@@ -293,8 +293,7 @@ where
                                 ref valid_cert_subjects,
                             } => (valid_cert_issuer, valid_cert_subjects),
                             _ => {
-                                warn!("request from Leader denied due to unexpected authorization method (did not expect TLS client auth)");
-                                return Ok(false);
+                                return Ok(Some("Request from Leader denied due to unexpected authorization method (did not expect TLS client auth).".into()));
                             }
                         },
                         Some(DapSender::Collector) => match taskprov_config.collector_auth {
@@ -303,14 +302,10 @@ where
                                 ref valid_cert_subjects,
                             }) => (valid_cert_issuer, valid_cert_subjects),
                             Some(..) => {
-                                warn!("request from Collector denied due to unexpected authorization method (did not expect TLS client auth)");
-                                return Ok(false);
+                                return Ok(Some("Request from Collector denied due to unexpected authorization method (did not expect TLS client auth).".into()));
                             }
                             None => {
-                                warn!(
-                                    "request from Collector denied: no authorization method configured"
-                                );
-                                return Ok(false);
+                                return Ok(Some("Request from Collector denied: no authorization method configured.".into()));
                             }
                         },
                         Some(sender) => {
@@ -318,38 +313,38 @@ where
                             // that require authoriztion. These include the Collector and the
                             // Leader; currently the Client does not require authorization. If at
                             // some point we need this, we would check it here.
-                            warn!("request denied from unexpected sender ({sender:?})");
-                            return Ok(false);
+                            return Ok(Some(format!(
+                                "Request denied from unexpected sender ({sender:?})."
+                            )));
                         }
                         None => {
-                            warn!("request denied becuase the sender could not be determined");
-                            return Ok(false);
+                            return Ok(Some(
+                                "Request denied because the sender could not be determined.".into(),
+                            ));
                         }
                     };
 
                     if cert_issuer != valid_cert_issuer
                         || !valid_cert_subjects.contains(cert_subject)
                     {
-                        warn!("request denied due to unexpected subject or issuer in TLS client certificate");
                         debug!("issuer is '{cert_issuer}'; expected '{valid_cert_issuer}'");
                         debug!(
                             "subject is '{cert_subject}'; expected one of {valid_cert_subjects:?}"
                         );
-                        return Ok(false);
+                        return Ok(Some("Request denied due to unexpected subject or issuer in TLS client certificate.".into()));
                     }
 
-                    return Ok(true);
+                    // Authorize requestl.
+                    Ok(None)
                 } else {
-                    warn!("request denied: authorization method unavailable");
                     // We currently only support usage of the TLS client authentication with the
                     // taskprov extension.
-                    Ok(false)
+                    return Ok(Some(
+                        "Request denied: authorization method unavailable.".into(),
+                    ));
                 }
             }
-            None => {
-                warn!("request denied: no authorization provided");
-                Ok(false)
-            }
+            None => Ok(Some("request denied: no authorization provided".into())),
         }
     }
 

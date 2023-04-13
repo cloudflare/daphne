@@ -188,7 +188,7 @@ pub enum DapAbort {
 
     /// Unauthorized HTTP request.
     #[error("unauthorizedRequest")]
-    UnauthorizedRequest,
+    UnauthorizedRequest { detail: String, task_id: TaskId },
 
     /// Unrecognized aggregation job. Sent in response to an AggregateContinueReq for which the
     /// Helper does not recognize the indicated aggregation job.
@@ -223,7 +223,8 @@ impl DapAbort {
             | Self::BatchMismatch { detail, task_id }
             | Self::BatchOverlap { detail, task_id }
             | Self::InvalidBatchSize { detail, task_id }
-            | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail), None),
+            | Self::QueryMismatch { detail, task_id }
+            | Self::UnauthorizedRequest { detail, task_id } => (Some(task_id), Some(detail), None),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
@@ -238,7 +239,6 @@ impl DapAbort {
                 agg_job_id_base64url,
             } => (Some(task_id), Some(detail), Some(agg_job_id_base64url)),
             Self::ReportTooLate
-            | Self::UnauthorizedRequest
             | Self::UnrecognizedAggregationJob
             | Self::UnrecognizedHpkeConfig
             | Self::UnrecognizedMessage
@@ -339,7 +339,7 @@ impl DapAbort {
             Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
             Self::ReportRejected { .. } => Some("Report rejected"),
             Self::ReportTooLate => Some("The requested task expires after report timestamp"),
-            Self::UnauthorizedRequest => None,
+            Self::UnauthorizedRequest { .. } => Some("Request authorization failed"),
             Self::UnrecognizedAggregationJob => None,
             Self::UnrecognizedHpkeConfig => None,
             Self::UnrecognizedMessage => None,

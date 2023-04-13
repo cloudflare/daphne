@@ -10,7 +10,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 /// A bearer token used for authorizing DAP requests.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -97,13 +96,18 @@ pub trait BearerTokenProvider<'a> {
     }
 
     /// Check that the bearer token carried by a request can be used to authorize that request.
+    ///
+    /// Return `None` if the request is authorized. Otherwise return `Some(reason)`, where `reason`
+    /// is the reason for the failure.
     async fn bearer_token_authorized<T: AsRef<BearerToken>>(
         &'a self,
         req: &'a DapRequest<T>,
-    ) -> Result<bool, DapError> {
+    ) -> Result<Option<String>, DapError> {
         if req.task_id.is_none() {
             // Can't authorize request with missing task ID.
-            return Ok(false);
+            return Ok(Some(
+                "Cannot authorize request with missing task ID.".into(),
+            ));
         }
         let task_id = req.task_id.as_ref().unwrap();
 
@@ -114,26 +118,44 @@ pub trait BearerTokenProvider<'a> {
         if matches!(req.media_type.sender(), Some(DapSender::Leader)) {
             if let Some(ref got) = req.sender_auth {
                 if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
-                    return Ok(got.as_ref() == expected.as_ref());
+                    return Ok(if got.as_ref() == expected.as_ref() {
+                        None
+                    } else {
+                        Some("The indicated beareer token is incorrect for the Leader.".into())
+                    });
                 }
-                return Ok(self.is_taskprov_leader_bearer_token(got.as_ref()));
+                return Ok(if self.is_taskprov_leader_bearer_token(got.as_ref()) {
+                    None
+                } else {
+                    Some("The indicated beaer token is incorrect for Taskprov Leader.".into())
+                });
             }
         }
 
         if matches!(req.media_type.sender(), Some(DapSender::Collector)) {
             if let Some(ref got) = req.sender_auth {
                 if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
-                    return Ok(got.as_ref() == expected.as_ref());
+                    return Ok(if got.as_ref() == expected.as_ref() {
+                        None
+                    } else {
+                        Some("The indicated bearer token is incorrect for the Collector.".into())
+                    });
                 }
-                return Ok(self.is_taskprov_collector_bearer_token(got.as_ref()));
+                return Ok(if self.is_taskprov_collector_bearer_token(got.as_ref()) {
+                    None
+                } else {
+                    Some(
+                        "The indicated bearer token is incorrect for the Taskprov Collector."
+                            .into(),
+                    )
+                });
             }
         }
 
         // Deny request with unhandled or unknown media type.
-        warn!(
-            "request denied because of unhandled media type {:?}",
+        Ok(Some(format!(
+            "Cannot resolve sender due to unexpected media type ({:?}).",
             req.media_type
-        );
-        Ok(false)
+        )))
     }
 }

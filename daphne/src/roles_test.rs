@@ -537,14 +537,14 @@ async fn http_post_aggregate_init_unauthorized_request(version: DapVersion) {
     // Expect failure due to missing bearer token.
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
@@ -717,14 +717,14 @@ async fn http_post_aggregate_cont_unauthorized_request(version: DapVersion) {
     // Expect failure due to missing bearer token.
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         t.helper.http_post_aggregate(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
@@ -738,14 +738,14 @@ async fn http_post_aggregate_share_unauthorized_request(version: DapVersion) {
     // Expect failure due to missing bearer token.
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
@@ -852,14 +852,14 @@ async fn http_post_collect_unauthorized_request(version: DapVersion) {
     // Expect failure due to missing bearer token.
     assert_matches!(
         t.leader.http_post_collect(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
         t.leader.http_post_collect(&req).await,
-        Err(DapAbort::UnauthorizedRequest)
+        Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
