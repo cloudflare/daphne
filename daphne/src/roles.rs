@@ -847,6 +847,7 @@ where
 
                 // Ensure we know which batch the request pertains to.
                 check_part_batch(
+                    task_id,
                     task_config,
                     &agg_job_init_req.part_batch_sel,
                     &agg_job_init_req.agg_param,
@@ -1118,12 +1119,17 @@ where
 }
 
 fn check_part_batch(
+    task_id: &TaskId,
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,
     agg_param: &[u8],
 ) -> Result<(), DapAbort> {
     if !task_config.query.is_valid_part_batch_sel(part_batch_sel) {
-        return Err(DapAbort::QueryMismatch);
+        return Err(DapAbort::query_mismatch(
+            task_id,
+            &task_config.query,
+            part_batch_sel,
+        ));
     }
 
     // Check that the aggreation parameter is suitable for the given VDAF.
@@ -1201,7 +1207,13 @@ where
                 });
             }
         }
-        _ => return Err(DapAbort::QueryMismatch),
+        _ => {
+            return Err(DapAbort::query_mismatch(
+                task_id,
+                &task_config.query,
+                batch_sel,
+            ))
+        }
     };
 
     // Check that the batch does not overlap with any previously collected batch.

@@ -521,7 +521,7 @@ async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
         .await;
     assert_matches!(
         t.helper.http_post_aggregate(&req).await.unwrap_err(),
-        DapAbort::QueryMismatch
+        DapAbort::QueryMismatch { .. }
     );
 }
 
@@ -781,7 +781,7 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
         .await;
     assert_matches!(
         t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
-        DapAbort::QueryMismatch
+        DapAbort::QueryMismatch { .. }
     );
 
     // Leader sends aggregate share request for unrecognized batch ID.
@@ -1476,7 +1476,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
         .await;
     assert_matches!(
         t.leader.http_post_collect(&req).await.unwrap_err(),
-        DapAbort::QueryMismatch
+        DapAbort::QueryMismatch { .. }
     );
 
     // Collector indicates unrecognized batch ID.

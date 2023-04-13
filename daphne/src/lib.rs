@@ -161,7 +161,7 @@ pub enum DapAbort {
 
     /// Query mismatch. Sent in response to a CollectReq or AggregateShareReq.
     #[error("queryMismatch")]
-    QueryMismatch,
+    QueryMismatch { detail: String, task_id: TaskId },
 
     /// Replayed report. Sent in response to an upload request containing a Report that has been replayed.
     //
@@ -218,14 +218,14 @@ impl DapAbort {
         let (task_id, detail) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
-            | Self::BatchMismatch { detail, task_id } => (Some(task_id), Some(detail)),
+            | Self::BatchMismatch { detail, task_id }
+            | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail)),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
             ),
             Self::BatchOverlap
             | Self::InvalidBatchSize
-            | Self::QueryMismatch
             | Self::RoundMismatch
             | Self::ReplayedReport
             | Self::ReportTooLate
@@ -275,6 +275,18 @@ impl DapAbort {
         DapAbort::BadRequest("DAP version of request is not recognized".into())
     }
 
+    #[inline]
+    pub(crate) fn query_mismatch(
+        task_id: &TaskId,
+        query_type_for_task: impl std::fmt::Display,
+        query_type_for_request: impl std::fmt::Display,
+    ) -> Self {
+        Self::QueryMismatch {
+            detail: format!("The task's query type is \"{query_type_for_task}\", but the request indicates \"{query_type_for_request}\"."),
+            task_id: task_id.clone(),
+        }
+    }
+
     fn title(&self) -> Option<&'static str> {
         match self {
             Self::BatchInvalid { .. } => Some("Batch boundary check failed"),
@@ -284,7 +296,7 @@ impl DapAbort {
             Self::BatchOverlap => None,
             Self::InvalidBatchSize => None,
             Self::InvalidTask { .. } => Some("Opted out of Taskprov task"),
-            Self::QueryMismatch => None,
+            Self::QueryMismatch { .. } => Some("Query type does not match the task"),
             Self::RoundMismatch => None,
             Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
             Self::ReplayedReport => None,
@@ -483,6 +495,15 @@ impl DapQueryConfig {
                 BatchSelector::FixedSizeByBatchId { .. }
             )
         )
+    }
+}
+
+impl std::fmt::Display for DapQueryConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval => write!(f, "time_interval"),
+            Self::FixedSize { .. } => write!(f, "fixed_size"),
+        }
     }
 }
 
