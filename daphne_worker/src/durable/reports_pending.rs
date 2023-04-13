@@ -9,12 +9,13 @@ use crate::{
             DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
         state_get, state_set_if_not_exists, DurableConnector, DurableOrdered,
-        BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
+        BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING, MAX_KEYS,
     },
     initialize_tracing, int_err,
 };
 use daphne::{messages::TaskId, DapVersion};
 use serde::{Deserialize, Serialize};
+use std::cmp::min;
 use tracing::debug;
 use worker::*;
 
@@ -110,9 +111,10 @@ impl DurableObject for ReportsPending {
             // Output: `Vec<PendingReport>`
             (DURABLE_REPORTS_PENDING_GET, Method::Post) => {
                 let reports_requested: usize = req.json().await?;
+                // Note we impose an upper limit on the user's specified limit.
                 let opt = ListOptions::new()
                     .prefix("pending/")
-                    .limit(reports_requested);
+                    .limit(min(reports_requested, MAX_KEYS));
                 let iter = self.state.storage().list_with_options(opt).await?.entries();
                 let mut item = iter.next()?;
                 let mut reports = Vec::with_capacity(reports_requested);
