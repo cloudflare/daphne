@@ -157,11 +157,12 @@ use crate::{
     dap::dap_response_to_worker,
 };
 use daphne::{
+    aborts::DapAbort,
     auth::BearerToken,
     constants::DapMediaType,
     messages::{CollectionJobId, Duration, TaskId, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
-    DapAbort, DapCollectJob, DapError, DapResponse, DapVersion,
+    DapCollectJob, DapError, DapResponse, DapVersion,
 };
 use once_cell::sync::OnceCell;
 use prio::codec::ParameterizedEncode;

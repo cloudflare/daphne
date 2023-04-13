@@ -45,6 +45,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
+    aborts::DapAbort,
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     hpke::HpkeDecrypter,
@@ -411,7 +412,7 @@ where
 
             // This is the opt-in / opt-out decision point.
             if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
-                return Err(DapError::Abort(daphne::DapAbort::InvalidTask {
+                return Err(DapError::Abort(DapAbort::InvalidTask {
                     detail: reason,
                     task_id: task_id.into_owned(),
                 }));
