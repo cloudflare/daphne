@@ -292,6 +292,15 @@ pub enum PartialBatchSelector {
     FixedSizeByBatchId { batch_id: BatchId },
 }
 
+impl std::fmt::Display for PartialBatchSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval => write!(f, "time_interval"),
+            Self::FixedSizeByBatchId { .. } => write!(f, "fixed_size"),
+        }
+    }
+}
+
 impl From<BatchSelector> for PartialBatchSelector {
     fn from(batch_sel: BatchSelector) -> Self {
         match batch_sel {
@@ -331,6 +340,15 @@ impl Decode for PartialBatchSelector {
 pub enum BatchSelector {
     TimeInterval { batch_interval: Interval },
     FixedSizeByBatchId { batch_id: BatchId },
+}
+
+impl std::fmt::Display for BatchSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval { .. } => write!(f, "time_interval"),
+            Self::FixedSizeByBatchId { .. } => write!(f, "fixed_size"),
+        }
+    }
 }
 
 impl Encode for BatchSelector {
