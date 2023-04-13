@@ -1073,7 +1073,7 @@ async fn http_post_aggregate_fail_send_cont_req(version: DapVersion) {
     let err = t.helper.http_post_aggregate(&req).await.unwrap_err();
 
     // Expect failure due to sending continue request before initialization request.
-    assert_matches!(err, DapAbort::UnrecognizedAggregationJob);
+    assert_matches!(err, DapAbort::UnrecognizedAggregationJob { .. });
 }
 
 async_test_versions! { http_post_aggregate_fail_send_cont_req }
