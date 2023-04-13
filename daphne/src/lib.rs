@@ -321,7 +321,7 @@ impl DapAbort {
             Self::RoundMismatch => None,
             Self::MissingTaskId => Some("Request for HPKE configuration with unspecified task"),
             Self::ReportRejected { .. } => Some("Report rejected"),
-            Self::ReportTooLate => None,
+            Self::ReportTooLate => Some("The requested task expires after report timestamp"),
             Self::UnauthorizedRequest => None,
             Self::UnrecognizedAggregationJob => None,
             Self::UnrecognizedHpkeConfig => None,
