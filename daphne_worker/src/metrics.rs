@@ -12,7 +12,10 @@ pub(crate) struct DaphneWorkerMetrics {
     pub(crate) daphne: DaphneMetrics,
 
     /// HTTP response status.
-    pub(crate) http_status_code: IntCounterVec,
+    pub(crate) http_status_code_counter: IntCounterVec,
+
+    /// DAP aborts.
+    pub(crate) dap_abort_counter: IntCounterVec,
 }
 
 impl DaphneWorkerMetrics {
@@ -23,10 +26,17 @@ impl DaphneWorkerMetrics {
             "".into()
         };
 
-        let http_status_code = register_int_counter_vec_with_registry!(
+        let http_status_code_counter = register_int_counter_vec_with_registry!(
             format!("{front}http_status_code"),
             "HTTP response status code.",
             &["host", "code"],
+            registry
+        )?;
+
+        let dap_abort_counter = register_int_counter_vec_with_registry!(
+            format!("{front}dap_abort"),
+            "DAP aborts.",
+            &["host", "type"],
             registry
         )?;
 
@@ -34,7 +44,8 @@ impl DaphneWorkerMetrics {
 
         Ok(Self {
             daphne,
-            http_status_code,
+            http_status_code_counter,
+            dap_abort_counter,
         })
     }
 }
