@@ -5,17 +5,17 @@
 
 use crate::DapError;
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry, IntCounterVec,
-    IntGauge, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounterVec,
+    IntGaugeVec, Registry,
 };
 
 pub struct DaphneMetrics {
     /// Report metrics. How many reports have been rejected, aggregated, and collected. When
     /// a report is rejected, the failure type is recorded.
-    pub(crate) report_counter: IntCounterVec,
+    report_counter: IntCounterVec,
 
     /// Helper: Number of running aggregation jobs.
-    pub(crate) aggregation_job_gauge: IntGauge,
+    aggregation_job_gauge: IntGaugeVec,
 }
 
 impl DaphneMetrics {
@@ -31,13 +31,14 @@ impl DaphneMetrics {
         let report_counter = register_int_counter_vec_with_registry!(
             format!("{front}report_counter"),
             "Total number reports rejected, aggregated, and collected.",
-            &["status"],
+            &["host", "status"],
             registry
         )?;
 
-        let aggregation_job_gauge = register_int_gauge_with_registry!(
+        let aggregation_job_gauge = register_int_gauge_vec_with_registry!(
             format!("{front}aggregation_job_gauge"),
             "Number of running aggregation jobs.",
+            &["host"],
             registry
         )?;
 
@@ -45,5 +46,40 @@ impl DaphneMetrics {
             report_counter,
             aggregation_job_gauge,
         })
+    }
+
+    pub fn with_host<'req>(&'req self, host: &'req str) -> ContextualizedDaphneMetrics<'req> {
+        ContextualizedDaphneMetrics {
+            metrics: self,
+            host,
+        }
+    }
+}
+
+pub struct ContextualizedDaphneMetrics<'req> {
+    metrics: &'req DaphneMetrics,
+    host: &'req str,
+}
+
+impl ContextualizedDaphneMetrics<'_> {
+    pub fn report_inc_by(&self, status: &str, val: u64) {
+        self.metrics
+            .report_counter
+            .with_label_values(&[self.host, status])
+            .inc_by(val);
+    }
+
+    pub fn agg_job_inc(&self) {
+        self.metrics
+            .aggregation_job_gauge
+            .with_label_values(&[self.host])
+            .inc();
+    }
+
+    pub fn agg_job_dec(&self) {
+        self.metrics
+            .aggregation_job_gauge
+            .with_label_values(&[self.host])
+            .dec();
     }
 }

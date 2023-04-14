@@ -26,7 +26,7 @@ impl DaphneWorkerMetrics {
         let http_status_code = register_int_counter_vec_with_registry!(
             format!("{front}http_status_code"),
             "HTTP response status code.",
-            &["code"],
+            &["host", "code"],
             registry
         )?;
 

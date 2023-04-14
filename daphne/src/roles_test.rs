@@ -83,8 +83,8 @@ impl Test {
 
         // Task Parameters that the Leader and Helper must agree on.
         let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
-        let leader_url = Url::parse("https://leader.biz/v02/").unwrap();
-        let helper_url = Url::parse("http://helper.com:8788/v02/").unwrap();
+        let leader_url = Url::parse("https://leader.com/v02/").unwrap();
+        let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
         let time_precision = 3600;
         let collector_hpke_receiver_config =
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
@@ -371,7 +371,13 @@ impl Test {
         // Leader->Helper: Run aggregation job.
         let _reports_aggregated = self
             .leader
-            .run_agg_job(&task_id, task_config, &part_batch_sel, reports)
+            .run_agg_job(
+                &task_id,
+                task_config,
+                &part_batch_sel,
+                reports,
+                task_config.leader_url.host_str().unwrap(),
+            )
             .await?;
         Ok(())
     }
@@ -407,7 +413,13 @@ impl Test {
         // Leader->Helper: Complete collection job.
         let _reports_collected = self
             .leader
-            .run_collect_job(task_id, collect_id, task_config, collect_req)
+            .run_collect_job(
+                task_id,
+                collect_id,
+                task_config,
+                collect_req,
+                task_config.leader_url.host_str().unwrap(),
+            )
             .await?;
         Ok(())
     }
@@ -969,8 +981,8 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{status="rejected_report_replayed"}"#: 1,
-        r#"test_helper_aggregation_job_gauge"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="rejected_report_replayed"}"#: 1,
+        r#"test_helper_aggregation_job_gauge{host="helper.org"}"#: 1,
     });
 }
 
@@ -1026,8 +1038,8 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{status="rejected_batch_collected"}"#: 1,
-        r#"test_helper_aggregation_job_gauge"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="rejected_batch_collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge{host="helper.org"}"#: 1,
     });
 }
 
@@ -1559,11 +1571,11 @@ async fn e2e_time_interval(version: DapVersion) {
     t.run_col_job(task_id, &query).await.unwrap();
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="aggregated"}"#: 1,
-        r#"test_helper_report_counter{status="aggregated"}"#: 1,
-        r#"test_leader_report_counter{status="collected"}"#: 1,
-        r#"test_helper_report_counter{status="collected"}"#: 1,
-        r#"test_helper_aggregation_job_gauge"#: 0,
+        r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge{host="helper.org"}"#: 0,
     });
 }
 
@@ -1590,11 +1602,11 @@ async fn e2e_fixed_size(version: DapVersion) {
     t.run_col_job(task_id, &query).await.unwrap();
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="aggregated"}"#: 1,
-        r#"test_helper_report_counter{status="aggregated"}"#: 1,
-        r#"test_leader_report_counter{status="collected"}"#: 1,
-        r#"test_helper_report_counter{status="collected"}"#: 1,
-        r#"test_helper_aggregation_job_gauge"#: 0,
+        r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge{host="helper.org"}"#: 0,
     });
 }
 
@@ -1609,10 +1621,10 @@ async fn e2e_taskprov(version: DapVersion) {
         task_info: "cool task".as_bytes().to_vec(),
         aggregator_endpoints: vec![
             taskprov::UrlBytes {
-                bytes: b"https://cool.biz/".to_vec(),
+                bytes: b"https://leader.com/".to_vec(),
             },
             taskprov::UrlBytes {
-                bytes: b"http://cool.com:8788/".to_vec(),
+                bytes: b"http://helper.org:8788/".to_vec(),
             },
         ],
         query_config: taskprov::QueryConfig {
@@ -1668,7 +1680,7 @@ async fn e2e_taskprov(version: DapVersion) {
         task_id: Some(taskprov_id.clone()),
         resource: DapResource::Undefined,
         payload: report.get_encoded_with_param(&version),
-        url: Url::parse("https://cool.biz/upload").unwrap(),
+        url: Url::parse("https://leader.com/upload").unwrap(),
         sender_auth: None,
     };
     t.leader.http_post_upload(&req).await.unwrap();
@@ -1689,11 +1701,11 @@ async fn e2e_taskprov(version: DapVersion) {
     t.run_col_job(&taskprov_id, &query).await.unwrap();
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="aggregated"}"#: 1,
-        r#"test_helper_report_counter{status="aggregated"}"#: 1,
-        r#"test_leader_report_counter{status="collected"}"#: 1,
-        r#"test_helper_report_counter{status="collected"}"#: 1,
-        r#"test_helper_aggregation_job_gauge"#: 0,
+        r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+        r#"test_helper_aggregation_job_gauge{host="helper.org"}"#: 0,
     });
 }
 

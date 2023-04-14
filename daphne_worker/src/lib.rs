@@ -410,7 +410,7 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
                         match daph
-                            .process(&report_sel)
+                            .process(&report_sel, &host(&req)?)
                             .instrument(info_span!("process"))
                             .await
                         {
@@ -548,6 +548,8 @@ impl DaphneWorkerRouter {
             router
         };
 
+        let host = host(&req)?;
+
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
         // router creates. If curious, you can add .instrument(info_span!("http")) just before
@@ -557,10 +559,10 @@ impl DaphneWorkerRouter {
         state
             .metrics
             .http_status_code
-            .with_label_values(&[&format!(
-                "{}",
-                result.as_ref().map_or(500, |resp| resp.status_code())
-            )])
+            .with_label_values(&[
+                &host,
+                &format!("{}", result.as_ref().map_or(500, |resp| resp.status_code())),
+            ])
             .inc();
 
         // Push metrics to Prometheus metrics server, if configured.
@@ -661,6 +663,14 @@ fn abort(e: DapAbort) -> Result<Response> {
     Ok(Response::from_json(&problem_details)?
         .with_status(status)
         .with_headers(headers))
+}
+
+fn host(req: &Request) -> Result<String> {
+    Ok(req
+        .url()?
+        .host_str()
+        .unwrap_or("unspecified-daphne-worker-host")
+        .to_string())
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
