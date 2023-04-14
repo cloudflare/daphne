@@ -461,7 +461,10 @@ where
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
+        host: &str,
     ) -> Result<u64, DapAbort> {
+        let metrics = self.metrics().with_host(host);
+
         // Filter out early rejected reports.
         //
         // TODO Add a test similar to http_post_aggregate_init_expired_task() in roles_test.rs that
@@ -478,10 +481,7 @@ where
             .into_iter()
             .filter(|report| {
                 if let Some(failure) = early_rejects.get(&report.report_metadata.id) {
-                    self.metrics()
-                        .report_counter
-                        .with_label_values(&[&format!("rejected_{failure}")])
-                        .inc();
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                     return false;
                 }
                 true
@@ -499,7 +499,7 @@ where
                 &agg_job_id,
                 part_batch_sel,
                 reports,
-                self.metrics(),
+                &metrics,
             )
             .await?;
         let (state, agg_job_init_req) = match transition {
@@ -541,7 +541,7 @@ where
             state,
             agg_job_resp,
             task_config.version,
-            self.metrics(),
+            &metrics,
         )?;
         let (uncommited, agg_job_cont_req) = match transition {
             DapLeaderTransition::Uncommitted(uncommited, agg_job_cont_req) => {
@@ -571,16 +571,12 @@ where
         let out_shares =
             task_config
                 .vdaf
-                .handle_final_agg_job_resp(uncommited, agg_job_resp, self.metrics())?;
+                .handle_final_agg_job_resp(uncommited, agg_job_resp, &metrics)?;
         let out_shares_count = out_shares.len() as u64;
         self.put_out_shares(task_id, part_batch_sel, out_shares)
             .await?;
 
-        self.metrics()
-            .report_counter
-            .with_label_values(&["aggregated"])
-            .inc_by(out_shares_count);
-
+        metrics.report_inc_by("aggregated", out_shares_count);
         Ok(out_shares_count)
     }
 
@@ -593,7 +589,10 @@ where
         collect_id: &CollectionJobId,
         task_config: &DapTaskConfig,
         collect_req: &CollectionReq,
+        host: &str,
     ) -> Result<u64, DapAbort> {
+        let metrics = self.metrics().with_host(host);
+
         debug!("collecting id {collect_id}");
         let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self.get_agg_share(task_id, &batch_selector).await?;
@@ -678,11 +677,7 @@ where
         self.mark_collected(task_id, &agg_share_req.batch_sel)
             .await?;
 
-        self.metrics()
-            .report_counter
-            .with_label_values(&["collected"])
-            .inc_by(agg_share_req.report_count);
-
+        metrics.report_inc_by("collected", agg_share_req.report_count);
         Ok(agg_share_req.report_count)
     }
 
@@ -697,6 +692,7 @@ where
     async fn process(
         &'srv self,
         selector: &Self::ReportSelector,
+        host: &str,
     ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
         let mut telem = DapLeaderProcessTelemetry::default();
 
@@ -717,7 +713,13 @@ where
                 );
                 if !reports.is_empty() {
                     telem.reports_aggregated += self
-                        .run_agg_job(&task_id, task_config.as_ref(), &part_batch_sel, reports)
+                        .run_agg_job(
+                            &task_id,
+                            task_config.as_ref(),
+                            &part_batch_sel,
+                            reports,
+                            host,
+                        )
                         .await?;
                 }
             }
@@ -733,7 +735,13 @@ where
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
             telem.reports_collected += self
-                .run_collect_job(&task_id, &collect_id, task_config.as_ref(), &collect_req)
+                .run_collect_job(
+                    &task_id,
+                    &collect_id,
+                    task_config.as_ref(),
+                    &collect_req,
+                    host,
+                )
                 .await?;
         }
 
@@ -776,6 +784,7 @@ where
             return Err(DapAbort::version_unknown());
         }
 
+        let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
@@ -881,7 +890,7 @@ where
                         task_id,
                         task_config,
                         &agg_job_init_req,
-                        self.metrics(),
+                        &metrics,
                     )
                     .await?;
 
@@ -928,10 +937,7 @@ where
                                 // rejection metrics, the latter rejections take precedence. The
                                 // Leader has the opposite behavior: Early rejections are resolved
                                 // first, so take precedence.
-                                self.metrics()
-                                    .report_counter
-                                    .with_label_values(&[&format!("rejected_{failure}")])
-                                    .inc();
+                                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                             } else {
                                 state_index += 1;
                             }
@@ -945,8 +951,7 @@ where
                     }
                 };
 
-                self.metrics().aggregation_job_gauge.inc();
-
+                metrics.agg_job_inc();
                 Ok(DapResponse {
                     version: req.version,
                     media_type: DapMediaType::AggregationJobResp,
@@ -999,7 +1004,7 @@ where
                     &agg_job_id,
                     state,
                     &agg_job_cont_req,
-                    self.metrics(),
+                    &metrics,
                 )?;
 
                 let (agg_job_resp, out_shares_count) = match transition {
@@ -1014,13 +1019,8 @@ where
                     }
                 };
 
-                self.metrics()
-                    .report_counter
-                    .with_label_values(&["aggregated"])
-                    .inc_by(out_shares_count);
-
-                self.metrics().aggregation_job_gauge.dec();
-
+                metrics.report_inc_by("aggregated", out_shares_count);
+                metrics.agg_job_dec();
                 Ok(DapResponse {
                     version: req.version,
                     media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
@@ -1049,6 +1049,7 @@ where
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
+        let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
@@ -1131,11 +1132,7 @@ where
             encrypted_agg_share,
         };
 
-        self.metrics()
-            .report_counter
-            .with_label_values(&["collected"])
-            .inc_by(agg_share_req.report_count);
-
+        metrics.report_inc_by("collected", agg_share_req.report_count);
         Ok(DapResponse {
             version: req.version,
             media_type: DapMediaType::AggregateShare,

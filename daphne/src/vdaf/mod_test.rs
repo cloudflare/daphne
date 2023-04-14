@@ -228,7 +228,7 @@ async fn produce_agg_job_init_req_skip_hpke_decrypt_err(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="rejected_hpke_decrypt_error"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="rejected_hpke_decrypt_error"}"#: 1,
     });
 }
 
@@ -247,7 +247,7 @@ async fn produce_agg_job_init_req_skip_hpke_unknown_config_id(version: DapVersio
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="rejected_hpke_unknown_config_id"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="rejected_hpke_unknown_config_id"}"#: 1,
     });
 }
 
@@ -266,7 +266,7 @@ async fn produce_agg_job_init_req_skip_vdaf_prep_error(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="rejected_vdaf_prep_error"}"#: 2,
+        r#"test_leader_report_counter{host="leader.com",status="rejected_vdaf_prep_error"}"#: 2,
     });
 }
 
@@ -292,7 +292,7 @@ async fn handle_agg_job_init_req_hpke_decrypt_err(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{status="rejected_hpke_decrypt_error"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="rejected_hpke_decrypt_error"}"#: 1,
     });
 }
 
@@ -318,7 +318,7 @@ async fn handle_agg_job_init_req_hpke_unknown_config_id(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{status="rejected_hpke_unknown_config_id"}"#: 1,
+        r#"test_helper_report_counter{host="helper.org",status="rejected_hpke_unknown_config_id"}"#: 1,
     });
 }
 
@@ -363,7 +363,7 @@ async fn handle_agg_job_init_req_vdaf_prep_error(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{status="rejected_vdaf_prep_error"}"#: 2,
+        r#"test_helper_report_counter{host="helper.org",status="rejected_vdaf_prep_error"}"#: 2,
     });
 }
 
@@ -559,7 +559,7 @@ async fn agg_job_cont_req_skip_vdaf_prep_error(version: DapVersion) {
     );
 
     assert_metrics_include!(t.prometheus_registry, {
-        r#"test_leader_report_counter{status="rejected_vdaf_prep_error"}"#: 1,
+        r#"test_leader_report_counter{host="leader.com",status="rejected_vdaf_prep_error"}"#: 1,
     });
 }
 
@@ -764,8 +764,8 @@ impl Test {
             collector_hpke_receiver_config,
             task_config: DapTaskConfig {
                 version,
-                leader_url: Url::parse("http://dummy.url").unwrap(),
-                helper_url: Url::parse("http://dummy.url").unwrap(),
+                leader_url: Url::parse("http://leader.com").unwrap(),
+                helper_url: Url::parse("https://helper.org").unwrap(),
                 time_precision: 500,
                 expiration: now + 500,
                 min_batch_size: 10,
@@ -889,6 +889,9 @@ impl Test {
         &self,
         reports: Vec<Report>,
     ) -> DapLeaderTransition<AggregationJobInitReq> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
         self.task_config
             .vdaf
             .produce_agg_job_init_req(
@@ -898,7 +901,7 @@ impl Test {
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
-                &self.leader_metrics,
+                &metrics,
             )
             .await
             .unwrap()
@@ -908,6 +911,9 @@ impl Test {
         &mut self,
         agg_job_init_req: AggregationJobInitReq,
     ) -> DapHelperTransition<AggregationJobResp> {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
         self.task_config
             .vdaf
             .handle_agg_job_init_req(
@@ -915,7 +921,7 @@ impl Test {
                 &self.task_id,
                 &self.task_config,
                 &agg_job_init_req,
-                &self.helper_metrics,
+                &metrics,
             )
             .await
             .unwrap()
@@ -926,6 +932,9 @@ impl Test {
         leader_state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
     ) -> DapLeaderTransition<AggregationJobContinueReq> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
         self.task_config
             .vdaf
             .handle_agg_job_resp(
@@ -934,7 +943,7 @@ impl Test {
                 leader_state,
                 agg_job_resp,
                 self.task_config.version,
-                &self.leader_metrics,
+                &metrics,
             )
             .unwrap()
     }
@@ -944,6 +953,9 @@ impl Test {
         leader_state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
     ) -> DapAbort {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
         self.task_config
             .vdaf
             .handle_agg_job_resp(
@@ -952,7 +964,7 @@ impl Test {
                 leader_state,
                 agg_job_resp,
                 self.task_config.version,
-                &self.leader_metrics,
+                &metrics,
             )
             .expect_err("handle_agg_job_resp() succeeded; expected failure")
     }
@@ -962,6 +974,9 @@ impl Test {
         helper_state: DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapHelperTransition<AggregationJobResp> {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
@@ -969,7 +984,7 @@ impl Test {
                 &self.agg_job_id,
                 helper_state,
                 agg_job_cont_req,
-                &self.helper_metrics,
+                &metrics,
             )
             .unwrap()
     }
@@ -979,6 +994,9 @@ impl Test {
         helper_state: DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapAbort {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
@@ -986,7 +1004,7 @@ impl Test {
                 &self.agg_job_id,
                 helper_state,
                 agg_job_cont_req,
-                &self.helper_metrics,
+                &metrics,
             )
             .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
@@ -996,9 +1014,12 @@ impl Test {
         leader_uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
     ) -> Vec<DapOutputShare> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
         self.task_config
             .vdaf
-            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, &self.leader_metrics)
+            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, &metrics)
             .unwrap()
     }
 

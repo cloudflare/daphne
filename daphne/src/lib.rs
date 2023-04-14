@@ -817,6 +817,12 @@ impl<S> DapRequest<S> {
             ))
         }
     }
+
+    /// Return the hostname of the request URL. The value is "unspecified-host" if the URL does not
+    /// indicate a hostname.
+    pub fn host(&self) -> &str {
+        self.url.host_str().unwrap_or("unspecified-host")
+    }
 }
 
 /// DAP response.

@@ -12,7 +12,7 @@ use crate::{
         PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, TaskId, Time,
         Transition, TransitionFailure, TransitionVar,
     },
-    metrics::DaphneMetrics,
+    metrics::ContextualizedDaphneMetrics,
     vdaf::{
         prio2::{
             prio2_encode_prepare_message, prio2_helper_prepare_finish, prio2_leader_prepare_finish,
@@ -441,7 +441,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId<'_>,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-        metrics: &DaphneMetrics,
+        metrics: &ContextualizedDaphneMetrics<'_>,
     ) -> Result<DapLeaderTransition<AggregationJobInitReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -487,10 +487,9 @@ impl VdafConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                Err(DapError::Transition(failure)) => metrics
-                    .report_counter
-                    .with_label_values(&[&format!("rejected_{failure}")])
-                    .inc(),
+                Err(DapError::Transition(failure)) => {
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1)
+                }
 
                 Err(e) => return Err(DapAbort::Internal(Box::new(e))),
             };
@@ -539,7 +538,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_init_req: &AggregationJobInitReq,
-        metrics: &DaphneMetrics,
+        metrics: &ContextualizedDaphneMetrics<'_>,
     ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
         let num_reports = agg_job_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -577,10 +576,7 @@ impl VdafConfig {
                 }
 
                 Err(DapError::Transition(failure)) => {
-                    metrics
-                        .report_counter
-                        .with_label_values(&[&format!("rejected_{failure}")])
-                        .inc();
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                     TransitionVar::Failed(failure)
                 }
 
@@ -621,7 +617,7 @@ impl VdafConfig {
         state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
         version: DapVersion,
-        metrics: &DaphneMetrics,
+        metrics: &ContextualizedDaphneMetrics<'_>,
     ) -> Result<DapLeaderTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
@@ -644,10 +640,7 @@ impl VdafConfig {
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
-                    metrics
-                        .report_counter
-                        .with_label_values(&[&format!("rejected_{failure}")])
-                        .inc();
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                     continue;
                 }
 
@@ -695,10 +688,7 @@ impl VdafConfig {
                 // Skip report that can't be processed any further.
                 Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
                     let failure = TransitionFailure::VdafPrepError;
-                    metrics
-                        .report_counter
-                        .with_label_values(&[&format!("rejected_{failure}")])
-                        .inc();
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
             };
         }
@@ -738,7 +728,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId,
         state: DapHelperState,
         agg_cont_req: &AggregationJobContinueReq,
-        metrics: &DaphneMetrics,
+        metrics: &ContextualizedDaphneMetrics<'_>,
     ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
         if let Some(round) = agg_cont_req.round {
             if round == 0 {
@@ -817,10 +807,7 @@ impl VdafConfig {
 
                     Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
                         let failure = TransitionFailure::VdafPrepError;
-                        metrics
-                            .report_counter
-                            .with_label_values(&[&format!("rejected_{failure}")])
-                            .inc();
+                        metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                         TransitionVar::Failed(failure)
                     }
                 };
@@ -857,7 +844,7 @@ impl VdafConfig {
         &self,
         uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
-        metrics: &DaphneMetrics,
+        metrics: &ContextualizedDaphneMetrics,
     ) -> Result<Vec<DapOutputShare>, DapAbort> {
         if agg_job_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage);
@@ -880,10 +867,7 @@ impl VdafConfig {
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
-                    metrics
-                        .report_counter
-                        .with_label_values(&[&format!("rejected_{failure}")])
-                        .inc();
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                     continue;
                 }
 
