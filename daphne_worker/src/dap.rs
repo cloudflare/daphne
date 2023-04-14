@@ -55,7 +55,7 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    taskprov::{bad_request, get_taskprov_task_config},
+    taskprov::get_taskprov_task_config,
     DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender, DapTaskConfig, DapVersion,
     MetaAggregationJobId,
@@ -392,7 +392,10 @@ where
             let global = self.get_global_config();
             if !global.allow_taskprov {
                 // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
-                return Err(bad_request("taskprov is not allowed"));
+                return Err(DapError::Abort(DapAbort::InvalidTask {
+                    detail: "Taskprov extension is disabled.".to_string(),
+                    task_id: task_id.as_ref().clone(),
+                }));
             }
             let taskprov = self
                 .config()

@@ -112,8 +112,14 @@ pub(crate) fn compute_vdaf_verify_key(
     )
 }
 
-pub fn bad_request(detail: &str) -> DapError {
-    DapError::Abort(DapAbort::BadRequest(detail.to_string()))
+/// Opt out due to invalid configuration.
+//
+// TODO taskprov spec: Decide if this should be a different error type.
+fn malformed_task_config(task_id: &TaskId, detail: String) -> DapError {
+    DapError::Abort(DapAbort::InvalidTask {
+        detail,
+        task_id: task_id.clone(),
+    })
 }
 
 /// Check for a taskprov extension in the report, and return it if found.
@@ -149,9 +155,19 @@ pub fn get_taskprov_task_config(
     }
 }
 
-fn url_from_bytes(bytes: &[u8]) -> Result<Url, DapError> {
-    let s = str::from_utf8(bytes).map_err(|_| bad_request("bad URL UTF8"))?;
-    Url::parse(s).map_err(|_| bad_request("bad URL syntax"))
+fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapError> {
+    let url_string = str::from_utf8(url_bytes).map_err(|e| {
+        malformed_task_config(
+            task_id,
+            format!("Encountered error while parsing URL bytes as string: {e}"),
+        )
+    })?;
+    Url::parse(url_string).map_err(|e| {
+        malformed_task_config(
+            task_id,
+            format!("Encountered error while parsing URL string: {e}"),
+        )
+    })
 }
 
 impl From<QueryConfigVar> for DapQueryConfig {
@@ -192,13 +208,19 @@ impl DapTaskConfig {
         collector_hpke_config: &HpkeConfig,
     ) -> Result<DapTaskConfig, DapError> {
         if task_config.aggregator_endpoints.len() != 2 {
-            return Err(bad_request("number of aggregator endpoints is not 2"));
+            return Err(malformed_task_config(
+                task_id,
+                format!(
+                    "The task config indicates an invalid number of Aggregators ({})",
+                    task_config.aggregator_endpoints.len()
+                ),
+            ));
         }
         let vdaf_type = VdafType::from(task_config.vdaf_config.var.clone());
         Ok(DapTaskConfig {
             version: dap_version,
-            leader_url: url_from_bytes(&task_config.aggregator_endpoints[0].bytes)?,
-            helper_url: url_from_bytes(&task_config.aggregator_endpoints[1].bytes)?,
+            leader_url: url_from_bytes(task_id, &task_config.aggregator_endpoints[0].bytes)?,
+            helper_url: url_from_bytes(task_id, &task_config.aggregator_endpoints[1].bytes)?,
             time_precision: task_config.query_config.time_precision,
             expiration: task_config.task_expiration,
             min_batch_size: task_config.query_config.min_batch_size.into(),
