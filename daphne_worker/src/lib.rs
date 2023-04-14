@@ -231,7 +231,7 @@ impl DaphneWorkerRouter {
         } else {
             ISOLATE_STATE.get_or_try_init(|| DaphneWorkerIsolateState::from_worker_env(&env))?
         };
-        let state = DaphneWorkerRequestState::new(shared_state)?;
+        let state = DaphneWorkerRequestState::new(shared_state, &req)?;
 
         let router = Router::with_data(&state)
             .get_async("/:version/hpke_config", |req, ctx| async move {
@@ -243,7 +243,7 @@ impl DaphneWorkerRouter {
                     .await
                 {
                     Ok(req) => dap_response_to_worker(req),
-                    Err(e) => abort(e),
+                    Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
             })
             .post_async("/task", |mut req, ctx| async move {
@@ -290,7 +290,7 @@ impl DaphneWorkerRouter {
                                     .with_status(303)
                                     .with_headers(headers))
                             }
-                            Err(e) => abort(e),
+                            Err(e) => daph.state.dap_abort_to_worker_response(e),
                         }
                     }) // draft02
                     .get_async(
@@ -300,9 +300,11 @@ impl DaphneWorkerRouter {
                                 match ctx.param("task_id").and_then(TaskId::try_from_base64url) {
                                     Some(id) => id,
                                     None => {
-                                        return abort(DapAbort::BadRequest(
-                                            "missing task_id parameter".to_string(),
-                                        ))
+                                        return ctx.data.dap_abort_to_worker_response(
+                                            DapAbort::BadRequest(
+                                                "missing task_id parameter".to_string(),
+                                            ),
+                                        )
                                     }
                                 };
                             let collect_id = match ctx
@@ -311,9 +313,11 @@ impl DaphneWorkerRouter {
                             {
                                 Some(id) => id,
                                 None => {
-                                    return abort(DapAbort::BadRequest(
-                                        "missing collect_id parameter".to_string(),
-                                    ))
+                                    return ctx.data.dap_abort_to_worker_response(
+                                        DapAbort::BadRequest(
+                                            "missing collect_id parameter".to_string(),
+                                        ),
+                                    )
                                 }
                             };
                             let daph = ctx.data.handler(&ctx.env);
@@ -334,10 +338,12 @@ impl DaphneWorkerRouter {
                                     Ok(Response::empty().unwrap().with_status(202))
                                 }
                                 // TODO spec: Decide whether to define this behavior.
-                                Ok(DapCollectJob::Unknown) => {
-                                    abort(DapAbort::BadRequest("unknown collect id".into()))
-                                }
-                                Err(e) => abort(e.into()),
+                                Ok(DapCollectJob::Unknown) => daph
+                                    .state
+                                    .dap_abort_to_worker_response(DapAbort::BadRequest(
+                                        "unknown collect id".into(),
+                                    )),
+                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
                             }
                         },
                     ) // draft02
@@ -353,7 +359,7 @@ impl DaphneWorkerRouter {
                                 .await
                             {
                                 Ok(_) => Ok(Response::empty().unwrap().with_status(201)),
-                                Err(e) => abort(e),
+                                Err(e) => daph.state.dap_abort_to_worker_response(e),
                             }
                         },
                     )
@@ -364,7 +370,7 @@ impl DaphneWorkerRouter {
                             let req = daph.worker_request_to_dap(req, &ctx).await?;
                             let task_id = match req.task_id() {
                                 Ok(id) => id,
-                                Err(e) => return abort(e),
+                                Err(e) => return daph.state.dap_abort_to_worker_response(e),
                             };
                             // We cannot check a resource here as the resource is set via
                             // media type, and there is no media type when polling.
@@ -376,9 +382,9 @@ impl DaphneWorkerRouter {
                                 {
                                     Some(id) => id,
                                     None => {
-                                        return abort(DapAbort::BadRequest(
-                                            "malformed collect id".into(),
-                                        ))
+                                        return daph.state.dap_abort_to_worker_response(
+                                            DapAbort::BadRequest("malformed collect id".into()),
+                                        )
                                     }
                                 };
 
@@ -398,10 +404,12 @@ impl DaphneWorkerRouter {
                                     Ok(Response::empty().unwrap().with_status(202))
                                 }
                                 // TODO spec: Decide whether to define this behavior.
-                                Ok(DapCollectJob::Unknown) => {
-                                    abort(DapAbort::BadRequest("unknown collect id".into()))
-                                }
-                                Err(e) => abort(e.into()),
+                                Ok(DapCollectJob::Unknown) => daph
+                                    .state
+                                    .dap_abort_to_worker_response(DapAbort::BadRequest(
+                                        "unknown collect id".into(),
+                                    )),
+                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
                             }
                         },
                     )
@@ -410,7 +418,7 @@ impl DaphneWorkerRouter {
                         let daph = ctx.data.handler(&ctx.env);
                         let report_sel: DaphneWorkerReportSelector = req.json().await?;
                         match daph
-                            .process(&report_sel, &host(&req)?)
+                            .process(&report_sel, &daph.state.host)
                             .instrument(info_span!("process"))
                             .await
                         {
@@ -418,7 +426,7 @@ impl DaphneWorkerRouter {
                                 debug!("{:?}", telem);
                                 Response::from_json(&telem)
                             }
-                            Err(e) => abort(e),
+                            Err(e) => daph.state.dap_abort_to_worker_response(e),
                         }
                     })
                     .get_async(
@@ -428,16 +436,18 @@ impl DaphneWorkerRouter {
                             // task. The task ID and batch ID are both encoded in URL-safe base64.
                             //
                             // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
-                            let task_id =
-                                match ctx.param("task_id").and_then(TaskId::try_from_base64url) {
-                                    Some(id) => id,
-                                    None => {
-                                        return abort(DapAbort::BadRequest(
-                                            "missing or malformed task ID".into(),
-                                        ))
-                                    }
-                                };
                             let daph = ctx.data.handler(&ctx.env);
+                            let task_id = match ctx
+                                .param("task_id")
+                                .and_then(TaskId::try_from_base64url)
+                            {
+                                Some(id) => id,
+                                None => {
+                                    return daph.state.dap_abort_to_worker_response(
+                                        DapAbort::BadRequest("missing or malformed task ID".into()),
+                                    )
+                                }
+                            };
                             match daph
                                 .internal_current_batch(&task_id)
                                 .instrument(info_span!("current_batch"))
@@ -446,7 +456,7 @@ impl DaphneWorkerRouter {
                                 Ok(batch_id) => Response::from_bytes(
                                     batch_id.to_base64url().as_bytes().to_owned(),
                                 ),
-                                Err(e) => abort(e.into()),
+                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
                             }
                         },
                     )
@@ -468,7 +478,7 @@ impl DaphneWorkerRouter {
                     handle_agg_share_req,
                 ),
 
-            _ => return abort(DapError::fatal("unexpected role").into()),
+            role => return Err(Error::RustError(format!("Unhandled DAP role: {role}"))),
         };
 
         let router = if self.enable_internal_test {
@@ -481,7 +491,7 @@ impl DaphneWorkerRouter {
                         .await
                     {
                         Ok(()) => Response::empty(),
-                        Err(e) => abort(e.into()),
+                        Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
                     }
                 })
                 // Endpoints for draft-dcook-ppm-dap-interop-test-design-02
@@ -548,8 +558,6 @@ impl DaphneWorkerRouter {
             router
         };
 
-        let host = host(&req)?;
-
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
         // router creates. If curious, you can add .instrument(info_span!("http")) just before
@@ -558,9 +566,9 @@ impl DaphneWorkerRouter {
 
         state
             .metrics
-            .http_status_code
+            .http_status_code_counter
             .with_label_values(&[
-                &host,
+                &state.host,
                 &format!("{}", result.as_ref().map_or(500, |resp| resp.status_code())),
             ])
             .inc();
@@ -589,7 +597,7 @@ async fn put_report_into_task(
         .await
     {
         Ok(()) => Response::empty(),
-        Err(e) => abort(e),
+        Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
 }
 
@@ -606,7 +614,7 @@ async fn handle_agg_job(
         .await
     {
         Ok(resp) => dap_response_to_worker(resp),
-        Err(e) => abort(e),
+        Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
 }
 
@@ -623,7 +631,7 @@ async fn handle_agg_share_req(
         .await
     {
         Ok(resp) => dap_response_to_worker(resp),
-        Err(e) => abort(e),
+        Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
 }
 
@@ -645,32 +653,6 @@ pub(crate) fn int_err<S: ToString>(s: S) -> Error {
 /// between both crates is not currently feasible.
 pub(crate) fn dap_err(e: Error) -> DapError {
     DapError::Fatal(format!("worker: {e}"))
-}
-
-fn abort(e: DapAbort) -> Result<Response> {
-    let status = if matches!(e, DapAbort::Internal(..)) {
-        500
-    } else {
-        400
-    };
-    let problem_details = e.into_problem_details();
-    error!(
-        "request aborted: {}",
-        serde_json::to_string(&problem_details)?
-    );
-    let mut headers = Headers::new();
-    headers.set("Content-Type", "application/problem+json")?;
-    Ok(Response::from_json(&problem_details)?
-        .with_status(status)
-        .with_headers(headers))
-}
-
-fn host(req: &Request) -> Result<String> {
-    Ok(req
-        .url()?
-        .host_str()
-        .unwrap_or("unspecified-daphne-worker-host")
-        .to_string())
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]

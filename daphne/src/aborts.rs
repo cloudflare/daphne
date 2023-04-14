@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, thiserror::Error)]
 pub enum DapAbort {
     /// Bad request. Sent in response to an HTTP request that couldn't be handled preoprly.
-    #[error("badRequest")]
+    #[error("bad request")]
     BadRequest(String),
 
     /// Invalid batch. Sent in response to a CollectReq or AggregateShareReq.
@@ -31,7 +31,7 @@ pub enum DapAbort {
     BatchOverlap { detail: String, task_id: TaskId },
 
     /// Internal error.
-    #[error("internalError")]
+    #[error("internal error")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
@@ -259,7 +259,7 @@ impl DapAbort {
                 "Task indicated by request is not recognized",
                 Some(self.to_string()),
             ),
-            Self::BadRequest(..) => ("Invalid request", None),
+            Self::BadRequest(..) => ("Bad request", None),
             Self::Internal(..) => ("Internal server error", None),
         };
 
