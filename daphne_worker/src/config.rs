@@ -407,18 +407,31 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
 
     /// Metrics.
     pub(crate) metrics: DaphneWorkerMetrics,
+
+    /// Hostname parsed from the HTTP request URL. Set to "unspecified-daphne-worker-hsot" if the
+    /// hostname is not part of the URL.
+    pub(crate) host: String,
 }
 
 impl<'srv> DaphneWorkerRequestState<'srv> {
-    pub(crate) fn new(isolate_state: &'srv DaphneWorkerIsolateState) -> Result<Self> {
+    pub(crate) fn new(
+        isolate_state: &'srv DaphneWorkerIsolateState,
+        req: &Request,
+    ) -> Result<Self> {
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
             .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
+        let host = req
+            .url()?
+            .host_str()
+            .unwrap_or("unspecified-daphne-worker-host")
+            .to_string();
 
         Ok(Self {
             isolate_state,
             prometheus_registry,
             metrics,
+            host,
         })
     }
 
@@ -469,6 +482,28 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn dap_abort_to_worker_response(&self, e: DapAbort) -> Result<Response> {
+        let status = if matches!(e, DapAbort::Internal(..)) {
+            500
+        } else {
+            400
+        };
+        self.metrics
+            .dap_abort_counter
+            .with_label_values(&[&self.host, &e.to_string()])
+            .inc();
+        let problem_details = e.into_problem_details();
+        error!(
+            "request aborted: {}",
+            serde_json::to_string(&problem_details)?
+        );
+        let mut headers = Headers::new();
+        headers.set("Content-Type", "application/problem+json")?;
+        Ok(Response::from_json(&problem_details)?
+            .with_status(status)
+            .with_headers(headers))
     }
 }
 
