@@ -526,7 +526,7 @@ async fn e2e_leader_upload_taskprov() {
         DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
-        "badRequest",
+        "invalidTask",
     )
     .await;
 }
