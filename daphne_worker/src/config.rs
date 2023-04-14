@@ -441,17 +441,17 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
 
     /// If configured, gather metrics and push to Prometheus server.
     pub(crate) async fn maybe_push_metrics(&self) -> Result<()> {
-        if let Some(ref metrics_push_config) = self.isolate_state.config.metrics_push_config {
-            // Prepare text exposition of metrics.
-            let mut buf = Vec::new();
-            let encoder = prometheus::TextEncoder::new();
-            let metrics_familes = self.prometheus_registry.gather();
-            encoder
-                .encode(&metrics_familes, &mut buf)
-                .expect("failled to encode metrics");
-            let text_metrics =
-                String::from_utf8(buf).expect("text encoding of metrics is not UTF8");
+        // Prepare text exposition of metrics.
+        let mut buf = Vec::new();
+        let encoder = prometheus::TextEncoder::new();
+        let metrics_familes = self.prometheus_registry.gather();
+        encoder
+            .encode(&metrics_familes, &mut buf)
+            .expect("failed to encode metrics");
+        let text_metrics = String::from_utf8(buf).expect("text encoding of metrics is not UTF8");
+        info!("Prometheus summary:\n{text_metrics}");
 
+        if let Some(ref metrics_push_config) = self.isolate_state.config.metrics_push_config {
             // Prepare authorization.
             let mut headers = reqwest_wasm::header::HeaderMap::new();
             let bearer_token: &str = metrics_push_config.bearer_token.as_ref();
