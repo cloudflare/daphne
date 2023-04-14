@@ -13,7 +13,7 @@ use crate::{
         PartialBatchSelector, Query, Report, ReportId, ReportMetadata, TaskId, Time,
         TransitionFailure, TransitionVar,
     },
-    metrics::DaphneMetrics,
+    metrics::{DaphneMetrics, DaphneRequestType},
     DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
     DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
     DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion,
@@ -151,6 +151,8 @@ where
             return Err(DapAbort::version_unknown());
         }
 
+        let metrics = self.metrics().with_host(req.host());
+
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;
         for (k, v) in req.url.query_pairs() {
@@ -195,6 +197,7 @@ where
             _ => unreachable!("unhandled version {:?}", req.version),
         };
 
+        metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);
         Ok(DapResponse {
             version: req.version,
             media_type: DapMediaType::HpkeConfigList,
@@ -309,6 +312,7 @@ where
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
     async fn http_post_upload(&'srv self, req: &'req DapRequest<S>) -> Result<(), DapAbort> {
+        let metrics = self.metrics().with_host(req.host());
         debug!("upload for task {}", req.task_id()?);
 
         // Check whether the DAP version indicated by the sender is supported.
@@ -362,16 +366,20 @@ where
         // Store the report for future processing. At this point, the report may be rejected if
         // the Leader detects that the report was replayed or pertains to a batch that has already
         // been collected.
-        Ok(self.put_report(&report, req.task_id()?).await?)
+        self.put_report(&report, req.task_id()?).await?;
+
+        metrics.inbound_req_inc(DaphneRequestType::Upload);
+        Ok(())
     }
 
     /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
     async fn http_post_collect(&'srv self, req: &'req DapRequest<S>) -> Result<Url, DapAbort> {
+        let now = self.get_current_time();
+        let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
         debug!("collect for task {task_id}");
-        let now = self.get_current_time();
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
@@ -443,9 +451,12 @@ where
             _ => unreachable!("unhandled resource {:?}", req.resource),
         };
 
-        Ok(self
+        let collect_job_uri = self
             .init_collect_job(task_id, &collect_job_id, &collect_req)
-            .await?)
+            .await?;
+
+        metrics.inbound_req_inc(DaphneRequestType::Collect);
+        Ok(collect_job_uri)
     }
 
     /// Run the aggregation sub-protocol for the given set of reports. Return the number of reports
@@ -779,12 +790,13 @@ where
         &'srv self,
         req: &'req DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
+        let metrics = self.metrics().with_host(req.host());
+
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::version_unknown());
         }
 
-        let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
@@ -952,6 +964,7 @@ where
                 };
 
                 metrics.agg_job_inc();
+                metrics.inbound_req_inc(DaphneRequestType::Aggregate);
                 Ok(DapResponse {
                     version: req.version,
                     media_type: DapMediaType::AggregationJobResp,
@@ -1021,6 +1034,7 @@ where
 
                 metrics.report_inc_by("aggregated", out_shares_count);
                 metrics.agg_job_dec();
+                metrics.inbound_req_inc(DaphneRequestType::Aggregate);
                 Ok(DapResponse {
                     version: req.version,
                     media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
@@ -1041,6 +1055,7 @@ where
         req: &'req DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
+        let metrics = self.metrics().with_host(req.host());
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
@@ -1049,7 +1064,6 @@ where
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
@@ -1133,6 +1147,7 @@ where
         };
 
         metrics.report_inc_by("collected", agg_share_req.report_count);
+        metrics.inbound_req_inc(DaphneRequestType::Collect);
         Ok(DapResponse {
             version: req.version,
             media_type: DapMediaType::AggregateShare,

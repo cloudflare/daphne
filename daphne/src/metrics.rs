@@ -10,6 +10,9 @@ use prometheus::{
 };
 
 pub struct DaphneMetrics {
+    /// Inbound request metrics: Successful requests served, broken down by type.
+    inbound_request_counter: IntCounterVec,
+
     /// Report metrics. How many reports have been rejected, aggregated, and collected. When
     /// a report is rejected, the failure type is recorded.
     report_counter: IntCounterVec,
@@ -28,6 +31,13 @@ impl DaphneMetrics {
             "".into()
         };
 
+        let inbound_request_counter = register_int_counter_vec_with_registry!(
+            format!("{front}inbound_request_counter"),
+            "Total number of successful inbound requests.",
+            &["host", "type"],
+            registry
+        )?;
+
         let report_counter = register_int_counter_vec_with_registry!(
             format!("{front}report_counter"),
             "Total number reports rejected, aggregated, and collected.",
@@ -43,6 +53,7 @@ impl DaphneMetrics {
         )?;
 
         Ok(Self {
+            inbound_request_counter,
             report_counter,
             aggregation_job_gauge,
         })
@@ -62,6 +73,20 @@ pub struct ContextualizedDaphneMetrics<'req> {
 }
 
 impl ContextualizedDaphneMetrics<'_> {
+    pub fn inbound_req_inc(&self, request_type: DaphneRequestType) {
+        let request_type_str = match request_type {
+            DaphneRequestType::HpkeConfig => "hpke_config",
+            DaphneRequestType::Upload => "upload",
+            DaphneRequestType::Aggregate => "aggregate",
+            DaphneRequestType::Collect => "collect",
+        };
+
+        self.metrics
+            .inbound_request_counter
+            .with_label_values(&[self.host, request_type_str])
+            .inc();
+    }
+
     pub fn report_inc_by(&self, status: &str, val: u64) {
         self.metrics
             .report_counter
@@ -82,4 +107,16 @@ impl ContextualizedDaphneMetrics<'_> {
             .with_label_values(&[self.host])
             .dec();
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DaphneRequestType {
+    /// DAP request for fetching the Aggregator's HPKE config.
+    HpkeConfig,
+    /// DAP upload request.
+    Upload,
+    /// DAP aggregate request.
+    Aggregate,
+    /// DAP collect request.
+    Collect,
 }
