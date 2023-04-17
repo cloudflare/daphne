@@ -164,6 +164,7 @@ use daphne::{
     roles::{DapAggregator, DapHelper, DapLeader},
     DapCollectJob, DapError, DapResponse, DapVersion,
 };
+pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
 use prio::codec::ParameterizedEncode;
 use serde::{Deserialize, Serialize};
@@ -182,14 +183,26 @@ pub struct DaphneWorkerReportSelector {
 }
 
 /// HTTP request handler for Daphne-Worker.
-#[derive(Default)]
-pub struct DaphneWorkerRouter {
+pub struct DaphneWorkerRouter<'srv> {
     /// If true, then enable internal test endpoints. These should not be enabled in production.
     pub enable_internal_test: bool,
 
     /// If true, then respond to unhandled requests with 200 OK instead of 404 Not Found. The
     /// response body can be overrided by setting environment variable DAP_DEFAULT_RESPONSE_HTML.
     pub enable_default_response: bool,
+
+    /// Error reporting for Daphne. By default is a no-op.
+    pub error_reporter: &'srv dyn error_reporting::ErrorReporter,
+}
+
+impl<'srv> Default for DaphneWorkerRouter<'srv> {
+    fn default() -> Self {
+        Self {
+            error_reporter: &error_reporting::NoopErrorReporter {},
+            enable_internal_test: false,
+            enable_default_response: false,
+        }
+    }
 }
 
 /// The response body for unhandled requests when [`DaphneWorkerRouter::enable_default_response`]
@@ -198,7 +211,7 @@ pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
 static ISOLATE_STATE: OnceCell<DaphneWorkerIsolateState> = OnceCell::new();
 
-impl DaphneWorkerRouter {
+impl DaphneWorkerRouter<'_> {
     /// HTTP request handler for Daphne-Worker.
     ///
     /// This methoed is typically called from the
@@ -231,7 +244,7 @@ impl DaphneWorkerRouter {
         } else {
             ISOLATE_STATE.get_or_try_init(|| DaphneWorkerIsolateState::from_worker_env(&env))?
         };
-        let state = DaphneWorkerRequestState::new(shared_state, &req)?;
+        let state = DaphneWorkerRequestState::new(shared_state, &req, self.error_reporter)?;
 
         let router = Router::with_data(&state)
             .get_async("/:version/hpke_config", |req, ctx| async move {
@@ -702,5 +715,6 @@ mod auth_test;
 mod config;
 mod dap;
 mod durable;
+mod error_reporting;
 mod metrics;
 mod tracing_utils;
