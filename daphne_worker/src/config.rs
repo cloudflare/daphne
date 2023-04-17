@@ -14,6 +14,7 @@ use crate::{
         DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
         DURABLE_DELETE_ALL,
     },
+    error_reporting::ErrorReporter,
     int_err,
     metrics::DaphneWorkerMetrics,
     InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
@@ -411,12 +412,16 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
     /// Hostname parsed from the HTTP request URL. Set to "unspecified-daphne-worker-hsot" if the
     /// hostname is not part of the URL.
     pub(crate) host: String,
+
+    /// Error reporting for Daphne internal errors.
+    pub(crate) error_reporter: &'srv dyn ErrorReporter,
 }
 
 impl<'srv> DaphneWorkerRequestState<'srv> {
     pub(crate) fn new(
         isolate_state: &'srv DaphneWorkerIsolateState,
         req: &Request,
+        error_reporter: &'srv dyn ErrorReporter,
     ) -> Result<Self> {
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
@@ -432,6 +437,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             prometheus_registry,
             metrics,
             host,
+            error_reporter,
         })
     }
 
@@ -486,6 +492,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
 
     pub(crate) fn dap_abort_to_worker_response(&self, e: DapAbort) -> Result<Response> {
         let status = if matches!(e, DapAbort::Internal(..)) {
+            self.error_reporter.report_abort(&e);
             500
         } else {
             400
