@@ -842,19 +842,7 @@ impl VdafConfig {
 
     /// Encrypt an aggregate share under the Collector's public key. This method is run by the
     /// Leader in reponse to a collect request.
-    ///
-    /// # Inputs
-    ///
-    /// * `hpke_config` is the Collector's HPKE public key.
-    ///
-    /// * `task_id` is the DAP task ID.
-    ///
-    /// * `batch_interval` is the batch interval for the aggregate share.
-    ///
-    /// * `agg_share` is the aggregate share.
-    ///
-    /// * `version` is the DapVersion to use.
-    pub(crate) fn produce_leader_encrypted_agg_share(
+    pub fn produce_leader_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
@@ -867,9 +855,7 @@ impl VdafConfig {
 
     /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
     /// aggregate-share request.
-    ///
-    /// * `version` is the DapVersion to use.
-    pub(crate) fn produce_helper_encrypted_agg_share(
+    pub fn produce_helper_encrypted_agg_share(
         &self,
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
