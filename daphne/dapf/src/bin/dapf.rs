@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::{anyhow, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use daphne::{
     aborts::ProblemDetails,
     constants::DapMediaType,
     hpke::HpkeReceiverConfig,
-    messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, Query, TaskId},
+    messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, HpkeKemId, Query, TaskId},
     DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
-use reqwest::blocking::{Client, ClientBuilder};
+use rand::prelude::*;
+use reqwest::{Client, ClientBuilder};
 use std::{
     io::{stdin, Read},
     time::SystemTime,
@@ -27,7 +28,7 @@ struct Cli {
 
     /// DAP task ID (base64, URL-safe encoding)
     #[clap(short, long, action)]
-    task_id: String,
+    task_id: Option<String>,
 
     /// Bearer token for authorizing request
     #[clap(short, long, action)]
@@ -71,17 +72,40 @@ enum Action {
         #[clap(short, long, action)]
         vdaf: VdafConfig,
     },
+    GenerateHpkeReceiverConfig {
+        kem_alg: KemAlg,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct KemAlg(HpkeKemId);
+
+impl ValueEnum for KemAlg {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            Self(HpkeKemId::X25519HkdfSha256),
+            Self(HpkeKemId::P256HkdfSha256),
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(match self.0 {
+            HpkeKemId::X25519HkdfSha256 => PossibleValue::new("x25519_hkdf_sha256"),
+            HpkeKemId::P256HkdfSha256 => PossibleValue::new("p256_hkdf_sha256"),
+            HpkeKemId::NotImplemented(id) => unreachable!("unhandled HPKE KEM ID {id}"),
+        })
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut rng = thread_rng();
     let version = DapVersion::Draft02; // TODO(bhalleycf) make a parameter
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
 
     let cli = Cli::parse();
-    let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
 
     // HTTP client should not handle redirects automatically.
     let http_client = ClientBuilder::new()
@@ -94,6 +118,8 @@ async fn main() -> Result<()> {
             helper_url,
             vdaf,
         } => {
+            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
+
             // Read the measurement from stdin.
             let mut buf = String::new();
             stdin()
@@ -105,8 +131,10 @@ async fn main() -> Result<()> {
 
             // Get the Aggregators' HPKE configs.
             let leader_hpke_config = get_hpke_config(&http_client, &task_id, leader_url)
+                .await
                 .with_context(|| "failed to fetch the Leader's HPKE config")?;
             let helper_hpke_config = get_hpke_config(&http_client, &task_id, helper_url)
+                .await
                 .with_context(|| "failed to fetch the Helper's HPKE config")?;
 
             // Generate a report for the measurement.
@@ -135,10 +163,11 @@ async fn main() -> Result<()> {
                 .post(Url::parse(leader_url)?.join("upload")?)
                 .body(report.get_encoded_with_param(&version))
                 .headers(headers)
-                .send()?;
+                .send()
+                .await?;
             if resp.status() == 400 {
-                let problem_details: ProblemDetails =
-                    serde_json::from_str(&resp.text()?).with_context(|| "unexpected response")?;
+                let problem_details: ProblemDetails = serde_json::from_str(&resp.text().await?)
+                    .with_context(|| "unexpected response")?;
                 return Err(anyhow!(serde_json::to_string(&problem_details)?));
             } else if resp.status() != 200 {
                 return Err(anyhow!("unexpected response: {:?}", resp));
@@ -147,6 +176,8 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Action::Collect { leader_url } => {
+            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
+
             // Read the batch selector from stdin.
             let mut buf = String::new();
             stdin()
@@ -188,10 +219,11 @@ async fn main() -> Result<()> {
                 .post(Url::parse(leader_url)?.join("collect")?)
                 .body(collect_req.get_encoded_with_param(&version))
                 .headers(headers)
-                .send()?;
+                .send()
+                .await?;
             if resp.status() == 400 {
-                let problem_details: ProblemDetails =
-                    serde_json::from_str(&resp.text()?).with_context(|| "unexpected response")?;
+                let problem_details: ProblemDetails = serde_json::from_str(&resp.text().await?)
+                    .with_context(|| "unexpected response")?;
                 return Err(anyhow!(serde_json::to_string(&problem_details)?));
             } else if resp.status() != 303 {
                 return Err(anyhow!("unexpected response: {:?}", resp));
@@ -209,6 +241,8 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Action::CollectPoll { uri, vdaf } => {
+            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
+
             // Read the batch selector from stdin.
             let mut buf = String::new();
             stdin()
@@ -218,7 +252,7 @@ async fn main() -> Result<()> {
             let batch_selector: BatchSelector =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
-            let resp = http_client.get(uri).send()?;
+            let resp = http_client.get(uri).send().await?;
             if resp.status() == 202 {
                 return Err(anyhow!("aggregate result not ready"));
             } else if resp.status() != 200 {
@@ -227,7 +261,7 @@ async fn main() -> Result<()> {
             let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
-            let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes()?)?;
+            let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
                     receiver,
@@ -242,17 +276,35 @@ async fn main() -> Result<()> {
             print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())
         }
+        Action::GenerateHpkeReceiverConfig { kem_alg } => {
+            let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
+                .with_context(|| "failed to generate HPKE receiver config")?;
+            println!(
+                "{}",
+                serde_json::to_string(&receiver_config)
+                    .with_context(|| "failed to JSON-encode the HPKE receiver config")?
+            );
+            Ok(())
+        }
     }
 }
 
-fn parse_id(id_str: &str) -> Result<TaskId> {
-    TaskId::try_from_base64url(id_str)
-        .ok_or_else(|| anyhow!("failed to decode ID"))
-        .with_context(|| "expected URL-safe, base64 string")
+fn parse_id(id_str: &Option<String>) -> Result<TaskId> {
+    TaskId::try_from_base64url(
+        id_str
+            .as_deref()
+            .ok_or_else(|| anyhow!("expected task ID argument"))?,
+    )
+    .ok_or_else(|| anyhow!("failed to decode ID"))
+    .with_context(|| "expected URL-safe, base64 string")
 }
 
 // TODO(cjpatton) Refactor integration tests to use this method.
-fn get_hpke_config(http_client: &Client, task_id: &TaskId, base_url: &str) -> Result<HpkeConfig> {
+async fn get_hpke_config(
+    http_client: &Client,
+    task_id: &TaskId,
+    base_url: &str,
+) -> Result<HpkeConfig> {
     let url = Url::parse(base_url)
         .with_context(|| "failed to parse base URL")?
         .join("hpke_config")?;
@@ -261,11 +313,15 @@ fn get_hpke_config(http_client: &Client, task_id: &TaskId, base_url: &str) -> Re
         .get(url.as_str())
         .query(&[("task_id", task_id.to_base64url())])
         .send()
+        .await
         .with_context(|| "request failed")?;
     if !resp.status().is_success() {
         return Err(anyhow!("unexpected response: {:?}", resp));
     }
 
-    let hpke_config_bytes = resp.bytes().with_context(|| "failed to read response")?;
+    let hpke_config_bytes = resp
+        .bytes()
+        .await
+        .with_context(|| "failed to read response")?;
     Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?)
 }
