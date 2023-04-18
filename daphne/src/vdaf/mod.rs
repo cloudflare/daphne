@@ -417,23 +417,8 @@ impl VdafConfig {
     /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the initial aggregate request to be sent to the Helper.
     /// This method is called by the Leader.
-    ///
-    /// Note: This method does not compute the message authentication tag. It is up to the caller
-    /// to do so.
-    ///
-    /// # inputs
-    ///
-    /// * `decrypter` is used to decrypt the Leader's report shares.
-    ///
-    /// * `verify_key` is the secret VDAF verification key shared by the Aggregators.
-    ///
-    /// * `task_id` indicates the DAP task for which the set of reports are being aggregated.
-    ///
-    /// * `reports` is the set of reports uploaded by Clients.
-    ///
-    /// * `version` is the DapVersion to use.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn produce_agg_job_init_req(
+    pub async fn produce_agg_job_init_req(
         &self,
         decrypter: &impl HpkeDecrypter<'_>,
         task_id: &TaskId,
@@ -599,18 +584,7 @@ impl VdafConfig {
     }
 
     /// Handle an aggregate response from the Helper. This method is run by the Leader.
-    ///
-    /// Note: This method does not compute the message authentication tag. It is up to the caller
-    /// to do so.
-    ///
-    /// # Inputs
-    ///
-    /// * `task_id` is the DAP task for which the reports are being aggregated.
-    ///
-    /// * `state` is the Leader's current state.
-    ///
-    /// * `agg_job_resp` is the previous aggregate response sent by the Helper.
-    pub(crate) fn handle_agg_job_resp(
+    pub fn handle_agg_job_resp(
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
@@ -828,19 +802,7 @@ impl VdafConfig {
     }
 
     /// Handle the last aggregate response from the Helper. This method is run by the Leader.
-    ///
-    /// Note: This method does not compute the message authentication tag. It is up to the caller
-    /// to do so.
-    ///
-    /// # Inputs
-    ///
-    /// * `task_id` is the DAP task for which the reports are being aggregated.
-    ///
-    /// * `uncommited` is the Leader's current state, i.e., the set of output shares output from
-    /// the previous round that have not yet been commmitted to.
-    ///
-    /// * `agg_job_resp` is the previous aggregate response sent by the Helper.
-    pub(crate) fn handle_final_agg_job_resp(
+    pub fn handle_final_agg_job_resp(
         &self,
         uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
