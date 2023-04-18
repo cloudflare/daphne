@@ -15,6 +15,7 @@ daphne = { path = ".." }
 assert_matches = "1.5.0"
 base64 = "0.21.0"
 prio = "0.12.0"
+rand = "0.8.5"
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.95"
 url = { version = "2.3.1", features = ["serde"] }

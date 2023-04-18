@@ -545,6 +545,7 @@ dependencies = [
  "clap",
  "daphne",
  "prio",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",
