@@ -573,10 +573,12 @@ pub struct DapOutputShare {
 /// An aggregate share computed by combining a set of output shares.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DapAggregateShare {
-    pub(crate) report_count: u64,
+    /// Number of reports in the batch.
+    pub report_count: u64,
     pub(crate) min_time: Time,
     pub(crate) max_time: Time,
-    pub(crate) checksum: [u8; 32],
+    /// Batch checkusm.
+    pub checksum: [u8; 32],
     pub(crate) data: Option<VdafAggregateShare>,
 }
 
