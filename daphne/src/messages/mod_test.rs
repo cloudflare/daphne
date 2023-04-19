@@ -4,13 +4,7 @@
 use crate::messages::taskprov::{
     DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
 };
-use crate::messages::{
-    decode_base64url, decode_base64url_vec, encode_base64url, AggregateShareReq,
-    AggregationJobContinueReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
-    BatchId, BatchSelector, CollectionJobId, DapVersion, Draft02AggregationJobId, Extension,
-    HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, PartialBatchSelector, Report,
-    ReportId, ReportMetadata, ReportShare, TaskId, Transition, TransitionFailure, TransitionVar,
-};
+use crate::messages::*;
 use crate::taskprov::{compute_task_id, TaskprovVersion};
 use crate::{test_version, test_versions};
 use hpke_rs::HpkePublicKey;
@@ -97,32 +91,38 @@ fn roundtrip_agg_job_init_req() {
         part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
             batch_id: BatchId([0; 32]),
         },
-        report_shares: vec![
-            ReportShare {
-                report_metadata: ReportMetadata {
-                    id: ReportId([99; 16]),
-                    time: 1637361337,
-                    extensions: Vec::default(),
+        report_inits: vec![
+            ReportInit {
+                helper_report_share: ReportShare {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([99; 16]),
+                        time: 1637361337,
+                        extensions: Vec::default(),
+                    },
+                    public_share: b"public share".to_vec(),
+                    encrypted_input_share: HpkeCiphertext {
+                        config_id: 23,
+                        enc: b"encapsulated key".to_vec(),
+                        payload: b"ciphertext".to_vec(),
+                    },
                 },
-                public_share: b"public share".to_vec(),
-                encrypted_input_share: HpkeCiphertext {
-                    config_id: 23,
-                    enc: b"encapsulated key".to_vec(),
-                    payload: b"ciphertext".to_vec(),
-                },
+                draft05_leader_prep_share: None,
             },
-            ReportShare {
-                report_metadata: ReportMetadata {
-                    id: ReportId([17; 16]),
-                    time: 163736423,
-                    extensions: Vec::default(),
+            ReportInit {
+                helper_report_share: ReportShare {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([17; 16]),
+                        time: 163736423,
+                        extensions: Vec::default(),
+                    },
+                    public_share: b"public share".to_vec(),
+                    encrypted_input_share: HpkeCiphertext {
+                        config_id: 0,
+                        enc: vec![],
+                        payload: b"ciphertext".to_vec(),
+                    },
                 },
-                public_share: b"public share".to_vec(),
-                encrypted_input_share: HpkeCiphertext {
-                    config_id: 0,
-                    enc: vec![],
-                    payload: b"ciphertext".to_vec(),
-                },
+                draft05_leader_prep_share: None,
             },
         ],
     };
@@ -141,32 +141,38 @@ fn roundtrip_agg_job_init_req() {
         part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
             batch_id: BatchId([0; 32]),
         },
-        report_shares: vec![
-            ReportShare {
-                report_metadata: ReportMetadata {
-                    id: ReportId([99; 16]),
-                    time: 1637361337,
-                    extensions: Vec::default(),
+        report_inits: vec![
+            ReportInit {
+                helper_report_share: ReportShare {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([99; 16]),
+                        time: 1637361337,
+                        extensions: Vec::default(),
+                    },
+                    public_share: b"public share".to_vec(),
+                    encrypted_input_share: HpkeCiphertext {
+                        config_id: 23,
+                        enc: b"encapsulated key".to_vec(),
+                        payload: b"ciphertext".to_vec(),
+                    },
                 },
-                public_share: b"public share".to_vec(),
-                encrypted_input_share: HpkeCiphertext {
-                    config_id: 23,
-                    enc: b"encapsulated key".to_vec(),
-                    payload: b"ciphertext".to_vec(),
-                },
+                draft05_leader_prep_share: Some(b"leader prep share".to_vec()),
             },
-            ReportShare {
-                report_metadata: ReportMetadata {
-                    id: ReportId([17; 16]),
-                    time: 163736423,
-                    extensions: Vec::default(),
+            ReportInit {
+                helper_report_share: ReportShare {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([17; 16]),
+                        time: 163736423,
+                        extensions: Vec::default(),
+                    },
+                    public_share: b"public share".to_vec(),
+                    encrypted_input_share: HpkeCiphertext {
+                        config_id: 0,
+                        enc: vec![],
+                        payload: b"ciphertext".to_vec(),
+                    },
                 },
-                public_share: b"public share".to_vec(),
-                encrypted_input_share: HpkeCiphertext {
-                    config_id: 0,
-                    enc: vec![],
-                    payload: b"ciphertext".to_vec(),
-                },
+                draft05_leader_prep_share: Some(b"leader prep share".to_vec()),
             },
         ],
     };
@@ -207,32 +213,39 @@ fn read_agg_job_init_req_draft02() {
             part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                 batch_id: BatchId([0; 32]),
             },
-            report_shares: vec![
-                ReportShare {
-                    report_metadata: ReportMetadata {
-                        id: ReportId([99; 16]),
-                        time: 1637361337,
-                        extensions: Vec::default(),
+
+            report_inits: vec![
+                ReportInit {
+                    helper_report_share: ReportShare {
+                        report_metadata: ReportMetadata {
+                            id: ReportId([99; 16]),
+                            time: 1637361337,
+                            extensions: Vec::default(),
+                        },
+                        public_share: b"public share".to_vec(),
+                        encrypted_input_share: HpkeCiphertext {
+                            config_id: 23,
+                            enc: b"encapsulated key".to_vec(),
+                            payload: b"ciphertext".to_vec(),
+                        },
                     },
-                    public_share: b"public share".to_vec(),
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 23,
-                        enc: b"encapsulated key".to_vec(),
-                        payload: b"ciphertext".to_vec(),
-                    },
+                    draft05_leader_prep_share: None,
                 },
-                ReportShare {
-                    report_metadata: ReportMetadata {
-                        id: ReportId([17; 16]),
-                        time: 163736423,
-                        extensions: Vec::default(),
+                ReportInit {
+                    helper_report_share: ReportShare {
+                        report_metadata: ReportMetadata {
+                            id: ReportId([17; 16]),
+                            time: 163736423,
+                            extensions: Vec::default(),
+                        },
+                        public_share: b"public share".to_vec(),
+                        encrypted_input_share: HpkeCiphertext {
+                            config_id: 0,
+                            enc: vec![],
+                            payload: b"ciphertext".to_vec(),
+                        },
                     },
-                    public_share: b"public share".to_vec(),
-                    encrypted_input_share: HpkeCiphertext {
-                        config_id: 0,
-                        enc: vec![],
-                        payload: b"ciphertext".to_vec(),
-                    },
+                    draft05_leader_prep_share: None,
                 },
             ],
         },

@@ -29,6 +29,42 @@ use std::collections::HashMap;
 use tracing::{debug, error, warn};
 use url::Url;
 
+macro_rules! helper_filter_early_rejects {
+    (
+        $report_list:expr,
+        $early_rejects: expr,
+        $agg_job_resp:expr,
+        $metrics:expr
+    ) => {{
+        let mut report_index = 0;
+        for transition in $agg_job_resp.transitions.iter_mut() {
+            let early_failure = $early_rejects.get(&transition.report_id);
+            if !matches!(transition.var, TransitionVar::Failed(..)) && early_failure.is_some() {
+                // NOTE(cjpatton) Clippy wants us to use and `if let` statement to unwrap
+                // `early_failure`. I don't think this works becauase we only want to enter this
+                // loop if `early_failure.is_some()` and the current `transition` is not a failure.
+                // As far as I know, `if let` statements can't yet be combined with other
+                // conditions.
+                #[allow(clippy::unnecessary_unwrap)]
+                let failure = early_failure.unwrap();
+                transition.var = TransitionVar::Failed(*failure);
+
+                // Remove VDAF preparation state of reports that were rejected early.
+                let _removed = $report_list.remove(report_index);
+
+                // NOTE(cjpatton) Unlike the Leader, the Helper filters out early rejects after
+                // processing all of the reports. (This is an optimization intended to reduce
+                // latency.) To avoid overcounting rejection metrics, the latter rejections take
+                // precedence. The Leader has the opposite behavior: Early rejections are resolved
+                // first, so take precedence.
+                $metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+            } else {
+                report_index += 1;
+            }
+        }
+    }};
+}
+
 /// A party in the DAP protocol who is authorized to send requests to another party.
 #[async_trait(?Send)]
 pub trait DapAuthorizedSender<S> {
@@ -517,8 +553,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let (state, agg_job_init_req) = match transition {
             DapLeaderTransition::Continue(state, agg_job_init_req) => (state, agg_job_init_req),
             DapLeaderTransition::Skip => return Ok(0),
-            DapLeaderTransition::Uncommitted(..) => {
-                return Err(fatal_error!(err = "unexpected state transition (uncommitted)").into())
+            DapLeaderTransition::Uncommitted(..) | DapLeaderTransition::Committed(..) => {
+                unreachable!("Leader encountered unexpected transition while producing AggregationJobInitReq: {transition}");
             }
         };
         let is_put = task_config.version != DapVersion::Draft02;
@@ -547,7 +583,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
-        // Prepare AggreagteContinueReq.
         let transition = task_config.vdaf.handle_agg_job_resp(
             task_id,
             &agg_job_id,
@@ -556,36 +591,43 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             task_config.version,
             &metrics,
         )?;
-        let (uncommited, agg_job_cont_req) = match transition {
-            DapLeaderTransition::Uncommitted(uncommited, agg_job_cont_req) => {
-                (uncommited, agg_job_cont_req)
+        let out_shares = match (task_config.version, transition) {
+            // draft02: One more request is required in order to complete the aggregation job.
+            (
+                DapVersion::Draft02,
+                DapLeaderTransition::Uncommitted(uncommited, agg_job_cont_req),
+            ) => {
+                let resp = leader_post!(
+                    self,
+                    task_id,
+                    task_config,
+                    &url_path,
+                    DapMediaType::AggregationJobContinueReq,
+                    DapMediaType::agg_job_cont_resp_for_version(task_config.version),
+                    agg_job_id.for_request_path(),
+                    agg_job_cont_req.get_encoded_with_param(&task_config.version),
+                    false
+                );
+
+                let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
+                    .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+                task_config
+                    .vdaf
+                    .handle_final_agg_job_resp(uncommited, agg_job_resp, &metrics)?
             }
-            DapLeaderTransition::Skip => return Ok(0),
-            DapLeaderTransition::Continue(..) => {
-                return Err(fatal_error!(err = "unexpected state transition (continue)").into())
+
+            // The aggregation flow is complete.
+            (DapVersion::Draft05, DapLeaderTransition::Committed(out_shares)) => out_shares,
+
+            // The aggregation flow is complete. No valid output shares were recovered, bail out
+            // early.
+            (_version, DapLeaderTransition::Skip) => return Ok(0),
+            (version, transition) => {
+                unreachable!("Leader encountered unexpected transition while handling first AggregationJobResp for (version {version:?}): {transition}");
             }
         };
 
-        // Send AggregationJobContinueReq and receive AggregationJobResp.
-        let resp = leader_post!(
-            self,
-            task_id,
-            task_config,
-            &url_path,
-            DapMediaType::AggregationJobContinueReq,
-            DapMediaType::agg_job_cont_resp_for_version(task_config.version),
-            agg_job_id.for_request_path(),
-            agg_job_cont_req.get_encoded_with_param(&task_config.version),
-            false
-        );
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
-
-        // Commit the output shares.
-        let out_shares =
-            task_config
-                .vdaf
-                .handle_final_agg_job_resp(uncommited, agg_job_resp, &metrics)?;
+        // Commit the output shares to aggregate storage.
         let out_shares_count = out_shares.len() as u64;
         self.put_out_shares(task_id, part_batch_sel, out_shares)
             .await?;
@@ -808,7 +850,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
                         .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
-                metrics.agg_job_observe_batch_size(agg_job_init_req.report_shares.len());
+                metrics.agg_job_observe_batch_size(agg_job_init_req.report_inits.len());
 
                 // taskprov: Resolve the task config to use for the request. We also need to ensure
                 // that all of the reports include the task config in the report extensions. (See
@@ -817,22 +859,22 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 let global_config = self.get_global_config();
                 if global_config.allow_taskprov {
                     let using_taskprov = agg_job_init_req
-                        .report_shares
+                        .report_inits
                         .iter()
-                        .filter(|share| {
-                            share
+                        .filter(|init| {
+                            init.helper_report_share
                                 .report_metadata
                                 .is_taskprov(global_config.taskprov_version, task_id)
                         })
                         .count();
 
-                    if using_taskprov == agg_job_init_req.report_shares.len() {
+                    if using_taskprov == agg_job_init_req.report_inits.len() {
                         // All the extensions use taskprov and look ok, so compute first_metadata.
                         // Note this will always be Some().
                         first_metadata = agg_job_init_req
-                            .report_shares
+                            .report_inits
                             .first()
-                            .map(|report_share| &report_share.report_metadata);
+                            .map(|report_init| &report_init.helper_report_share.report_metadata);
                     } else if using_taskprov != 0 {
                         // It's not all taskprov or no taskprov, so it's an error.
                         return Err(DapAbort::UnrecognizedMessage {
@@ -883,13 +925,19 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     &agg_job_init_req.agg_param,
                 )?;
 
+                let helper_state_future = match req.version {
+                    DapVersion::Draft02 => Some(self.get_helper_state(task_id, &agg_job_id)),
+                    DapVersion::Draft05 => None,
+                    DapVersion::Unknown => unreachable!("unhandled version {:?}", req.version),
+                };
+
                 let early_rejects_future = self.check_early_reject(
                     task_id,
                     &agg_job_init_req.part_batch_sel,
                     agg_job_init_req
-                        .report_shares
+                        .report_inits
                         .iter()
-                        .map(|report_share| &report_share.report_metadata),
+                        .map(|report_init| &report_init.helper_report_share.report_metadata),
                 );
 
                 let transition_future = task_config
@@ -905,46 +953,25 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
                 let (early_rejects, transition) =
                     futures::try_join!(early_rejects_future, transition_future)?;
+                let agg_job_resp = match (req.version, transition) {
+                    (
+                        DapVersion::Draft02,
+                        DapHelperTransition::Continue(mut state, mut agg_job_resp),
+                    ) => {
+                        helper_filter_early_rejects!(
+                            state.seq,
+                            early_rejects,
+                            agg_job_resp,
+                            metrics
+                        );
 
-                let agg_job_resp = match transition {
-                    DapHelperTransition::Continue(mut state, mut agg_job_resp) => {
-                        // Filter out early rejected reports.
-                        let mut state_index = 0;
-                        for transition in agg_job_resp.transitions.iter_mut() {
-                            let early_failure = early_rejects.get(&transition.report_id);
-                            if !matches!(transition.var, TransitionVar::Failed(..))
-                                && early_failure.is_some()
-                            {
-                                // NOTE(cjpatton) Clippy wants us to use and `if let` statement to
-                                // unwrap `early_failure`. I don't think this works becauase we
-                                // only want to enter this loop if `early_failure.is_some()` and
-                                // the current `transition` is not a failure. As far as I know, `if
-                                // let` statements can't yet be combined with other conditions.
-                                #[allow(clippy::unnecessary_unwrap)]
-                                let failure = early_failure.unwrap();
-                                transition.var = TransitionVar::Failed(*failure);
-
-                                // Remove VDAF preparation state of reports that were rejected early.
-                                if transition.report_id == state.seq[state_index].2 {
-                                    let _val = state.seq.remove(state_index);
-                                } else {
-                                    // The report ID in the Helper state and Aggregate response
-                                    // must be aligned. If not, handle as an internal error.
-                                    return Err(fatal_error!(err = "report IDs not aligned").into());
-                                }
-
-                                // NOTE(cjpatton) Unlike the Leader, the Helper filters out early
-                                // rejects after processing all of the reports. (This is an
-                                // optimization intended to reduce latency.) To avoid overcounting
-                                // rejection metrics, the latter rejections take precedence. The
-                                // Leader has the opposite behavior: Early rejections are resolved
-                                // first, so take precedence.
-                                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                            } else {
-                                state_index += 1;
-                            }
+                        // Check if the aggregation job is already in progress.
+                        if helper_state_future.unwrap().await?.is_some() {
+                            error!("Leader attempted to re-initialize aggregation job {} for task {}", agg_job_id.to_base64url(), task_id.to_base64url());
+                            return Err(DapAbort::BadRequest("unexpected message for aggregation job (already exists)".into()));
                         }
 
+                        // Store state for use in the next request.
                         if !self
                             .put_helper_state_if_not_exists(task_id, &agg_job_id, &state)
                             .await?
@@ -956,16 +983,31 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         }
                         agg_job_resp
                     }
-                    DapHelperTransition::Finish(..) => {
-                        return Err(fatal_error!(err = "unexpected transition (finished)").into());
+                    (
+                        DapVersion::Draft05,
+                        DapHelperTransition::Finish(mut out_shares, mut agg_job_resp),
+                    ) => {
+                        helper_filter_early_rejects!(
+                            out_shares,
+                            early_rejects,
+                            agg_job_resp,
+                            metrics
+                        );
+
+                        // Commit the output shares to aggregate storage.
+                        metrics.report_inc_by("aggregated", out_shares.len().try_into().unwrap());
+                        self.put_out_shares(task_id, &agg_job_init_req.part_batch_sel, out_shares)
+                            .await?;
+                        agg_job_resp
                     }
+                    (version, transition) => unreachable!("Helper encountered unexpected transition when handling AggregationJobInitReq (version {version:?}): {transition}"),
                 };
 
                 self.audit_log().on_aggregation_job(
                     req.host(),
                     task_id,
                     task_config,
-                    agg_job_init_req.report_shares.len() as u64,
+                    agg_job_init_req.report_inits.len() as u64,
                     AggregationJobAuditAction::Init,
                 );
 

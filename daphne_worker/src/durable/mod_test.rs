@@ -6,7 +6,7 @@ use crate::durable::{
     reports_pending::PendingReport,
 };
 use daphne::{
-    messages::{BatchId, Report, ReportId, ReportMetadata, TaskId},
+    messages::{BatchId, HpkeCiphertext, Report, ReportId, ReportMetadata, TaskId},
     test_version, test_versions, DapBatchBucket, DapVersion,
 };
 use paste::paste;
@@ -52,7 +52,18 @@ fn parse_report_id_hex_from_report(version: DapVersion) {
             extensions: Vec::default(),
         },
         public_share: Vec::default(),
-        encrypted_input_shares: Vec::default(),
+        encrypted_input_shares: vec![
+            HpkeCiphertext {
+                config_id: rng.gen(),
+                enc: b"encapsulated key".to_vec(),
+                payload: b"ciphertext".to_vec(),
+            },
+            HpkeCiphertext {
+                config_id: rng.gen(),
+                enc: b"encapsulated key".to_vec(),
+                payload: b"ciphertext".to_vec(),
+            },
+        ],
     };
 
     let pending_report = PendingReport {

@@ -215,6 +215,8 @@ pub struct Report {
     pub draft02_task_id: Option<TaskId>, // Set in draft02
     pub report_metadata: ReportMetadata,
     pub public_share: Vec<u8>,
+    // draft02 compatibility: In the latest draft there are two named fields, one for the Leader's
+    // share and one for the Helper's. In draft02, this is a length-prefixed sequence.
     pub encrypted_input_shares: Vec<HpkeCiphertext>,
 }
 
@@ -229,7 +231,17 @@ impl ParameterizedEncode<DapVersion> for Report {
         }
         self.report_metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
-        encode_u32_items(bytes, &(), &self.encrypted_input_shares);
+        match version {
+            DapVersion::Draft02 => encode_u32_items(bytes, &(), &self.encrypted_input_shares),
+            DapVersion::Draft05 => {
+                if self.encrypted_input_shares.len() != 2 {
+                    unreachable!("draft05: tried to serialize Report with an invalid number of input shares: got {}; want {}", self.encrypted_input_shares.len(), 2);
+                }
+                self.encrypted_input_shares[0].encode(bytes);
+                self.encrypted_input_shares[1].encode(bytes);
+            }
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        }
     }
 }
 
@@ -247,7 +259,14 @@ impl ParameterizedDecode<DapVersion> for Report {
             draft02_task_id,
             report_metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
-            encrypted_input_shares: decode_u32_items(&(), bytes)?,
+            encrypted_input_shares: match version {
+                DapVersion::Draft02 => decode_u32_items(&(), bytes)?,
+                DapVersion::Draft05 => vec![
+                    HpkeCiphertext::decode(bytes)?,
+                    HpkeCiphertext::decode(bytes)?,
+                ],
+                DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+            },
         })
     }
 }
@@ -402,6 +421,50 @@ impl TryFrom<Query> for BatchSelector {
     }
 }
 
+/// Helper's report share and the Leader's first-round prep share.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportInit {
+    pub helper_report_share: ReportShare,
+    pub draft05_leader_prep_share: Option<Vec<u8>>, // Set in draft05+PR393
+}
+
+impl ParameterizedEncode<DapVersion> for ReportInit {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+        self.helper_report_share.encode_with_param(version, bytes);
+        match (version, &self.draft05_leader_prep_share) {
+            (DapVersion::Draft02, None) => (),
+            (DapVersion::Draft05, Some(leader_prep_share)) => {
+                encode_u32_bytes(bytes, leader_prep_share)
+            }
+            (_, prep_share) => {
+                unreachable!(
+                    "unhandled version {version:?} (leader prep share set = {}",
+                    prep_share.is_some()
+                )
+            }
+        };
+    }
+}
+
+impl ParameterizedDecode<DapVersion> for ReportInit {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        let helper_report_share = ReportShare::decode_with_param(version, bytes)?;
+        let draft05_leader_prep_share = match version {
+            DapVersion::Draft02 => None,
+            DapVersion::Draft05 => Some(decode_u32_bytes(bytes)?),
+            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
+        };
+
+        Ok(Self {
+            helper_report_share,
+            draft05_leader_prep_share,
+        })
+    }
+}
+
 /// Aggregate initialization request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AggregationJobInitReq {
@@ -409,7 +472,7 @@ pub struct AggregationJobInitReq {
     pub draft02_agg_job_id: Option<Draft02AggregationJobId>, // Set in draft02
     pub agg_param: Vec<u8>,
     pub part_batch_sel: PartialBatchSelector,
-    pub report_shares: Vec<ReportShare>,
+    pub report_inits: Vec<ReportInit>,
 }
 
 impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
@@ -430,7 +493,7 @@ impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
             DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         self.part_batch_sel.encode(bytes);
-        encode_u32_items(bytes, version, &self.report_shares);
+        encode_u32_items(bytes, version, &self.report_inits);
     }
 }
 
@@ -454,7 +517,7 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
             draft02_agg_job_id,
             agg_param,
             part_batch_sel: PartialBatchSelector::decode(bytes)?,
-            report_shares: decode_u32_items(version, bytes)?,
+            report_inits: decode_u32_items(version, bytes)?,
         })
     }
 }
@@ -546,6 +609,8 @@ impl Decode for Transition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransitionVar {
     Continued(Vec<u8>),
+    // XXX Figure out what to call this. We also need to allocate the enum value in the spec.
+    FinishedWithPayload(Vec<u8>),
     Finished,
     Failed(TransitionFailure),
 }
@@ -555,6 +620,10 @@ impl Encode for TransitionVar {
         match self {
             TransitionVar::Continued(vdaf_message) => {
                 0_u8.encode(bytes);
+                encode_u32_bytes(bytes, vdaf_message);
+            }
+            TransitionVar::FinishedWithPayload(vdaf_message) => {
+                255_u8.encode(bytes); // XXX Pick a byte
                 encode_u32_bytes(bytes, vdaf_message);
             }
             TransitionVar::Finished => {
@@ -572,6 +641,7 @@ impl Decode for TransitionVar {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
             0 => Ok(Self::Continued(decode_u32_bytes(bytes)?)),
+            255 => Ok(Self::FinishedWithPayload(decode_u32_bytes(bytes)?)), // XXX Pick a byte
             1 => Ok(Self::Finished),
             2 => Ok(Self::Failed(TransitionFailure::decode(bytes)?)),
             _ => Err(CodecError::UnexpectedValue),

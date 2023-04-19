@@ -97,7 +97,7 @@ macro_rules! prep_init {
 }
 
 /// Consume an input share and return the corresponding VDAF step and message.
-pub(crate) fn prio3_prepare_init(
+pub(crate) fn prio3_prep_init(
     config: &Prio3Config,
     verify_key: &[u8; 16],
     agg_id: usize,
@@ -169,25 +169,30 @@ pub(crate) fn prio3_prepare_init(
     }
 }
 
-macro_rules! leader_prep_fin {
+macro_rules! prep_finish_from_shares {
     (
         $vdaf:ident,
-        $leader_state:expr,
-        $leader_share:expr,
-        $helper_share_data:expr
+        $host_state:expr,
+        $host_share:expr,
+        $peer_share_data:expr,
+        $is_leader:expr
     ) => {{
-        // Decode the Helper's inbound message.
-        let helper_share =
-            Prio3PrepareShare::get_decoded_with_param(&$leader_state, $helper_share_data)?;
+        // Decode the peer's prep share.
+        let peer_share = Prio3PrepareShare::get_decoded_with_param(&$host_state, $peer_share_data)?;
+        let shares = if $is_leader {
+            [$host_share, peer_share]
+        } else {
+            [peer_share, $host_share]
+        };
 
-        // Preprocess the inbound messages.
-        let message = $vdaf.prepare_preprocess([$leader_share, helper_share])?;
+        // Combine the prep shares into the prep message.
+        let message = $vdaf.prepare_preprocess(shares)?;
         let message_data = message.get_encoded();
 
-        // Compute the leader's output share.
-        match $vdaf.prepare_step($leader_state, message)? {
+        // Compute the host's output share.
+        match $vdaf.prepare_step($host_state, message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_leader_prepare_finish: {ERR_EXPECT_FINISH}")
+                panic!("prio3_prep_finish: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => (out_share, message_data),
         }
@@ -195,20 +200,22 @@ macro_rules! leader_prep_fin {
 }
 
 /// Consume the verifier shares and return the output share and serialized outbound message.
-pub(crate) fn prio3_leader_prepare_finish(
+pub(crate) fn prio3_prep_finish_from_shares(
     config: &Prio3Config,
-    leader_state: VdafState,
-    leader_share: VdafMessage,
-    helper_share_data: &[u8],
+    host_state: VdafState,
+    host_share: VdafMessage,
+    peer_share_data: &[u8],
+    is_leader: bool,
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-    let (agg_share, outbound) = match (&config, leader_state, leader_share) {
+    let (agg_share, outbound) = match (&config, host_state, host_share) {
         (
             Prio3Config::Count,
             VdafState::Prio3Field64(state),
             VdafMessage::Prio3ShareField64(share),
         ) => {
             let vdaf = Prio3::new_count(2)?;
-            let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
+            let (out_share, outbound) =
+                prep_finish_from_shares!(vdaf, state, share, peer_share_data, is_leader);
             let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -218,7 +225,8 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_histogram(2, buckets)?;
-            let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
+            let (out_share, outbound) =
+                prep_finish_from_shares!(vdaf, state, share, peer_share_data, is_leader);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -228,7 +236,8 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
-            let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
+            let (out_share, outbound) =
+                prep_finish_from_shares!(vdaf, state, share, peer_share_data, is_leader);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -238,65 +247,65 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
-            let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
+            let (out_share, outbound) =
+                prep_finish_from_shares!(vdaf, state, share, peer_share_data, is_leader);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
-        _ => panic!("prio3_leader_prepare_finish: {ERR_FIELD_TYPE}"),
+        _ => panic!("prio3_prep_finish_from_shares: {ERR_FIELD_TYPE}"),
     };
 
     Ok((agg_share, outbound))
 }
 
-macro_rules! helper_prep_fin {
+macro_rules! prep_finish {
     (
         $vdaf:ident,
-        $helper_state:expr,
-        $leader_message_data:expr
+        $host_state:expr,
+        $peer_message_data:expr
     ) => {{
-        // Decode the inbound message from the Leader, which contains the preprocessed prepare
-        // message.
-        let leader_message =
-            Prio3PrepareMessage::get_decoded_with_param(&$helper_state, $leader_message_data)?;
+        // Decode the prep message.
+        let peer_message =
+            Prio3PrepareMessage::get_decoded_with_param(&$host_state, $peer_message_data)?;
 
-        // Compute the Helper's output share.
-        match $vdaf.prepare_step($helper_state, leader_message)? {
+        // Compute the host's output share.
+        match $vdaf.prepare_step($host_state, peer_message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_helper_prepare_finish: {ERR_EXPECT_FINISH}")
+                panic!("prio3_prep_finish: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => out_share,
         }
     }};
 }
 
-/// Consume the peer's prepare message and return an output share.
-pub(crate) fn prio3_helper_prepare_finish(
+/// Consume the peer's prepare message and return an outpprio3_append_prepare_stateut share.
+pub(crate) fn prio3_prep_finish(
     config: &Prio3Config,
-    state: VdafState,
+    host_state: VdafState,
     peer_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
-    let agg_share = match (&config, state) {
+    let agg_share = match (&config, host_state) {
         (Prio3Config::Count, VdafState::Prio3Field64(state)) => {
             let vdaf = Prio3::new_count(2)?;
-            let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
+            let out_share = prep_finish!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::Histogram { buckets }, VdafState::Prio3Field128(state)) => {
+        (Prio3Config::Histogram { buckets }, VdafState::Prio3Field128(host_state)) => {
             let vdaf = Prio3::new_histogram(2, buckets)?;
-            let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
+            let out_share = prep_finish!(vdaf, host_state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::Sum { bits }, VdafState::Prio3Field128(state)) => {
+        (Prio3Config::Sum { bits }, VdafState::Prio3Field128(host_state)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
-            let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
+            let out_share = prep_finish!(vdaf, host_state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::SumVec { bits, len }, VdafState::Prio3Field128(state)) => {
+        (Prio3Config::SumVec { bits, len }, VdafState::Prio3Field128(host_state)) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
-            let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
+            let out_share = prep_finish!(vdaf, host_state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        _ => panic!("prio3_helper_prepare_finish: {ERR_FIELD_TYPE}"),
+        _ => panic!("prio3_prep_finish: {ERR_FIELD_TYPE}"),
     };
 
     Ok(agg_share)
@@ -304,7 +313,7 @@ pub(crate) fn prio3_helper_prepare_finish(
 
 /// Interpret `step` as a prepare message for prio3 and append it to `bytes`. Returns an error if
 /// the `step` is not compatible with `param`.
-pub(crate) fn prio3_append_prepare_state(
+pub(crate) fn prio3_append_prep_state(
     bytes: &mut Vec<u8>,
     config: &Prio3Config,
     state: &VdafState,
@@ -313,8 +322,9 @@ pub(crate) fn prio3_append_prepare_state(
         (Prio3Config::Count, VdafState::Prio3Field64(state)) => {
             state.encode(bytes);
         }
-        (Prio3Config::Histogram { buckets: _ }, VdafState::Prio3Field128(state))
-        | (Prio3Config::Sum { bits: _ }, VdafState::Prio3Field128(state)) => {
+        (Prio3Config::Histogram { .. }, VdafState::Prio3Field128(state))
+        | (Prio3Config::Sum { .. }, VdafState::Prio3Field128(state))
+        | (Prio3Config::SumVec { .. }, VdafState::Prio3Field128(state)) => {
             state.encode(bytes);
         }
         _ => panic!("prio3_append_prepare_state: {ERR_FIELD_TYPE}"),
@@ -323,7 +333,7 @@ pub(crate) fn prio3_append_prepare_state(
 }
 
 /// Parse a prio3 prepare message from the front of `reader` whose type is compatible with `param`.
-pub(crate) fn prio3_decode_prepare_state(
+pub(crate) fn prio3_decode_prep_state(
     config: &Prio3Config,
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,
@@ -357,7 +367,7 @@ pub(crate) fn prio3_decode_prepare_state(
 }
 
 /// Encode `message` as a byte string.
-pub(crate) fn prio3_encode_prepare_message(message: &VdafMessage) -> Vec<u8> {
+pub(crate) fn prio3_encode_prep_message(message: &VdafMessage) -> Vec<u8> {
     match message {
         VdafMessage::Prio3ShareField64(message) => message.get_encoded(),
         VdafMessage::Prio3ShareField128(message) => message.get_encoded(),
