@@ -47,8 +47,8 @@ use crate::{
     },
     taskprov::TaskprovVersion,
     vdaf::{
-        prio2::prio2_decode_prepare_state,
-        prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
+        prio2::prio2_decode_prep_state,
+        prio3::{prio3_append_prep_state, prio3_decode_prep_state},
         VdafAggregateShare, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
@@ -447,13 +447,7 @@ pub enum DapAggregateResult {
 /// The Leader's state after sending an AggregateInitReq.
 #[derive(Debug)]
 pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafState, VdafMessage, Time, ReportId)>,
-}
-
-/// The Leader's state after sending an AggregateContReq.
-#[derive(Debug)]
-pub struct DapLeaderUncommitted {
-    pub(crate) seq: Vec<(DapOutputShare, ReportId)>,
+    pub(crate) seq: Vec<(VdafState, Option<VdafMessage>, Time, ReportId)>,
 }
 
 /// The Helper's state during the aggregation flow.
@@ -477,7 +471,7 @@ impl DapHelperState {
         for (state, time, report_id) in self.seq.iter() {
             match (vdaf_config, state) {
                 (VdafConfig::Prio3(prio3_config), _) => {
-                    prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
+                    prio3_append_prep_state(&mut bytes, prio3_config, state)?;
                 }
                 (VdafConfig::Prio2 { .. }, VdafState::Prio2(state)) => {
                     state.encode(&mut bytes);
@@ -499,11 +493,9 @@ impl DapHelperState {
         while (r.position() as usize) < data.len() {
             let state = match vdaf_config {
                 VdafConfig::Prio3(ref prio3_config) => {
-                    prio3_decode_prepare_state(prio3_config, 1, &mut r)?
+                    prio3_decode_prep_state(prio3_config, 1, &mut r)?
                 }
-                VdafConfig::Prio2 { dimension } => {
-                    prio2_decode_prepare_state(*dimension, 1, &mut r)?
-                }
+                VdafConfig::Prio2 { dimension } => prio2_decode_prep_state(*dimension, 1, &mut r)?,
             };
             let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             let report_id =
@@ -521,7 +513,8 @@ impl DapHelperState {
 #[derive(Debug)]
 /// An ouptut share produced by an Aggregator for a single report.
 pub struct DapOutputShare {
-    pub(crate) time: u64, // Value from the report
+    pub(crate) report_id: ReportId, // Value from the report XXX Maybe remove this
+    pub(crate) time: u64,           // Value from the report
     pub(crate) checksum: [u8; 32],
     pub(crate) data: VdafAggregateShare,
 }
@@ -625,12 +618,28 @@ pub enum DapLeaderTransition<M: Debug> {
     /// The Leader has produced the next outbound message and its state has been updated.
     Continue(DapLeaderState, M),
 
-    /// The leader has computed output shares, but is waiting on an AggregateResp from the hepler
+    /// The Leader has computed output shares, but is waiting on an AggregationJobResp from the Helper
     /// before committing them.
-    Uncommitted(DapLeaderUncommitted, M),
+    Uncommitted(Vec<DapOutputShare>, M),
+
+    /// The Leader has computed output shares and intends to commit them. This is in response to a
+    /// an AggregationJobResp in which the Helper indicated it has committed.
+    Committed(Vec<DapOutputShare>),
 
     /// The Leader has completed the aggregation flow without computing an aggregate share.
     Skip,
+}
+
+impl<M: Debug> std::fmt::Display for DapLeaderTransition<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Continue(..) => "continue",
+            Self::Uncommitted(..) => "uncommitted",
+            Self::Committed(..) => "uncommitted",
+            Self::Skip => "skip",
+        };
+        write!(f, "{s}")
+    }
 }
 
 /// Helper state transition during the aggregation flow.
@@ -647,7 +656,17 @@ pub enum DapHelperTransition<M: Debug> {
     Finish(Vec<DapOutputShare>, M),
 }
 
-/// Specification of a concrete VDAF.
+impl<M: Debug> std::fmt::Display for DapHelperTransition<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Continue(..) => "continue",
+            Self::Finish(..) => "finish",
+        };
+        write!(f, "{s}")
+    }
+}
+
+/// Specificaiton of a concrete VDAF.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {

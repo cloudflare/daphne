@@ -10,7 +10,7 @@ use crate::{
     messages::{
         taskprov, AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
         AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-        Extension, HpkeKemId, Interval, PartialBatchSelector, Query, Report, ReportId,
+        Extension, HpkeKemId, Interval, PartialBatchSelector, Query, Report, ReportId, ReportInit,
         ReportMetadata, ReportShare, TaskId, Time, Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
@@ -20,7 +20,7 @@ use crate::{
     testing::{
         AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector, MockAuditLog,
     },
-    vdaf::VdafVerifyKey,
+    vdaf::{prio3::prio3_encode_prep_message, VdafVerifyKey},
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapMeasurement, DapQueryConfig,
     DapRequest, DapResource, DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config,
     VdafConfig,
@@ -232,7 +232,7 @@ impl Test {
         &self,
         task_id: &TaskId,
         version: DapVersion,
-        report_shares: Vec<ReportShare>,
+        report_inits: Vec<ReportInit>,
     ) -> DapRequest<BearerToken> {
         let mut rng = thread_rng();
         let task_config = self.leader.unchecked_get_task_config(task_id).await;
@@ -254,7 +254,7 @@ impl Test {
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
                 agg_param: Vec::default(),
                 part_batch_sel,
-                report_shares,
+                report_inits,
             },
             task_config.helper_url.join("aggregate").unwrap(),
         )
@@ -333,18 +333,18 @@ impl Test {
     }
 
     async fn gen_test_report(&self, task_id: &TaskId) -> Report {
-        let version = self.leader.unchecked_get_task_config(task_id).await.version;
+        let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
         // Construct HPKE config list.
         let hpke_config_list = [
             self.leader
-                .get_hpke_config_for(version, Some(task_id))
+                .get_hpke_config_for(task_config.version, Some(task_id))
                 .await
                 .unwrap()
                 .as_ref()
                 .clone(),
             self.helper
-                .get_hpke_config_for(version, Some(task_id))
+                .get_hpke_config_for(task_config.version, Some(task_id))
                 .await
                 .unwrap()
                 .as_ref()
@@ -352,8 +352,8 @@ impl Test {
         ];
 
         // Construct report.
-        let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-        vdaf_config
+        task_config
+            .vdaf
             .produce_report(
                 &hpke_config_list,
                 self.now,
@@ -362,6 +362,39 @@ impl Test {
                 self.version,
             )
             .unwrap()
+    }
+
+    async fn gen_test_report_init(&self, task_id: &TaskId) -> ReportInit {
+        let task_config = self.leader.unchecked_get_task_config(task_id).await;
+        let report = self.gen_test_report(task_id).await;
+
+        // Construct the report initializer.
+        let (_leader_prep_state, leader_prep_share) = task_config
+            .vdaf
+            .consume_report_share(
+                &self.leader.hpke_receiver_config_list[0],
+                true,
+                task_id,
+                &task_config,
+                &report.report_metadata,
+                &report.public_share,
+                &report.encrypted_input_shares[0],
+            )
+            .await
+            .unwrap();
+
+        ReportInit {
+            helper_report_share: ReportShare {
+                report_metadata: report.report_metadata,
+                public_share: report.public_share,
+                encrypted_input_share: report.encrypted_input_shares[1].clone(),
+            },
+            draft05_leader_prep_share: match task_config.version {
+                DapVersion::Draft02 => None,
+                DapVersion::Draft05 => Some(prio3_encode_prep_message(&leader_prep_share)),
+                DapVersion::Unknown => unreachable!("unhandled version"),
+            },
+        }
     }
 
     async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapAbort> {
@@ -536,7 +569,7 @@ async fn handle_agg_job_req_invalid_batch_sel(version: DapVersion) {
                 part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                     batch_id: BatchId(rng.gen()),
                 },
-                report_shares: Vec::default(),
+                report_inits: Vec::default(),
             },
             task_config.helper_url.join("aggregate").unwrap(),
         )
@@ -581,13 +614,22 @@ async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
     let t = Test::new(version);
 
     let report = t.gen_test_report(&t.expired_task_id).await;
-    let report_share = ReportShare {
-        report_metadata: report.report_metadata,
-        public_share: report.public_share,
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    let report_init = ReportInit {
+        helper_report_share: ReportShare {
+            report_metadata: report.report_metadata,
+            public_share: report.public_share,
+            encrypted_input_share: report.encrypted_input_shares[1].clone(),
+        },
+        draft05_leader_prep_share: match version {
+            DapVersion::Draft02 => None,
+            // Send a dummy report share. This will cause the Helper to reject the report, however
+            // task expiration should take precedence.
+            DapVersion::Draft05 => Some(b"dummy prep share".to_vec()),
+            DapVersion::Unknown => unreachable!("unhandled version"),
+        },
     };
     let req = t
-        .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_share])
+        .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_init])
         .await;
 
     let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
@@ -602,102 +644,6 @@ async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
 }
 
 async_test_versions! { handle_agg_job_req_init_expired_task }
-
-// Test that the Helper rejects reports with a bad round number.
-async fn handle_agg_job_req_bad_round(version: DapVersion) {
-    let t = Test::new(version);
-    if version == DapVersion::Draft02 {
-        // Nothing to test.
-        return;
-    }
-
-    let report = t.gen_test_report(&t.time_interval_task_id).await;
-    let report_share = ReportShare {
-        report_metadata: report.report_metadata,
-        public_share: report.public_share,
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    };
-    let req = t
-        .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report_share])
-        .await;
-    let agg_job_id = match &req.resource {
-        DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
-        _ => panic!("agg_job_id resource missing!"),
-    };
-    let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
-
-    // AggregationJobInitReq succeeds
-    assert_eq!(t.helper.audit_log.invocations(), 1);
-
-    let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-    assert_eq!(agg_job_resp.transitions.len(), 1);
-    assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
-    // Test wrong round
-    let req = t
-        .gen_test_agg_job_cont_req_with_round(
-            &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
-            Vec::default(),
-            Some(2),
-        )
-        .await;
-    assert_matches!(
-        t.helper.handle_agg_job_req(&req).await,
-        Err(DapAbort::RoundMismatch { .. })
-    );
-
-    // AggregationJobContinueReq fails
-    assert_eq!(t.helper.audit_log.invocations(), 1);
-}
-
-async_test_versions! { handle_agg_job_req_bad_round }
-
-// Test that the Helper rejects reports with a bad round id
-async fn handle_agg_job_req_zero_round(version: DapVersion) {
-    let t = Test::new(version);
-    if version == DapVersion::Draft02 {
-        // Nothing to test.
-        return;
-    }
-
-    let report = t.gen_test_report(&t.time_interval_task_id).await;
-    let report_share = ReportShare {
-        report_metadata: report.report_metadata,
-        public_share: report.public_share,
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    };
-    let req = t
-        .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report_share])
-        .await;
-    let agg_job_id = match &req.resource {
-        DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
-        _ => panic!("agg_job_id resource missing!"),
-    };
-    let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
-
-    // AggregationJobInitReq succeeds
-    assert_eq!(t.helper.audit_log.invocations(), 1);
-
-    let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-    assert_eq!(agg_job_resp.transitions.len(), 1);
-    assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
-    // Test wrong round
-    let req = t
-        .gen_test_agg_job_cont_req_with_round(
-            &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
-            Vec::default(),
-            Some(0),
-        )
-        .await;
-    assert_matches!(
-        t.helper.handle_agg_job_req(&req).await,
-        Err(DapAbort::UnrecognizedMessage { .. })
-    );
-
-    // AggregationJobContinueReq fails
-    assert_eq!(t.helper.audit_log.invocations(), 1);
-}
-
-async_test_versions! { handle_agg_job_req_zero_round }
 
 async fn handle_hpke_config_req_unrecognized_task(version: DapVersion) {
     let t = Test::new(version);
@@ -913,20 +859,13 @@ async fn handle_agg_job_req_failure_hpke_decrypt_error(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
-    let report = t.gen_test_report(task_id).await;
-    let (report_metadata, public_share, mut encrypted_input_share) = (
-        report.report_metadata,
-        report.public_share,
-        report.encrypted_input_shares[1].clone(),
-    );
-    encrypted_input_share.payload[0] ^= 0xff; // Cause decryption to fail
-    let report_shares = vec![ReportShare {
-        report_metadata,
-        public_share,
-        encrypted_input_share,
-    }];
+    let mut report_init = t.gen_test_report_init(task_id).await;
+    report_init
+        .helper_report_share
+        .encrypted_input_share
+        .payload[0] ^= 0xff; // Cause decryption to fail
     let req = t
-        .gen_test_agg_job_init_req(task_id, version, report_shares)
+        .gen_test_agg_job_init_req(task_id, version, vec![report_init])
         .await;
 
     // Get AggregationJobResp and then extract the transition data from inside.
@@ -948,15 +887,9 @@ async fn handle_agg_job_req_transition_continue(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
-    let report = t.gen_test_report(task_id).await;
-    let report_shares = vec![ReportShare {
-        report_metadata: report.report_metadata.clone(),
-        public_share: report.public_share,
-        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    }];
+    let report_init = t.gen_test_report_init(task_id).await;
     let req = t
-        .gen_test_agg_job_init_req(task_id, version, report_shares)
+        .gen_test_agg_job_init_req(task_id, version, vec![report_init])
         .await;
 
     // Get AggregationJobResp and then extract the transition data from inside.
@@ -966,7 +899,13 @@ async fn handle_agg_job_req_transition_continue(version: DapVersion) {
     let transition = &agg_job_resp.transitions[0];
 
     // Expect success due to valid ciphertext.
-    assert_matches!(transition.var, TransitionVar::Continued(_));
+    match version {
+        DapVersion::Draft02 => assert_matches!(transition.var, TransitionVar::Continued(_)),
+        DapVersion::Draft05 => {
+            assert_matches!(transition.var, TransitionVar::FinishedWithPayload(_))
+        }
+        _ => unreachable!("unhandled version {version:?}"),
+    }
 }
 
 async_test_versions! { handle_agg_job_req_transition_continue }
@@ -975,15 +914,9 @@ async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
-    let report = t.gen_test_report(task_id).await;
-    let report_shares = vec![ReportShare {
-        report_metadata: report.report_metadata.clone(),
-        public_share: report.public_share,
-        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    }];
+    let report_init = t.gen_test_report_init(task_id).await;
     let req = t
-        .gen_test_agg_job_init_req(task_id, version, report_shares)
+        .gen_test_agg_job_init_req(task_id, version, vec![report_init.clone()])
         .await;
 
     // Add dummy data to report store backend. This is done in a new scope so that the lock on the
@@ -997,7 +930,7 @@ async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
         let report_store = guard.entry(task_id.clone()).or_default();
         report_store
             .processed
-            .insert(report.report_metadata.id.clone());
+            .insert(report_init.helper_report_share.report_metadata.id.clone());
     }
 
     // Get AggregationJobResp and then extract the transition data from inside.
@@ -1012,11 +945,18 @@ async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
         TransitionVar::Failed(TransitionFailure::ReportReplayed)
     );
 
-    assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{host="helper.org",status="rejected_report_replayed"}"#: 1,
-        r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-    });
+    match version {
+        DapVersion::Draft02 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_report_counter{host="helper.org",status="rejected_report_replayed"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+        }),
+        DapVersion::Draft05 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_report_counter{host="helper.org",status="rejected_report_replayed"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+        }),
+        _ => unreachable!("unhandled version {version:?}"),
+    }
 }
 
 async_test_versions! { handle_agg_job_req_failure_report_replayed }
@@ -1026,15 +966,9 @@ async fn handle_agg_job_req_failure_batch_collected(version: DapVersion) {
     let task_id = &t.time_interval_task_id;
     let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
-    let report = t.gen_test_report(task_id).await;
-    let report_shares = vec![ReportShare {
-        report_metadata: report.report_metadata.clone(),
-        public_share: report.public_share,
-        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    }];
+    let report_init = t.gen_test_report_init(task_id).await;
     let req = t
-        .gen_test_agg_job_init_req(task_id, version, report_shares)
+        .gen_test_agg_job_init_req(task_id, version, vec![report_init])
         .await;
 
     // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
@@ -1072,28 +1006,34 @@ async fn handle_agg_job_req_failure_batch_collected(version: DapVersion) {
         TransitionVar::Failed(TransitionFailure::BatchCollected)
     );
 
-    assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_report_counter{host="helper.org",status="rejected_batch_collected"}"#: 1,
-        r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-    });
+    match version {
+        DapVersion::Draft02 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_report_counter{host="helper.org",status="rejected_batch_collected"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+        }),
+        DapVersion::Draft05 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_report_counter{host="helper.org",status="rejected_batch_collected"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+        }),
+        _ => unreachable!("unhandled version {version:?}"),
+    }
 }
 
 async_test_versions! { handle_agg_job_req_failure_batch_collected }
 
-async fn handle_agg_job_req_abort_helper_state_overwritten(version: DapVersion) {
-    let t = Test::new(version);
+/// draft02: Test that the Helper stops the Leader from overwriting the state associated with an
+/// existing aggregation job. The same teset would apply to the latest version when a multi-round
+/// VDAF is used, but for now we only support 1-round VDAFs
+/// (https://github.com/cloudflare/daphne/issues/306).
+#[tokio::test]
+async fn handle_agg_job_req_abort_helper_state_overwritten_draft02() {
+    let t = Test::new(DapVersion::Draft02);
     let task_id = &t.time_interval_task_id;
 
-    let report = t.gen_test_report(task_id).await;
-    let report_shares = vec![ReportShare {
-        report_metadata: report.report_metadata.clone(),
-        public_share: report.public_share,
-        // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-        encrypted_input_share: report.encrypted_input_shares[1].clone(),
-    }];
+    let report_init = t.gen_test_report_init(task_id).await;
     let req = t
-        .gen_test_agg_job_init_req(task_id, version, report_shares)
+        .gen_test_agg_job_init_req(task_id, t.version, vec![report_init])
         .await;
 
     // Send aggregate request.
@@ -1111,8 +1051,6 @@ async fn handle_agg_job_req_abort_helper_state_overwritten(version: DapVersion) 
         assert_eq!(e, "unexpected message for aggregation job (already exists)")
     );
 }
-
-async_test_versions! { handle_agg_job_req_abort_helper_state_overwritten }
 
 async fn handle_agg_job_req_fail_send_cont_req(version: DapVersion) {
     let t = Test::new(version);
@@ -1154,6 +1092,14 @@ async fn handle_upload_req_fail_send_invalid_report(version: DapVersion) {
         t.leader.handle_upload_req(&req).await,
         Err(DapAbort::UnrecognizedTask)
     );
+}
+
+async_test_versions! { handle_upload_req_fail_send_invalid_report }
+
+#[tokio::test]
+async fn http_post_upload_fail_invalid_number_of_encrypted_input_shares_draft02() {
+    let t = Test::new(DapVersion::Draft02);
+    let task_id = &t.time_interval_task_id;
 
     // Construct an invalid report payload that only has one input share.
     let mut report_one_input_share = t.gen_test_report(task_id).await;
@@ -1167,8 +1113,6 @@ async fn handle_upload_req_fail_send_invalid_report(version: DapVersion) {
         Err(DapAbort::UnrecognizedMessage { .. })
     );
 }
-
-async_test_versions! { handle_upload_req_fail_send_invalid_report }
 
 // Test that the Leader rejects reports past the expiration date.
 async fn handle_upload_req_task_expired(version: DapVersion) {
@@ -1612,16 +1556,27 @@ async fn e2e_time_interval(version: DapVersion) {
     let query = task_config.query_for_current_batch_window(t.now);
     t.run_col_job(task_id, &query).await.unwrap();
 
-    assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
-        r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
-        r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
-        r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
-        r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
-        r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
-    });
+    match version {
+        DapVersion::Draft02 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
+        }),
+        DapVersion::Draft05 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+        }),
+        _ => unreachable!("unhandled version {version:?}"),
+    }
 }
 
 async_test_versions! { e2e_time_interval }
@@ -1646,16 +1601,27 @@ async fn e2e_fixed_size(version: DapVersion) {
     };
     t.run_col_job(task_id, &query).await.unwrap();
 
-    assert_metrics_include!(t.prometheus_registry, {
-        r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
-        r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
-        r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
-        r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
-        r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
-        r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-        r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
-    });
+    match version {
+        DapVersion::Draft02 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+            r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
+        }),
+        DapVersion::Draft05 => assert_metrics_include!(t.prometheus_registry, {
+            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
+            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
+            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
+            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
+        }),
+        _ => unreachable!("unhandled version {version:?}"),
+    }
 }
 
 async_test_versions! { e2e_fixed_size }
