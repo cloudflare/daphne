@@ -162,13 +162,35 @@ pub fn initialize_tracing(env: &Env) {
             Ok(var) => var.to_string(),
             Err(_) => "info".to_string(),
         };
-        registry()
-            .with(
-                fmt::layer()
+
+        let (ansi, json) = match env.var("DAP_DEPLOYMENT") {
+            Ok(format) if format.to_string() == "prod" => {
+                // JSON output
+                let json_fmt = fmt::layer()
+                    .json()
+                    .flatten_event(true)
+                    .with_ansi(false)
                     .with_writer(LogWriter::new)
                     .with_timer(WasmTime::new())
-                    .and_then(WasmTimingLayer::new()),
-            )
+                    .and_then(WasmTimingLayer::new());
+
+                (None, Some(json_fmt))
+            }
+            Ok(_) | Err(_) => {
+                // Console output
+                let ansi_fmt = fmt::layer()
+                    .with_ansi(true)
+                    .with_writer(LogWriter::new)
+                    .with_timer(WasmTime::new())
+                    .and_then(WasmTimingLayer::new());
+
+                (Some(ansi_fmt), None)
+            }
+        };
+
+        registry()
+            .with(ansi)
+            .with(json)
             .with(EnvFilter::new(filter))
             .init();
     });
