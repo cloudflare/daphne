@@ -455,7 +455,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             .encode(&metrics_familes, &mut buf)
             .expect("failed to encode metrics");
         let text_metrics = String::from_utf8(buf).expect("text encoding of metrics is not UTF8");
-        info!("Prometheus summary:\n{text_metrics}");
+        trace!("Prometheus summary:\n{text_metrics}");
 
         if let Some(ref metrics_push_config) = self.isolate_state.config.metrics_push_config {
             // Prepare authorization.
