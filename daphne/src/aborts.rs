@@ -289,18 +289,23 @@ impl From<CodecError> for DapAbort {
 /// A problem details document compatible with RFC 7807.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProblemDetails {
-    #[serde(rename = "taskid")]
     pub title: String,
+
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typ: Option<String>,
+
+    #[serde(rename = "taskid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) task_id: Option<String>,
+
     #[serde(rename = "aggregationjobid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) agg_job_id: Option<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instance: Option<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
