@@ -15,6 +15,8 @@ use tracing_subscriber::{
 };
 use worker::*;
 
+use self::workers_json_layer::WorkersJsonLayer;
+
 /// WasmTime provides a `tracing_subscriber::fmt::time::FormatTime` implementation that works
 /// using the clock available to WASM code, as the default FormatTime implementation does not
 /// work.
@@ -166,25 +168,18 @@ pub fn initialize_tracing(env: &Env) {
         let (ansi, json) = match env.var("DAP_DEPLOYMENT") {
             Ok(format) if format.to_string() == "prod" => {
                 // JSON output
-                let json_fmt = fmt::layer()
-                    .json()
-                    .flatten_event(true)
-                    .with_ansi(false)
-                    .with_writer(LogWriter::new)
-                    .with_timer(WasmTime::new())
-                    .and_then(WasmTimingLayer::new());
-
-                (None, Some(json_fmt))
+                let json = WorkersJsonLayer.and_then(WasmTimingLayer::new());
+                (None, Some(json))
             }
             Ok(_) | Err(_) => {
                 // Console output
-                let ansi_fmt = fmt::layer()
+                let ansi = fmt::layer()
                     .with_ansi(true)
                     .with_writer(LogWriter::new)
                     .with_timer(WasmTime::new())
                     .and_then(WasmTimingLayer::new());
 
-                (Some(ansi_fmt), None)
+                (Some(ansi), None)
             }
         };
 
@@ -195,3 +190,5 @@ pub fn initialize_tracing(env: &Env) {
             .init();
     });
 }
+
+mod workers_json_layer;

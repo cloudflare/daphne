@@ -9,10 +9,10 @@ mod utils;
 
 fn log_request(req: &Request) {
     info!(
-        "[{}], located at: {:?}, within: {}",
+        coordinates = ?req.cf().coordinates().unwrap_or_default(),
+        region = req.cf().region().unwrap_or_else(|| "unknown region".into()),
+        "{}",
         req.path(),
-        req.cf().coordinates().unwrap_or_default(),
-        req.cf().region().unwrap_or_else(|| "unknown region".into())
     );
 }
 
