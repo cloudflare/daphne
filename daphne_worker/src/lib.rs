@@ -621,11 +621,21 @@ async fn handle_agg_job(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    match daph
-        .http_post_aggregate(&req)
-        .instrument(info_span!("aggregate"))
-        .await
-    {
+    let span = {
+        let task_id = req
+            .task_id
+            .clone()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        info_span!(
+            "aggregate",
+            job_id = task_id,
+            version = req.version.to_string()
+        )
+    };
+
+    match daph.http_post_aggregate(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
@@ -638,11 +648,21 @@ async fn handle_agg_share_req(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    match daph
-        .http_post_aggregate_share(&req)
-        .instrument(info_span!("aggregate_share"))
-        .await
-    {
+    let span = {
+        let task_id = req
+            .task_id
+            .clone()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        info_span!(
+            "aggregate_share",
+            job_id = task_id,
+            version = req.version.to_string()
+        )
+    };
+
+    match daph.http_post_aggregate_share(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
