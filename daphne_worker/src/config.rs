@@ -482,9 +482,6 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             let status = reqwest_resp.status();
             if status != 200 {
                 error!("unexpected response from metrics server: {reqwest_resp:?}");
-                return Err(Error::RustError(format!(
-                    "metrics push failed with response status {status}",
-                )));
             }
         }
         Ok(())
