@@ -55,7 +55,11 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Get, None::<()>).await
+        durable_request(stub, durable_path, Method::Get, None::<()>)
+            .await
+            .map_err(|error| {
+                Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
+            })
     }
 
     /// Send a POST request with the given path to the DO instance with the given binding and name.
@@ -69,7 +73,13 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Post, Some(data)).await
+        durable_request(stub, durable_path, Method::Post, Some(data))
+            .await
+            .map_err(|error| {
+                Error::RustError(format!(
+                    "DO {durable_binding}: post {durable_path}: {error}"
+                ))
+            })
     }
 
     /// Send a POST request with the given path to the DO instance with the given binding and hex
@@ -84,7 +94,13 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_string(&durable_id_hex)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Post, Some(data)).await
+        durable_request(stub, durable_path, Method::Post, Some(data))
+            .await
+            .map_err(|error| {
+                Error::RustError(format!(
+                    "DO {durable_binding}: post {durable_path}: {error}"
+                ))
+            })
     }
 }
 
