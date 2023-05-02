@@ -122,6 +122,14 @@ where
             }
         }
 
+        // If there is no `message`, repurpose the `current_span` as the `message`.
+        // This helps normalize the `WasmTimingLayer` events.
+        if !fields.contains_key("message") {
+            if let Some(span_name) = fields.remove("current_span") {
+                fields.insert("message".to_owned(), span_name);
+            }
+        }
+
         let log_line = LogLine {
             timestamp,
             log_level: event.metadata().level().as_str(),
