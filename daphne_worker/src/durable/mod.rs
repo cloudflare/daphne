@@ -5,7 +5,8 @@ use crate::{int_err, now};
 use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cmp::min;
+use std::{cmp::min, time::Duration};
+use tracing::warn;
 use worker::*;
 
 pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
@@ -35,14 +36,27 @@ const ERR_NO_VALUE: &str = "No such value in storage.";
 // TODO(bhalley) does this need to be configurable?
 const MAX_KEYS: usize = 128;
 
+const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+const DEFAULT_MAX_RETRIES: usize = 3;
+
 /// Used to send HTTP requests to a durable object (DO) instance.
-pub(crate) struct DurableConnector<'a> {
-    env: &'a Env,
+pub(crate) struct DurableConnector<'srv> {
+    env: &'srv Env,
+    retry: bool,
 }
 
-impl<'a> DurableConnector<'a> {
-    pub(crate) fn new(env: &'a Env) -> Self {
-        DurableConnector { env }
+impl<'srv> DurableConnector<'srv> {
+    pub(crate) fn new(env: &'srv Env) -> Self {
+        DurableConnector { env, retry: false }
+    }
+
+    /// Configure the connector to retry requests a few times on failure. This method should only
+    /// be used for idempotent requests.
+    pub(crate) fn with_retry(self) -> Self {
+        Self {
+            env: self.env,
+            retry: true,
+        }
     }
 
     /// Send a GET request with the given path to the DO instance with the given binding and name.
@@ -55,7 +69,7 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Get, None::<()>)
+        self.durable_request(stub, durable_path, Method::Get, None::<()>)
             .await
             .map_err(|error| {
                 Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
@@ -73,7 +87,7 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Post, Some(data))
+        self.durable_request(stub, durable_path, Method::Post, Some(data))
             .await
             .map_err(|error| {
                 Error::RustError(format!(
@@ -94,7 +108,7 @@ impl<'a> DurableConnector<'a> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_string(&durable_id_hex)?.get_stub()?;
-        durable_request(stub, durable_path, Method::Post, Some(data))
+        self.durable_request(stub, durable_path, Method::Post, Some(data))
             .await
             .map_err(|error| {
                 Error::RustError(format!(
@@ -102,34 +116,53 @@ impl<'a> DurableConnector<'a> {
                 ))
             })
     }
-}
 
-async fn durable_request<I: Serialize, O: for<'a> Deserialize<'a>>(
-    durable_stub: Stub,
-    durable_path: &'static str,
-    method: Method,
-    data: Option<I>,
-) -> Result<O> {
-    let req = match (&method, data) {
-        (Method::Post, Some(data)) => Request::new_with_init(
-            &format!("https://fake-host{durable_path}"),
-            RequestInit::new().with_method(Method::Post).with_body(Some(
-                wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
-            )),
-        )?,
-        (Method::Get, None) => Request::new_with_init(
-            &format!("https://fake-host{durable_path}"),
-            RequestInit::new().with_method(Method::Get),
-        )?,
-        _ => {
-            return Err(Error::RustError(format!(
-                "durable_request: Unrecognized method: {method:?}",
-            )));
+    async fn durable_request<I: Serialize, O: for<'a> Deserialize<'a>>(
+        &self,
+        durable_stub: Stub,
+        durable_path: &'static str,
+        method: Method,
+        data: Option<I>,
+    ) -> Result<O> {
+        let req = match (&method, data) {
+            (Method::Post, Some(data)) => Request::new_with_init(
+                &format!("https://fake-host{durable_path}"),
+                RequestInit::new().with_method(Method::Post).with_body(Some(
+                    wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
+                )),
+            )?,
+            (Method::Get, None) => Request::new_with_init(
+                &format!("https://fake-host{durable_path}"),
+                RequestInit::new().with_method(Method::Get),
+            )?,
+            _ => {
+                return Err(Error::RustError(format!(
+                    "durable_request: Unrecognized method: {method:?}",
+                )));
+            }
+        };
+
+        let attempts = if self.retry {
+            DEFAULT_MAX_RETRIES + 1
+        } else {
+            1
+        };
+        let mut attempt = 1;
+        loop {
+            match durable_stub.fetch_with_request(req.clone()?).await {
+                Ok(mut resp) => return resp.json().await,
+                Err(err) => {
+                    if attempt < attempts {
+                        warn!("DO request attempt #{attempt} failed: {err}");
+                        Delay::from(DEFAULT_RETRY_INTERVAL).await;
+                        attempt += 1;
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
         }
-    };
-
-    let mut resp = durable_stub.fetch_with_request(req).await?;
-    resp.json().await
+    }
 }
 
 macro_rules! ensure_garbage_collected {

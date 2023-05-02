@@ -1000,6 +1000,7 @@ where
         let task_config = self.try_get_task_config(task_id).await?;
         let helper_state_hex = hex::encode(helper_state.get_encoded(&task_config.as_ref().vdaf)?);
         self.durable()
+            .with_retry()
             .post(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_PUT,
@@ -1019,6 +1020,7 @@ where
         let task_config = self.try_get_task_config(task_id).await?;
         let res: Option<String> = self
             .durable()
+            .with_retry()
             .post(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_GET,
