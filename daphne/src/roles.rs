@@ -963,7 +963,7 @@ where
                     }
                 };
 
-                metrics.agg_job_inc();
+                metrics.agg_job_started_inc();
                 metrics.inbound_req_inc(DaphneRequestType::Aggregate);
                 Ok(DapResponse {
                     version: req.version,
@@ -1033,7 +1033,7 @@ where
                 };
 
                 metrics.report_inc_by("aggregated", out_shares_count);
-                metrics.agg_job_dec();
+                metrics.agg_job_completed_inc();
                 metrics.inbound_req_inc(DaphneRequestType::Aggregate);
                 Ok(DapResponse {
                     version: req.version,
