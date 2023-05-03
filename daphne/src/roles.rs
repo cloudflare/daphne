@@ -806,6 +806,8 @@ where
                 let agg_job_init_req =
                     AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)?;
 
+                metrics.agg_job_observe_batch_size(agg_job_init_req.report_shares.len());
+
                 // taskprov: Resolve the task config to use for the request. We also need to ensure
                 // that all of the reports include the task config in the report extensions. (See
                 // section 6 of draft-wang-ppm-dap-taskprov-02.)
