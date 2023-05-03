@@ -4,7 +4,10 @@
 //! Daphne metrics.
 
 use crate::DapError;
-use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
+use prometheus::{
+    linear_buckets, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    HistogramVec, IntCounterVec, Registry,
+};
 
 pub struct DaphneMetrics {
     /// Inbound request metrics: Successful requests served, broken down by type.
@@ -16,6 +19,9 @@ pub struct DaphneMetrics {
 
     /// Helper: Total number of aggregation jobs started and completed.
     aggregation_job_counter: IntCounterVec,
+
+    /// Helper: Number of records in an incoming AggregationJobInitReq.
+    aggregation_job_batch_size_histogram: HistogramVec,
 }
 
 impl DaphneMetrics {
@@ -42,6 +48,14 @@ impl DaphneMetrics {
             registry
         )?;
 
+        let aggregation_job_batch_size_histogram = register_histogram_vec_with_registry!(
+            format!("{front}aggregation_job_batch_size"),
+            "Number of records in an incoming AggregationJobInitReq.",
+            &["host"],
+            linear_buckets(250.0, 250.0, 6)?, // <250, <500, ... <1500, +Inf
+            registry
+        )?;
+
         let aggregation_job_counter = register_int_counter_vec_with_registry!(
             format!("{front}aggregation_job_counter"),
             "Total number of aggregation jobs started and completed.",
@@ -53,6 +67,7 @@ impl DaphneMetrics {
             inbound_request_counter,
             report_counter,
             aggregation_job_counter,
+            aggregation_job_batch_size_histogram,
         })
     }
 
@@ -89,6 +104,13 @@ impl ContextualizedDaphneMetrics<'_> {
             .report_counter
             .with_label_values(&[self.host, status])
             .inc_by(val);
+    }
+
+    pub fn agg_job_observe_batch_size(&self, val: usize) {
+        self.metrics
+            .aggregation_job_batch_size_histogram
+            .with_label_values(&[self.host])
+            .observe(val as f64);
     }
 
     pub fn agg_job_started_inc(&self) {
