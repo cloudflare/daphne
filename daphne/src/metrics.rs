@@ -4,10 +4,7 @@
 //! Daphne metrics.
 
 use crate::DapError;
-use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounterVec,
-    IntGaugeVec, Registry,
-};
+use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
 pub struct DaphneMetrics {
     /// Inbound request metrics: Successful requests served, broken down by type.
@@ -17,8 +14,8 @@ pub struct DaphneMetrics {
     /// a report is rejected, the failure type is recorded.
     report_counter: IntCounterVec,
 
-    /// Helper: Number of running aggregation jobs.
-    aggregation_job_gauge: IntGaugeVec,
+    /// Helper: Total number of aggregation jobs started and completed.
+    aggregation_job_counter: IntCounterVec,
 }
 
 impl DaphneMetrics {
@@ -45,17 +42,17 @@ impl DaphneMetrics {
             registry
         )?;
 
-        let aggregation_job_gauge = register_int_gauge_vec_with_registry!(
-            format!("{front}aggregation_job_gauge"),
-            "Number of running aggregation jobs.",
-            &["host"],
+        let aggregation_job_counter = register_int_counter_vec_with_registry!(
+            format!("{front}aggregation_job_counter"),
+            "Total number of aggregation jobs started and completed.",
+            &["host", "status"],
             registry
         )?;
 
         Ok(Self {
             inbound_request_counter,
             report_counter,
-            aggregation_job_gauge,
+            aggregation_job_counter,
         })
     }
 
@@ -94,18 +91,18 @@ impl ContextualizedDaphneMetrics<'_> {
             .inc_by(val);
     }
 
-    pub fn agg_job_inc(&self) {
+    pub fn agg_job_started_inc(&self) {
         self.metrics
-            .aggregation_job_gauge
-            .with_label_values(&[self.host])
+            .aggregation_job_counter
+            .with_label_values(&[self.host, "started"])
             .inc();
     }
 
-    pub fn agg_job_dec(&self) {
+    pub fn agg_job_completed_inc(&self) {
         self.metrics
-            .aggregation_job_gauge
-            .with_label_values(&[self.host])
-            .dec();
+            .aggregation_job_counter
+            .with_label_values(&[self.host, "completed"])
+            .inc();
     }
 }
 
