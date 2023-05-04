@@ -122,8 +122,44 @@ fn malformed_task_config(task_id: &TaskId, detail: String) -> DapError {
     })
 }
 
+/// Convert a task config advertised by the peer into a [`DapTaskConfig`]. The `task_id` is the
+/// task ID indicated by the request; if this does not match the derived task ID, then
+/// `DapError::Abort(DapAbort::UnrecognizedTask)` is returned.
+pub fn resolve_advertised_task_config(
+    dap_version: DapVersion,
+    taskprov_version: TaskprovVersion,
+    verify_key_init: &[u8; 32],
+    collector_hpke_config: &HpkeConfig,
+    task_id: &TaskId,
+    report_metadata_advertisement: Option<&ReportMetadata>,
+) -> Result<Option<DapTaskConfig>, DapError> {
+    let Some(report_metadata_advertisement) = report_metadata_advertisement else {
+        // No report metadata, so we're not going to find anything.
+        return Ok(None);
+    };
+
+    let Some(advertised_task_config) = get_taskprov_task_config(
+        taskprov_version,
+        task_id,
+        report_metadata_advertisement,
+    )? else {
+        return Ok(None);
+    };
+
+    let task_config = DapTaskConfig::try_from_taskprov(
+        dap_version,
+        taskprov_version,
+        task_id, // get_taskprov_task_config() checks that this matches the derived ID
+        advertised_task_config,
+        verify_key_init,
+        collector_hpke_config,
+    )?;
+
+    Ok(Some(task_config))
+}
+
 /// Check for a taskprov extension in the report, and return it if found.
-pub fn get_taskprov_task_config(
+fn get_taskprov_task_config(
     version: TaskprovVersion,
     task_id: &TaskId,
     metadata: &ReportMetadata,

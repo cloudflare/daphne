@@ -366,20 +366,14 @@ where
             && metadata.is_some()
             && metadata.unwrap().is_taskprov(taskprov_version, &task_id)
         {
-            if let Some(taskprov_task_config) = taskprov::get_taskprov_task_config(
+            if let Some(task_config) = taskprov::resolve_advertised_task_config(
+                version,
                 taskprov_version,
+                &self.taskprov_vdaf_verify_key_init,
+                &self.collector_hpke_config,
                 task_id.as_ref(),
-                metadata.unwrap(),
+                metadata,
             )? {
-                let task_config = DapTaskConfig::try_from_taskprov(
-                    version,
-                    self.global_config.taskprov_version,
-                    task_id.as_ref(),
-                    taskprov_task_config,
-                    &self.taskprov_vdaf_verify_key_init,
-                    &self.collector_hpke_config,
-                )?;
-
                 let mut tasks = self.tasks.lock().expect("tasks: lock failed");
                 if tasks.get(task_id.as_ref()).is_none() {
                     // Decide whether to opt-in to the task.
