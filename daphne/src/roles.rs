@@ -67,32 +67,24 @@ where
         task_config: &DapTaskConfig,
     ) -> Result<Option<String>, DapError>;
 
-    /// Look up the DAP task configuration for the given task ID.
+    /// taskprov: Attempt to configure the task advertised in the request. If taskprov is disabled
+    /// then this is a noop. Otherwise, if successful, the next call to `get_task_config_for()`
+    /// will return the configure task. Otherwise this call will return nothing.
     ///
-    /// If a `report` has been provided, then look for the draft-wang-ppm-dap-taskprov-<nn> extension
-    /// in the report.  If a taskprov task configuration is successfully read from the report,
-    /// [`DapAggregator::taskprov_opt_in_decision`] will be called, and if it returns Ok(true) the server will opt-in to the task.
-    /// if it returns Ok(false) or an error then the server will opt-out or return an appropriate error.
-    ///
-    /// The DAP version must be specified because we may create a DapTaskConfig via taskprov, and we want it
-    /// to have the same version as the API entry point the client is using.
-    async fn get_task_config_considering_taskprov(
+    /// The DAP version must be specified because we may create a DapTaskConfig via taskprov, and
+    /// we want it to have the same version as the API entry point the client is using.
+    async fn resolve_taskprov(
         &'srv self,
-        version: DapVersion,
-        task_id: Cow<'req, TaskId>,
-        report: Option<&ReportMetadata>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
+        task_id: &TaskId,
+        req: &'req DapRequest<S>,
+        report_metadata_advertisement: Option<&ReportMetadata>,
+    ) -> Result<(), DapError>;
 
     /// Look up the DAP task configuration for the given task ID.
     async fn get_task_config_for(
         &'srv self,
         task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError> {
-        // We use DapVersion::Unknown here as we don't know it and we don't need to
-        // know it as we will not be doing any taskprov task creation.
-        self.get_task_config_considering_taskprov(DapVersion::Unknown, task_id, None)
-            .await
-    }
+    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;
@@ -325,12 +317,12 @@ where
 
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         debug!("report id is {}", report.report_metadata.id);
+
+        let task_id = req.task_id()?;
+        self.resolve_taskprov(task_id, req, Some(&report.report_metadata))
+            .await?;
         let task_config = self
-            .get_task_config_considering_taskprov(
-                req.version,
-                Cow::Borrowed(req.task_id()?),
-                Some(&report.report_metadata),
-            )
+            .get_task_config_for(Cow::Borrowed(task_id))
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -842,12 +834,10 @@ where
                     }
                 }
 
+                self.resolve_taskprov(task_id, req, first_metadata).await?;
+
                 let wrapped_task_config = self
-                    .get_task_config_considering_taskprov(
-                        req.version,
-                        Cow::Borrowed(task_id),
-                        first_metadata,
-                    )
+                    .get_task_config_for(Cow::Borrowed(task_id))
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();
