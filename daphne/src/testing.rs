@@ -369,7 +369,7 @@ where
                 .is_taskprov(taskprov_version, task_id)
         {
             if let Some(task_config) = taskprov::resolve_advertised_task_config(
-                req.version,
+                req,
                 taskprov_version,
                 &self.taskprov_vdaf_verify_key_init,
                 &self.collector_hpke_config,

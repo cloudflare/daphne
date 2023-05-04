@@ -396,7 +396,7 @@ where
             .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
 
         let Some(task_config) = taskprov::resolve_advertised_task_config(
-            req.version,
+            req,
             global_config.taskprov_version,
             &taskprov.vdaf_verify_key_init,
             &taskprov.hpke_collector_config,

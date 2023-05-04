@@ -3,11 +3,13 @@
 
 use crate::{
     messages::{
+        decode_base64url_vec,
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
         Extension, HpkeConfig, ReportMetadata, TaskId,
     },
     vdaf::VdafVerifyKey,
-    DapAbort, DapError, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
+    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config,
+    VdafConfig,
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -15,7 +17,7 @@ use ring::{
     hkdf::{Prk, Salt, HKDF_SHA256},
 };
 use serde::{Deserialize, Serialize};
-use std::str;
+use std::{borrow::Cow, str};
 use url::Url;
 
 /// DAP taskprov version.
@@ -122,32 +124,34 @@ fn malformed_task_config(task_id: &TaskId, detail: String) -> DapError {
     })
 }
 
-/// Convert a task config advertised by the peer into a [`DapTaskConfig`]. The `task_id` is the
-/// task ID indicated by the request; if this does not match the derived task ID, then
-/// `DapError::Abort(DapAbort::UnrecognizedTask)` is returned.
-pub fn resolve_advertised_task_config(
-    dap_version: DapVersion,
+/// Convert a task config advertised by the peer into a [`DapTaskConfig`].
+///
+/// The `task_id` is the task ID indicated by the request; if this does not match the derived task
+/// ID, then we return `Err(DapError::Abort(DapAbort::UnrecognizedTask))`.
+///
+/// We first look for the taskprov advertisement first in the request header (`req.taskprov`, which
+/// is set to the value of the "dap-taskprov" HTTP header, if available). We then look for the
+/// advertisement in the metadata of one of the reports incident to the request
+/// (`report_metadata_advertisement.extensions`). If not found, then we return `Ok(None)`.
+pub fn resolve_advertised_task_config<S>(
+    req: &'_ DapRequest<S>,
     taskprov_version: TaskprovVersion,
     verify_key_init: &[u8; 32],
     collector_hpke_config: &HpkeConfig,
     task_id: &TaskId,
     report_metadata_advertisement: Option<&ReportMetadata>,
 ) -> Result<Option<DapTaskConfig>, DapError> {
-    let Some(report_metadata_advertisement) = report_metadata_advertisement else {
-        // No report metadata, so we're not going to find anything.
-        return Ok(None);
-    };
-
     let Some(advertised_task_config) = get_taskprov_task_config(
+        req,
         taskprov_version,
         task_id,
         report_metadata_advertisement,
-    )? else {
+    ).map_err(DapError::Abort)? else {
         return Ok(None);
     };
 
     let task_config = DapTaskConfig::try_from_taskprov(
-        dap_version,
+        req.version,
         taskprov_version,
         task_id, // get_taskprov_task_config() checks that this matches the derived ID
         advertised_task_config,
@@ -159,36 +163,51 @@ pub fn resolve_advertised_task_config(
 }
 
 /// Check for a taskprov extension in the report, and return it if found.
-fn get_taskprov_task_config(
-    version: TaskprovVersion,
+fn get_taskprov_task_config<S>(
+    req: &'_ DapRequest<S>,
+    taskprov_version: TaskprovVersion,
     task_id: &TaskId,
-    metadata: &ReportMetadata,
-) -> Result<Option<TaskConfig>, DapError> {
-    let taskprovs: Vec<&Extension> = metadata
-        .extensions
-        .iter()
-        .filter(|x| matches!(x, Extension::Taskprov { .. }))
-        .collect();
-    match taskprovs.len() {
-        0 => Ok(None),
-        1 => match &taskprovs[0] {
-            Extension::Taskprov { payload } => {
-                if compute_task_id(version, &payload[..])? != *task_id {
-                    // Return unrecognizedTask following section 5.1 of the taskprov draft.
-                    return Err(DapError::Abort(DapAbort::UnrecognizedTask));
-                }
-                // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
-                let task_config = TaskConfig::get_decoded_with_param(&version, payload)
-                    .map_err(|_| DapError::Abort(DapAbort::UnrecognizedMessage))?;
-                Ok(Some(task_config))
+    report_metadata_advertisement: Option<&ReportMetadata>,
+) -> Result<Option<TaskConfig>, DapAbort> {
+    let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
+        Cow::Owned(decode_base64url_vec(taskprov_base64url).ok_or_else(|| {
+            DapAbort::BadRequest(
+                r#"Invalid advertisement in "dap-taskprov" header: base64url parsing failed"#
+                    .to_string(),
+            )
+        })?)
+    } else if let Some(metadata) = report_metadata_advertisement {
+        let taskprovs: Vec<&Extension> = metadata
+            .extensions
+            .iter()
+            .filter(|x| matches!(x, Extension::Taskprov { .. }))
+            .collect();
+        match taskprovs.len() {
+            0 => return Ok(None),
+            1 => match &taskprovs[0] {
+                Extension::Taskprov { payload } => Cow::Borrowed(payload),
+                _ => panic!("cannot happen"),
+            },
+            _ => {
+                // The decoder already returns an error if an extension of a give type occurs more
+                // than once.
+                panic!("should not happen")
             }
-            _ => panic!("cannot happen"),
-        },
-        _ => {
-            // The decoder already returns an error if an extension of a give type occurs more than once.
-            panic!("should not happen")
         }
+    } else {
+        return Ok(None);
+    };
+
+    if compute_task_id(taskprov_version, taskprov_data.as_ref())? != *task_id {
+        // Return unrecognizedTask following section 5.1 of the taskprov draft.
+        return Err(DapAbort::UnrecognizedTask);
     }
+
+    // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
+    let task_config =
+        TaskConfig::get_decoded_with_param(&taskprov_version, taskprov_data.as_ref())?;
+
+    Ok(Some(task_config))
 }
 
 fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapError> {
