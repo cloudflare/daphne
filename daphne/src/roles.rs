@@ -306,7 +306,8 @@ where
     /// request.
     async fn http_post_upload(&'srv self, req: &'req DapRequest<S>) -> Result<(), DapAbort> {
         let metrics = self.metrics().with_host(req.host());
-        debug!("upload for task {}", req.task_id()?);
+        let task_id = req.task_id()?;
+        debug!("upload for task {task_id}");
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
@@ -318,7 +319,6 @@ where
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         debug!("report id is {}", report.report_metadata.id);
 
-        let task_id = req.task_id()?;
         self.resolve_taskprov(task_id, req, Some(&report.report_metadata))
             .await?;
         let task_config = self
@@ -380,6 +380,8 @@ where
         }
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
+
+        self.resolve_taskprov(task_id, req, None).await?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
             error!("aborted unauthorized collect request: {reason}");
@@ -784,13 +786,12 @@ where
         req: &'req DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
         let metrics = self.metrics().with_host(req.host());
+        let task_id = req.task_id()?;
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::version_unknown());
         }
-
-        let task_id = req.task_id()?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
             error!("aborted unauthorized collect request: {reason}");
@@ -805,10 +806,10 @@ where
                 let agg_job_init_req =
                     AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)?;
 
+                // taskprov: Resolve the task config to use for the request. We also need to ensure
+                // that all of the reports include the task config in the report extensions. (See
+                // section 6 of draft-wang-ppm-dap-taskprov-02.)
                 let mut first_metadata: Option<&ReportMetadata> = None;
-
-                // If taskprov is allowed, ensure that either all of the shares have it or none of them
-                // do (section 6 of draft-wang-ppm-dap-taskprov-02).
                 let global_config = self.get_global_config();
                 if global_config.allow_taskprov {
                     let using_taskprov = agg_job_init_req
@@ -833,7 +834,6 @@ where
                         return Err(DapAbort::UnrecognizedMessage);
                     }
                 }
-
                 self.resolve_taskprov(task_id, req, first_metadata).await?;
 
                 let wrapped_task_config = self
@@ -963,8 +963,7 @@ where
                 })
             }
             DapMediaType::AggregationJobContinueReq => {
-                let agg_job_cont_req =
-                    AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)?;
+                self.resolve_taskprov(task_id, req, None).await?;
                 let wrapped_task_config = self
                     .get_task_config_for(Cow::Borrowed(task_id))
                     .await?
@@ -975,6 +974,9 @@ where
                 if task_config.version != req.version {
                     return Err(DapAbort::version_mismatch(req.version, task_config.version));
                 }
+
+                let agg_job_cont_req =
+                    AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)?;
 
                 // draft02 compatibility: In draft02, the aggregation job ID is parsed from the
                 // HTTP request payload; in the latest, the aggregation job ID is parsed from the
@@ -1047,6 +1049,7 @@ where
     ) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
         let metrics = self.metrics().with_host(req.host());
+        let task_id = req.task_id()?;
 
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
@@ -1055,7 +1058,7 @@ where
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        let task_id = req.task_id()?;
+        self.resolve_taskprov(task_id, req, None).await?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
             error!("aborted unauthorized collect request: {reason}");
@@ -1065,7 +1068,6 @@ where
             });
         }
 
-        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)?;
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
@@ -1076,6 +1078,8 @@ where
         if task_config.version != req.version {
             return Err(DapAbort::version_mismatch(req.version, task_config.version));
         }
+
+        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)?;
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
