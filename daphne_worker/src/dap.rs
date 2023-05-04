@@ -366,18 +366,18 @@ where
     /// Get an existing task (whether an ordinary task or a previously created
     /// taskprov task).  If we can't find it, see if there is a taskprov extension
     /// in the report, and if so create the task.
-    async fn get_task_config_considering_taskprov(
+    async fn resolve_taskprov(
         &'srv self,
-        version: DapVersion,
-        task_id: Cow<'req, TaskId>,
-        metadata: Option<&ReportMetadata>,
-    ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
+        task_id: &TaskId,
+        req: &'req DapRequest<DaphneWorkerAuth>,
+        report_metadata_advertisement: Option<&ReportMetadata>,
+    ) -> std::result::Result<(), DapError> {
         let found = self
-            .get_task_config(task_id.clone())
+            .get_task_config(Cow::Borrowed(task_id))
             .await
             .map_err(dap_err)?;
         if found.is_some() {
-            return Ok(found);
+            return Ok(());
         }
 
         let global_config = self.get_global_config();
@@ -385,7 +385,7 @@ where
             // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
             return Err(DapError::Abort(DapAbort::InvalidTask {
                 detail: "Taskprov extension is disabled.".to_string(),
-                task_id: task_id.as_ref().clone(),
+                task_id: task_id.clone(),
             }));
         }
 
@@ -396,21 +396,21 @@ where
             .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
 
         let Some(task_config) = taskprov::resolve_advertised_task_config(
-            version,
+            req.version,
             global_config.taskprov_version,
             &taskprov.vdaf_verify_key_init,
             &taskprov.hpke_collector_config,
-            task_id.as_ref(),
-            metadata,
+            task_id,
+            report_metadata_advertisement,
         )? else {
-            return Ok(None);
+            return Ok(());
         };
 
         // This is the opt-in / opt-out decision point.
         if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
             return Err(DapError::Abort(DapAbort::InvalidTask {
                 detail: reason,
-                task_id: task_id.into_owned(),
+                task_id: task_id.clone(),
             }));
         }
 
@@ -420,7 +420,7 @@ where
         // TODO(bhalleycf) Note that this is generating KV garbage that will
         // need collection at some point.
         if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
-            self.set_leader_bearer_token(task_id.as_ref(), leader_bearer_token)
+            self.set_leader_bearer_token(task_id, leader_bearer_token)
                 .await
                 .map_err(dap_err)?;
         }
@@ -429,11 +429,17 @@ where
         //
         // TODO(bhalleycf) Note that this is generating KV garbage that will
         // need collection at some point.
-        self.set_task_config(task_id.as_ref(), &task_config)
+        self.set_task_config(task_id, &task_config)
             .await
             .map_err(dap_err)?;
 
-        // Do the usual get again so we cache and return the right type.
+        Ok(())
+    }
+
+    async fn get_task_config_for(
+        &'srv self,
+        task_id: Cow<'req, TaskId>,
+    ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
         self.get_task_config(task_id).await.map_err(dap_err)
     }
 

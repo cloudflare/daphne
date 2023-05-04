@@ -352,47 +352,51 @@ where
         Ok(None)
     }
 
-    async fn get_task_config_considering_taskprov(
+    async fn resolve_taskprov(
         &'srv self,
-        version: DapVersion,
-        task_id: Cow<'req, TaskId>,
-        metadata: Option<&ReportMetadata>,
-    ) -> Result<Option<DapTaskConfig>, DapError> {
+        task_id: &TaskId,
+        req: &'req DapRequest<BearerToken>,
+        report_metadata_advertisement: Option<&ReportMetadata>,
+    ) -> Result<(), DapError> {
         let taskprov_version = self.global_config.taskprov_version;
 
         // Before looking up the task configuration, first check if it needs to be configured from
         // the current request.
         if self.get_global_config().allow_taskprov
-            && metadata.is_some()
-            && metadata.unwrap().is_taskprov(taskprov_version, &task_id)
+            && report_metadata_advertisement.is_some()
+            && report_metadata_advertisement
+                .unwrap()
+                .is_taskprov(taskprov_version, task_id)
         {
             if let Some(task_config) = taskprov::resolve_advertised_task_config(
-                version,
+                req.version,
                 taskprov_version,
                 &self.taskprov_vdaf_verify_key_init,
                 &self.collector_hpke_config,
-                task_id.as_ref(),
-                metadata,
+                task_id,
+                report_metadata_advertisement,
             )? {
                 let mut tasks = self.tasks.lock().expect("tasks: lock failed");
-                if tasks.get(task_id.as_ref()).is_none() {
+                if tasks.get(task_id).is_none() {
                     // Decide whether to opt-in to the task.
                     if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
                         return Err(DapError::Abort(DapAbort::InvalidTask {
                             detail: reason,
-                            task_id: task_id.into_owned(),
+                            task_id: task_id.clone(),
                         }));
                     }
 
-                    tasks
-                        .deref_mut()
-                        .insert(task_id.into_owned(), task_config.clone());
+                    tasks.deref_mut().insert(task_id.clone(), task_config);
                 }
-
-                return Ok(Some(task_config));
             }
         }
+        Ok(())
+    }
 
+    async fn get_task_config_for(
+        &'srv self,
+        task_id: Cow<'req, TaskId>,
+    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError> {
         let tasks = self.tasks.lock().expect("tasks: lock failed");
         Ok(tasks.get(task_id.as_ref()).cloned())
     }
