@@ -86,7 +86,7 @@ struct MetricsPushConfig {
 /// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
 pub(crate) struct DaphneWorkerConfig {
     /// Indicates if DaphneWorker is used as the Leader.
-    is_leader: bool,
+    pub(crate) is_leader: bool,
 
     /// Global DAP configuration.
     pub(crate) global: DapGlobalConfig,
@@ -371,13 +371,13 @@ pub(crate) struct DaphneWorkerIsolateState {
     hpke_receiver_configs: Arc<RwLock<HashMap<HpkeReceiverKvKey, HpkeReceiverConfig>>>,
 
     /// Laeder bearer token per task.
-    leader_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
+    pub(crate) leader_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
 
     /// Collector bearer token per task.
     collector_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
 
     /// Task list.
-    tasks: Arc<RwLock<HashMap<TaskId, DapTaskConfig>>>,
+    pub(crate) tasks: Arc<RwLock<HashMap<TaskId, DapTaskConfig>>>,
 }
 
 impl DaphneWorkerIsolateState {

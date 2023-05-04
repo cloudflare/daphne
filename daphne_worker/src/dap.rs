@@ -414,24 +414,44 @@ where
             }));
         }
 
-        // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
-        // finds something.
+        // If `resolve_advertised_task_config()` returned a `TaskConfig` and `req.taskprov` is set,
+        // then the task was advertised in the HTTP "dap-taskprov" header. In this case we expect
+        // the peer to send the header in every request for this task.
         //
-        // TODO(bhalleycf) Note that this is generating KV garbage that will
-        // need collection at some point.
-        if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
-            self.set_leader_bearer_token(task_id, leader_bearer_token)
+        // NOTE(cjpatton) This behavior is not specified in taskprov-02, but we expect it to be
+        // mandatory in a future draft.
+        if !self.config().is_leader && req.taskprov.is_some() {
+            // Store the task config in Worker memory, but don't write it through to KV.
+            let mut guarded_tasks =
+                self.isolate_state().tasks.write().map_err(|e| {
+                    DapError::Fatal(format!("failed to lock tasks for writing: {e}"))
+                })?;
+            guarded_tasks.insert(task_id.clone(), task_config);
+
+            if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
+                let mut guarded_leader_bearer_tokens = self
+                    .isolate_state()
+                    .leader_bearer_tokens
+                    .write()
+                    .map_err(|e| {
+                        DapError::Fatal(format!(
+                            "failed to lock leader_bearer_tokens for writing: {e}"
+                        ))
+                    })?;
+                guarded_leader_bearer_tokens.insert(task_id.clone(), leader_bearer_token.clone());
+            }
+        } else {
+            // Write the task config through to KV.
+            self.set_task_config(task_id, &task_config)
                 .await
                 .map_err(dap_err)?;
-        }
 
-        // Write the task config to the KV.
-        //
-        // TODO(bhalleycf) Note that this is generating KV garbage that will
-        // need collection at some point.
-        self.set_task_config(task_id, &task_config)
-            .await
-            .map_err(dap_err)?;
+            if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
+                self.set_leader_bearer_token(task_id, leader_bearer_token)
+                    .await
+                    .map_err(dap_err)?;
+            }
+        }
 
         Ok(())
     }
