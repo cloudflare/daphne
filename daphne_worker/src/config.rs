@@ -1004,6 +1004,7 @@ impl<'srv> DaphneWorker<'srv> {
             url: req.url()?,
             media_type,
             sender_auth,
+            taskprov: req.headers().get("dap-taskprov")?,
         })
     }
 

@@ -123,7 +123,7 @@ impl From<VdafError> for DapError {
 }
 
 /// DAP version used for a task.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
@@ -133,6 +133,7 @@ pub enum DapVersion {
 
     #[serde(other)]
     #[serde(rename = "unknown_version")]
+    #[default]
     Unknown,
 }
 
@@ -737,7 +738,7 @@ pub enum DapSender {
 }
 
 /// Types of resources associated with DAP tasks.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum DapResource {
     /// Aggregation job resource.
     AggregationJob(AggregationJobId),
@@ -758,6 +759,7 @@ pub enum DapResource {
     ///
     /// draft02 compatibility: In draft02, the resource of a DAP request is undetermined until the
     /// request payload is parsed. Defer detrmination of the resource until then.
+    #[default]
     Undefined,
 }
 
@@ -785,6 +787,24 @@ pub struct DapRequest<S> {
 
     /// Sender authorization, e.g., a bearer token.
     pub sender_auth: Option<S>,
+
+    /// taskprov: The task advertisement, sent in the "dap-taskprov" header.
+    pub taskprov: Option<String>,
+}
+
+impl<S> Default for DapRequest<S> {
+    fn default() -> Self {
+        Self {
+            version: Default::default(),
+            media_type: Default::default(),
+            task_id: Default::default(),
+            resource: Default::default(),
+            payload: Default::default(),
+            url: Url::parse("http://example.com").unwrap(),
+            sender_auth: Default::default(),
+            taskprov: Default::default(),
+        }
+    }
 }
 
 impl<S> DapRequest<S> {

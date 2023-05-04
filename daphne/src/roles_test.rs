@@ -217,7 +217,7 @@ impl Test {
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version),
             url: task_config.leader_url.join("upload").unwrap(),
-            sender_auth: None,
+            ..Default::default()
         }
     }
 
@@ -448,6 +448,7 @@ impl Test {
             payload,
             url,
             sender_auth,
+            ..Default::default()
         }
     }
 
@@ -475,6 +476,7 @@ impl Test {
             payload,
             url,
             sender_auth,
+            ..Default::default()
         }
     }
 
@@ -500,6 +502,7 @@ impl Test {
             payload: msg.get_encoded_with_param(&version),
             url,
             sender_auth: Some(self.collector_token.clone()),
+            ..Default::default()
         }
     }
 }
@@ -684,7 +687,7 @@ async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
             task_id.to_base64url()
         ))
         .unwrap(),
-        sender_auth: None,
+        ..Default::default()
     };
 
     assert_matches!(
@@ -704,7 +707,7 @@ async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
         resource: DapResource::Undefined,
         payload: Vec::new(),
         url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),
-        sender_auth: None,
+        ..Default::default()
     };
 
     // An Aggregator is permitted to abort an HPKE config request if the task ID is missing. Note
@@ -858,7 +861,7 @@ async fn http_post_collect_unauthorized_request(version: DapVersion) {
         }
         .get_encoded_with_param(&task_config.version),
         url: task_config.leader_url.join(&url_path).unwrap(),
-        sender_auth: None, // Unauthorized request.
+        ..Default::default() // Unauthorized request.
     };
 
     // Expect failure due to missing bearer token.
@@ -1106,7 +1109,7 @@ async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
         resource: DapResource::Undefined,
         payload: report_invalid_task_id.get_encoded_with_param(&task_config.version),
         url: task_config.leader_url.join("upload").unwrap(),
-        sender_auth: None,
+        ..Default::default()
     };
 
     // Expect failure due to invalid task ID in report.
@@ -1144,7 +1147,7 @@ async fn http_post_upload_task_expired(version: DapVersion) {
         resource: DapResource::Undefined,
         payload: report.get_encoded_with_param(&version),
         url: task_config.leader_url.join("upload").unwrap(),
-        sender_auth: None,
+        ..Default::default()
     };
 
     assert_matches!(
@@ -1689,7 +1692,7 @@ async fn e2e_taskprov(version: DapVersion) {
         resource: DapResource::Undefined,
         payload: report.get_encoded_with_param(&version),
         url: Url::parse("https://leader.com/upload").unwrap(),
-        sender_auth: None,
+        ..Default::default()
     };
     t.leader.http_post_upload(&req).await.unwrap();
 
