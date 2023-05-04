@@ -792,6 +792,7 @@ pub struct DapRequest<S> {
     pub taskprov: Option<String>,
 }
 
+#[cfg(test)]
 impl<S> Default for DapRequest<S> {
     fn default() -> Self {
         Self {
