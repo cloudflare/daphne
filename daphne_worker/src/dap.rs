@@ -55,10 +55,9 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    taskprov::get_taskprov_task_config,
-    DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender, DapTaskConfig, DapVersion,
-    MetaAggregationJobId,
+    taskprov, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
+    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender,
+    DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
@@ -380,76 +379,62 @@ where
         if found.is_some() {
             return Ok(found);
         }
-        // Not found and no error.
-        if metadata.is_none() {
-            // No report metadata, so we're not going to find anything.
-            return Ok(None);
+
+        let global_config = self.get_global_config();
+        if !global_config.allow_taskprov {
+            // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
+            return Err(DapError::Abort(DapAbort::InvalidTask {
+                detail: "Taskprov extension is disabled.".to_string(),
+                task_id: task_id.as_ref().clone(),
+            }));
         }
-        let metadata_ref = metadata.unwrap();
-        let taskprov_task_config = get_taskprov_task_config(
-            self.config().global.taskprov_version,
+
+        let taskprov = self
+            .config()
+            .taskprov
+            .as_ref()
+            .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
+
+        let Some(task_config) = taskprov::resolve_advertised_task_config(
+            version,
+            global_config.taskprov_version,
+            &taskprov.vdaf_verify_key_init,
+            &taskprov.hpke_collector_config,
             task_id.as_ref(),
-            metadata_ref,
-        )?;
-        if taskprov_task_config.is_some() {
-            let global = self.get_global_config();
-            if !global.allow_taskprov {
-                // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
-                return Err(DapError::Abort(DapAbort::InvalidTask {
-                    detail: "Taskprov extension is disabled.".to_string(),
-                    task_id: task_id.as_ref().clone(),
-                }));
-            }
-            let taskprov = self
-                .config()
-                .taskprov
-                .as_ref()
-                .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
+            metadata,
+        )? else {
+            return Ok(None);
+        };
 
-            let taskprov_task_id = task_id.as_ref().clone();
-            let task_config = DapTaskConfig::try_from_taskprov(
-                version,
-                self.config().global.taskprov_version,
-                &taskprov_task_id,
-                taskprov_task_config.unwrap(),
-                &taskprov.vdaf_verify_key_init,
-                taskprov.hpke_collector_config.as_ref(),
-            )?;
+        // This is the opt-in / opt-out decision point.
+        if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
+            return Err(DapError::Abort(DapAbort::InvalidTask {
+                detail: reason,
+                task_id: task_id.into_owned(),
+            }));
+        }
 
-            // This is the opt-in / opt-out decision point.
-            if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
-                return Err(DapError::Abort(DapAbort::InvalidTask {
-                    detail: reason,
-                    task_id: task_id.into_owned(),
-                }));
-            }
-
-            // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
-            // finds something.
-            //
-            // TODO(bhalleycf) Note that this is generating KV garbage that will
-            // need collection at some point.
-            if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
-                self.set_leader_bearer_token(&taskprov_task_id, leader_bearer_token)
-                    .await
-                    .map_err(dap_err)?;
-            }
-
-            // Write the task config to the KV.
-            //
-            // TODO(bhalleycf) Note that this is generating KV garbage that will
-            // need collection at some point.
-            self.set_task_config(&taskprov_task_id, &task_config)
+        // Write the leader bearer token to the KV.  We do this so authorize_with_bearer_token()
+        // finds something.
+        //
+        // TODO(bhalleycf) Note that this is generating KV garbage that will
+        // need collection at some point.
+        if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
+            self.set_leader_bearer_token(task_id.as_ref(), leader_bearer_token)
                 .await
                 .map_err(dap_err)?;
-
-            // Do the usual get again so we cache and return the right type.
-            self.get_task_config(Cow::Owned(taskprov_task_id))
-                .await
-                .map_err(dap_err)
-        } else {
-            Ok(None)
         }
+
+        // Write the task config to the KV.
+        //
+        // TODO(bhalleycf) Note that this is generating KV garbage that will
+        // need collection at some point.
+        self.set_task_config(task_id.as_ref(), &task_config)
+            .await
+            .map_err(dap_err)?;
+
+        // Do the usual get again so we cache and return the right type.
+        self.get_task_config(task_id).await.map_err(dap_err)
     }
 
     fn get_current_time(&self) -> u64 {
