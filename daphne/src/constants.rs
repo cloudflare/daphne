@@ -24,7 +24,7 @@ const MEDIA_TYPE_HPKE_CONFIG_LIST: &str = "application/dap-hpke-config-list";
 const MEDIA_TYPE_REPORT: &str = "application/dap-report";
 
 /// Media type for each DAP request. This is included in the "content-type" HTTP header.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum DapMediaType {
     AggregationJobInitReq,
     AggregationJobResp,
@@ -41,6 +41,7 @@ pub enum DapMediaType {
     /// The content-type does not match a known media type.
     Invalid(String),
     /// No content-type header found.
+    #[default]
     Missing,
 }
 

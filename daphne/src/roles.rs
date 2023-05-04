@@ -240,6 +240,7 @@ macro_rules! leader_post {
                     .authorize(&$task_id, &$req_media_type, &$req_data)
                     .await?,
             ),
+            taskprov: None,
         };
 
         let resp = if $is_put {
