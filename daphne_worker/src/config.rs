@@ -895,6 +895,7 @@ impl<'srv> DaphneWorker<'srv> {
                     vdaf,
                     vdaf_verify_key,
                     collector_hpke_config,
+                    taskprov: false,
                 },
             )
             .await?

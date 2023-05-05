@@ -107,6 +107,7 @@ impl Test {
                 query: DapQueryConfig::TimeInterval,
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                taskprov: false,
             },
         );
         tasks.insert(
@@ -122,6 +123,7 @@ impl Test {
                 query: DapQueryConfig::FixedSize { max_batch_size: 2 },
                 vdaf: vdaf_config.clone(),
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                taskprov: false,
             },
         );
         tasks.insert(
@@ -137,6 +139,7 @@ impl Test {
                 query: DapQueryConfig::TimeInterval,
                 vdaf: vdaf_config,
                 vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                taskprov: false,
             },
         );
 

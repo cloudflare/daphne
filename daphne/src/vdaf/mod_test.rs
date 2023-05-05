@@ -773,6 +773,7 @@ impl Test {
                 vdaf: vdaf.clone(),
                 vdaf_verify_key,
                 collector_hpke_config,
+                taskprov: false,
             },
             prometheus_registry,
             leader_metrics,
