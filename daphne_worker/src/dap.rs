@@ -9,7 +9,7 @@
 use crate::{
     auth::DaphneWorkerAuth,
     config::{
-        DaphneWorker, GuardedBearerToken, GuardedDapTaskConfig, GuardedHpkeReceiverConfig,
+        BearerTokenKvPair, DapTaskConfigKvPair, DaphneWorker, HpkeReceiverConfigKvPair,
         HpkeReceiverKvKey, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
     },
     dap_err,
@@ -87,13 +87,13 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 
 #[async_trait(?Send)]
 impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
-    type WrappedHpkeConfig = GuardedHpkeReceiverConfig<'srv>;
+    type WrappedHpkeConfig = HpkeReceiverConfigKvPair<'srv>;
 
     async fn get_hpke_config_for(
         &'srv self,
         version: DapVersion,
         _task_id: Option<&TaskId>,
-    ) -> std::result::Result<GuardedHpkeReceiverConfig<'srv>, DapError> {
+    ) -> std::result::Result<HpkeReceiverConfigKvPair<'srv>, DapError> {
         let kv_store = self.kv().map_err(dap_err)?;
         let keys = kv_store
             .list()
@@ -207,19 +207,19 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 
 #[async_trait(?Send)]
 impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
-    type WrappedBearerToken = GuardedBearerToken<'srv>;
+    type WrappedBearerToken = BearerTokenKvPair<'srv>;
 
     async fn get_leader_bearer_token_for(
         &'srv self,
         task_id: &'srv TaskId,
-    ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
+    ) -> std::result::Result<Option<BearerTokenKvPair>, DapError> {
         self.get_leader_bearer_token(task_id).await.map_err(dap_err)
     }
 
     async fn get_collector_bearer_token_for(
         &'srv self,
         task_id: &'srv TaskId,
-    ) -> std::result::Result<Option<GuardedBearerToken>, DapError> {
+    ) -> std::result::Result<Option<BearerTokenKvPair>, DapError> {
         self.get_collector_bearer_token(task_id)
             .await
             .map_err(dap_err)
@@ -276,7 +276,7 @@ impl<'srv, 'req> DapAggregator<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'s
 where
     'srv: 'req,
 {
-    type WrappedDapTaskConfig = GuardedDapTaskConfig<'req>;
+    type WrappedDapTaskConfig = DapTaskConfigKvPair<'req>;
 
     async fn unauthorized_reason(
         &self,
@@ -459,7 +459,7 @@ where
     async fn get_task_config_for(
         &'srv self,
         task_id: Cow<'req, TaskId>,
-    ) -> std::result::Result<Option<GuardedDapTaskConfig<'req>>, DapError> {
+    ) -> std::result::Result<Option<DapTaskConfigKvPair<'req>>, DapError> {
         self.get_task_config(task_id).await.map_err(dap_err)
     }
 

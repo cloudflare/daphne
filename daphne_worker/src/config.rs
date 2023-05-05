@@ -42,7 +42,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     io::Cursor,
-    sync::{Arc, RwLock, RwLockReadGuard},
+    sync::{Arc, RwLock},
     time::Duration,
 };
 use tracing::{error, info, trace};
@@ -558,16 +558,39 @@ impl<'srv> DaphneWorker<'srv> {
         Ok(None)
     }
 
+    /// In memory cache on-top of KV to avoid hitting KV API limits.
+    // NOTE: We shouldn't return guards from this function as they could be held across await points.
+    //
+    // Locks in wasm are assumed to be single threaded without concurrency:
+    // https://github.com/rust-lang/rust/blob/6f8c0557e0b73c73a8a7163a15f4a5a3feca7d5c/library/std/src/sys/unsupported/locks/rwlock.rs#L4
+    //
+    // However, with Cloudflare Workers the situation is not so straightforward.
+    //
+    // A single isolate can process multiple requests concurrently (not in parallel), so holding
+    // ReadGuards across await points is not OK.
+    //
+    // There are some official docs that refer to the behaviour:
+    // https://developers.cloudflare.com/workers/learning/how-workers-works/#distributed-execution
+    //
+    // The errors seen are:
+    //
+    //   Error: The script will never generate a response.
+    //
+    //   and
+    //
+    //   Memory access out of bounds
+    //
+    // They only seem to happen under load, likely because the Workers runtime will readily spawn
+    // additional isolates.
     async fn kv_get_cached<'req, K, V>(
         &self,
         map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
         kv_key_suffix: Cow<'req, K>,
-    ) -> Result<Option<Guarded<'req, K, V>>>
+    ) -> Result<Option<KvPair<'req, K, V>>>
     where
         K: Clone + Eq + std::hash::Hash + ToString,
-        V: for<'de> Deserialize<'de>,
-        'srv: 'req,
+        V: Clone + for<'de> Deserialize<'de>,
     {
         // If the value is cached, then return immediately.
         {
@@ -575,9 +598,9 @@ impl<'srv> DaphneWorker<'srv> {
                 .read()
                 .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
 
-            if guarded_map.get(&kv_key_suffix).is_some() {
-                return Ok(Some(Guarded {
-                    guarded_map,
+            if let Some(value) = guarded_map.get(&kv_key_suffix) {
+                return Ok(Some(KvPair {
+                    value: value.clone(),
                     key: kv_key_suffix,
                 }));
             }
@@ -601,9 +624,9 @@ impl<'srv> DaphneWorker<'srv> {
             .read()
             .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
 
-        if guarded_map.get(kv_key_suffix.as_ref()).is_some() {
-            Ok(Some(Guarded {
-                guarded_map,
+        if let Some(value) = guarded_map.get(kv_key_suffix.as_ref()) {
+            Ok(Some(KvPair {
+                value: value.clone(),
                 key: kv_key_suffix,
             }))
         } else {
@@ -616,7 +639,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_hpke_receiver_config(
         &self,
         hpke_receiver_kv_key: HpkeReceiverKvKey,
-    ) -> Result<Option<GuardedHpkeReceiverConfig>> {
+    ) -> Result<Option<HpkeReceiverConfigKvPair>> {
         self.kv_get_cached(
             &self.isolate_state().hpke_receiver_configs,
             KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
@@ -629,7 +652,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_leader_bearer_token<'a>(
         &'a self,
         task_id: &'a TaskId,
-    ) -> Result<Option<GuardedBearerToken>> {
+    ) -> Result<Option<BearerTokenKvPair>> {
         self.kv_get_cached(
             &self.isolate_state().leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
@@ -652,7 +675,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_collector_bearer_token<'a>(
         &'a self,
         task_id: &'a TaskId,
-    ) -> Result<Option<GuardedBearerToken>> {
+    ) -> Result<Option<BearerTokenKvPair>> {
         self.kv_get_cached(
             &self.isolate_state().collector_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
@@ -665,7 +688,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_task_config<'req>(
         &'srv self,
         task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<GuardedDapTaskConfig<'req>>>
+    ) -> Result<Option<DapTaskConfigKvPair<'req>>>
     where
         'srv: 'req,
     {
@@ -692,7 +715,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn try_get_task_config<'req>(
         &'srv self,
         task_id: &'req TaskId,
-    ) -> std::result::Result<GuardedDapTaskConfig<'req>, DapError>
+    ) -> std::result::Result<DapTaskConfigKvPair<'req>, DapError>
     where
         'srv: 'req,
     {
@@ -1113,41 +1136,41 @@ impl<'srv> DaphneWorker<'srv> {
     }
 }
 
-/// RwLockReadGuard'ed object, used to catch items fetched from KV.
-pub(crate) struct Guarded<'a, K: Clone, V> {
-    guarded_map: RwLockReadGuard<'a, HashMap<K, V>>,
+/// KV pair
+pub(crate) struct KvPair<'a, K: Clone, V> {
     key: Cow<'a, K>,
+    value: V,
 }
 
-impl<K: Clone + Eq + std::hash::Hash, V> Guarded<'_, K, V> {
+impl<K: Clone + Eq + std::hash::Hash, V> KvPair<'_, K, V> {
     pub(crate) fn key(&self) -> &K {
         self.key.as_ref()
     }
 
     pub(crate) fn value(&self) -> &V {
-        self.guarded_map.get(self.key.as_ref()).unwrap()
+        &self.value
     }
 }
 
-pub(crate) type GuardedHpkeReceiverConfig<'a> = Guarded<'a, HpkeReceiverKvKey, HpkeReceiverConfig>;
+pub(crate) type HpkeReceiverConfigKvPair<'a> = KvPair<'a, HpkeReceiverKvKey, HpkeReceiverConfig>;
 
-impl AsRef<HpkeConfig> for GuardedHpkeReceiverConfig<'_> {
+impl AsRef<HpkeConfig> for HpkeReceiverConfigKvPair<'_> {
     fn as_ref(&self) -> &HpkeConfig {
         &self.value().config
     }
 }
 
-pub(crate) type GuardedBearerToken<'a> = Guarded<'a, TaskId, BearerToken>;
+pub(crate) type BearerTokenKvPair<'a> = KvPair<'a, TaskId, BearerToken>;
 
-impl AsRef<BearerToken> for GuardedBearerToken<'_> {
+impl AsRef<BearerToken> for BearerTokenKvPair<'_> {
     fn as_ref(&self) -> &BearerToken {
         self.value()
     }
 }
 
-pub(crate) type GuardedDapTaskConfig<'a> = Guarded<'a, TaskId, DapTaskConfig>;
+pub(crate) type DapTaskConfigKvPair<'a> = KvPair<'a, TaskId, DapTaskConfig>;
 
-impl AsRef<DapTaskConfig> for GuardedDapTaskConfig<'_> {
+impl AsRef<DapTaskConfig> for DapTaskConfigKvPair<'_> {
     fn as_ref(&self) -> &DapTaskConfig {
         self.value()
     }
