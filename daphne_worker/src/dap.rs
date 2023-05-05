@@ -45,19 +45,19 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
-    aborts::DapAbort,
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     hpke::HpkeDecrypter,
     messages::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
-        PartialBatchSelector, Report, ReportId, ReportMetadata, TaskId, TransitionFailure,
+        HpkeConfig, PartialBatchSelector, Report, ReportId, ReportMetadata, TaskId,
+        TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    taskprov, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
-    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender,
-    DapTaskConfig, DapVersion, MetaAggregationJobId,
+    DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
+    DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapSender, DapTaskConfig, DapVersion,
+    MetaAggregationJobId,
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
@@ -355,6 +355,20 @@ where
         &self.config().global
     }
 
+    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
+        self.config()
+            .taskprov
+            .as_ref()
+            .map(|config| &config.vdaf_verify_key_init)
+    }
+
+    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig> {
+        self.config()
+            .taskprov
+            .as_ref()
+            .map(|config| &config.hpke_collector_config)
+    }
+
     fn taskprov_opt_out_reason(
         &self,
         _task_config: &DapTaskConfig,
@@ -363,56 +377,17 @@ where
         Ok(None)
     }
 
-    /// Get an existing task (whether an ordinary task or a previously created
-    /// taskprov task).  If we can't find it, see if there is a taskprov extension
-    /// in the report, and if so create the task.
-    async fn resolve_taskprov(
+    async fn taskprov_put(
         &'srv self,
-        task_id: &TaskId,
         req: &'req DapRequest<DaphneWorkerAuth>,
-        report_metadata_advertisement: Option<&ReportMetadata>,
+        task_config: DapTaskConfig,
     ) -> std::result::Result<(), DapError> {
-        let found = self
-            .get_task_config(Cow::Borrowed(task_id))
-            .await
-            .map_err(dap_err)?;
-        if found.is_some() {
-            return Ok(());
-        }
-
-        let global_config = self.get_global_config();
-        if !global_config.allow_taskprov {
-            // TODO(bhalleycf) if DAP gets a generic denied error, we should use it here.
-            return Err(DapError::Abort(DapAbort::InvalidTask {
-                detail: "Taskprov extension is disabled.".to_string(),
-                task_id: task_id.clone(),
-            }));
-        }
-
+        let task_id = req.task_id().map_err(DapError::Abort)?;
         let taskprov = self
             .config()
             .taskprov
             .as_ref()
             .ok_or_else(|| DapError::fatal("taskprov configuration not found"))?;
-
-        let Some(task_config) = taskprov::resolve_advertised_task_config(
-            req,
-            global_config.taskprov_version,
-            &taskprov.vdaf_verify_key_init,
-            &taskprov.hpke_collector_config,
-            task_id,
-            report_metadata_advertisement,
-        )? else {
-            return Ok(());
-        };
-
-        // This is the opt-in / opt-out decision point.
-        if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
-            return Err(DapError::Abort(DapAbort::InvalidTask {
-                detail: reason,
-                task_id: task_id.clone(),
-            }));
-        }
 
         // If `resolve_advertised_task_config()` returned a `TaskConfig` and `req.taskprov` is set,
         // then the task was advertised in the HTTP "dap-taskprov" header. In this case we expect

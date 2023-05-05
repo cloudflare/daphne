@@ -9,21 +9,21 @@ use crate::{
     messages::{
         constant_time_eq, decode_base64url, AggregateShare, AggregateShareReq,
         AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchId,
-        BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeConfigList, Interval,
-        PartialBatchSelector, Query, Report, ReportId, ReportMetadata, TaskId, Time,
+        BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeConfig, HpkeConfigList,
+        Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata, TaskId, Time,
         TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
-    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
-    DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
-    DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion,
-    MetaAggregationJobId,
+    taskprov, DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig,
+    DapHelperState, DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition,
+    DapOutputShare, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapVersion, MetaAggregationJobId,
 };
 use async_trait::async_trait;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use url::Url;
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
@@ -57,7 +57,15 @@ where
     /// Look up the DAP global configuration.
     fn get_global_config(&self) -> &DapGlobalConfig;
 
-    /// Decide whether to opt-in or out-out of a task provisioned via taskprov.
+    /// taskprov: The VDAF verification key initializer. Used to derive the VDAF verify key for all
+    /// tasks configured by this extension.
+    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]>;
+
+    /// taskprov: The Collector's HPKE configuration used for all tasks configured by this
+    /// extension.
+    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig>;
+
+    /// taskprov: Decide whether to opt-in or out-out of a task provisioned via taskprov.
     ///
     /// If the return value is `None`, then the decision is to opt-in. If the return value is
     /// `Some(reason)`, then the decision is to opt-out; `reason` conveys details about how the
@@ -67,17 +75,13 @@ where
         task_config: &DapTaskConfig,
     ) -> Result<Option<String>, DapError>;
 
-    /// taskprov: Attempt to configure the task advertised in the request. If taskprov is disabled
-    /// then this is a noop. Otherwise, if successful, the next call to `get_task_config_for()`
-    /// will return the configure task. Otherwise this call will return nothing.
-    ///
-    /// The DAP version must be specified because we may create a DapTaskConfig via taskprov, and
-    /// we want it to have the same version as the API entry point the client is using.
-    async fn resolve_taskprov(
+    /// taskprov: Configure a task. This is called after opting in. If successful, the next call to
+    /// `get_task_config_for()` will return the configure task. Otherwise this call will return
+    /// nothing.
+    async fn taskprov_put(
         &'srv self,
-        task_id: &TaskId,
         req: &'req DapRequest<S>,
-        report_metadata_advertisement: Option<&ReportMetadata>,
+        task_config: DapTaskConfig,
     ) -> Result<(), DapError>;
 
     /// Look up the DAP task configuration for the given task ID.
@@ -319,8 +323,7 @@ where
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
         debug!("report id is {}", report.report_metadata.id);
 
-        self.resolve_taskprov(task_id, req, Some(&report.report_metadata))
-            .await?;
+        resolve_taskprov(self, task_id, req, Some(&report.report_metadata)).await?;
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
             .await?
@@ -381,7 +384,7 @@ where
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
 
-        self.resolve_taskprov(task_id, req, None).await?;
+        resolve_taskprov(self, task_id, req, None).await?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
             error!("aborted unauthorized collect request: {reason}");
@@ -834,7 +837,7 @@ where
                         return Err(DapAbort::UnrecognizedMessage);
                     }
                 }
-                self.resolve_taskprov(task_id, req, first_metadata).await?;
+                resolve_taskprov(self, task_id, req, first_metadata).await?;
 
                 let wrapped_task_config = self
                     .get_task_config_for(Cow::Borrowed(task_id))
@@ -963,7 +966,7 @@ where
                 })
             }
             DapMediaType::AggregationJobContinueReq => {
-                self.resolve_taskprov(task_id, req, None).await?;
+                resolve_taskprov(self, task_id, req, None).await?;
                 let wrapped_task_config = self
                     .get_task_config_for(Cow::Borrowed(task_id))
                     .await?
@@ -1058,7 +1061,7 @@ where
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        self.resolve_taskprov(task_id, req, None).await?;
+        resolve_taskprov(self, task_id, req, None).await?;
 
         if let Some(reason) = self.unauthorized_reason(req).await? {
             error!("aborted unauthorized collect request: {reason}");
@@ -1314,4 +1317,62 @@ fn check_request_content_type<S>(
     } else {
         Ok(())
     }
+}
+
+async fn resolve_taskprov<'srv, 'req, S>(
+    agg: &'srv impl DapAggregator<'srv, 'req, S>,
+    task_id: &'req TaskId,
+    req: &'req DapRequest<S>,
+    report_metadata_advertisement: Option<&ReportMetadata>,
+) -> Result<(), DapError>
+where
+    'srv: 'req,
+{
+    if agg
+        .get_task_config_for(Cow::Borrowed(task_id))
+        .await?
+        .is_some()
+    {
+        // Task already configured, so nothing to do.
+        return Ok(());
+    }
+
+    let global_config = agg.get_global_config();
+    if !global_config.allow_taskprov {
+        // Taskprov is disabled, so nothing to do.
+        return Ok(());
+    }
+
+    let Some(vdaf_verify_key_init) = agg.taskprov_vdaf_verify_key_init() else {
+        warn!("Taskprov disabled due to missing VDAF verification key initializer.");
+        return Ok(());
+    };
+
+    let Some(collector_hpke_config) = agg.taskprov_collector_hpke_config() else {
+        warn!("Taskprov disabled due to missing Collector HPKE configuration.");
+        return Ok(());
+    };
+
+    let Some(task_config) = taskprov::resolve_advertised_task_config(
+            req,
+            global_config.taskprov_version,
+            vdaf_verify_key_init,
+            collector_hpke_config,
+            task_id,
+            report_metadata_advertisement,
+        )? else {
+            // No task configuration advertised, so nothing to do.
+            return Ok(());
+        };
+
+    // This is the opt-in / opt-out decision point.
+    if let Some(reason) = agg.taskprov_opt_out_reason(&task_config)? {
+        return Err(DapError::Abort(DapAbort::InvalidTask {
+            detail: reason,
+            task_id: task_id.clone(),
+        }));
+    }
+
+    agg.taskprov_put(req, task_config).await?;
+    Ok(())
 }
