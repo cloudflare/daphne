@@ -14,9 +14,9 @@ use crate::{
     },
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    taskprov, DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
-    DapGlobalConfig, DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
-    DapTaskConfig, DapVersion, MetaAggregationJobId,
+    DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
+    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+    DapVersion, MetaAggregationJobId,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -344,6 +344,14 @@ where
         &self.global_config
     }
 
+    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
+        Some(&self.taskprov_vdaf_verify_key_init)
+    }
+
+    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig> {
+        Some(&self.collector_hpke_config)
+    }
+
     fn taskprov_opt_out_reason(
         &self,
         _task_config: &DapTaskConfig,
@@ -352,44 +360,14 @@ where
         Ok(None)
     }
 
-    async fn resolve_taskprov(
+    async fn taskprov_put(
         &'srv self,
-        task_id: &TaskId,
         req: &'req DapRequest<BearerToken>,
-        report_metadata_advertisement: Option<&ReportMetadata>,
+        task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
-        let taskprov_version = self.global_config.taskprov_version;
-
-        // Before looking up the task configuration, first check if it needs to be configured from
-        // the current request.
-        if self.get_global_config().allow_taskprov
-            && report_metadata_advertisement.is_some()
-            && report_metadata_advertisement
-                .unwrap()
-                .is_taskprov(taskprov_version, task_id)
-        {
-            if let Some(task_config) = taskprov::resolve_advertised_task_config(
-                req,
-                taskprov_version,
-                &self.taskprov_vdaf_verify_key_init,
-                &self.collector_hpke_config,
-                task_id,
-                report_metadata_advertisement,
-            )? {
-                let mut tasks = self.tasks.lock().expect("tasks: lock failed");
-                if tasks.get(task_id).is_none() {
-                    // Decide whether to opt-in to the task.
-                    if let Some(reason) = self.taskprov_opt_out_reason(&task_config)? {
-                        return Err(DapError::Abort(DapAbort::InvalidTask {
-                            detail: reason,
-                            task_id: task_id.clone(),
-                        }));
-                    }
-
-                    tasks.deref_mut().insert(task_id.clone(), task_config);
-                }
-            }
-        }
+        let task_id = req.task_id().map_err(DapError::Abort)?;
+        let mut tasks = self.tasks.lock().expect("tasks: lock failed");
+        tasks.deref_mut().insert(task_id.clone(), task_config);
         Ok(())
     }
 
