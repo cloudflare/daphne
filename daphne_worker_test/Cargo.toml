@@ -25,8 +25,8 @@ cfg-if = "1.0.0"
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne_worker = { path = "../daphne_worker" }
-serde = { version = "1.0.160", features = ["derive"] }
-serde_json = "1.0.95"
+serde = { version = "1.0.162", features = ["derive"] }
+serde_json = "1.0.96"
 tracing = "0.1.37"
 worker = "0.0.16"
 
@@ -39,9 +39,9 @@ hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "0.1.0"
 lazy_static = "1.4.0"
 paste = "1.0.12"
-prio = "0.12.0"
+prio = "0.12.1"
 rand = "0.8.5"
-reqwest = { version = "0.11.16", features = ["json"] }
+reqwest = { version = "0.11.17", features = ["json"] }
 ring = "0.16.20"
-tokio = { version = "1.27.0", features = ["full"] }
+tokio = { version = "1.28.0", features = ["full"] }
 url = { version = "2.3.1", features = ["serde"] }

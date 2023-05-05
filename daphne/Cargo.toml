@@ -29,15 +29,15 @@ hpke-rs-rust-crypto = { version = "0.1.1"}
 lazy_static = "1.4.0"
 matchit = "0.7.0"
 paste = "1.0.12"
-prio = { version = "0.12.0", features = ["prio2"] }
+prio = { version = "0.12.1", features = ["prio2"] }
 prometheus = "0.13.3"
 rand = "0.8.5"
 ring = "0.16.20"
-serde = { version = "1.0.160", features = ["derive"] }
-serde_json = "1.0.95"
+serde = { version = "1.0.162", features = ["derive"] }
+serde_json = "1.0.96"
 thiserror = "1.0.40"
 tracing = "0.1.37"
 url = { version = "2.3.1", features = ["serde"] }
 
 [dev-dependencies]
-tokio = { version = "1.27.0", features = ["rt", "macros"] }
+tokio = { version = "1.28.0", features = ["rt", "macros"] }
