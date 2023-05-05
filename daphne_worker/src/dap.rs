@@ -452,7 +452,7 @@ where
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
         // shares that have already been marked collected.
-        let durable = self.durable();
+        let durable = self.durable().with_retry();
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
             let durable_name =
@@ -484,6 +484,7 @@ where
 
         let agg_share: DapAggregateShare = self
             .durable()
+            .with_retry()
             .get(
                 BINDING_DAP_AGGREGATE_STORE,
                 DURABLE_AGGREGATE_STORE_GET,
@@ -533,7 +534,7 @@ where
     ) -> std::result::Result<DapAggregateShare, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
 
-        let durable = self.durable();
+        let durable = self.durable().with_retry();
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
             let durable_name =
@@ -559,7 +560,6 @@ where
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
     ) -> std::result::Result<HashMap<ReportId, TransitionFailure>, DapError> {
-        let durable = self.durable();
         let task_config = self.try_get_task_config(task_id).await?;
         let task_id_hex = task_id.to_hex();
         let span = task_config
@@ -592,6 +592,7 @@ where
         }
 
         // Send ReportsProcessed requests.
+        let durable = self.durable();
         let mut reports_processed_requests = Vec::new();
         for (durable_name, report_id_hex_set) in reports_processed_request_data.into_iter() {
             reports_processed_requests.push(durable.post(
@@ -603,6 +604,7 @@ where
         }
 
         // Send AggregateStore requests.
+        let durable = self.durable().with_retry();
         let mut agg_store_requests = Vec::new();
         for durable_name in agg_store_request_name {
             agg_store_requests.push(durable.get(
@@ -613,6 +615,11 @@ where
         }
 
         // Create the set of reports that have been processed.
+        //
+        // TODO(cjpatton) These requests are non-idempotent, but decide if we should retry anyway.
+        // The only risk I can see is incorrectly marking a report as aggregated. This would happen
+        // if the request wrote some the report IDs to storage before the request failed. If we did
+        // this then "report_dropped" would be a more accurate signal than "report_replayed".
         let reports_processed_responses: Vec<Vec<String>> =
             try_join_all(reports_processed_requests)
                 .await
@@ -1005,6 +1012,8 @@ where
         agg_job_id: &MetaAggregationJobId,
     ) -> std::result::Result<Option<DapHelperState>, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
+        // TODO(cjpatton) Figure out if retry is safe, since the request is not actually
+        // idempotent. (It removes the helper's state from storage if it exists.)
         let res: Option<String> = self
             .durable()
             .with_retry()

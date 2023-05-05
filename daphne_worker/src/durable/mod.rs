@@ -69,7 +69,7 @@ impl<'srv> DurableConnector<'srv> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        self.durable_request(stub, durable_path, Method::Get, None::<()>)
+        self.durable_request(stub, durable_binding, durable_path, Method::Get, None::<()>)
             .await
             .map_err(|error| {
                 Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
@@ -87,13 +87,19 @@ impl<'srv> DurableConnector<'srv> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        self.durable_request(stub, durable_path, Method::Post, Some(data))
-            .await
-            .map_err(|error| {
-                Error::RustError(format!(
-                    "DO {durable_binding}: post {durable_path}: {error}"
-                ))
-            })
+        self.durable_request(
+            stub,
+            durable_binding,
+            durable_path,
+            Method::Post,
+            Some(data),
+        )
+        .await
+        .map_err(|error| {
+            Error::RustError(format!(
+                "DO {durable_binding}: post {durable_path}: {error}"
+            ))
+        })
     }
 
     /// Send a POST request with the given path to the DO instance with the given binding and hex
@@ -108,18 +114,25 @@ impl<'srv> DurableConnector<'srv> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_string(&durable_id_hex)?.get_stub()?;
-        self.durable_request(stub, durable_path, Method::Post, Some(data))
-            .await
-            .map_err(|error| {
-                Error::RustError(format!(
-                    "DO {durable_binding}: post {durable_path}: {error}"
-                ))
-            })
+        self.durable_request(
+            stub,
+            durable_binding,
+            durable_path,
+            Method::Post,
+            Some(data),
+        )
+        .await
+        .map_err(|error| {
+            Error::RustError(format!(
+                "DO {durable_binding}: post {durable_path}: {error}"
+            ))
+        })
     }
 
     async fn durable_request<I: Serialize, O: for<'a> Deserialize<'a>>(
         &self,
         durable_stub: Stub,
+        durable_binding: &str,
         durable_path: &'static str,
         method: Method,
         data: Option<I>,
@@ -153,7 +166,7 @@ impl<'srv> DurableConnector<'srv> {
                 Ok(mut resp) => return resp.json().await,
                 Err(err) => {
                     if attempt < attempts {
-                        warn!("DO request attempt #{attempt} failed: {err}");
+                        warn!("DO {durable_binding}: post {durable_path}: attempt #{attempt} failed: {err}");
                         Delay::from(DEFAULT_RETRY_INTERVAL).await;
                         attempt += 1;
                     } else {

@@ -62,7 +62,9 @@ impl DurableObject for HelperStateStore {
         match (req.path().as_ref(), req.method()) {
             // Store the Helper's state.
             //
+            // Idempotent
             // Input: `helper_state_hex: String` (hex-encoded state)
+            // Output: `()`
             (DURABLE_HELPER_STATE_PUT, Method::Post) => {
                 // The state is handled as an opaque hex string.
                 let mut helper_state_hex: Option<String> =
@@ -82,6 +84,7 @@ impl DurableObject for HelperStateStore {
 
             // Drain the Helper's state.
             //
+            // Non-idempotent (do not retry)
             // Output: `String` (hex-encoded state)
             (DURABLE_HELPER_STATE_GET, Method::Post) => {
                 let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;

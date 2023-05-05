@@ -62,7 +62,9 @@ impl DurableObject for AggregateStore {
         match (req.path().as_ref(), req.method()) {
             // Merge an aggregate share into the stored aggregate.
             //
+            // Non-idempotent (do not retry)
             // Input: `agg_share_dellta: DapAggregateShare`
+            // Output: `()`
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
                 let agg_share_delta = req.json().await?;
 
@@ -80,6 +82,7 @@ impl DurableObject for AggregateStore {
 
             // Get the current aggregate share.
             //
+            // Idempotent
             // Output: `DapAggregateShare`
             (DURABLE_AGGREGATE_STORE_GET, Method::Get) => {
                 let agg_share: DapAggregateShare =
@@ -88,13 +91,17 @@ impl DurableObject for AggregateStore {
             }
 
             // Mark this bucket as collected.
+            //
+            // Non-idempotent (do not retry)
+            // Output: `()`
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
                 self.state.storage().put("collected", true).await?;
                 Response::from_json(&())
             }
 
-            // Get the value of the flag indicating whether this bucket has been collected
+            // Get the value of the flag indicating whether this bucket has been collected.
             //
+            // Idempotent
             // Output: `bool`
             (DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, Method::Get) => {
                 let collected: bool = state_get_or_default(&self.state, "collected").await?;
