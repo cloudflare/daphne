@@ -288,6 +288,7 @@ impl DapTaskConfig {
                 vdaf_type,
             ),
             collector_hpke_config: collector_hpke_config.clone(),
+            taskprov: true,
         })
     }
 }

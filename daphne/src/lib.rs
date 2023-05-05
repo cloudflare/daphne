@@ -320,6 +320,10 @@ pub struct DapTaskConfig {
 
     /// The Collector's HPKE configuration for this task.
     pub collector_hpke_config: HpkeConfig,
+
+    /// If true, then the taskprov extension was used to configure this task.
+    #[serde(default)]
+    pub taskprov: bool,
 }
 
 impl DapTaskConfig {

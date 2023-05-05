@@ -115,6 +115,7 @@ impl TestRunner {
             vdaf: VDAF_CONFIG.clone(),
             vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
+            taskprov: false,
         };
 
         // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
