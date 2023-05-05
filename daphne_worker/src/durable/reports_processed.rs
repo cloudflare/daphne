@@ -80,6 +80,7 @@ impl DurableObject for ReportsProcessed {
             // Mark a set of reports as aggregated. Return the set of report IDs that already
             // exist.
             //
+            // Non-idempotent (do not retry)
             // Input: `report_id_hex_set: Vec<String>` (hex-encoded report IDs)
             // Output: `Vec<String>` (subset of the inputs that already exist).
             (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
