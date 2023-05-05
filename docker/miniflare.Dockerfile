@@ -7,7 +7,7 @@ RUN apk add --update \
     npm \
     openssl-dev \
     wasm-pack
-RUN npm install -g wrangler@2.12.2
+RUN npm install -g wrangler@2.19.0
 
 # Pre-install worker-build and Rust's wasm32 target to speed up our custom build command
 RUN cargo install --git https://github.com/cloudflare/workers-rs
@@ -23,7 +23,7 @@ RUN wrangler publish --dry-run
 
 FROM alpine:3.16 AS test
 RUN apk add --update npm bash
-RUN npm install -g miniflare@2.12.2
+RUN npm install -g miniflare@2.14.0
 COPY --from=builder /tmp/dap_test/daphne_worker_test/wrangler.toml /wrangler.toml
 COPY --from=builder /tmp/dap_test/daphne_worker_test/build/worker/* /build/worker/
 EXPOSE 8080
