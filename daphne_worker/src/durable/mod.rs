@@ -69,11 +69,18 @@ impl<'srv> DurableConnector<'srv> {
     ) -> Result<O> {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        self.durable_request(stub, durable_binding, durable_path, Method::Get, None::<()>)
-            .await
-            .map_err(|error| {
-                Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
-            })
+        self.durable_request(
+            stub,
+            durable_binding,
+            durable_path,
+            Method::Get,
+            None::<()>,
+            |output, _retried| output,
+        )
+        .await
+        .map_err(|error| {
+            Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
+        })
     }
 
     /// Send a POST request with the given path to the DO instance with the given binding and name.
@@ -85,6 +92,31 @@ impl<'srv> DurableConnector<'srv> {
         durable_name: String,
         data: I,
     ) -> Result<O> {
+        self.post_with_handler(
+            durable_binding,
+            durable_path,
+            durable_name,
+            data,
+            |output, _retried| output,
+        )
+        .await
+    }
+
+    /// Like `post()`, except `handler` is called on the result. The callback is given an
+    /// indication of whether the request was retried.
+    pub(crate) async fn post_with_handler<I, O1, O2, H>(
+        &self,
+        durable_binding: &str,
+        durable_path: &'static str,
+        durable_name: String,
+        data: I,
+        handler: H,
+    ) -> Result<O2>
+    where
+        I: Serialize,
+        O1: for<'b> Deserialize<'b>,
+        H: FnOnce(O1, bool) -> O2 + Sized,
+    {
         let namespace = self.env.durable_object(durable_binding)?;
         let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
         self.durable_request(
@@ -93,6 +125,7 @@ impl<'srv> DurableConnector<'srv> {
             durable_path,
             Method::Post,
             Some(data),
+            handler,
         )
         .await
         .map_err(|error| {
@@ -120,6 +153,7 @@ impl<'srv> DurableConnector<'srv> {
             durable_path,
             Method::Post,
             Some(data),
+            |output, _retried| output,
         )
         .await
         .map_err(|error| {
@@ -129,14 +163,20 @@ impl<'srv> DurableConnector<'srv> {
         })
     }
 
-    async fn durable_request<I: Serialize, O: for<'a> Deserialize<'a>>(
+    async fn durable_request<I, O1, O2, H>(
         &self,
         durable_stub: Stub,
         durable_binding: &str,
         durable_path: &'static str,
         method: Method,
         data: Option<I>,
-    ) -> Result<O> {
+        handler: H,
+    ) -> Result<O2>
+    where
+        I: Serialize,
+        O1: for<'a> Deserialize<'a>,
+        H: FnOnce(O1, bool) -> O2 + Sized,
+    {
         let req = match (&method, data) {
             (Method::Post, Some(data)) => Request::new_with_init(
                 &format!("https://fake-host{durable_path}"),
@@ -163,7 +203,7 @@ impl<'srv> DurableConnector<'srv> {
         let mut attempt = 1;
         loop {
             match durable_stub.fetch_with_request(req.clone()?).await {
-                Ok(mut resp) => return resp.json().await,
+                Ok(mut resp) => return Ok(handler(resp.json().await?, attempt > 1)),
                 Err(err) => {
                     if attempt < attempts {
                         warn!("DO {durable_binding}: post {durable_path}: attempt #{attempt} failed: {err}");
