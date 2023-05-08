@@ -61,10 +61,7 @@ use daphne::{
 };
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::{borrow::Cow, collections::HashMap};
 use tracing::debug;
 use worker::*;
 
@@ -560,6 +557,7 @@ where
         part_batch_sel: &'b PartialBatchSelector,
         report_meta: impl Iterator<Item = &'b ReportMetadata>,
     ) -> std::result::Result<HashMap<ReportId, TransitionFailure>, DapError> {
+        let durable = self.durable().with_retry();
         let task_config = self.try_get_task_config(task_id).await?;
         let task_id_hex = task_id.to_hex();
         let span = task_config
@@ -592,19 +590,18 @@ where
         }
 
         // Send ReportsProcessed requests.
-        let durable = self.durable();
         let mut reports_processed_requests = Vec::new();
         for (durable_name, report_id_hex_set) in reports_processed_request_data.into_iter() {
-            reports_processed_requests.push(durable.post(
+            reports_processed_requests.push(durable.post_with_handler(
                 BINDING_DAP_REPORTS_PROCESSED,
                 DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
                 durable_name,
                 report_id_hex_set,
+                |output: Vec<String>, retried| (output, retried),
             ));
         }
 
         // Send AggregateStore requests.
-        let durable = self.durable().with_retry();
         let mut agg_store_requests = Vec::new();
         for durable_name in agg_store_request_name {
             agg_store_requests.push(durable.get(
@@ -615,20 +612,25 @@ where
         }
 
         // Create the set of reports that have been processed.
-        //
-        // TODO(cjpatton) These requests are non-idempotent, but decide if we should retry anyway.
-        // The only risk I can see is incorrectly marking a report as aggregated. This would happen
-        // if the request wrote some the report IDs to storage before the request failed. If we did
-        // this then "report_dropped" would be a more accurate signal than "report_replayed".
-        let reports_processed_responses: Vec<Vec<String>> =
+        let reports_processed_responses: Vec<(Vec<String>, bool)> =
             try_join_all(reports_processed_requests)
                 .await
                 .map_err(dap_err)?;
-        let mut reports_processed = HashSet::new();
-        for response in reports_processed_responses.into_iter() {
-            for report_id_hex in response.into_iter() {
+        let mut early_fails = HashMap::new();
+        for (reports_processed, retried) in reports_processed_responses.into_iter() {
+            // The request to ReportsProcessed is not idempotent. If it was retried, then it's
+            // possible that one or more of the reports were erroneously as replayed. This would
+            // happen if, for example, a fresh report was marked as aggregated in the failed
+            // request, then marked as replayed by a retried request. In this case we cannot
+            // determine definitively if the report was replayed, so we drop it to be safe.
+            let failure = if retried {
+                TransitionFailure::ReportDropped
+            } else {
+                TransitionFailure::ReportReplayed
+            };
+            for report_id_hex in reports_processed.into_iter() {
                 let report_id = ReportId::get_decoded(&hex::decode(report_id_hex)?)?;
-                reports_processed.insert(report_id);
+                early_fails.insert(report_id, failure);
             }
         }
 
@@ -642,13 +644,17 @@ where
         let current_time = self.get_current_time();
         let min_time = self.least_valid_report_time(current_time);
         let max_time = self.greatest_valid_report_time(current_time);
-        let mut early_fails = HashMap::new();
         for (bucket, collected) in agg_store_request_bucket
             .iter()
             .zip(agg_store_responses.into_iter())
         {
             for metadata in span.get(bucket).unwrap() {
-                let processed = reports_processed.contains(&metadata.id);
+                let result = early_fails.get(&metadata.id);
+                if matches!(result, Some(TransitionFailure::ReportDropped)) {
+                    continue;
+                }
+
+                let processed = matches!(result, Some(TransitionFailure::ReportReplayed));
                 if let Some(failure) =
                     early_metadata_check(metadata, processed, collected, min_time, max_time)
                 {
