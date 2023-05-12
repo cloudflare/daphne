@@ -630,7 +630,7 @@ async fn handle_agg_job(
 
         info_span!(
             "aggregate",
-            job_id = task_id,
+            "dap.task_id" = task_id,
             version = req.version.to_string()
         )
     };
@@ -657,7 +657,7 @@ async fn handle_agg_share_req(
 
         info_span!(
             "aggregate_share",
-            job_id = task_id,
+            "dap.task_id" = task_id,
             version = req.version.to_string()
         )
     };
