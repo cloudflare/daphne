@@ -162,7 +162,7 @@ use daphne::{
     constants::DapMediaType,
     messages::{CollectionJobId, Duration, TaskId, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
-    DapCollectJob, DapError, DapResponse, DapVersion,
+    DapCollectJob, DapError, DapRequest, DapResponse, DapVersion,
 };
 pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
@@ -211,6 +211,23 @@ pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
 static ISOLATE_STATE: OnceCell<DaphneWorkerIsolateState> = OnceCell::new();
 
+macro_rules! info_span_from_dap_request {
+    ($span_name:expr, $req:expr) => {{
+        let req: &DapRequest<_> = &$req;
+        let task_id = req
+            .task_id
+            .clone()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        info_span!(
+            $span_name,
+            dap.task_id = task_id,
+            version = req.version.to_string()
+        )
+    }};
+}
+
 impl DaphneWorkerRouter<'_> {
     /// HTTP request handler for Daphne-Worker.
     ///
@@ -250,11 +267,10 @@ impl DaphneWorkerRouter<'_> {
             .get_async("/:version/hpke_config", |req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = daph.worker_request_to_dap(req, &ctx).await?;
-                match daph
-                    .http_get_hpke_config(&req)
-                    .instrument(info_span!("hpke_config"))
-                    .await
-                {
+
+                let span = info_span_from_dap_request!("hpke_config", req);
+
+                match daph.http_get_hpke_config(&req).instrument(span).await {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
@@ -290,11 +306,9 @@ impl DaphneWorkerRouter<'_> {
                         let daph = ctx.data.handler(&ctx.env);
                         let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-                        match daph
-                            .http_post_collect(&req)
-                            .instrument(info_span!("collect"))
-                            .await
-                        {
+                        let span = info_span_from_dap_request!("collect", req);
+
+                        match daph.http_post_collect(&req).instrument(span).await {
                             Ok(collect_uri) => {
                                 let mut headers = Headers::new();
                                 headers.set("Location", collect_uri.as_str())?;
@@ -366,11 +380,9 @@ impl DaphneWorkerRouter<'_> {
                             let daph = ctx.data.handler(&ctx.env);
                             let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-                            match daph
-                                .http_post_collect(&req)
-                                .instrument(info_span!("collect (PUT)"))
-                                .await
-                            {
+                            let span = info_span_from_dap_request!("collect (PUT)", req);
+
+                            match daph.http_post_collect(&req).instrument(span).await {
                                 Ok(_) => Ok(Response::empty().unwrap().with_status(201)),
                                 Err(e) => daph.state.dap_abort_to_worker_response(e),
                             }
@@ -401,9 +413,15 @@ impl DaphneWorkerRouter<'_> {
                                     }
                                 };
 
+                            let span = info_span!(
+                                "poll_collect_job",
+                                dap.task_id = %task_id,
+                                version = req.version.to_string()
+                            );
+
                             match daph
                                 .poll_collect_job(task_id, &collect_job_id)
-                                .instrument(info_span!("poll_collect_job"))
+                                .instrument(span)
                                 .await
                             {
                                 Ok(DapCollectJob::Done(collect_resp)) => {
@@ -604,11 +622,9 @@ async fn put_report_into_task(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    match daph
-        .http_post_upload(&req)
-        .instrument(info_span!("upload"))
-        .await
-    {
+    let span = info_span_from_dap_request!("upload", req);
+
+    match daph.http_post_upload(&req).instrument(span).await {
         Ok(()) => Response::empty(),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
@@ -621,19 +637,7 @@ async fn handle_agg_job(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    let span = {
-        let task_id = req
-            .task_id
-            .clone()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
-
-        info_span!(
-            "aggregate",
-            "dap.task_id" = task_id,
-            version = req.version.to_string()
-        )
-    };
+    let span = info_span_from_dap_request!("aggregate", req);
 
     match daph.http_post_aggregate(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
@@ -648,19 +652,7 @@ async fn handle_agg_share_req(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    let span = {
-        let task_id = req
-            .task_id
-            .clone()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
-
-        info_span!(
-            "aggregate_share",
-            "dap.task_id" = task_id,
-            version = req.version.to_string()
-        )
-    };
+    let span = info_span_from_dap_request!("aggregate_share", req);
 
     match daph.http_post_aggregate_share(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
