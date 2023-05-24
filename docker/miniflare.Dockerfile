@@ -32,8 +32,8 @@ ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "
 
 FROM test AS helper
 
-ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "-p", "8080", "--wrangler-env=helper"]
+ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "--wrangler-env=helper"]
 
 FROM test AS leader
 
-ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "-p", "8080", "--wrangler-env=leader"]
+ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", "", "--wrangler-env=leader"]
