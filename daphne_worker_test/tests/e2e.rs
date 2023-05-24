@@ -26,7 +26,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::cmp::{max, min};
 use test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
-use url::Url;
 
 // Redefine async_test_version locally because we want a
 // cfg_attr as well.
@@ -1529,7 +1528,8 @@ async fn e2e_helper_admin_add_task(version: DapVersion) {
         "vdaf_verify_key": "y4e6alnJMQ0MZTvdJRJx5Q"
     });
 
-    let url = Url::parse("http://127.0.0.1:8788/task").unwrap();
+    let mut url = t.helper_url.clone();
+    url.set_path("task");
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::HeaderName::from_lowercase(b"x-daphne-worker-admin-bearer-token").unwrap(),
@@ -1545,8 +1545,7 @@ async fn e2e_helper_admin_add_task(version: DapVersion) {
         .expect("request failed");
     if resp.status() != 200 {
         panic!(
-            "request to {} failed: {}: {}",
-            url,
+            "request to {url} failed: {}: {}",
             resp.status(),
             resp.text().await.unwrap()
         );
