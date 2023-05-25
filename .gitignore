@@ -5,3 +5,4 @@ node_modules
 wasm-pack.log
 build/
 dist
+.wrangler
