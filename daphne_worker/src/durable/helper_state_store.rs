@@ -68,7 +68,7 @@ impl DurableObject for HelperStateStore {
         match (req.path().as_ref(), req.method()) {
             // Store the Helper's state.
             //
-            // Idempotent
+            // Non-idempotent
             // Input: `helper_state_hex: String` (hex-encoded state)
             // Output: `bool`
             (DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS, Method::Post) => {
@@ -80,15 +80,12 @@ impl DurableObject for HelperStateStore {
                 Response::from_json(&success)
             }
 
-            // Drain the Helper's state.
+            // Get the Helper's state.
             //
-            // Non-idempotent (do not retry)
+            // Idempotent
             // Output: `String` (hex-encoded state)
-            (DURABLE_HELPER_STATE_GET, Method::Post) => {
+            (DURABLE_HELPER_STATE_GET, Method::Get) => {
                 let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;
-                if helper_state.is_some() {
-                    self.state.storage().delete("helper_state").await?;
-                }
                 Response::from_json(&helper_state)
             }
 
