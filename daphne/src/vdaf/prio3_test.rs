@@ -46,6 +46,23 @@ fn prepare_histogram() {
     .unwrap();
 }
 
+#[test]
+fn prepare_sum_vec() {
+    test_prepare(
+        &Prio3Config::SumVec { bits: 23, len: 1 },
+        DapMeasurement::U128Vec(vec![(1 << 23) - 1]),
+        DapAggregateResult::U128Vec(vec![(1 << 23) - 1]),
+    )
+    .unwrap();
+
+    test_prepare(
+        &Prio3Config::SumVec { bits: 23, len: 3 },
+        DapMeasurement::U128Vec(vec![1, 0, 42]),
+        DapAggregateResult::U128Vec(vec![1, 0, 42]),
+    )
+    .unwrap();
+}
+
 fn test_prepare(
     config: &Prio3Config,
     measurement: DapMeasurement,

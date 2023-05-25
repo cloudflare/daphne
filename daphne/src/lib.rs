@@ -483,6 +483,7 @@ impl AsRef<DapTaskConfig> for DapTaskConfig {
 pub enum DapMeasurement {
     U64(u64),
     U32Vec(Vec<u32>),
+    U128Vec(Vec<u128>),
 }
 
 /// The aggregate result computed by the Collector.
@@ -730,6 +731,10 @@ pub enum Prio3Config {
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
     /// 2^bits)`.
     Sum { bits: usize },
+
+    /// The element-wise sum of vectors. Each vector has `len` elements.
+    /// Each element is a 64-bit unsigned integer in range `[0,2^bits)`.
+    SumVec { bits: usize, len: usize },
 }
 
 /// DAP sender role.

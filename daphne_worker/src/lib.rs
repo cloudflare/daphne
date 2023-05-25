@@ -698,6 +698,8 @@ pub(crate) struct InternalTestVdaf {
     typ: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     bits: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    length: Option<String>,
 }
 
 #[derive(Deserialize)]

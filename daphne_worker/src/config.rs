@@ -831,16 +831,21 @@ impl<'srv> DaphneWorker<'srv> {
             .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
 
         // VDAF config.
-        let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits) {
-            ("Prio3Count", None) => VdafConfig::Prio3(Prio3Config::Count),
-            ("Prio3Sum", Some(bits)) => {
+        let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits, cmd.vdaf.length) {
+            ("Prio3Count", None, None) => VdafConfig::Prio3(Prio3Config::Count),
+            ("Prio3Sum", Some(bits), None) => {
                 let bits = bits.parse().map_err(int_err)?;
                 VdafConfig::Prio3(Prio3Config::Sum { bits })
+            }
+            ("Prio3SumVec", Some(bits), Some(length)) => {
+                let bits = bits.parse().map_err(int_err)?;
+                let len = length.parse().map_err(int_err)?;
+                VdafConfig::Prio3(Prio3Config::SumVec { bits, len })
             }
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 
-        // VDAF verificaiton key.
+        // VDAF verification key.
         let vdaf_verify_key_data = decode_base64url_vec(cmd.vdaf_verify_key.as_bytes())
             .ok_or_else(|| int_err("VDAF verify key is not valid URL-safe base64"))?;
         let vdaf_verify_key = vdaf
