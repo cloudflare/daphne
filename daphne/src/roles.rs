@@ -764,13 +764,14 @@ pub trait DapHelper<'srv, 'req, S>: DapAggregator<'srv, 'req, S>
 where
     'srv: 'req,
 {
-    /// Store the Helper's aggregation-flow state.
-    async fn put_helper_state(
+    /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
+    /// indicating if the operation succeeded.
+    async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
         helper_state: &DapHelperState,
-    ) -> Result<(), DapError>;
+    ) -> Result<bool, DapError>;
 
     /// Fetch the Helper's aggregation-flow state. `None` is returned if the Helper has no state
     /// associated with the given task and aggregation job.
@@ -867,8 +868,6 @@ where
                     _ => unreachable!("unhandled resource {:?}", req.resource),
                 };
 
-                let helper_state = self.get_helper_state(task_id, &agg_job_id);
-
                 // Check whether the DAP version in the request matches the task config.
                 if task_config.version != req.version {
                     return Err(DapAbort::version_mismatch(req.version, task_config.version));
@@ -901,15 +900,6 @@ where
                         &metrics,
                     )
                     .await?;
-
-                // Check that helper state with the given task ID and aggregation job ID does not
-                // exist.
-                if helper_state.await?.is_some() {
-                    // TODO spec: Consider an explicit abort for this case.
-                    return Err(DapAbort::BadRequest(
-                        "unexpected message for aggregation job (already exists)".into(),
-                    ));
-                }
 
                 let agg_job_resp = match transition {
                     DapHelperTransition::Continue(mut state, mut agg_job_resp) => {
@@ -951,7 +941,15 @@ where
                             }
                         }
 
-                        self.put_helper_state(task_id, &agg_job_id, &state).await?;
+                        if !self
+                            .put_helper_state_if_not_exists(task_id, &agg_job_id, &state)
+                            .await?
+                        {
+                            // TODO spec: Consider an explicit abort for this case.
+                            return Err(DapAbort::BadRequest(
+                                "unexpected message for aggregation job (already exists)".into(),
+                            ));
+                        }
                         agg_job_resp
                     }
                     DapHelperTransition::Finish(..) => {
