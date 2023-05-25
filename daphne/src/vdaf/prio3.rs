@@ -60,6 +60,10 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_sum(2, *bits)?;
             Ok(shard!(vdaf, &(measurement as u128), nonce))
         }
+        (Prio3Config::SumVec { bits, len }, DapMeasurement::U128Vec(measurement)) => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            Ok(shard!(vdaf, &measurement, nonce))
+        }
         _ => panic!("prio3_shard: unexpected VDAF config"),
     }
 }
@@ -147,6 +151,21 @@ pub(crate) fn prio3_prepare_init(
                 VdafMessage::Prio3ShareField128(share),
             ))
         }
+        Prio3Config::SumVec { bits, len } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            let (state, share) = prep_init!(
+                vdaf,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data
+            );
+            Ok((
+                VdafState::Prio3Field128(state),
+                VdafMessage::Prio3ShareField128(share),
+            ))
+        }
     }
 }
 
@@ -213,6 +232,16 @@ pub(crate) fn prio3_leader_prepare_finish(
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
+        (
+            Prio3Config::SumVec { bits, len },
+            VdafState::Prio3Field128(state),
+            VdafMessage::Prio3ShareField128(share),
+        ) => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
+            let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
+            (agg_share, outbound)
+        }
         _ => panic!("prio3_leader_prepare_finish: {ERR_FIELD_TYPE}"),
     };
 
@@ -259,6 +288,11 @@ pub(crate) fn prio3_helper_prepare_finish(
         }
         (Prio3Config::Sum { bits }, VdafState::Prio3Field128(state)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
+            let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
+            VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
+        }
+        (Prio3Config::SumVec { bits, len }, VdafState::Prio3Field128(state)) => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -313,6 +347,12 @@ pub(crate) fn prio3_decode_prepare_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
+        Prio3Config::SumVec { bits, len } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            Ok(VdafState::Prio3Field128(
+                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
+            ))
+        }
     }
 }
 
@@ -361,6 +401,11 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let vdaf = Prio3::new_sum(2, *bits)?;
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128(agg_res))
+        }
+        Prio3Config::SumVec { bits, len } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
+            Ok(DapAggregateResult::U128Vec(agg_res))
         }
     }
 }
