@@ -1024,11 +1024,10 @@ where
         let res: Option<String> = self
             .durable()
             .with_retry()
-            .post(
+            .get(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_GET,
                 durable_helper_state_name(&task_config.as_ref().version, task_id, agg_job_id),
-                (),
             )
             .await
             .map_err(dap_err)?;
