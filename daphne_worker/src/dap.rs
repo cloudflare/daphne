@@ -20,7 +20,8 @@ use crate::{
         },
         durable_name_agg_store, durable_name_queue, durable_name_task,
         helper_state_store::{
-            durable_helper_state_name, DURABLE_HELPER_STATE_GET, DURABLE_HELPER_STATE_PUT,
+            durable_helper_state_name, DURABLE_HELPER_STATE_GET,
+            DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
         },
         leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET,
         leader_batch_queue::{
@@ -991,25 +992,25 @@ impl<'srv, 'req> DapHelper<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
 where
     'srv: 'req,
 {
-    async fn put_helper_state(
+    async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
         helper_state: &DapHelperState,
-    ) -> std::result::Result<(), DapError> {
+    ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         let helper_state_hex = hex::encode(helper_state.get_encoded(&task_config.as_ref().vdaf)?);
-        self.durable()
+        Ok(self
+            .durable()
             .with_retry()
             .post(
                 BINDING_DAP_HELPER_STATE_STORE,
-                DURABLE_HELPER_STATE_PUT,
+                DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
                 durable_helper_state_name(&task_config.as_ref().version, task_id, agg_job_id),
                 helper_state_hex,
             )
             .await
-            .map_err(dap_err)?;
-        Ok(())
+            .map_err(dap_err)?)
     }
 
     async fn get_helper_state(

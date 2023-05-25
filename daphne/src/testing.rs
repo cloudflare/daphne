@@ -554,12 +554,12 @@ impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for MockAggregator
 where
     'srv: 'req,
 {
-    async fn put_helper_state(
+    async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
         helper_state: &DapHelperState,
-    ) -> Result<(), DapError> {
+    ) -> Result<bool, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: task_id.clone(),
             agg_job_id_owned: agg_job_id.into(),
@@ -573,16 +573,14 @@ where
         let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
         if helper_state_store.contains_key(&helper_state_info) {
-            return Err(DapError::Fatal(
-                "overwriting existing helper state".to_string(),
-            ));
+            return Ok(false);
         }
 
         // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
         // For VDAFs with more rounds, the helper state blob will need to be updated here.
         helper_state_store.insert(helper_state_info, helper_state.clone());
 
-        Ok(())
+        Ok(true)
     }
 
     async fn get_helper_state(

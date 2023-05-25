@@ -1,7 +1,11 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{config::DaphneWorkerConfig, durable::state_get, initialize_tracing, int_err};
+use crate::{
+    config::DaphneWorkerConfig,
+    durable::{state_get, state_set_if_not_exists},
+    initialize_tracing, int_err,
+};
 use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
 use tracing::{trace, warn};
 use worker::*;
@@ -19,14 +23,16 @@ pub(crate) fn durable_helper_state_name(
     )
 }
 
-pub(crate) const DURABLE_HELPER_STATE_PUT: &str = "/internal/do/helper_state/put";
+pub(crate) const DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS: &str =
+    "/internal/do/helper_state/put_if_not_exists";
 pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get";
 
 /// Durable Object (DO) for storing the Helper's state for a given aggregation job.
 ///
 /// This object implements the following API endpoints:
 ///
-/// - `DURABLE_HELPER_STATE_PUT`: Stores Helper's hex-encoded state.
+/// - `DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS`: Stores Helper's hex-encoded state unless the state
+///    already exists. Returns a boolean indicating whether the operation succeeded.
 /// - `DURABLE_HELPER_STATE_GET`: Drains the Helper's hex-encoded state.
 ///
 /// The state blob is stored in `helper_state`.
@@ -64,22 +70,14 @@ impl DurableObject for HelperStateStore {
             //
             // Idempotent
             // Input: `helper_state_hex: String` (hex-encoded state)
-            // Output: `()`
-            (DURABLE_HELPER_STATE_PUT, Method::Post) => {
-                // The state is handled as an opaque hex string.
-                let mut helper_state_hex: Option<String> =
-                    state_get(&self.state, "helper_state").await?;
-                if helper_state_hex.is_some() {
-                    // TODO spec: Handle this as an abort rather than an internal error.
-                    return Err(int_err("tried to overwrite helper state"));
-                }
-
-                helper_state_hex = req.json().await?;
-                self.state
-                    .storage()
-                    .put("helper_state", helper_state_hex)
-                    .await?;
-                Response::from_json(&())
+            // Output: `bool`
+            (DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS, Method::Post) => {
+                let helper_state_hex: String = req.json().await?;
+                let success =
+                    state_set_if_not_exists(&self.state, "helper_state", &helper_state_hex)
+                        .await?
+                        .is_none();
+                Response::from_json(&success)
             }
 
             // Drain the Helper's state.
