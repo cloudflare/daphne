@@ -420,11 +420,11 @@ impl DapTaskConfig {
     }
 
     /// Return the batch span of a set of reports with the given metadata.
-    pub fn batch_span_for_meta<'a>(
+    pub fn batch_span_for_meta<'sel, 'rep>(
         &self,
-        part_batch_sel: &'a PartialBatchSelector,
-        report_meta: impl Iterator<Item = &'a ReportMetadata>,
-    ) -> Result<HashMap<DapBatchBucket<'a>, Vec<&'a ReportMetadata>>, DapError> {
+        part_batch_sel: &'sel PartialBatchSelector,
+        report_meta: impl Iterator<Item = &'rep ReportMetadata>,
+    ) -> Result<HashMap<DapBatchBucket<'sel>, Vec<&'rep ReportMetadata>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(DapError::fatal(
                 "partial batch selector not compatible with task",

@@ -652,7 +652,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_leader_bearer_token<'a>(
         &'a self,
         task_id: &'a TaskId,
-    ) -> Result<Option<BearerTokenKvPair>> {
+    ) -> Result<Option<BearerTokenKvPair<'a>>> {
         self.kv_get_cached(
             &self.isolate_state().leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
@@ -686,12 +686,9 @@ impl<'srv> DaphneWorker<'srv> {
 
     /// Retrieve from KV the configuration for the given task.
     pub(crate) async fn get_task_config<'req>(
-        &'srv self,
+        &self,
         task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<DapTaskConfigKvPair<'req>>>
-    where
-        'srv: 'req,
-    {
+    ) -> Result<Option<DapTaskConfigKvPair<'req>>> {
         self.kv_get_cached(
             &self.isolate_state().tasks,
             KV_KEY_PREFIX_TASK_CONFIG,

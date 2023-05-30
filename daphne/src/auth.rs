@@ -51,21 +51,23 @@ impl AsRef<BearerToken> for BearerToken {
 
 /// A source of bearer tokens used for authorizing DAP requests.
 #[async_trait(?Send)]
-pub trait BearerTokenProvider<'a> {
+pub trait BearerTokenProvider {
     /// A reference to a bearer token owned by the provider.
-    type WrappedBearerToken: AsRef<BearerToken>;
+    type WrappedBearerToken<'a>: AsRef<BearerToken>
+    where
+        Self: 'a;
 
     /// Fetch the Leader's bearer token for the given task, if the task is recognized.
-    async fn get_leader_bearer_token_for(
-        &'a self,
-        task_id: &'a TaskId,
-    ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
+    async fn get_leader_bearer_token_for<'s>(
+        &'s self,
+        task_id: &'s TaskId,
+    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError>;
 
     /// Fetch the Collector's bearer token for the given task, if the task is recognized.
-    async fn get_collector_bearer_token_for(
-        &'a self,
-        task_id: &'a TaskId,
-    ) -> Result<Option<Self::WrappedBearerToken>, DapError>;
+    async fn get_collector_bearer_token_for<'s>(
+        &'s self,
+        task_id: &'s TaskId,
+    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError>;
 
     /// Returns true if the given bearer token matches the leader token configured for the "taskprov" extension.
     fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool;
@@ -75,11 +77,11 @@ pub trait BearerTokenProvider<'a> {
 
     /// Return a bearer token that can be used to authorize a request with the given task ID and
     /// media type.
-    async fn authorize_with_bearer_token(
-        &'a self,
-        task_id: &'a TaskId,
+    async fn authorize_with_bearer_token<'s>(
+        &'s self,
+        task_id: &'s TaskId,
         media_type: &DapMediaType,
-    ) -> Result<Self::WrappedBearerToken, DapError> {
+    ) -> Result<Self::WrappedBearerToken<'s>, DapError> {
         if matches!(media_type.sender(), Some(DapSender::Leader)) {
             let token = self
                 .get_leader_bearer_token_for(task_id)
@@ -100,8 +102,8 @@ pub trait BearerTokenProvider<'a> {
     /// Return `None` if the request is authorized. Otherwise return `Some(reason)`, where `reason`
     /// is the reason for the failure.
     async fn bearer_token_authorized<T: AsRef<BearerToken>>(
-        &'a self,
-        req: &'a DapRequest<T>,
+        &self,
+        req: &DapRequest<T>,
     ) -> Result<Option<String>, DapError> {
         if req.task_id.is_none() {
             // Can't authorize request with missing task ID.
