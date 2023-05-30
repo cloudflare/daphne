@@ -340,7 +340,7 @@ impl VdafConfig {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn consume_report_share(
         &self,
-        decrypter: &impl HpkeDecrypter<'_>,
+        decrypter: &impl HpkeDecrypter,
         is_leader: bool,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -420,7 +420,7 @@ impl VdafConfig {
     #[allow(clippy::too_many_arguments)]
     pub async fn produce_agg_job_init_req(
         &self,
-        decrypter: &impl HpkeDecrypter<'_>,
+        decrypter: &impl HpkeDecrypter,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_id: &MetaAggregationJobId<'_>,
@@ -519,7 +519,7 @@ impl VdafConfig {
     /// * `version` is the DapVersion to use.
     pub(crate) async fn handle_agg_job_init_req(
         &self,
-        decrypter: &impl HpkeDecrypter<'_>,
+        decrypter: &impl HpkeDecrypter,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_init_req: &AggregationJobInitReq,
@@ -885,7 +885,7 @@ impl VdafConfig {
     // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
     pub async fn consume_encrypted_agg_shares(
         &self,
-        decrypter: &impl HpkeDecrypter<'_>,
+        decrypter: &impl HpkeDecrypter,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
         report_count: u64,

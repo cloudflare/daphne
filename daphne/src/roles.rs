@@ -40,12 +40,9 @@ pub trait DapAuthorizedSender<S> {
 
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
-pub trait DapAggregator<'srv, 'req, S>: HpkeDecrypter<'srv> + Sized
-where
-    'srv: 'req,
-{
+pub trait DapAggregator<S>: HpkeDecrypter + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
-    type WrappedDapTaskConfig: AsRef<DapTaskConfig>;
+    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig>;
 
     /// Decide whether the given DAP request is authorized.
     ///
@@ -79,16 +76,16 @@ where
     /// `get_task_config_for()` will return the configure task. Otherwise this call will return
     /// nothing.
     async fn taskprov_put(
-        &'srv self,
-        req: &'req DapRequest<S>,
+        &self,
+        req: &DapRequest<S>,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError>;
 
     /// Look up the DAP task configuration for the given task ID.
-    async fn get_task_config_for(
-        &'srv self,
+    async fn get_task_config_for<'req>(
+        &self,
         task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError>;
+    ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;
@@ -123,11 +120,11 @@ where
     /// Ensure a set of reorts can be aggregated. Return a transition failure for each report
     /// that must be rejected early, due to the repot being replayed, the bucket that contains the
     /// report being collected, etc.
-    async fn check_early_reject<'b>(
+    async fn check_early_reject(
         &self,
         task_id: &TaskId,
-        part_batch_sel: &'b PartialBatchSelector,
-        report_meta: impl Iterator<Item = &'b ReportMetadata>,
+        part_batch_sel: &PartialBatchSelector,
+        report_meta: impl Iterator<Item = &ReportMetadata>,
     ) -> Result<HashMap<ReportId, TransitionFailure>, DapError>;
 
     /// Mark a batch as collected.
@@ -138,10 +135,7 @@ where
     ) -> Result<(), DapError>;
 
     /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
-    async fn http_get_hpke_config(
-        &'srv self,
-        req: &DapRequest<S>,
-    ) -> Result<DapResponse, DapAbort> {
+    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::version_unknown());
@@ -252,10 +246,7 @@ macro_rules! leader_post {
 
 /// DAP Leader functionality.
 #[async_trait(?Send)]
-pub trait DapLeader<'srv, 'req, S>: DapAuthorizedSender<S> + DapAggregator<'srv, 'req, S>
-where
-    'srv: 'req,
-{
+pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;
 
@@ -308,7 +299,7 @@ where
 
     /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
     /// request.
-    async fn http_post_upload(&'srv self, req: &'req DapRequest<S>) -> Result<(), DapAbort> {
+    async fn http_post_upload(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
         debug!("upload for task {task_id}");
@@ -371,7 +362,7 @@ where
     /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
     /// The return value is a URI that the Collector can poll later on to get the corresponding
     /// [`CollectResp`](crate::messages::CollectResp).
-    async fn http_post_collect(&'srv self, req: &'req DapRequest<S>) -> Result<Url, DapAbort> {
+    async fn http_post_collect(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
         let now = self.get_current_time();
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
@@ -699,7 +690,7 @@ where
     /// create a bottleneck. Such deployments can improve throughput by running many aggregation
     /// jobs in parallel.
     async fn process(
-        &'srv self,
+        &self,
         selector: &Self::ReportSelector,
         host: &str,
     ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
@@ -760,10 +751,7 @@ where
 
 /// DAP Helper functionality.
 #[async_trait(?Send)]
-pub trait DapHelper<'srv, 'req, S>: DapAggregator<'srv, 'req, S>
-where
-    'srv: 'req,
-{
+pub trait DapHelper<S>: DapAggregator<S> {
     /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
     /// indicating if the operation succeeded.
     async fn put_helper_state_if_not_exists(
@@ -785,10 +773,7 @@ where
     /// AggregationJobContinueReq and the response is an AggregationJobResp.
     ///
     /// This is called during the Initialization and Continuation phases.
-    async fn http_post_aggregate(
-        &'srv self,
-        req: &'req DapRequest<S>,
-    ) -> Result<DapResponse, DapAbort> {
+    async fn http_post_aggregate(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
@@ -1047,8 +1032,8 @@ where
     ///
     /// This is called during the Collection phase.
     async fn http_post_aggregate_share(
-        &'srv self,
-        req: &'req DapRequest<S>,
+        &self,
+        req: &DapRequest<S>,
     ) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
         let metrics = self.metrics().with_host(req.host());
@@ -1177,17 +1162,14 @@ fn check_part_batch(
     Ok(())
 }
 
-async fn check_batch<'srv, 'req, S>(
-    agg: &impl DapAggregator<'srv, 'req, S>,
+async fn check_batch<S>(
+    agg: &impl DapAggregator<S>,
     task_config: &DapTaskConfig,
     task_id: &TaskId,
     batch_sel: &BatchSelector,
     agg_param: &[u8],
     now: Time,
-) -> Result<(), DapAbort>
-where
-    'srv: 'req,
-{
+) -> Result<(), DapAbort> {
     let global_config = agg.get_global_config();
     let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
 
@@ -1319,15 +1301,12 @@ fn check_request_content_type<S>(
     }
 }
 
-async fn resolve_taskprov<'srv, 'req, S>(
-    agg: &'srv impl DapAggregator<'srv, 'req, S>,
-    task_id: &'req TaskId,
-    req: &'req DapRequest<S>,
+async fn resolve_taskprov<S>(
+    agg: &impl DapAggregator<S>,
+    task_id: &TaskId,
+    req: &DapRequest<S>,
     report_metadata_advertisement: Option<&ReportMetadata>,
-) -> Result<(), DapError>
-where
-    'srv: 'req,
-{
+) -> Result<(), DapError> {
     if agg
         .get_task_config_for(Cow::Borrowed(task_id))
         .await?

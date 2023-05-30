@@ -84,14 +84,15 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 }
 
 #[async_trait(?Send)]
-impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
-    type WrappedHpkeConfig = HpkeReceiverConfigKvPair<'srv>;
+impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
+    type WrappedHpkeConfig<'a> = HpkeReceiverConfigKvPair<'a>
+        where Self: 'a;
 
-    async fn get_hpke_config_for(
-        &'srv self,
+    async fn get_hpke_config_for<'s>(
+        &'s self,
         version: DapVersion,
         _task_id: Option<&TaskId>,
-    ) -> std::result::Result<HpkeReceiverConfigKvPair<'srv>, DapError> {
+    ) -> std::result::Result<HpkeReceiverConfigKvPair<'s>, DapError> {
         let kv_store = self.kv().map_err(dap_err)?;
         let keys = kv_store
             .list()
@@ -204,20 +205,21 @@ impl<'srv> HpkeDecrypter<'srv> for DaphneWorker<'srv> {
 }
 
 #[async_trait(?Send)]
-impl<'srv> BearerTokenProvider<'srv> for DaphneWorker<'srv> {
-    type WrappedBearerToken = BearerTokenKvPair<'srv>;
+impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
+    type WrappedBearerToken<'a> = BearerTokenKvPair<'a>
+        where Self: 'a;
 
-    async fn get_leader_bearer_token_for(
-        &'srv self,
-        task_id: &'srv TaskId,
-    ) -> std::result::Result<Option<BearerTokenKvPair>, DapError> {
+    async fn get_leader_bearer_token_for<'s>(
+        &'s self,
+        task_id: &'s TaskId,
+    ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         self.get_leader_bearer_token(task_id).await.map_err(dap_err)
     }
 
-    async fn get_collector_bearer_token_for(
-        &'srv self,
-        task_id: &'srv TaskId,
-    ) -> std::result::Result<Option<BearerTokenKvPair>, DapError> {
+    async fn get_collector_bearer_token_for<'s>(
+        &'s self,
+        task_id: &'s TaskId,
+    ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         self.get_collector_bearer_token(task_id)
             .await
             .map_err(dap_err)
@@ -270,11 +272,8 @@ impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapAggregator<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
-where
-    'srv: 'req,
-{
-    type WrappedDapTaskConfig = DapTaskConfigKvPair<'req>;
+impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
+    type WrappedDapTaskConfig<'a> = DapTaskConfigKvPair<'a>;
 
     async fn unauthorized_reason(
         &self,
@@ -376,8 +375,8 @@ where
     }
 
     async fn taskprov_put(
-        &'srv self,
-        req: &'req DapRequest<DaphneWorkerAuth>,
+        &self,
+        req: &DapRequest<DaphneWorkerAuth>,
         task_config: DapTaskConfig,
     ) -> std::result::Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
@@ -429,10 +428,10 @@ where
         Ok(())
     }
 
-    async fn get_task_config_for(
-        &'srv self,
+    async fn get_task_config_for<'req>(
+        &self,
         task_id: Cow<'req, TaskId>,
-    ) -> std::result::Result<Option<DapTaskConfigKvPair<'req>>, DapError> {
+    ) -> std::result::Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         self.get_task_config(task_id).await.map_err(dap_err)
     }
 
@@ -552,11 +551,11 @@ where
         Ok(agg_share)
     }
 
-    async fn check_early_reject<'b>(
+    async fn check_early_reject(
         &self,
         task_id: &TaskId,
-        part_batch_sel: &'b PartialBatchSelector,
-        report_meta: impl Iterator<Item = &'b ReportMetadata>,
+        part_batch_sel: &PartialBatchSelector,
+        report_meta: impl Iterator<Item = &ReportMetadata>,
     ) -> std::result::Result<HashMap<ReportId, TransitionFailure>, DapError> {
         let durable = self.durable().with_retry();
         let task_config = self.try_get_task_config(task_id).await?;
@@ -701,10 +700,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapLeader<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
-where
-    'srv: 'req,
-{
+impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
     type ReportSelector = DaphneWorkerReportSelector;
 
     async fn put_report(
@@ -988,10 +984,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapHelper<'srv, 'req, DaphneWorkerAuth> for DaphneWorker<'srv>
-where
-    'srv: 'req,
-{
+impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
     async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,

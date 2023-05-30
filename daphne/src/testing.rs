@@ -224,20 +224,20 @@ impl MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'a> BearerTokenProvider<'a> for MockAggregator {
-    type WrappedBearerToken = &'a BearerToken;
+impl BearerTokenProvider for MockAggregator {
+    type WrappedBearerToken<'a> = &'a BearerToken;
 
-    async fn get_leader_bearer_token_for(
-        &'a self,
-        _task_id: &'a TaskId,
-    ) -> Result<Option<&'a BearerToken>, DapError> {
+    async fn get_leader_bearer_token_for<'s>(
+        &'s self,
+        _task_id: &'s TaskId,
+    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         Ok(Some(&self.leader_token))
     }
 
-    async fn get_collector_bearer_token_for(
-        &'a self,
-        _task_id: &'a TaskId,
-    ) -> Result<Option<&'a BearerToken>, DapError> {
+    async fn get_collector_bearer_token_for<'s>(
+        &'s self,
+        _task_id: &'s TaskId,
+    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         if let Some(ref collector_token) = self.collector_token {
             Ok(Some(collector_token))
         } else {
@@ -263,14 +263,14 @@ impl<'a> BearerTokenProvider<'a> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'a> HpkeDecrypter<'a> for MockAggregator {
-    type WrappedHpkeConfig = &'a HpkeConfig;
+impl HpkeDecrypter for MockAggregator {
+    type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
-    async fn get_hpke_config_for(
-        &'a self,
+    async fn get_hpke_config_for<'s>(
+        &'s self,
         _version: DapVersion,
         task_id: Option<&TaskId>,
-    ) -> Result<&'a HpkeConfig, DapError> {
+    ) -> Result<Self::WrappedHpkeConfig<'s>, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
             return Err(DapError::fatal("emtpy HPKE receiver config list"));
         }
@@ -324,14 +324,11 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapAggregator<'srv, 'req, BearerToken> for MockAggregator
-where
-    'srv: 'req,
-{
+impl DapAggregator<BearerToken> for MockAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
     // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
     // clones the task config as needed.
-    type WrappedDapTaskConfig = DapTaskConfig;
+    type WrappedDapTaskConfig<'a> = DapTaskConfig;
 
     async fn unauthorized_reason(
         &self,
@@ -361,8 +358,8 @@ where
     }
 
     async fn taskprov_put(
-        &'srv self,
-        req: &'req DapRequest<BearerToken>,
+        &self,
+        req: &DapRequest<BearerToken>,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
@@ -371,10 +368,10 @@ where
         Ok(())
     }
 
-    async fn get_task_config_for(
-        &'srv self,
-        task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig>, DapError> {
+    async fn get_task_config_for<'s>(
+        &self,
+        task_id: Cow<'s, TaskId>,
+    ) -> Result<Option<Self::WrappedDapTaskConfig<'s>>, DapError> {
         let tasks = self.tasks.lock().expect("tasks: lock failed");
         Ok(tasks.get(task_id.as_ref()).cloned())
     }
@@ -479,11 +476,11 @@ where
         Ok(agg_share)
     }
 
-    async fn check_early_reject<'b>(
+    async fn check_early_reject(
         &self,
         task_id: &TaskId,
-        part_batch_sel: &'b PartialBatchSelector,
-        report_meta: impl Iterator<Item = &'b ReportMetadata>,
+        part_batch_sel: &PartialBatchSelector,
+        report_meta: impl Iterator<Item = &ReportMetadata>,
     ) -> Result<HashMap<ReportId, TransitionFailure>, DapError> {
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
@@ -550,10 +547,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapHelper<'srv, 'req, BearerToken> for MockAggregator
-where
-    'srv: 'req,
-{
+impl DapHelper<BearerToken> for MockAggregator {
     async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
@@ -613,10 +607,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'srv, 'req> DapLeader<'srv, 'req, BearerToken> for MockAggregator
-where
-    'srv: 'req,
-{
+impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = MockAggregatorReportSelector;
 
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
