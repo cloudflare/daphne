@@ -21,6 +21,7 @@ use crate::{
 };
 use daphne::{
     aborts::DapAbort,
+    audit_log::AuditLog,
     auth::BearerToken,
     constants::DapMediaType,
     hpke::HpkeReceiverConfig,
@@ -415,6 +416,9 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
 
     /// Error reporting for Daphne internal errors.
     pub(crate) error_reporter: &'srv dyn ErrorReporter,
+
+    /// Audit logging
+    pub(crate) audit_log: &'srv dyn AuditLog,
 }
 
 impl<'srv> DaphneWorkerRequestState<'srv> {
@@ -422,6 +426,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         isolate_state: &'srv DaphneWorkerIsolateState,
         req: &Request,
         error_reporter: &'srv dyn ErrorReporter,
+        audit_log: &'srv dyn AuditLog,
     ) -> Result<Self> {
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
@@ -438,6 +443,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             metrics,
             host,
             error_reporter,
+            audit_log,
         })
     }
 

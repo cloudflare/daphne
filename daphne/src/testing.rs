@@ -4,6 +4,7 @@
 //! Mock backend functionality to test DAP protocol.
 
 use crate::{
+    audit_log::{AggregationJobAuditAction, AuditLog},
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
@@ -27,7 +28,10 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     ops::DerefMut,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
     time::SystemTime,
 };
 use url::Url;
@@ -84,6 +88,29 @@ impl<'a> DapBatchBucket<'a> {
 
 pub(crate) struct MockAggregatorReportSelector(pub(crate) TaskId);
 
+#[derive(Default)]
+pub(crate) struct MockAuditLog(AtomicU32);
+
+impl MockAuditLog {
+    #[cfg(test)]
+    pub(crate) fn invocations(&self) -> u32 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+impl AuditLog for MockAuditLog {
+    fn on_aggregation_job(
+        &self,
+        _host: &str,
+        _task_id: &TaskId,
+        _task_config: &DapTaskConfig,
+        _report_count: u64,
+        _action: AggregationJobAuditAction,
+    ) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 pub(crate) struct MockAggregator {
     pub(crate) global_config: DapGlobalConfig,
     pub(crate) tasks: Arc<Mutex<HashMap<TaskId, DapTaskConfig>>>,
@@ -97,6 +124,7 @@ pub(crate) struct MockAggregator {
     pub(crate) collector_hpke_config: HpkeConfig,
     pub(crate) taskprov_vdaf_verify_key_init: [u8; 32],
     pub(crate) metrics: DaphneMetrics,
+    pub(crate) audit_log: MockAuditLog,
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `MockAggregator`. Not set by the Helper.
@@ -543,6 +571,10 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
     fn metrics(&self) -> &DaphneMetrics {
         &self.metrics
+    }
+
+    fn audit_log(&self) -> &dyn AuditLog {
+        &self.audit_log
     }
 }
 
