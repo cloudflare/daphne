@@ -46,6 +46,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
+    audit_log::AuditLog,
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     hpke::HpkeDecrypter,
@@ -696,6 +697,10 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     fn metrics(&self) -> &DaphneMetrics {
         &self.state.metrics.daphne
+    }
+
+    fn audit_log(&self) -> &dyn AuditLog {
+        self.state.audit_log
     }
 }
 

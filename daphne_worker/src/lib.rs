@@ -160,6 +160,7 @@ use crate::{
 };
 use daphne::{
     aborts::DapAbort,
+    audit_log::{AuditLog, NoopAuditLog},
     auth::BearerToken,
     constants::DapMediaType,
     messages::{CollectionJobId, Duration, TaskId, Time},
@@ -195,12 +196,16 @@ pub struct DaphneWorkerRouter<'srv> {
 
     /// Error reporting for Daphne. By default is a no-op.
     pub error_reporter: &'srv dyn error_reporting::ErrorReporter,
+
+    /// Audit log, used to record statistics of tasks processed.
+    pub audit_log: &'srv dyn AuditLog,
 }
 
 impl<'srv> Default for DaphneWorkerRouter<'srv> {
     fn default() -> Self {
         Self {
             error_reporter: &error_reporting::NoopErrorReporter {},
+            audit_log: &NoopAuditLog,
             enable_internal_test: false,
             enable_default_response: false,
         }
@@ -263,7 +268,8 @@ impl DaphneWorkerRouter<'_> {
         } else {
             ISOLATE_STATE.get_or_try_init(|| DaphneWorkerIsolateState::from_worker_env(&env))?
         };
-        let state = DaphneWorkerRequestState::new(shared_state, &req, self.error_reporter)?;
+        let state =
+            DaphneWorkerRequestState::new(shared_state, &req, self.error_reporter, self.audit_log)?;
 
         let router = Router::with_data(&state)
             .get_async("/:version/hpke_config", |req, ctx| async move {

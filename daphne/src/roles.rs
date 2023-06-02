@@ -4,6 +4,7 @@
 //! Trait definitions for Daphne backends.
 
 use crate::{
+    audit_log::{AggregationJobAuditAction, AuditLog},
     constants::DapMediaType,
     hpke::HpkeDecrypter,
     messages::{
@@ -200,6 +201,9 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
 
     /// Access the Prometheus metrics.
     fn metrics(&self) -> &DaphneMetrics;
+
+    /// Access the audit log.
+    fn audit_log(&self) -> &dyn AuditLog;
 }
 
 macro_rules! leader_post {
@@ -945,6 +949,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     }
                 };
 
+                self.audit_log().on_aggregation_job(
+                    req.host(),
+                    task_id,
+                    task_config,
+                    agg_job_init_req.report_shares.len() as u64,
+                    AggregationJobAuditAction::Init,
+                );
+
                 metrics.agg_job_started_inc();
                 metrics.inbound_req_inc(DaphneRequestType::Aggregate);
                 Ok(DapResponse {
@@ -1015,6 +1027,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         (agg_job_resp, out_shares_count)
                     }
                 };
+
+                self.audit_log().on_aggregation_job(
+                    req.host(),
+                    task_id,
+                    task_config,
+                    out_shares_count,
+                    AggregationJobAuditAction::Continue,
+                );
 
                 metrics.report_inc_by("aggregated", out_shares_count);
                 metrics.agg_job_completed_inc();

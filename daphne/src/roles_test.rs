@@ -17,7 +17,9 @@ use crate::{
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
     taskprov::TaskprovVersion,
     test_version, test_versions,
-    testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
+    testing::{
+        AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector, MockAuditLog,
+    },
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapMeasurement, DapQueryConfig,
     DapRequest, DapResource, DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config,
@@ -169,6 +171,7 @@ impl Test {
             collector_hpke_config: collector_hpke_receiver_config.config.clone(),
             taskprov_vdaf_verify_key_init,
             metrics: DaphneMetrics::register(&prometheus_registry, Some("test_helper")).unwrap(),
+            audit_log: MockAuditLog::default(),
             peer: None,
         });
 
@@ -189,6 +192,7 @@ impl Test {
             collector_hpke_config: collector_hpke_receiver_config.config,
             taskprov_vdaf_verify_key_init,
             metrics: DaphneMetrics::register(&prometheus_registry, Some("test_leader")).unwrap(),
+            audit_log: MockAuditLog::default(),
             peer: Some(Arc::clone(&helper)),
         });
 
@@ -541,6 +545,8 @@ async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
         t.helper.http_post_aggregate(&req).await.unwrap_err(),
         DapAbort::QueryMismatch { .. }
     );
+
+    assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
 async_test_versions! { http_post_aggregate_invalid_batch_sel }
@@ -564,6 +570,8 @@ async fn http_post_aggregate_init_unauthorized_request(version: DapVersion) {
         t.helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
+
+    assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
 async_test_versions! { http_post_aggregate_init_unauthorized_request }
@@ -589,6 +597,8 @@ async fn http_post_aggregate_init_expired_task(version: DapVersion) {
         agg_job_resp.transitions[0].var,
         TransitionVar::Failed(TransitionFailure::TaskExpired)
     );
+
+    assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
 async_test_versions! { http_post_aggregate_init_expired_task }
@@ -615,6 +625,10 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
         _ => panic!("agg_job_id resource missing!"),
     };
     let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+
+    // AggregationJobInitReq succeeds
+    assert_eq!(t.helper.audit_log.invocations(), 1);
+
     let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
     assert_eq!(agg_job_resp.transitions.len(), 1);
     assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
@@ -630,6 +644,9 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
         t.helper.http_post_aggregate(&req).await,
         Err(DapAbort::RoundMismatch { .. })
     );
+
+    // AggregationJobContinueReq fails
+    assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
 async_test_versions! { http_post_aggregate_bad_round }
@@ -656,6 +673,10 @@ async fn http_post_aggregate_zero_round(version: DapVersion) {
         _ => panic!("agg_job_id resource missing!"),
     };
     let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+
+    // AggregationJobInitReq succeeds
+    assert_eq!(t.helper.audit_log.invocations(), 1);
+
     let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
     assert_eq!(agg_job_resp.transitions.len(), 1);
     assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
@@ -671,6 +692,9 @@ async fn http_post_aggregate_zero_round(version: DapVersion) {
         t.helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnrecognizedMessage)
     );
+
+    // AggregationJobContinueReq fails
+    assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
 async_test_versions! { http_post_aggregate_zero_round }
@@ -744,6 +768,8 @@ async fn http_post_aggregate_cont_unauthorized_request(version: DapVersion) {
         t.helper.http_post_aggregate(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
+
+    assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
 async_test_versions! { http_post_aggregate_cont_unauthorized_request }
@@ -1038,6 +1064,8 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
             .unwrap();
     let transition = &agg_job_resp.transitions[0];
 
+    assert_eq!(t.helper.audit_log.invocations(), 1);
+
     // Expect failure due to report store marked as collected.
     assert_matches!(
         transition.var,
@@ -1071,8 +1099,12 @@ async fn http_post_aggregate_abort_helper_state_overwritten(version: DapVersion)
     // Send aggregate request.
     let _ = t.helper.http_post_aggregate(&req).await;
 
+    assert_eq!(t.helper.audit_log.invocations(), 1);
+
     // Send another aggregate request.
     let err = t.helper.http_post_aggregate(&req).await.unwrap_err();
+
+    assert_eq!(t.helper.audit_log.invocations(), 1);
 
     // Expect failure due to overwriting existing helper state.
     assert_matches!(err, DapAbort::BadRequest(e) =>
@@ -1088,6 +1120,8 @@ async fn http_post_aggregate_fail_send_cont_req(version: DapVersion) {
     let req = t
         .gen_test_agg_job_cont_req(&agg_job_id, Vec::default(), version)
         .await;
+
+    assert_eq!(t.helper.audit_log.invocations(), 0);
 
     // Send aggregate continue request to helper.
     let err = t.helper.http_post_aggregate(&req).await.unwrap_err();

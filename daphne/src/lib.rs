@@ -62,7 +62,7 @@ use std::{
     borrow::Cow,
     cmp::{max, min},
     collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{Debug, Display},
 };
 use url::Url;
 
@@ -702,7 +702,7 @@ pub enum DapHelperTransition<M: Debug> {
     Finish(Vec<DapOutputShare>, M),
 }
 
-/// Specificaiton of a concrete VDAF.
+/// Specification of a concrete VDAF.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {
@@ -715,6 +715,15 @@ impl std::str::FromStr for VdafConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(s)
+    }
+}
+
+impl Display for VdafConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
+            VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
+        }
     }
 }
 
@@ -737,6 +746,19 @@ pub enum Prio3Config {
     /// The element-wise sum of vectors. Each vector has `len` elements.
     /// Each element is a 64-bit unsigned integer in range `[0,2^bits)`.
     SumVec { bits: usize, len: usize },
+}
+
+impl Display for Prio3Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Prio3Config::Count => write!(f, "Count"),
+            Prio3Config::Histogram { buckets } => {
+                write!(f, "Histogram({})", buckets.len())
+            }
+            Prio3Config::Sum { bits } => write!(f, "Sum({bits})"),
+            Prio3Config::SumVec { bits, len } => write!(f, "SumVec({bits},{len})"),
+        }
+    }
 }
 
 /// DAP sender role.
@@ -951,6 +973,7 @@ impl MetaAggregationJobId<'_> {
 }
 
 pub mod aborts;
+pub mod audit_log;
 pub mod auth;
 pub mod constants;
 #[cfg(test)]
