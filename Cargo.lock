@@ -492,14 +492,11 @@ name = "dapf"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "assert_matches",
- "base64 0.21.2",
  "clap",
  "daphne",
  "prio",
  "rand",
  "reqwest",
- "serde",
  "serde_json",
  "tokio",
  "url",
@@ -512,12 +509,10 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "base64 0.21.2",
- "getrandom",
  "hex",
  "hpke-rs",
  "hpke-rs-crypto",
  "hpke-rs-rust-crypto",
- "lazy_static",
  "matchit 0.7.0",
  "paste",
  "prio",
@@ -537,15 +532,12 @@ name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
  "assert_matches",
- "base64 0.21.2",
  "cfg-if",
  "console_error_panic_hook",
  "daphne",
  "daphne_worker",
- "futures",
  "hex",
  "hpke-rs",
- "lazy_static",
  "paste",
  "prio",
  "rand",
@@ -563,13 +555,10 @@ dependencies = [
 name = "daphne_worker"
 version = "0.3.0"
 dependencies = [
- "assert_matches",
  "async-trait",
- "base64 0.21.2",
  "chrono",
  "daphne",
  "futures",
- "getrandom",
  "hex",
  "matchit 0.7.0",
  "once_cell",
@@ -578,15 +567,12 @@ dependencies = [
  "prometheus",
  "rand",
  "reqwest-wasm",
- "ring",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "thiserror",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
- "url",
  "worker",
 ]
 

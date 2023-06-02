@@ -1,6 +1,8 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#![warn(unused_crate_dependencies)]
+
 //! This crate implements the core protocol logic for the Distributed Aggregation Protocol
 //! ([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard under development in the
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported

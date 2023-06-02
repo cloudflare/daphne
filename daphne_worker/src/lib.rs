@@ -1,6 +1,8 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#![warn(unused_crate_dependencies)]
+
 //! Daphne-Worker implements a [Workers](https://developers.cloudflare.com/workers/) backend for
 //! Daphne.
 //!

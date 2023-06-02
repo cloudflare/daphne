@@ -25,23 +25,20 @@ cfg-if = "1.0.0"
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne_worker = { path = "../daphne_worker" }
-serde.workspace = true
-serde_json.workspace = true
 tracing.workspace = true
 worker.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
-base64.workspace = true
 daphne = { path = "../daphne" }
-futures.workspace = true
 hex.workspace = true
 hpke-rs.workspace = true
-lazy_static.workspace = true
 paste.workspace = true
 prio.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 url.workspace = true
