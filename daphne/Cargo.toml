@@ -20,15 +20,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 assert_matches.workspace = true
 async-trait.workspace = true
-base64.workspace = true
-getrandom.workspace = true
+base64 = "0.21.2"
 hex.workspace = true
 hpke-rs = { workspace = true , features = ["hazmat", "serialization"] }
 hpke-rs-crypto = { version = "0.1.1" }
 hpke-rs-rust-crypto = { version = "0.1.1"}
-lazy_static.workspace = true
-matchit.workspace = true
-paste.workspace = true
 prio = { workspace = true, features = ["prio2"] }
 prometheus.workspace = true
 rand.workspace = true
@@ -40,4 +36,6 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+matchit.workspace = true
+paste.workspace = true
 tokio.workspace = true
