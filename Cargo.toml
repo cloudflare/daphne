@@ -12,3 +12,27 @@ members = [
 [profile.release]
 # Tell `rustc` to optimize for small code size.
 opt-level = "s"
+
+[workspace.dependencies]
+assert_matches = "1.5.0"
+async-trait = "0.1.68"
+base64 = "0.21.2"
+futures = "0.3.28"
+getrandom = { version = "0.2.9", features = ["js"] } # Required for prio
+hex = { version = "0.4.3", features = ["serde"] }
+hpke-rs = "0.1.0"
+lazy_static = "1.4.0"
+matchit = "0.7.0"
+paste = "1.0.12"
+prio = "0.12.2"
+prometheus = "0.13.3"
+rand = "0.8.5"
+reqwest = "0.11.18"
+ring = "0.16.20"
+serde = { version = "1.0.163", features = ["derive"] }
+serde_json = "1.0.96"
+thiserror = "1.0.40"
+tokio = { version = "1.28.2", features = ["macros", "rt"] }
+tracing = "0.1.37"
+url = { version = "2.3.1", features = ["serde"] }
+worker = "0.0.16"
