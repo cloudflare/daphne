@@ -278,7 +278,7 @@ impl DaphneWorkerRouter<'_> {
 
                 let span = info_span_from_dap_request!("hpke_config", req);
 
-                match daph.http_get_hpke_config(&req).instrument(span).await {
+                match daph.handle_hpke_config_req(&req).instrument(span).await {
                     Ok(req) => dap_response_to_worker(req),
                     Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
@@ -316,7 +316,7 @@ impl DaphneWorkerRouter<'_> {
 
                         let span = info_span_from_dap_request!("collect", req);
 
-                        match daph.http_post_collect(&req).instrument(span).await {
+                        match daph.handle_collect_job_req(&req).instrument(span).await {
                             Ok(collect_uri) => {
                                 let mut headers = Headers::new();
                                 headers.set("Location", collect_uri.as_str())?;
@@ -390,7 +390,7 @@ impl DaphneWorkerRouter<'_> {
 
                             let span = info_span_from_dap_request!("collect (PUT)", req);
 
-                            match daph.http_post_collect(&req).instrument(span).await {
+                            match daph.handle_collect_job_req(&req).instrument(span).await {
                                 Ok(_) => Ok(Response::empty().unwrap().with_status(201)),
                                 Err(e) => daph.state.dap_abort_to_worker_response(e),
                             }
@@ -632,7 +632,7 @@ async fn put_report_into_task(
 
     let span = info_span_from_dap_request!("upload", req);
 
-    match daph.http_post_upload(&req).instrument(span).await {
+    match daph.handle_upload_req(&req).instrument(span).await {
         Ok(()) => Response::empty(),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
@@ -647,7 +647,7 @@ async fn handle_agg_job(
 
     let span = info_span_from_dap_request!("aggregate", req);
 
-    match daph.http_post_aggregate(&req).instrument(span).await {
+    match daph.handle_agg_job_req(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
@@ -662,7 +662,7 @@ async fn handle_agg_share_req(
 
     let span = info_span_from_dap_request!("aggregate_share", req);
 
-    match daph.http_post_aggregate_share(&req).instrument(span).await {
+    match daph.handle_agg_share_req(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }

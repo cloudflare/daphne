@@ -136,8 +136,8 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError>;
 
-    /// Handle HTTP GET to `/hpke_config?task_id=<task_id>`.
-    async fn http_get_hpke_config(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    /// Handle request for the Aggregator's HPKE configuration.
+    async fn handle_hpke_config_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         // Check whether the DAP version indicated by the sender is supported.
         if req.version == DapVersion::Unknown {
             return Err(DapAbort::version_unknown());
@@ -302,9 +302,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Send an HTTP PUT request.
     async fn send_http_put(&self, req: DapRequest<S>) -> Result<DapResponse, DapError>;
 
-    /// Handle HTTP POST to `/upload`. The input is the encoded report sent in the body of the HTTP
-    /// request.
-    async fn http_post_upload(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
+    /// Handle a report from a Client.
+    async fn handle_upload_req(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
         debug!("upload for task {task_id}");
@@ -364,10 +363,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(())
     }
 
-    /// Handle HTTP POST to `/collect`. The input is a [`CollectReq`](crate::messages::CollectReq).
-    /// The return value is a URI that the Collector can poll later on to get the corresponding
-    /// [`CollectResp`](crate::messages::CollectResp).
-    async fn http_post_collect(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
+    /// Handle a collect job from the Collector. The response is the URI that the Collector will
+    /// poll later on to get the collection.
+    async fn handle_collect_job_req(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
         let now = self.get_current_time();
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
@@ -453,8 +451,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(collect_job_uri)
     }
 
-    /// Run the aggregation sub-protocol for the given set of reports. Return the number of reports
-    /// that were aggregated successfully.
+    /// Run an aggregation job for a set of reports. Return the number of reports that were
+    /// aggregated successfully.
     //
     // TODO Handle non-encodable messages gracefully. The length of `reports` may be too long to
     // encode in `AggregationJobInitReq`, in which case this method will panic. We should increase
@@ -585,7 +583,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(out_shares_count)
     }
 
-    /// Handle a pending collect request. If the results are ready, then compute the aggregate
+    /// Handle a pending collection job. If the results are ready, then compute the aggregate
     /// results and store them to be retrieved by the Collector later. Returns the number of
     /// reports in the batch.
     async fn run_collect_job(
@@ -686,9 +684,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         Ok(agg_share_req.report_count)
     }
 
-    /// Fetch a set of reports grouped by task, then run an aggregation job for each task. once all
-    /// jobs completed, process the collect job queue. It is not safe to run multiple instances of
-    /// this function in parallel.
+    /// Fetch a set of reports grouped by task, then run an aggregation job for each task. Once all
+    /// jobs are completed, process the collect job queue. It is not safe to run multiple instances
+    /// of this function in parallel.
     ///
     /// This method is geared primarily towards testing. It also demonstrates how to properly
     /// synchronize collect and aggregation jobs. If used in a large DAP deployment, it is likely
@@ -774,11 +772,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
         agg_job_id: &MetaAggregationJobId,
     ) -> Result<Option<DapHelperState>, DapError>;
 
-    /// Handle an HTTP POST to `/aggregate`. The input is either an AggregationJobInitReq or
-    /// AggregationJobContinueReq and the response is an AggregationJobResp.
-    ///
-    /// This is called during the Initialization and Continuation phases.
-    async fn http_post_aggregate(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    /// Handle a request pertaining to an aggregation job.
+    async fn handle_agg_job_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;
 
@@ -1050,14 +1045,9 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
     }
 
-    /// Handle an HTTP POST to `/aggregate_share`. The input is an AggregateShareReq and the
-    /// response is an AggregateShareResp.
-    ///
-    /// This is called during the Collection phase.
-    async fn http_post_aggregate_share(
-        &self,
-        req: &DapRequest<S>,
-    ) -> Result<DapResponse, DapAbort> {
+    /// Handle a request for an aggregate share. This is called by the Leader to complete a
+    /// collection job.
+    async fn handle_agg_share_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
         let metrics = self.metrics().with_host(req.host());
         let task_id = req.task_id()?;

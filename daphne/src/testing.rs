@@ -870,7 +870,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                     .peer
                     .as_ref()
                     .expect("peer not configured")
-                    .http_post_aggregate(&req)
+                    .handle_agg_job_req(&req)
                     .await
                     .expect("peer aborted unexpectedly"))
             }
@@ -878,7 +878,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 .peer
                 .as_ref()
                 .expect("peer not configured")
-                .http_post_aggregate_share(&req)
+                .handle_agg_share_req(&req)
                 .await
                 .expect("peer aborted unexpectedly")),
             _ => unreachable!("unhandled media type: {:?}", req.media_type),
@@ -891,7 +891,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 .peer
                 .as_ref()
                 .expect("peer not configured")
-                .http_post_aggregate(&req)
+                .handle_agg_job_req(&req)
                 .await
                 .expect("peer aborted unexpectedly"))
         } else {
