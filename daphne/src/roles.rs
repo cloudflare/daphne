@@ -334,7 +334,13 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         if report.encrypted_input_shares.len() != 2 {
             // TODO spec: Decide if this behavior should be specified.
-            return Err(DapAbort::UnrecognizedMessage);
+            return Err(DapAbort::UnrecognizedMessage {
+                detail: format!(
+                    "expected exactly two encrypted input shares; got {}",
+                    report.encrypted_input_shares.len()
+                ),
+                task_id: Some(task_id.clone()),
+            });
         }
 
         // Check that the indicated HpkeConfig is present.
@@ -822,7 +828,11 @@ pub trait DapHelper<S>: DapAggregator<S> {
                             .map(|report_share| &report_share.report_metadata);
                     } else if using_taskprov != 0 {
                         // It's not all taskprov or no taskprov, so it's an error.
-                        return Err(DapAbort::UnrecognizedMessage);
+                        return Err(DapAbort::UnrecognizedMessage {
+                            detail: "some reports include the taskprov extensions and some do not"
+                                .to_string(),
+                            task_id: Some(task_id.clone()),
+                        });
                     }
                 }
                 resolve_taskprov(self, task_id, req, first_metadata).await?;
@@ -1166,10 +1176,13 @@ fn check_part_batch(
         ));
     }
 
-    // Check that the aggreation parameter is suitable for the given VDAF.
+    // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
         // TODO spec: Define this behavior.
-        return Err(DapAbort::UnrecognizedMessage);
+        return Err(DapAbort::UnrecognizedMessage {
+            detail: "invalid aggregation parameter".into(),
+            task_id: Some(task_id.clone()),
+        });
     }
 
     Ok(())
@@ -1186,10 +1199,13 @@ async fn check_batch<S>(
     let global_config = agg.get_global_config();
     let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
 
-    // Check that the aggreation parameter is suitable for the given VDAF.
+    // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
         // TODO spec: Define this behavior.
-        return Err(DapAbort::UnrecognizedMessage);
+        return Err(DapAbort::UnrecognizedMessage {
+            detail: "invalid aggregation parameter".into(),
+            task_id: Some(task_id.clone()),
+        });
     }
 
     // Check that the batch boundaries are valid.

@@ -690,7 +690,7 @@ async fn handle_agg_job_req_zero_round(version: DapVersion) {
         .await;
     assert_matches!(
         t.helper.handle_agg_job_req(&req).await,
-        Err(DapAbort::UnrecognizedMessage)
+        Err(DapAbort::UnrecognizedMessage { .. })
     );
 
     // AggregationJobContinueReq fails
@@ -1164,7 +1164,7 @@ async fn handle_upload_req_fail_send_invalid_report(version: DapVersion) {
     // Expect failure due to incorrect number of input shares
     assert_matches!(
         t.leader.handle_upload_req(&req).await,
-        Err(DapAbort::UnrecognizedMessage)
+        Err(DapAbort::UnrecognizedMessage { .. })
     );
 }
 

@@ -531,7 +531,13 @@ impl VdafConfig {
         let mut transitions = Vec::with_capacity(num_reports);
         for report_share in agg_job_init_req.report_shares.iter() {
             if processed.contains(&report_share.report_metadata.id) {
-                return Err(DapAbort::UnrecognizedMessage);
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: format!(
+                        "report ID {} appears twice in the same aggregation job",
+                        report_share.report_metadata.id.to_base64url()
+                    ),
+                    task_id: Some(task_id.clone()),
+                });
             }
             processed.insert(report_share.report_metadata.id.clone());
 
@@ -594,7 +600,14 @@ impl VdafConfig {
         metrics: &ContextualizedDaphneMetrics<'_>,
     ) -> Result<DapLeaderTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::UnrecognizedMessage);
+            return Err(DapAbort::UnrecognizedMessage {
+                detail: format!(
+                    "aggregation job response has {} reports; expected {}",
+                    agg_job_resp.transitions.len(),
+                    state.seq.len(),
+                ),
+                task_id: Some(task_id.clone()),
+            });
         }
 
         let mut seq = Vec::with_capacity(state.seq.len());
@@ -606,7 +619,13 @@ impl VdafConfig {
         {
             // TODO spec: Consider removing the report ID from the AggregationJobResp.
             if helper.report_id != leader_report_id {
-                return Err(DapAbort::UnrecognizedMessage);
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: format!(
+                        "report ID {} appears out of order in aggregation job response",
+                        helper.report_id.to_base64url()
+                    ),
+                    task_id: Some(task_id.clone()),
+                });
             }
 
             let helper_message = match &helper.var {
@@ -619,7 +638,12 @@ impl VdafConfig {
                 }
 
                 // TODO Log the fact that the helper sent an unexpected message.
-                TransitionVar::Finished => return Err(DapAbort::UnrecognizedMessage),
+                TransitionVar::Finished => {
+                    return Err(DapAbort::UnrecognizedMessage {
+                        detail: "helper sent unexpected `Finished` message".to_string(),
+                        task_id: Some(task_id.clone()),
+                    })
+                }
             };
 
             let res = match self {
@@ -706,7 +730,10 @@ impl VdafConfig {
     ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
         if let Some(round) = agg_cont_req.round {
             if round == 0 {
-                return Err(DapAbort::UnrecognizedMessage);
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: "request shouldn't indicate round 0".into(),
+                    task_id: Some(task_id.clone()),
+                });
             }
             // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
             // aggregation-round-skew-recovery.
@@ -737,8 +764,23 @@ impl VdafConfig {
             // would be nice if we didn't have to keep track of the set of processed reports. One
             // way to avoid this would be to require the leader to send the reports in a well-known
             // order, say, in ascending order by ID.
-            if !recognized.contains(&leader.report_id) || processed.contains(&leader.report_id) {
-                return Err(DapAbort::UnrecognizedMessage);
+            if !recognized.contains(&leader.report_id) {
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: format!(
+                        "report ID {} does not appear in the Helper's reports",
+                        leader.report_id.to_base64url()
+                    ),
+                    task_id: Some(task_id.clone()),
+                });
+            }
+            if processed.contains(&leader.report_id) {
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: format!(
+                        "report ID {} appears twice in the same aggregation job",
+                        leader.report_id.to_base64url()
+                    ),
+                    task_id: Some(task_id.clone()),
+                });
             }
 
             for (helper_step, helper_time, helper_report_id) in &mut helper_iter {
@@ -752,7 +794,13 @@ impl VdafConfig {
                     TransitionVar::Continued(message) => message,
 
                     // TODO Log the fact that the helper sent an unexpected message.
-                    _ => return Err(DapAbort::UnrecognizedMessage),
+                    _ => {
+                        return Err(DapAbort::UnrecognizedMessage {
+                            detail: "helper sent unexpected message instead of `Continued`"
+                                .to_string(),
+                            task_id: Some(task_id.clone()),
+                        })
+                    }
                 };
 
                 let res = match self {
@@ -809,7 +857,14 @@ impl VdafConfig {
         metrics: &ContextualizedDaphneMetrics,
     ) -> Result<Vec<DapOutputShare>, DapAbort> {
         if agg_job_resp.transitions.len() != uncommitted.seq.len() {
-            return Err(DapAbort::UnrecognizedMessage);
+            return Err(DapAbort::UnrecognizedMessage {
+                detail: format!(
+                    "the Leader has {} reports, but it received {} reports from the Helper",
+                    uncommitted.seq.len(),
+                    agg_job_resp.transitions.len()
+                ),
+                task_id: None,
+            });
         }
 
         let mut out_shares = Vec::with_capacity(uncommitted.seq.len());
@@ -820,12 +875,23 @@ impl VdafConfig {
         {
             // TODO spec: Consider removing the report ID from the AggregationJobResp.
             if helper.report_id != leader_report_id {
-                return Err(DapAbort::UnrecognizedMessage);
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: format!(
+                        "report ID {} appears out of order in aggregation job response",
+                        helper.report_id.to_base64url()
+                    ),
+                    task_id: None,
+                });
             }
 
             match &helper.var {
                 // TODO Log the fact that the helper sent an unexpected message.
-                TransitionVar::Continued(..) => return Err(DapAbort::UnrecognizedMessage),
+                TransitionVar::Continued(..) => {
+                    return Err(DapAbort::UnrecognizedMessage {
+                        detail: "helper sent unexpected `Continued` message".to_string(),
+                        task_id: None,
+                    })
+                }
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
