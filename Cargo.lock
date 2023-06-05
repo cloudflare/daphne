@@ -509,6 +509,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "base64 0.21.2",
+ "futures",
  "hex",
  "hpke-rs",
  "hpke-rs-crypto",
