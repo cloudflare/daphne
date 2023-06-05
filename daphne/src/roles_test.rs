@@ -413,7 +413,7 @@ impl Test {
             .await;
 
         // Leader: Handle request from Collector.
-        self.leader.http_post_collect(&req).await?;
+        self.leader.handle_collect_job_req(&req).await?;
         let resp = self.leader.get_pending_collect_jobs().await?;
         let (task_id, collect_id, collect_req) = &resp[0];
 
@@ -515,7 +515,7 @@ impl Test {
 }
 
 // Test that the Helper properly handles the batch parameter in the AggregationJobInitReq.
-async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
+async fn handle_agg_job_req_invalid_batch_sel(version: DapVersion) {
     let mut rng = thread_rng();
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
@@ -542,16 +542,16 @@ async fn http_post_aggregate_invalid_batch_sel(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await.unwrap_err(),
+        t.helper.handle_agg_job_req(&req).await.unwrap_err(),
         DapAbort::QueryMismatch { .. }
     );
 
     assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
-async_test_versions! { http_post_aggregate_invalid_batch_sel }
+async_test_versions! { handle_agg_job_req_invalid_batch_sel }
 
-async fn http_post_aggregate_init_unauthorized_request(version: DapVersion) {
+async fn handle_agg_job_req_init_unauthorized_request(version: DapVersion) {
     let t = Test::new(version);
     let mut req = t
         .gen_test_agg_job_init_req(&t.time_interval_task_id, version, Vec::default())
@@ -560,24 +560,24 @@ async fn http_post_aggregate_init_unauthorized_request(version: DapVersion) {
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
-async_test_versions! { http_post_aggregate_init_unauthorized_request }
+async_test_versions! { handle_agg_job_req_init_unauthorized_request }
 
 // Test that the Helper rejects reports past the expiration date.
-async fn http_post_aggregate_init_expired_task(version: DapVersion) {
+async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
     let t = Test::new(version);
 
     let report = t.gen_test_report(&t.expired_task_id).await;
@@ -590,7 +590,7 @@ async fn http_post_aggregate_init_expired_task(version: DapVersion) {
         .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_share])
         .await;
 
-    let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+    let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
     let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
     assert_eq!(agg_job_resp.transitions.len(), 1);
     assert_matches!(
@@ -601,10 +601,10 @@ async fn http_post_aggregate_init_expired_task(version: DapVersion) {
     assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
-async_test_versions! { http_post_aggregate_init_expired_task }
+async_test_versions! { handle_agg_job_req_init_expired_task }
 
 // Test that the Helper rejects reports with a bad round number.
-async fn http_post_aggregate_bad_round(version: DapVersion) {
+async fn handle_agg_job_req_bad_round(version: DapVersion) {
     let t = Test::new(version);
     if version == DapVersion::Draft02 {
         // Nothing to test.
@@ -624,7 +624,7 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
         DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
         _ => panic!("agg_job_id resource missing!"),
     };
-    let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+    let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
 
     // AggregationJobInitReq succeeds
     assert_eq!(t.helper.audit_log.invocations(), 1);
@@ -641,7 +641,7 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::RoundMismatch { .. })
     );
 
@@ -649,10 +649,10 @@ async fn http_post_aggregate_bad_round(version: DapVersion) {
     assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
-async_test_versions! { http_post_aggregate_bad_round }
+async_test_versions! { handle_agg_job_req_bad_round }
 
 // Test that the Helper rejects reports with a bad round id
-async fn http_post_aggregate_zero_round(version: DapVersion) {
+async fn handle_agg_job_req_zero_round(version: DapVersion) {
     let t = Test::new(version);
     if version == DapVersion::Draft02 {
         // Nothing to test.
@@ -672,7 +672,7 @@ async fn http_post_aggregate_zero_round(version: DapVersion) {
         DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
         _ => panic!("agg_job_id resource missing!"),
     };
-    let resp = t.helper.http_post_aggregate(&req).await.unwrap();
+    let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
 
     // AggregationJobInitReq succeeds
     assert_eq!(t.helper.audit_log.invocations(), 1);
@@ -689,7 +689,7 @@ async fn http_post_aggregate_zero_round(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::UnrecognizedMessage)
     );
 
@@ -697,9 +697,9 @@ async fn http_post_aggregate_zero_round(version: DapVersion) {
     assert_eq!(t.helper.audit_log.invocations(), 1);
 }
 
-async_test_versions! { http_post_aggregate_zero_round }
+async_test_versions! { handle_agg_job_req_zero_round }
 
-async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
+async fn handle_hpke_config_req_unrecognized_task(version: DapVersion) {
     let t = Test::new(version);
     let mut rng = thread_rng();
     let task_id = TaskId(rng.gen());
@@ -718,14 +718,14 @@ async fn http_get_hpke_config_unrecognized_task(version: DapVersion) {
     };
 
     assert_matches!(
-        t.leader.http_get_hpke_config(&req).await,
+        t.leader.handle_hpke_config_req(&req).await,
         Err(DapAbort::UnrecognizedTask)
     );
 }
 
-async_test_versions! { http_get_hpke_config_unrecognized_task }
+async_test_versions! { handle_hpke_config_req_unrecognized_task }
 
-async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
+async fn handle_hpke_config_req_missing_task_id(version: DapVersion) {
     let t = Test::new(version);
     let req = DapRequest {
         version: DapVersion::Draft02,
@@ -741,14 +741,14 @@ async fn http_get_hpke_config_missing_task_id(version: DapVersion) {
     // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
     // used for all tasks.
     assert_matches!(
-        t.leader.http_get_hpke_config(&req).await,
+        t.leader.handle_hpke_config_req(&req).await,
         Err(DapAbort::MissingTaskId)
     );
 }
 
-async_test_versions! { http_get_hpke_config_missing_task_id }
+async_test_versions! { handle_hpke_config_req_missing_task_id }
 
-async fn http_post_aggregate_cont_unauthorized_request(version: DapVersion) {
+async fn handle_agg_job_req_cont_unauthorized_request(version: DapVersion) {
     let t = Test::new(version);
     let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
     let mut req = t
@@ -758,45 +758,45 @@ async fn http_post_aggregate_cont_unauthorized_request(version: DapVersion) {
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        t.helper.http_post_aggregate(&req).await,
+        t.helper.handle_agg_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     assert_eq!(t.helper.audit_log.invocations(), 0);
 }
 
-async_test_versions! { http_post_aggregate_cont_unauthorized_request }
+async_test_versions! { handle_agg_job_req_cont_unauthorized_request }
 
-async fn http_post_aggregate_share_unauthorized_request(version: DapVersion) {
+async fn handle_agg_share_req_unauthorized_request(version: DapVersion) {
     let t = Test::new(version);
     let mut req = t.gen_test_agg_share_req(0, [0; 32]).await;
     req.sender_auth = None;
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        t.helper.http_post_aggregate_share(&req).await,
+        t.helper.handle_agg_share_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        t.helper.http_post_aggregate_share(&req).await,
+        t.helper.handle_agg_share_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
-async_test_versions! { http_post_aggregate_share_unauthorized_request }
+async_test_versions! { handle_agg_share_req_unauthorized_request }
 
 // Test that the Helper handles the batch selector sent from the Leader properly.
-async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
+async fn handle_agg_share_req_invalid_batch_sel(version: DapVersion) {
     let mut rng = thread_rng();
     let t = Test::new(version);
 
@@ -824,7 +824,7 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
+        t.helper.handle_agg_share_req(&req).await.unwrap_err(),
         DapAbort::QueryMismatch { .. }
     );
 
@@ -852,14 +852,14 @@ async fn http_post_aggregate_share_invalid_batch_sel(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.helper.http_post_aggregate_share(&req).await.unwrap_err(),
+        t.helper.handle_agg_share_req(&req).await.unwrap_err(),
         DapAbort::BatchInvalid { .. }
     );
 }
 
-async_test_versions! { http_post_aggregate_share_invalid_batch_sel }
+async_test_versions! { handle_agg_share_req_invalid_batch_sel }
 
-async fn http_post_collect_unauthorized_request(version: DapVersion) {
+async fn handle_collect_job_req_unauthorized_request(version: DapVersion) {
     let mut rng = thread_rng();
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
@@ -895,21 +895,21 @@ async fn http_post_collect_unauthorized_request(version: DapVersion) {
 
     // Expect failure due to missing bearer token.
     assert_matches!(
-        t.leader.http_post_collect(&req).await,
+        t.leader.handle_collect_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 
     // Expect failure due to incorrect bearer token.
     req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
     assert_matches!(
-        t.leader.http_post_collect(&req).await,
+        t.leader.handle_collect_job_req(&req).await,
         Err(DapAbort::UnauthorizedRequest { .. })
     );
 }
 
-async_test_versions! { http_post_collect_unauthorized_request }
+async_test_versions! { handle_collect_job_req_unauthorized_request }
 
-async fn http_post_aggregate_failure_hpke_decrypt_error(version: DapVersion) {
+async fn handle_agg_job_req_failure_hpke_decrypt_error(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
@@ -931,7 +931,7 @@ async fn http_post_aggregate_failure_hpke_decrypt_error(version: DapVersion) {
 
     // Get AggregationJobResp and then extract the transition data from inside.
     let agg_job_resp =
-        AggregationJobResp::get_decoded(&t.helper.http_post_aggregate(&req).await.unwrap().payload)
+        AggregationJobResp::get_decoded(&t.helper.handle_agg_job_req(&req).await.unwrap().payload)
             .unwrap();
     let transition = &agg_job_resp.transitions[0];
 
@@ -942,9 +942,9 @@ async fn http_post_aggregate_failure_hpke_decrypt_error(version: DapVersion) {
     );
 }
 
-async_test_versions! { http_post_aggregate_failure_hpke_decrypt_error }
+async_test_versions! { handle_agg_job_req_failure_hpke_decrypt_error }
 
-async fn http_post_aggregate_transition_continue(version: DapVersion) {
+async fn handle_agg_job_req_transition_continue(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
@@ -961,7 +961,7 @@ async fn http_post_aggregate_transition_continue(version: DapVersion) {
 
     // Get AggregationJobResp and then extract the transition data from inside.
     let agg_job_resp =
-        AggregationJobResp::get_decoded(&t.helper.http_post_aggregate(&req).await.unwrap().payload)
+        AggregationJobResp::get_decoded(&t.helper.handle_agg_job_req(&req).await.unwrap().payload)
             .unwrap();
     let transition = &agg_job_resp.transitions[0];
 
@@ -969,9 +969,9 @@ async fn http_post_aggregate_transition_continue(version: DapVersion) {
     assert_matches!(transition.var, TransitionVar::Continued(_));
 }
 
-async_test_versions! { http_post_aggregate_transition_continue }
+async_test_versions! { handle_agg_job_req_transition_continue }
 
-async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
+async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
@@ -1002,7 +1002,7 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
 
     // Get AggregationJobResp and then extract the transition data from inside.
     let agg_job_resp =
-        AggregationJobResp::get_decoded(&t.helper.http_post_aggregate(&req).await.unwrap().payload)
+        AggregationJobResp::get_decoded(&t.helper.handle_agg_job_req(&req).await.unwrap().payload)
             .unwrap();
     let transition = &agg_job_resp.transitions[0];
 
@@ -1019,9 +1019,9 @@ async fn http_post_aggregate_failure_report_replayed(version: DapVersion) {
     });
 }
 
-async_test_versions! { http_post_aggregate_failure_report_replayed }
+async_test_versions! { handle_agg_job_req_failure_report_replayed }
 
-async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
+async fn handle_agg_job_req_failure_batch_collected(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.helper.unchecked_get_task_config(task_id).await;
@@ -1060,7 +1060,7 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
 
     // Get AggregationJobResp and then extract the transition data from inside.
     let agg_job_resp =
-        AggregationJobResp::get_decoded(&t.helper.http_post_aggregate(&req).await.unwrap().payload)
+        AggregationJobResp::get_decoded(&t.helper.handle_agg_job_req(&req).await.unwrap().payload)
             .unwrap();
     let transition = &agg_job_resp.transitions[0];
 
@@ -1079,9 +1079,9 @@ async fn http_post_aggregate_failure_batch_collected(version: DapVersion) {
     });
 }
 
-async_test_versions! { http_post_aggregate_failure_batch_collected }
+async_test_versions! { handle_agg_job_req_failure_batch_collected }
 
-async fn http_post_aggregate_abort_helper_state_overwritten(version: DapVersion) {
+async fn handle_agg_job_req_abort_helper_state_overwritten(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
@@ -1097,12 +1097,12 @@ async fn http_post_aggregate_abort_helper_state_overwritten(version: DapVersion)
         .await;
 
     // Send aggregate request.
-    let _ = t.helper.http_post_aggregate(&req).await;
+    let _ = t.helper.handle_agg_job_req(&req).await;
 
     assert_eq!(t.helper.audit_log.invocations(), 1);
 
     // Send another aggregate request.
-    let err = t.helper.http_post_aggregate(&req).await.unwrap_err();
+    let err = t.helper.handle_agg_job_req(&req).await.unwrap_err();
 
     assert_eq!(t.helper.audit_log.invocations(), 1);
 
@@ -1112,9 +1112,9 @@ async fn http_post_aggregate_abort_helper_state_overwritten(version: DapVersion)
     );
 }
 
-async_test_versions! { http_post_aggregate_abort_helper_state_overwritten }
+async_test_versions! { handle_agg_job_req_abort_helper_state_overwritten }
 
-async fn http_post_aggregate_fail_send_cont_req(version: DapVersion) {
+async fn handle_agg_job_req_fail_send_cont_req(version: DapVersion) {
     let t = Test::new(version);
     let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
     let req = t
@@ -1124,15 +1124,15 @@ async fn http_post_aggregate_fail_send_cont_req(version: DapVersion) {
     assert_eq!(t.helper.audit_log.invocations(), 0);
 
     // Send aggregate continue request to helper.
-    let err = t.helper.http_post_aggregate(&req).await.unwrap_err();
+    let err = t.helper.handle_agg_job_req(&req).await.unwrap_err();
 
     // Expect failure due to sending continue request before initialization request.
     assert_matches!(err, DapAbort::UnrecognizedAggregationJob { .. });
 }
 
-async_test_versions! { http_post_aggregate_fail_send_cont_req }
+async_test_versions! { handle_agg_job_req_fail_send_cont_req }
 
-async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
+async fn handle_upload_req_fail_send_invalid_report(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1151,7 +1151,7 @@ async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
 
     // Expect failure due to invalid task ID in report.
     assert_matches!(
-        t.leader.http_post_upload(&req).await,
+        t.leader.handle_upload_req(&req).await,
         Err(DapAbort::UnrecognizedTask)
     );
 
@@ -1163,15 +1163,15 @@ async fn http_post_upload_fail_send_invalid_report(version: DapVersion) {
 
     // Expect failure due to incorrect number of input shares
     assert_matches!(
-        t.leader.http_post_upload(&req).await,
+        t.leader.handle_upload_req(&req).await,
         Err(DapAbort::UnrecognizedMessage)
     );
 }
 
-async_test_versions! { http_post_upload_fail_send_invalid_report }
+async_test_versions! { handle_upload_req_fail_send_invalid_report }
 
 // Test that the Leader rejects reports past the expiration date.
-async fn http_post_upload_task_expired(version: DapVersion) {
+async fn handle_upload_req_task_expired(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.expired_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1188,12 +1188,12 @@ async fn http_post_upload_task_expired(version: DapVersion) {
     };
 
     assert_matches!(
-        t.leader.http_post_upload(&req).await.unwrap_err(),
+        t.leader.handle_upload_req(&req).await.unwrap_err(),
         DapAbort::ReportTooLate
     );
 }
 
-async_test_versions! { http_post_upload_task_expired }
+async_test_versions! { handle_upload_req_task_expired }
 
 async fn get_reports_empty_response(version: DapVersion) {
     let t = Test::new(version);
@@ -1204,7 +1204,7 @@ async fn get_reports_empty_response(version: DapVersion) {
 
     // Upload report.
     t.leader
-        .http_post_upload(&req)
+        .handle_upload_req(&req)
         .await
         .expect("upload failed unexpectedly");
 
@@ -1248,7 +1248,7 @@ async fn poll_collect_job_test_results(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    t.leader.http_post_collect(&req).await.unwrap();
+    t.leader.handle_collect_job_req(&req).await.unwrap();
 
     // Expect DapCollectJob::Unknown due to invalid collect ID.
     assert_eq!(
@@ -1303,7 +1303,7 @@ async fn poll_collect_job_test_results(version: DapVersion) {
 
 async_test_versions! { poll_collect_job_test_results }
 
-async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
+async fn handle_collect_job_req_fail_invalid_batch_interval(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1330,7 +1330,7 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    let err = t.leader.http_post_collect(&req).await.unwrap_err();
+    let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
     // Fails because the requested batch interval is too large.
     assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too large".to_string()));
@@ -1358,7 +1358,7 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    let err = t.leader.http_post_collect(&req).await.unwrap_err();
+    let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
     // Fails because the requested batch interval is too far into the past.
     assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into past".to_string()));
@@ -1386,15 +1386,15 @@ async fn http_post_collect_fail_invalid_batch_interval(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    let err = t.leader.http_post_collect(&req).await.unwrap_err();
+    let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
     // Fails because the requested batch interval is too far into the future.
     assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into future".to_string()));
 }
 
-async_test_versions! { http_post_collect_fail_invalid_batch_interval }
+async_test_versions! { handle_collect_job_req_fail_invalid_batch_interval }
 
-async fn http_post_collect_succeed_max_batch_interval(version: DapVersion) {
+async fn handle_collect_job_req_succeed_max_batch_interval(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1421,13 +1421,13 @@ async fn http_post_collect_succeed_max_batch_interval(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    let _collect_uri = t.leader.http_post_collect(&req).await.unwrap();
+    let _collect_uri = t.leader.handle_collect_job_req(&req).await.unwrap();
 }
 
-async_test_versions! { http_post_collect_succeed_max_batch_interval }
+async_test_versions! { handle_collect_job_req_succeed_max_batch_interval }
 
 // Send a collect request with an overlapping batch interval.
-async fn http_post_collect_fail_overlapping_batch_interval(version: DapVersion) {
+async fn handle_collect_job_req_fail_overlapping_batch_interval(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1437,7 +1437,7 @@ async fn http_post_collect_fail_overlapping_batch_interval(version: DapVersion) 
     let req = t.gen_test_upload_req(report.clone(), task_id).await;
 
     // Client: Send upload request to Leader.
-    t.leader.http_post_upload(&req).await.unwrap();
+    t.leader.handle_upload_req(&req).await.unwrap();
 
     // Leader: Run aggregation job.
     t.run_agg_job(task_id).await.unwrap();
@@ -1453,11 +1453,11 @@ async fn http_post_collect_fail_overlapping_batch_interval(version: DapVersion) 
     );
 }
 
-async_test_versions! { http_post_collect_fail_overlapping_batch_interval }
+async_test_versions! { handle_collect_job_req_fail_overlapping_batch_interval }
 
 // Test a successful collect request submission.
 // This checks that the Leader reponds with the collect ID with the ID associated to the request.
-async fn http_post_collect_success(version: DapVersion) {
+async fn handle_collect_job_req_success(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
     let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1479,7 +1479,7 @@ async fn http_post_collect_success(version: DapVersion) {
         .await;
 
     // Leader: Handle the CollectReq received from Collector.
-    let url = t.leader.http_post_collect(&req).await.unwrap();
+    let url = t.leader.handle_collect_job_req(&req).await.unwrap();
     let resp = t.leader.get_pending_collect_jobs().await.unwrap();
     let (_leader_task_id, leader_collect_id, leader_collect_req) = &resp[0];
 
@@ -1501,10 +1501,10 @@ async fn http_post_collect_success(version: DapVersion) {
     );
 }
 
-async_test_versions! { http_post_collect_success }
+async_test_versions! { handle_collect_job_req_success }
 
 // Test that the Leader handles queries from the Collector properly.
-async fn http_post_collect_invalid_query(version: DapVersion) {
+async fn handle_collect_job_req_invalid_query(version: DapVersion) {
     let mut rng = thread_rng();
     let t = Test::new(version);
 
@@ -1529,7 +1529,7 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.leader.http_post_collect(&req).await.unwrap_err(),
+        t.leader.handle_collect_job_req(&req).await.unwrap_err(),
         DapAbort::QueryMismatch { .. }
     );
 
@@ -1554,12 +1554,12 @@ async fn http_post_collect_invalid_query(version: DapVersion) {
         )
         .await;
     assert_matches!(
-        t.leader.http_post_collect(&req).await.unwrap_err(),
+        t.leader.handle_collect_job_req(&req).await.unwrap_err(),
         DapAbort::BatchInvalid { .. }
     );
 }
 
-async_test_versions! { http_post_collect_invalid_query }
+async_test_versions! { handle_collect_job_req_invalid_query }
 
 // Test HTTP POST requests with a wrong DAP version.
 async fn http_post_fail_unknown_version(version: DapVersion) {
@@ -1573,13 +1573,13 @@ async fn http_post_fail_unknown_version(version: DapVersion) {
     req.version = DapVersion::Unknown;
     req.url = task_config.leader_url.join("upload").unwrap();
 
-    let err = t.leader.http_post_upload(&req).await.unwrap_err();
+    let err = t.leader.handle_upload_req(&req).await.unwrap_err();
     assert_matches!(err, DapAbort::BadRequest(details) => assert_eq!(details, "DAP version of request is not recognized"));
 }
 
 async_test_versions! { http_post_fail_unknown_version }
 
-async fn http_post_upload(version: DapVersion) {
+async fn handle_upload_req(version: DapVersion) {
     let t = Test::new(version);
     let task_id = &t.time_interval_task_id;
 
@@ -1587,12 +1587,12 @@ async fn http_post_upload(version: DapVersion) {
     let req = t.gen_test_upload_req(report, task_id).await;
 
     t.leader
-        .http_post_upload(&req)
+        .handle_upload_req(&req)
         .await
         .expect("upload failed unexpectedly");
 }
 
-async_test_versions! { http_post_upload }
+async_test_versions! { handle_upload_req }
 
 async fn e2e_time_interval(version: DapVersion) {
     let t = Test::new(version);
@@ -1603,7 +1603,7 @@ async fn e2e_time_interval(version: DapVersion) {
     let req = t.gen_test_upload_req(report, task_id).await;
 
     // Client: Send upload request to Leader.
-    t.leader.http_post_upload(&req).await.unwrap();
+    t.leader.handle_upload_req(&req).await.unwrap();
 
     // Leader: Run aggregation job.
     t.run_agg_job(task_id).await.unwrap();
@@ -1635,7 +1635,7 @@ async fn e2e_fixed_size(version: DapVersion) {
     let req = t.gen_test_upload_req(report, task_id).await;
 
     // Client: Send upload request to Leader.
-    t.leader.http_post_upload(&req).await.unwrap();
+    t.leader.handle_upload_req(&req).await.unwrap();
 
     // Leader: Run aggregation job.
     t.run_agg_job(task_id).await.unwrap();
@@ -1731,7 +1731,7 @@ async fn e2e_taskprov(version: DapVersion) {
         url: Url::parse("https://leader.com/upload").unwrap(),
         ..Default::default()
     };
-    t.leader.http_post_upload(&req).await.unwrap();
+    t.leader.handle_upload_req(&req).await.unwrap();
 
     // Leader: Run aggregation job.
     t.run_agg_job(&taskprov_id).await.unwrap();
