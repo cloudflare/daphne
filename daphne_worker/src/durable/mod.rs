@@ -177,24 +177,6 @@ impl<'srv> DurableConnector<'srv> {
         O1: for<'a> Deserialize<'a>,
         H: FnOnce(O1, bool) -> O2 + Sized,
     {
-        let req = match (&method, data) {
-            (Method::Post, Some(data)) => Request::new_with_init(
-                &format!("https://fake-host{durable_path}"),
-                RequestInit::new().with_method(Method::Post).with_body(Some(
-                    wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
-                )),
-            )?,
-            (Method::Get, None) => Request::new_with_init(
-                &format!("https://fake-host{durable_path}"),
-                RequestInit::new().with_method(Method::Get),
-            )?,
-            _ => {
-                return Err(Error::RustError(format!(
-                    "durable_request: Unrecognized method: {method:?}",
-                )));
-            }
-        };
-
         let attempts = if self.retry {
             DEFAULT_MAX_RETRIES + 1
         } else {
@@ -202,7 +184,25 @@ impl<'srv> DurableConnector<'srv> {
         };
         let mut attempt = 1;
         loop {
-            match durable_stub.fetch_with_request(req.clone()?).await {
+            let req = match (&method, &data) {
+                (Method::Post, Some(data)) => Request::new_with_init(
+                    &format!("https://fake-host{durable_path}"),
+                    RequestInit::new().with_method(Method::Post).with_body(Some(
+                        wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
+                    )),
+                )?,
+                (Method::Get, None) => Request::new_with_init(
+                    &format!("https://fake-host{durable_path}"),
+                    RequestInit::new().with_method(Method::Get),
+                )?,
+                _ => {
+                    return Err(Error::RustError(format!(
+                        "durable_request: Unrecognized method: {method:?}",
+                    )));
+                }
+            };
+
+            match durable_stub.fetch_with_request(req).await {
                 Ok(mut resp) => return Ok(handler(resp.json().await?, attempt > 1)),
                 Err(err) => {
                     if attempt < attempts {
