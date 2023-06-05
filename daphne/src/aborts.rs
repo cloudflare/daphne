@@ -93,7 +93,10 @@ pub enum DapAbort {
 
     /// Unrecognized message. Sent in response to a malformed or unexpected message.
     #[error("unrecognizedMessage")]
-    UnrecognizedMessage,
+    UnrecognizedMessage {
+        detail: String,
+        task_id: Option<TaskId>,
+    },
 
     /// Unrecognized DAP task. Sent in response to a request indicating an unrecognized task ID.
     #[error("unrecognizedTask")]
@@ -134,9 +137,8 @@ impl DapAbort {
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id_base64url),
             ),
-            Self::ReportTooLate | Self::UnrecognizedMessage | Self::UnrecognizedTask => {
-                (None, None, None)
-            }
+            Self::UnrecognizedMessage { detail, task_id } => (task_id, Some(detail), None),
+            Self::ReportTooLate | Self::UnrecognizedTask => (None, None, None),
             Self::Internal(e) => (None, Some(e.to_string()), None),
         };
 
@@ -252,8 +254,8 @@ impl DapAbort {
             Self::UnrecognizedAggregationJob { .. } => {
                 ("Unrecognized aggregation job", Some(self.to_string()))
             }
-            Self::UnrecognizedMessage => {
-                ("Failed to parse the request body", Some(self.to_string()))
+            Self::UnrecognizedMessage { .. } => {
+                ("Malformed or invalid message", Some(self.to_string()))
             }
             Self::UnrecognizedTask => (
                 "Task indicated by request is not recognized",
@@ -281,8 +283,11 @@ impl From<DapError> for DapAbort {
 }
 
 impl From<CodecError> for DapAbort {
-    fn from(_e: CodecError) -> Self {
-        Self::UnrecognizedMessage
+    fn from(e: CodecError) -> Self {
+        Self::UnrecognizedMessage {
+            detail: format!("codec error: {e}"),
+            task_id: None,
+        }
     }
 }
 

@@ -386,7 +386,7 @@ async fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -408,7 +408,7 @@ async fn agg_job_resp_abort_report_id_repeated(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -433,7 +433,7 @@ async fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -454,7 +454,7 @@ async fn agg_job_resp_abort_invalid_transition(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -590,7 +590,7 @@ async fn agg_cont_abort_unrecognized_report_id(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -616,7 +616,7 @@ async fn agg_job_cont_req_abort_transition_out_of_order(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
@@ -641,7 +641,7 @@ async fn agg_job_cont_req_abort_report_id_repeated(version: DapVersion) {
 
     assert_matches!(
         t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-        DapAbort::UnrecognizedMessage
+        DapAbort::UnrecognizedMessage { .. }
     );
 }
 
