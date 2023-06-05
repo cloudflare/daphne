@@ -20,6 +20,7 @@ use crate::{
     DapVersion, MetaAggregationJobId,
 };
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -875,7 +876,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         .map(|report_share| &report_share.report_metadata),
                 );
 
-                let transition = task_config
+                let transition_future = task_config
                     .vdaf
                     .handle_agg_job_init_req(
                         self,
@@ -884,12 +885,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         &agg_job_init_req,
                         &metrics,
                     )
-                    .await?;
+                    .map_err(DapError::Abort);
+
+                let (early_rejects, transition) =
+                    futures::try_join!(early_rejects_future, transition_future)?;
 
                 let agg_job_resp = match transition {
                     DapHelperTransition::Continue(mut state, mut agg_job_resp) => {
                         // Filter out early rejected reports.
-                        let early_rejects = early_rejects_future.await?;
                         let mut state_index = 0;
                         for transition in agg_job_resp.transitions.iter_mut() {
                             let early_failure = early_rejects.get(&transition.report_id);
