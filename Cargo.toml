@@ -33,4 +33,4 @@ thiserror = "1.0.40"
 tokio = { version = "1.28.2", features = ["macros", "rt"] }
 tracing = "0.1.37"
 url = { version = "2.3.1", features = ["serde"] }
-worker = "0.0.16"
+worker = "0.0.17"
