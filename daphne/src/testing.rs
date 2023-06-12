@@ -7,6 +7,7 @@ use crate::{
     audit_log::{AggregationJobAuditAction, AuditLog},
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
+    fatal_error,
     hpke::{HpkeDecrypter, HpkeReceiverConfig},
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
@@ -269,8 +270,8 @@ impl BearerTokenProvider for MockAggregator {
         if let Some(ref collector_token) = self.collector_token {
             Ok(Some(collector_token))
         } else {
-            Err(DapError::fatal(
-                "MockAggregator not configured with Collector bearer token",
+            Err(fatal_error!(
+                err = "MockAggregator not configured with Collector bearer token",
             ))
         }
     }
@@ -300,7 +301,7 @@ impl HpkeDecrypter for MockAggregator {
         task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig<'s>, DapError> {
         if self.hpke_receiver_config_list.is_empty() {
-            return Err(DapError::fatal("emtpy HPKE receiver config list"));
+            return Err(fatal_error!(err = "empty HPKE receiver config list"));
         }
 
         // Aggregators MAY abort if the HPKE config request does not specify a task ID. While not
@@ -461,7 +462,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
             .await?
-            .ok_or_else(|| DapError::fatal("task not found"))?;
+            .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = guard.entry(task_id.clone()).or_default();
@@ -594,7 +595,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         let mut helper_state_store_mutex_guard = self
             .helper_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
 
         let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
@@ -622,7 +623,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         let mut helper_state_store_mutex_guard = self
             .helper_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
 
         let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
@@ -732,12 +733,12 @@ impl DapLeader<BearerToken> for MockAggregator {
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
             .await?
-            .ok_or_else(|| DapError::fatal("task not found"))?;
+            .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         // Construct a new Collect URI for this CollectReq.
@@ -751,7 +752,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
 
         // Store Collect ID and CollectReq into LeaderState.
         let leader_state = leader_state_store.entry(task_id.clone()).or_default();
@@ -773,12 +774,12 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store
             .get(task_id)
-            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
+            .ok_or_else(|| fatal_error!(err = "collect job not found for task_id", %task_id))?;
         if let Some(collect_job_state) = leader_state.collect_jobs.get(collect_id) {
             match collect_job_state {
                 CollectJobState::Pending(_) => Ok(DapCollectJob::Pending),
@@ -796,7 +797,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let mut res = Vec::new();
@@ -822,16 +823,16 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store
             .get_mut(task_id)
-            .ok_or_else(|| DapError::fatal("collect job not found for task_id"))?;
+            .ok_or_else(|| fatal_error!(err = "collect job not found for task_id", %task_id))?;
         let collect_job = leader_state
             .collect_jobs
             .get_mut(collect_id)
-            .ok_or_else(|| DapError::fatal("collect job not found for collect_id"))?;
+            .ok_or_else(|| fatal_error!(err = "collect job not found for collect_id", %task_id))?;
 
         // Remove the batch from the batch queue.
         if let PartialBatchSelector::FixedSizeByBatchId { ref batch_id } =
@@ -858,7 +859,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 Ok(())
             }
             CollectJobState::Processed(_) => {
-                Err(DapError::fatal("tried to overwrite collect response"))
+                Err(fatal_error!(err = "tried to overwrite collect response"))
             }
         }
     }

@@ -4,7 +4,7 @@
 //! Daphne-Worker metrics.
 
 use crate::DapError;
-use daphne::metrics::DaphneMetrics;
+use daphne::{fatal_error, metrics::DaphneMetrics};
 use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
 pub(crate) struct DaphneWorkerMetrics {
@@ -31,14 +31,16 @@ impl DaphneWorkerMetrics {
             "HTTP response status code.",
             &["host", "code"],
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to register http_status_code"))?;
 
         let dap_abort_counter = register_int_counter_vec_with_registry!(
             format!("{front}dap_abort"),
             "DAP aborts.",
             &["host", "type"],
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to register dap_abort"))?;
 
         let daphne = DaphneMetrics::register(registry, prefix)?;
 

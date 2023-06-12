@@ -5,6 +5,7 @@
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
 use crate::{
+    fatal_error,
     hpke::HpkeDecrypter,
     messages::{
         encode_u32_bytes, AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp,
@@ -118,10 +119,12 @@ impl VdafConfig {
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
             Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(
-                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+                <[u8; 16]>::try_from(bytes)
+                    .map_err(|e| fatal_error!(err = CodecError::Other(Box::new(e))))?,
             )),
             Self::Prio2 { .. } => Ok(VdafVerifyKey::Prio2(
-                <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+                <[u8; 32]>::try_from(bytes)
+                    .map_err(|e| fatal_error!(err = CodecError::Other(Box::new(e))))?,
             )),
         }
     }
@@ -224,7 +227,7 @@ impl VdafConfig {
         }
 
         if hpke_config_list.len() != input_shares.len() {
-            return Err(DapError::Fatal("unexpected number of HPKE configs".into()));
+            return Err(fatal_error!(err = "unexpected number of HPKE configs"));
         }
 
         let input_share_text = match version {
@@ -385,7 +388,8 @@ impl VdafConfig {
                 extensions: vec![],
                 payload: encoded_input_share,
             },
-            _ => PlaintextInputShare::get_decoded(&encoded_input_share)?,
+            _ => PlaintextInputShare::get_decoded(&encoded_input_share)
+                .map_err(|e| fatal_error!(err = e))?,
         };
 
         let agg_id = usize::from(!is_leader);
@@ -410,7 +414,7 @@ impl VdafConfig {
                     &input_share.payload,
                 )?)
             }
-            _ => Err(DapError::fatal("VDAF verify key does not match config")),
+            _ => Err(fatal_error!(err = "VDAF verify key does not match config")),
         }
     }
 
@@ -433,8 +437,9 @@ impl VdafConfig {
         let mut seq = Vec::with_capacity(reports.len());
         for report in reports.into_iter() {
             if processed.contains(&report.report_metadata.id) {
-                return Err(DapError::fatal(
-                    "tried to process report sequence with non-unique report IDs",
+                return Err(fatal_error!(
+                    err = "tried to process report sequence with non-unique report IDs",
+                    non_unique_id = %report.report_metadata.id,
                 )
                 .into());
             }
@@ -989,8 +994,8 @@ impl VdafConfig {
         }
 
         if agg_shares.len() != encrypted_agg_shares.len() {
-            return Err(DapError::Fatal(
-                "one or more HPKE ciphertexts with unrecognized config ID".into(),
+            return Err(fatal_error!(
+                err = "one or more HPKE ciphertexts with unrecognized config ID",
             ));
         }
 
@@ -1017,7 +1022,7 @@ fn produce_encrypted_agg_share(
     let agg_share_data = agg_share
         .data
         .as_ref()
-        .ok_or_else(|| DapError::fatal("empty aggregate share"))?
+        .ok_or_else(|| fatal_error!(err = "empty aggregate share"))?
         .get_encoded();
 
     let agg_share_text = match version {

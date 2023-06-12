@@ -5,6 +5,7 @@
 
 use crate::{
     constants::DapMediaType,
+    fatal_error,
     messages::{constant_time_eq, TaskId},
     DapError, DapRequest, DapSender,
 };
@@ -87,14 +88,15 @@ pub trait BearerTokenProvider {
                 .get_leader_bearer_token_for(task_id)
                 .await?
                 .ok_or_else(|| {
-                    DapError::Fatal("attempted to authorize request with unknown task ID".into())
+                    fatal_error!(err = "attempted to authorize request with unknown task ID")
                 })?;
             return Ok(token);
         }
 
-        Err(DapError::Fatal(format!(
-            "attempted to authorize request of type '{media_type:?}'",
-        )))
+        Err(fatal_error!(
+            err = "attempted to authorize request of type",
+            ?media_type,
+        ))
     }
 
     /// Check that the bearer token carried by a request can be used to authorize that request.

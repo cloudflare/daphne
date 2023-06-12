@@ -7,7 +7,6 @@
 
 use crate::{
     auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod},
-    dap_err,
     durable::{
         durable_name_report_store, durable_name_task,
         leader_batch_queue::{LeaderBatchQueueResult, DURABLE_LEADER_BATCH_QUEUE_CURRENT},
@@ -24,6 +23,7 @@ use daphne::{
     audit_log::AuditLog,
     auth::BearerToken,
     constants::DapMediaType,
+    fatal_error,
     hpke::HpkeReceiverConfig,
     messages::{
         decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, HpkeConfig,
@@ -724,7 +724,7 @@ impl<'srv> DaphneWorker<'srv> {
     {
         self.get_task_config(Cow::Borrowed(task_id))
             .await
-            .map_err(dap_err)?
+            .map_err(|e| fatal_error!(err = e, "getting task config"))?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))
     }
 
@@ -740,22 +740,23 @@ impl<'srv> DaphneWorker<'srv> {
             &(),
         );
 
-        let kv_store = self.kv().map_err(dap_err)?;
+        let kv_store = self.kv().map_err(|e| fatal_error!(err = e))?;
         for kv_key in kv_store
             .list()
             .execute()
             .await
-            .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?
+            .map_err(|e| fatal_error!(err = e, "failed to list all keys from kv"))?
             .keys
         {
-            kv_store
-                .delete(kv_key.name.as_str())
-                .await
-                .map_err(|e| DapError::Fatal(format!("kv_store: {e}")))?;
+            kv_store.delete(kv_key.name.as_str()).await.map_err(
+                |e| fatal_error!(err = e, name = %kv_key.name, "failed to delete key from kv"),
+            )?;
             trace!("deleted KV item {}", kv_key.name);
         }
 
-        future_delete_durable.await.map_err(dap_err)?;
+        future_delete_durable
+            .await
+            .map_err(|e| fatal_error!(err = e))?;
         Ok(())
     }
 
@@ -767,7 +768,7 @@ impl<'srv> DaphneWorker<'srv> {
     ) -> std::result::Result<BatchId, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         if !matches!(task_config.as_ref().query, DapQueryConfig::FixedSize { .. }) {
-            return Err(DapError::fatal("query type mismatch"));
+            return Err(fatal_error!(err = "query type mismatch"));
         }
 
         let res: LeaderBatchQueueResult = self
@@ -778,7 +779,7 @@ impl<'srv> DaphneWorker<'srv> {
                 durable_name_task(&task_config.as_ref().version, &task_id.to_hex()),
             )
             .await
-            .map_err(dap_err)?;
+            .map_err(|e| fatal_error!(err = e))?;
 
         match res {
             LeaderBatchQueueResult::Ok(batch_id) => Ok(batch_id),
@@ -786,7 +787,7 @@ impl<'srv> DaphneWorker<'srv> {
             // TODO spec: If we end up taking the current batch semantics of
             // https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/pull/313, then we'll need to
             // define an error type for this case.
-            LeaderBatchQueueResult::EmptyQueue => Err(DapError::fatal("empty batch queue")),
+            LeaderBatchQueueResult::EmptyQueue => Err(fatal_error!(err = "empty batch queue")),
         }
     }
 
@@ -1062,24 +1063,24 @@ impl<'srv> DaphneWorker<'srv> {
             .media_type
             .as_str_for_version(req.version)
             .ok_or_else(|| {
-                DapError::Fatal(format!(
-                    "failed to construct content-type from media type {:?} and version {:?}",
-                    req.media_type, req.version
-                ))
+                fatal_error!(
+                    err = "failed to construct content-type",
+                    ?req.media_type,
+                    ?req.version,
+                )
             })?;
 
         headers.insert(
             reqwest_wasm::header::CONTENT_TYPE,
-            reqwest_wasm::header::HeaderValue::from_str(content_type).map_err(|e| {
-                DapError::Fatal(format!("failed to construct content-type header: {e}"))
-            })?,
+            reqwest_wasm::header::HeaderValue::from_str(content_type)
+                .map_err(|e| fatal_error!(err = e, "failed to construct content-type header"))?,
         );
 
         if let Some(bearer_token) = req.sender_auth.and_then(|auth| auth.bearer_token) {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
                 reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref()).map_err(
-                    |e| DapError::Fatal(format!("failed to construct dap-auth-token header: {e}")),
+                    |e| fatal_error!(err = e, "failed to construct dap-auth-token header"),
                 )?,
             );
         }
@@ -1097,7 +1098,7 @@ impl<'srv> DaphneWorker<'srv> {
         let reqwest_resp = reqwest_req
             .send()
             .await
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
         let end = Date::now().as_millis();
         info!("request to {} completed in {}ms", url, end - start);
         let status = reqwest_resp.status();
@@ -1106,15 +1107,15 @@ impl<'srv> DaphneWorker<'srv> {
             let content_type = reqwest_resp
                 .headers()
                 .get(reqwest_wasm::header::CONTENT_TYPE)
-                .ok_or_else(|| DapError::fatal(INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
+                .ok_or_else(|| fatal_error!(err = INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
-                .map_err(|e| DapError::Fatal(e.to_string()))?;
+                .map_err(|e| fatal_error!(err = e))?;
             let media_type = DapMediaType::from_str_for_version(req.version, Some(content_type));
 
             let payload = reqwest_resp
                 .bytes()
                 .await
-                .map_err(|e| DapError::Fatal(e.to_string()))?
+                .map_err(|e| fatal_error!(err = e))?
                 .to_vec();
 
             Ok(DapResponse {
@@ -1135,12 +1136,12 @@ impl<'srv> DaphneWorker<'srv> {
                             reqwest_resp
                                 .text()
                                 .await
-                                .map_err(|e| DapError::Fatal(e.to_string()))?
+                                .map_err(|e| fatal_error!(err = e))?
                         );
                     }
                 }
             }
-            Err(DapError::fatal(INT_ERR_PEER_ABORT))
+            Err(fatal_error!(err = INT_ERR_PEER_ABORT))
         }
     }
 }
@@ -1240,7 +1241,7 @@ impl HpkeReceiverKvKey {
 
     pub(crate) fn try_from_name(name: &str) -> std::result::Result<Self, DapError> {
         Self::parse_from_name(name)
-            .ok_or_else(|| DapError::Fatal(format!("encountored invalid KV name: {name}")))
+            .ok_or_else(|| fatal_error!(err = "encountored invalid KV name", %name))
     }
 }
 

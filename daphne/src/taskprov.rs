@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    fatal_error,
     messages::{
         decode_base64url_vec,
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
@@ -49,8 +50,8 @@ fn compute_task_id_draft02(serialized: &[u8]) -> TaskId {
 pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> Result<TaskId, DapError> {
     match version {
         TaskprovVersion::Draft02 => Ok(compute_task_id_draft02(serialized)),
-        TaskprovVersion::Unknown => Err(DapError::fatal(
-            "attempted to resolve taskprov task with unknown version",
+        TaskprovVersion::Unknown => Err(fatal_error!(
+            err = "attempted to resolve taskprov task with unknown version",
         )),
     }
 }

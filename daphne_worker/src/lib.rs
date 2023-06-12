@@ -677,17 +677,6 @@ pub(crate) fn int_err<S: ToString>(s: S) -> Error {
     Error::RustError("internalError".to_string())
 }
 
-/// Convert a [`worker::Error`] into a [`daphne::DapError`].
-///
-/// NOTE Alternatively, we could implement `From<worker::Error>` for `daphne::DapError` in the
-/// `daphne` crate. This requires synchronizing the version of the `worker` crate used here and by
-/// `daphne`. However, The `worker` crate is still under active development, and we often need
-/// changes that are on the main branch but not yet released. Thus, synchronizing this dependency
-/// between both crates is not currently feasible.
-pub(crate) fn dap_err(e: Error) -> DapError {
-    DapError::Fatal(format!("worker: {e}"))
-}
-
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum InternalTestRole {
