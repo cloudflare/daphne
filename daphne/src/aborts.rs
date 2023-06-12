@@ -138,8 +138,7 @@ impl DapAbort {
                 Some(agg_job_id_base64url),
             ),
             Self::UnrecognizedMessage { detail, task_id } => (task_id, Some(detail), None),
-            Self::ReportTooLate | Self::UnrecognizedTask => (None, None, None),
-            Self::Internal(e) => (None, Some(e.to_string()), None),
+            Self::ReportTooLate | Self::UnrecognizedTask | Self::Internal(_) => (None, None, None),
         };
 
         ProblemDetails {
