@@ -3,7 +3,7 @@
 
 //! Messages in the DAP protocol.
 
-use crate::{hpke::HpkePublicKeySerde, DapError, DapVersion};
+use crate::{fatal_error, hpke::HpkePublicKeySerde, DapError, DapVersion};
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use hpke_rs::HpkePublicKey;
 use prio::codec::{
@@ -395,8 +395,8 @@ impl TryFrom<Query> for BatchSelector {
         match query {
             Query::TimeInterval { batch_interval } => Ok(Self::TimeInterval { batch_interval }),
             Query::FixedSizeByBatchId { batch_id } => Ok(Self::FixedSizeByBatchId { batch_id }),
-            Query::FixedSizeCurrentBatch => Err(DapError::Fatal(
-                "tried to make a BatchSelector from a FixedSizeCurrentBatch query".to_string(),
+            Query::FixedSizeCurrentBatch => Err(fatal_error!(
+                err = "tried to make a BatchSelector from a FixedSizeCurrentBatch query",
             )),
         }
     }
@@ -580,7 +580,7 @@ impl Decode for TransitionVar {
 }
 
 /// Transition error.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionFailure {
     BatchCollected = 0,

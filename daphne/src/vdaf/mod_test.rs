@@ -174,7 +174,10 @@ fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
         DapMeasurement::U64(1),
         version,
     );
-    assert_matches!(res, Err(DapError::Fatal(s)) => assert_eq!(s, "HPKE ciphersuite not implemented (999, 1, 1)"));
+    assert_matches!(
+        res,
+        Err(DapError::Fatal(s)) => assert_eq!(s.to_string(), "HPKE ciphersuite not implemented (999, 1, 1)")
+    );
 }
 
 test_versions! { roundtrip_report_unsupported_hpke_suite }

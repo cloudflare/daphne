@@ -4,6 +4,7 @@
 //! Definitions and tooling for DAP protocol aborts.
 
 use crate::{
+    fatal_error,
     messages::{BatchSelector, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
@@ -210,7 +211,10 @@ impl DapAbort {
             TransitionFailure::ReportReplayed => {
                 "A report with the same ID was uploaded previously."
             }
-            _ => return DapError::Fatal(format!("Attempted to construct a \"reportRejected\" abort with unexpected transition failure: {failure_reason:?}")).into(),
+            _ => return fatal_error!(
+                err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
+                unexpected_transition_failure = ?failure_reason,
+            ).into(),
         };
 
         Self::ReportRejected {

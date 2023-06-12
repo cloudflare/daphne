@@ -3,7 +3,7 @@
 
 //! Daphne metrics.
 
-use crate::DapError;
+use crate::{fatal_error, DapError};
 use prometheus::{
     linear_buckets, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
     HistogramVec, IntCounterVec, Registry,
@@ -39,29 +39,34 @@ impl DaphneMetrics {
             "Total number of successful inbound requests.",
             &["host", "type"],
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to regsiter inbound_request_counter"))?;
 
         let report_counter = register_int_counter_vec_with_registry!(
             format!("{front}report_counter"),
             "Total number reports rejected, aggregated, and collected.",
             &["host", "status"],
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to register report_counter"))?;
 
         let aggregation_job_batch_size_histogram = register_histogram_vec_with_registry!(
             format!("{front}aggregation_job_batch_size"),
             "Number of records in an incoming AggregationJobInitReq.",
             &["host"],
-            linear_buckets(250.0, 250.0, 6)?, // <250, <500, ... <1500, +Inf
+            linear_buckets(250.0, 250.0, 6)
+                .expect("this shouldn't panic for these hardcoded values"), // <250, <500, ... <1500, +Inf
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to register aggregation_job_batch_size"))?;
 
         let aggregation_job_counter = register_int_counter_vec_with_registry!(
             format!("{front}aggregation_job_counter"),
             "Total number of aggregation jobs started and completed.",
             &["host", "status"],
             registry
-        )?;
+        )
+        .map_err(|e| fatal_error!(err = e, "failed to register aggregation_job_counter"))?;
 
         Ok(Self {
             inbound_request_counter,

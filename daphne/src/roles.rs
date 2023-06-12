@@ -6,6 +6,7 @@
 use crate::{
     audit_log::{AggregationJobAuditAction, AuditLog},
     constants::DapMediaType,
+    fatal_error,
     hpke::HpkeDecrypter,
     messages::{
         constant_time_eq, decode_base64url, AggregateShare, AggregateShareReq,
@@ -221,7 +222,7 @@ macro_rules! leader_post {
         let url = $task_config
             .helper_url
             .join($path)
-            .map_err(|e| DapError::Fatal(e.to_string()))?;
+            .map_err(|e| fatal_error!(err = e))?;
 
         let req = DapRequest {
             version: $task_config.version,
@@ -515,7 +516,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             DapLeaderTransition::Continue(state, agg_job_init_req) => (state, agg_job_init_req),
             DapLeaderTransition::Skip => return Ok(0),
             DapLeaderTransition::Uncommitted(..) => {
-                return Err(DapError::fatal("unexpected state transition (uncommitted)").into())
+                return Err(fatal_error!(err = "unexpected state transition (uncommitted)").into())
             }
         };
         let is_put = task_config.version != DapVersion::Draft02;
@@ -541,7 +542,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             agg_job_init_req.get_encoded_with_param(&task_config.version),
             is_put
         );
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)?;
+        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
+            .map_err(|e| fatal_error!(err = e, "could not decode aggregation job init response"))?;
 
         // Prepare AggreagteContinueReq.
         let transition = task_config.vdaf.handle_agg_job_resp(
@@ -558,7 +560,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             }
             DapLeaderTransition::Skip => return Ok(0),
             DapLeaderTransition::Continue(..) => {
-                return Err(DapError::fatal("unexpected state transition (continue)").into())
+                return Err(fatal_error!(err = "unexpected state transition (continue)").into())
             }
         };
 
@@ -574,7 +576,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             agg_job_cont_req.get_encoded_with_param(&task_config.version),
             false
         );
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)?;
+        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
+            .map_err(|e| fatal_error!(err = e, "could not decode aggregation cont job response"))?;
 
         // Commit the output shares.
         let out_shares =
@@ -923,7 +926,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                                 } else {
                                     // The report ID in the Helper state and Aggregate response
                                     // must be aligned. If not, handle as an internal error.
-                                    return Err(DapError::fatal("report IDs not aligned").into());
+                                    return Err(fatal_error!(err = "report IDs not aligned").into());
                                 }
 
                                 // NOTE(cjpatton) Unlike the Leader, the Helper filters out early
@@ -950,7 +953,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         agg_job_resp
                     }
                     DapHelperTransition::Finish(..) => {
-                        return Err(DapError::fatal("unexpected transition (finished)").into());
+                        return Err(fatal_error!(err = "unexpected transition (finished)").into());
                     }
                 };
 
@@ -1023,7 +1026,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
                 let (agg_job_resp, out_shares_count) = match transition {
                     DapHelperTransition::Continue(..) => {
-                        return Err(DapError::fatal("unexpected transition (continued)").into());
+                        return Err(fatal_error!(err = "unexpected transition (continued)").into());
                     }
                     DapHelperTransition::Finish(out_shares, agg_job_resp) => {
                         let out_shares_count = u64::try_from(out_shares.len()).unwrap();
@@ -1306,12 +1309,15 @@ fn check_response_content_type(resp: &DapResponse, expected: DapMediaType) -> Re
 
     if resp.media_type != expected {
         if let Some(got_str) = resp.media_type.as_str_for_version(resp.version) {
-            Err(DapError::Fatal(format!(
-                "response from peer has unexpected content-type: got {got_str}; want {want_str}",
-            )))
+            Err(fatal_error!(
+                err = "response from peer has unexpected content-type",
+                got = got_str,
+                want = want_str,
+            ))
         } else {
-            Err(DapError::fatal(
-                "response from peer has no content-type: expected {want_str}",
+            Err(fatal_error!(
+                err = "response from peer has no content-type",
+                expected = want_str,
             ))
         }
     } else {

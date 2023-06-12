@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #![warn(unused_crate_dependencies)]
+#![warn(rustdoc::broken_intra_doc_links)]
 
 //! This crate implements the core protocol logic for the Distributed Aggregation Protocol
 //! ([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard under development in the
@@ -42,18 +43,19 @@ use crate::{
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
         Draft02AggregationJobId, Duration, HpkeConfig, HpkeKemId, Interval, PartialBatchSelector,
-        ReportId, ReportMetadata, TaskId, Time, TransitionFailure,
+        ReportId, ReportMetadata, TaskId, Time,
     },
     taskprov::TaskprovVersion,
     vdaf::{
         prio2::prio2_decode_prepare_state,
         prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
-        VdafAggregateShare, VdafError, VdafMessage, VdafState, VdafVerifyKey,
+        VdafAggregateShare, VdafMessage, VdafState, VdafVerifyKey,
     },
 };
 use constants::DapMediaType;
+pub use dap_error::DapError;
 use prio::{
-    codec::{CodecError, Decode, Encode},
+    codec::{Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 use rand::prelude::*;
@@ -65,64 +67,6 @@ use std::{
     fmt::{Debug, Display},
 };
 use url::Url;
-
-/// DAP errors.
-#[derive(Debug, thiserror::Error)]
-pub enum DapError {
-    /// Fatal error. If this triggers an abort, then treat this as an internal error.
-    #[error("fatal error: {0}")]
-    Fatal(String),
-
-    /// Error triggered by peer, resulting in an abort.
-    #[error("abort: {0}")]
-    Abort(DapAbort),
-
-    /// Transition failure. This error blocks processing of a paritcular report and may, under
-    /// certain conditions, trigger an abort.
-    #[error("transition error: {0}")]
-    Transition(TransitionFailure),
-}
-
-impl DapError {
-    /// Create a fatal error.
-    pub fn fatal(s: &'static str) -> Self {
-        Self::Fatal(s.into())
-    }
-}
-
-impl From<prometheus::Error> for DapError {
-    fn from(e: prometheus::Error) -> Self {
-        Self::Fatal(format!("prometheus: {e}"))
-    }
-}
-
-impl From<serde_json::Error> for DapError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Fatal(format!("serde_json: {e}"))
-    }
-}
-
-impl From<hex::FromHexError> for DapError {
-    fn from(e: hex::FromHexError) -> Self {
-        Self::Fatal(format!("from hex: {e}"))
-    }
-}
-
-impl From<CodecError> for DapError {
-    fn from(e: CodecError) -> Self {
-        Self::Fatal(format!("codec: {e}"))
-    }
-}
-
-impl From<VdafError> for DapError {
-    fn from(e: VdafError) -> Self {
-        match e {
-            VdafError::Codec(..) | VdafError::Vdaf(..) => {
-                Self::Transition(TransitionFailure::VdafPrepError)
-            }
-        }
-    }
-}
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -361,8 +305,8 @@ impl DapTaskConfig {
         out_shares: Vec<DapOutputShare>,
     ) -> Result<HashMap<DapBatchBucket<'a>, DapAggregateShare>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
-            return Err(DapError::fatal(
-                "partial batch selector not compatible with task",
+            return Err(fatal_error!(
+                err = "partial batch selector not compatible with task",
             ));
         }
 
@@ -397,7 +341,9 @@ impl DapTaskConfig {
         batch_sel: &'a BatchSelector,
     ) -> Result<HashSet<DapBatchBucket<'a>>, DapError> {
         if !self.query.is_valid_batch_sel(batch_sel) {
-            return Err(DapError::fatal("batch selector not compatible with task"));
+            return Err(fatal_error!(
+                err = "batch selector not compatible with task"
+            ));
         }
 
         match batch_sel {
@@ -426,8 +372,8 @@ impl DapTaskConfig {
         report_meta: impl Iterator<Item = &'rep ReportMetadata>,
     ) -> Result<HashMap<DapBatchBucket<'sel>, Vec<&'rep ReportMetadata>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
-            return Err(DapError::fatal(
-                "partial batch selector not compatible with task",
+            return Err(fatal_error!(
+                err = "partial batch selector not compatible with task",
             ));
         }
 
@@ -536,7 +482,7 @@ impl DapHelperState {
                 (VdafConfig::Prio2 { .. }, VdafState::Prio2(state)) => {
                     state.encode(&mut bytes);
                 }
-                _ => return Err(DapError::fatal("VDAF config and prep state mismatch")),
+                _ => return Err(fatal_error!(err = "VDAF config and prep state mismatch")),
             }
             time.encode(&mut bytes);
             report_id.encode(&mut bytes);
@@ -547,7 +493,8 @@ impl DapHelperState {
     /// Decode the Helper state from a byte string.
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut r = std::io::Cursor::new(data);
-        let part_batch_sel = PartialBatchSelector::decode(&mut r)?;
+        let part_batch_sel = PartialBatchSelector::decode(&mut r)
+            .map_err(|e| fatal_error!(err = e, "failed to decode partial batch selector"))?;
         let mut seq = vec![];
         while (r.position() as usize) < data.len() {
             let state = match vdaf_config {
@@ -558,8 +505,10 @@ impl DapHelperState {
                     prio2_decode_prepare_state(*dimension, 1, &mut r)?
                 }
             };
-            let time = Time::decode(&mut r)?;
-            let report_id = ReportId::decode(&mut r)?;
+            let time =
+                Time::decode(&mut r).map_err(|e| fatal_error!(err = e, "failed to decode time"))?;
+            let report_id = ReportId::decode(&mut r)
+                .map_err(|e| fatal_error!(err = e, "failed to decode report id"))?;
             seq.push((state, time, report_id))
         }
 
@@ -602,25 +551,22 @@ impl DapAggregateShare {
                 self.data = Some(data);
             }
             (Some(VdafAggregateShare::Field64(left)), Some(VdafAggregateShare::Field64(right))) => {
-                left.merge(&right)
-                    .map_err(|e| DapError::Fatal(e.to_string()))?;
+                left.merge(&right).map_err(|e| fatal_error!(err = e))?;
             }
             (
                 Some(VdafAggregateShare::Field128(left)),
                 Some(VdafAggregateShare::Field128(right)),
             ) => {
-                left.merge(&right)
-                    .map_err(|e| DapError::Fatal(e.to_string()))?;
+                left.merge(&right).map_err(|e| fatal_error!(err = e))?;
             }
             (
                 Some(VdafAggregateShare::FieldPrio2(left)),
                 Some(VdafAggregateShare::FieldPrio2(right)),
             ) => {
-                left.merge(&right)
-                    .map_err(|e| DapError::Fatal(e.to_string()))?;
+                left.merge(&right).map_err(|e| fatal_error!(err = e))?;
             }
 
-            _ => return Err(DapError::fatal("invalid aggregate share merge")),
+            _ => return Err(fatal_error!(err = "invalid aggregate share merge")),
         };
 
         if self.report_count == 0 {
@@ -981,6 +927,7 @@ pub mod auth;
 pub mod constants;
 #[cfg(test)]
 mod constants_test;
+pub mod dap_error;
 pub mod hpke;
 #[cfg(test)]
 mod hpke_test;

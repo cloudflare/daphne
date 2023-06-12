@@ -12,6 +12,7 @@ use hpke_rs_crypto::{
 use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
 use crate::{
+    fatal_error,
     messages::{
         decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
         HpkeKemId, TaskId, TransitionFailure,
@@ -46,7 +47,7 @@ fn check_suite<T: HpkeCrypto>(
         u16::from(kdf_id),
         u16::from(aead_id)
     );
-    let maperr = |_| DapError::Fatal(s.clone());
+    let maperr = |_| fatal_error!(err = s);
     let kem = KemAlgorithm::try_from(u16::from(kem_id)).map_err(maperr)?;
     let kdf = KdfAlgorithm::try_from(u16::from(kdf_id)).map_err(maperr)?;
     let aead = AeadAlgorithm::try_from(u16::from(aead_id)).map_err(maperr)?;
@@ -55,7 +56,7 @@ fn check_suite<T: HpkeCrypto>(
         | (KemAlgorithm::DhKem25519, KdfAlgorithm::HkdfSha256, AeadAlgorithm::Aes128Gcm) => {
             Ok(Hpke::new(Mode::Base, kem, kdf, aead))
         }
-        _ => Err(DapError::Fatal(s)),
+        _ => Err(fatal_error!(err = s)),
     }
 }
 
@@ -154,7 +155,7 @@ impl HpkeReceiverConfig {
             HpkeKemId::P256HkdfSha256 => KemAlgorithm::DhKemP256,
             HpkeKemId::X25519HkdfSha256 => KemAlgorithm::DhKem25519,
             HpkeKemId::NotImplemented(x) => {
-                return Err(DapError::Fatal(format!("Unsupported KEM ({x:?})")))
+                return Err(fatal_error!(err = "Unsupported KEM", kem = ?x))
             }
         };
         let kdf = KdfAlgorithm::HkdfSha256;
@@ -174,9 +175,11 @@ impl HpkeReceiverConfig {
                     private_key,
                 })
             }
-            Err(e) => Err(DapError::Fatal(format!(
-                "bad key generation for KEM ({kem_id:?}) caused by {e:?}",
-            ))),
+            Err(e) => Err(fatal_error!(
+                err = format!("{e:?}"), // `HpkeError` doesn't implement Display or Error :(
+                ?kem_id,
+                "bad key generation for KEM",
+            )),
         }
     }
 }
@@ -198,7 +201,7 @@ impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
                 private_key,
             })
         } else {
-            Err(DapError::fatal("public key does not match private key"))
+            Err(fatal_error!(err = "public key does not match private key"))
         }
     }
 }
