@@ -161,7 +161,7 @@ impl Decode for VdafConfig {
 }
 
 /// A URL encode / decode helper struct, essentially a box for
-/// a Vec<u8>.
+/// a `Vec<u8>`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct UrlBytes {
     pub bytes: Vec<u8>,
