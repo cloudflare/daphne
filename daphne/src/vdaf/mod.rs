@@ -919,7 +919,7 @@ impl VdafConfig {
         produce_encrypted_agg_share(true, hpke_config, task_id, batch_sel, agg_share, version)
     }
 
-    /// Like [`produce_leader_encrypted_agg_share`] but run by the Helper in response to an
+    /// Like [`produce_leader_encrypted_agg_share`](Self::produce_leader_encrypted_agg_share) but run by the Helper in response to an
     /// aggregate-share request.
     pub fn produce_helper_encrypted_agg_share(
         &self,

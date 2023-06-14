@@ -288,7 +288,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         &self,
     ) -> Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError>;
 
-    /// Complete a collect job by assigning it the completed [`CollectResp`](crate::messages::CollectResp).
+    /// Complete a collect job by assigning it the completed [`CollectResp`](crate::messages::Collection).
     async fn finish_collect_job(
         &self,
         task_id: &TaskId,

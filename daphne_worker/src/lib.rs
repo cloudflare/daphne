@@ -66,7 +66,7 @@
 //! [Fixed-size tasks]    <version>/task/<task_id>/batch/<batch_id>
 //! ```
 //!
-//! where <version> is the DAP version, `<task_id>` is the task ID, `<window>` is a batch window,
+//! where `<version>` is the DAP version, `<task_id>` is the task ID, `<window>` is a batch window,
 //! and `<batch_id>` is a batch ID. A batch window is a UNIX timestamp (in seconds) truncated by
 //! the time precision for the task. (See the `time_precision` paramaeter of
 //! [`DapTaskConfig`](daphne::DapTaskConfig).)
@@ -100,7 +100,7 @@
 //!
 //! A "collection job ID" is computed for each job and incorporated into the collect URI for the
 //! Collector to poll later on. The job ID Is derived by applying a keyed hash to the serialized
-//! [`CollectReq`](daphne::messages::CollectReq) message. (The key is `DAP_COLLECT_ID_KEY`.)
+//! [`CollectionReq`](daphne::messages::CollectionReq) message. (The key is `DAP_COLLECT_ID_KEY`.)
 //!
 //! They are driven by the Leader's main processing loop. After all aggregation jobs are complete,
 //! the entire queue is fetched from `LeaderCollectionJobQueue`. In the order in which they were
