@@ -31,7 +31,7 @@ pub enum DapAbort {
     BatchOverlap { detail: String, task_id: TaskId },
 
     /// Internal error.
-    #[error("internal error")]
+    #[error("internal error: {0:?}")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
