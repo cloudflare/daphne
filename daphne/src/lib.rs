@@ -38,7 +38,7 @@
 //!     > requests to a collect job URI whose results have been removed.
 
 use crate::{
-    aborts::DapAbort,
+    error::DapAbort,
     hpke::HpkeReceiverConfig,
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
@@ -53,7 +53,7 @@ use crate::{
     },
 };
 use constants::DapMediaType;
-pub use dap_error::DapError;
+pub use error::DapError;
 use prio::{
     codec::{Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
@@ -494,7 +494,7 @@ impl DapHelperState {
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut r = std::io::Cursor::new(data);
         let part_batch_sel = PartialBatchSelector::decode(&mut r)
-            .map_err(|e| fatal_error!(err = e, "failed to decode partial batch selector"))?;
+            .map_err(|e| DapAbort::from_codec_error(e, None))?;
         let mut seq = vec![];
         while (r.position() as usize) < data.len() {
             let state = match vdaf_config {
@@ -505,10 +505,9 @@ impl DapHelperState {
                     prio2_decode_prepare_state(*dimension, 1, &mut r)?
                 }
             };
-            let time =
-                Time::decode(&mut r).map_err(|e| fatal_error!(err = e, "failed to decode time"))?;
-            let report_id = ReportId::decode(&mut r)
-                .map_err(|e| fatal_error!(err = e, "failed to decode report id"))?;
+            let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
+            let report_id =
+                ReportId::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             seq.push((state, time, report_id))
         }
 
@@ -921,13 +920,12 @@ impl MetaAggregationJobId<'_> {
     }
 }
 
-pub mod aborts;
 pub mod audit_log;
 pub mod auth;
 pub mod constants;
 #[cfg(test)]
 mod constants_test;
-pub mod dap_error;
+pub mod error;
 pub mod hpke;
 #[cfg(test)]
 mod hpke_test;

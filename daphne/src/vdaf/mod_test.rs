@@ -4,6 +4,7 @@
 use crate::{
     assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
     async_test_versions,
+    error::DapAbort,
     hpke::HpkeReceiverConfig,
     messages::{
         AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchSelector,
@@ -12,10 +13,10 @@ use crate::{
         TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
-    test_version, test_versions, DapAbort, DapAggregateResult, DapAggregateShare, DapError,
-    DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted,
-    DapMeasurement, DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion,
-    MetaAggregationJobId, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
+    test_version, test_versions, DapAggregateResult, DapAggregateShare, DapError, DapHelperState,
+    DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement,
+    DapOutputShare, DapQueryConfig, DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config,
+    VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
 };
 use assert_matches::assert_matches;
 use hpke_rs::HpkePublicKey;

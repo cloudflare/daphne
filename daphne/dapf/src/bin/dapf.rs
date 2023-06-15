@@ -4,8 +4,8 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use daphne::{
-    aborts::ProblemDetails,
     constants::DapMediaType,
+    error::aborts::ProblemDetails,
     hpke::HpkeReceiverConfig,
     messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, HpkeKemId, Query, TaskId},
     DapMeasurement, DapVersion, VdafConfig,

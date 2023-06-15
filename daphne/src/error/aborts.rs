@@ -8,6 +8,7 @@ use crate::{
     messages::{BatchSelector, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
+use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
@@ -285,11 +286,18 @@ impl From<DapError> for DapAbort {
     }
 }
 
-impl From<CodecError> for DapAbort {
-    fn from(e: CodecError) -> Self {
+impl DapAbort {
+    pub fn from_codec_error<Id: Into<Option<TaskId>>>(e: CodecError, task_id: Id) -> Self {
         Self::UnrecognizedMessage {
             detail: format!("codec error: {e}"),
-            task_id: None,
+            task_id: task_id.into(),
+        }
+    }
+
+    pub fn from_hex_error(e: FromHexError, task_id: TaskId) -> Self {
+        Self::UnrecognizedMessage {
+            detail: format!("invalid hexadecimal string {e:?}"),
+            task_id: Some(task_id),
         }
     }
 }

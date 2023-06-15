@@ -316,7 +316,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         check_request_content_type(req, DapMediaType::Report)?;
 
-        let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())?;
+        let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())
+            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
         debug!("report id is {}", report.report_metadata.id);
 
         resolve_taskprov(self, task_id, req, Some(&report.report_metadata)).await?;
@@ -396,7 +397,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         }
 
         let mut collect_req =
-            CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())?;
+            CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
+                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))
             .await?
@@ -543,7 +545,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             is_put
         );
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-            .map_err(|e| fatal_error!(err = e, "could not decode aggregation job init response"))?;
+            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
         // Prepare AggreagteContinueReq.
         let transition = task_config.vdaf.handle_agg_job_resp(
@@ -577,7 +579,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             false
         );
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-            .map_err(|e| fatal_error!(err = e, "could not decode aggregation cont job response"))?;
+            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
         // Commit the output shares.
         let out_shares =
@@ -654,7 +656,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             agg_share_req.get_encoded_with_param(&task_config.version),
             false
         );
-        let agg_share_resp = AggregateShare::get_decoded(&resp.payload)?;
+        let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
+            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
         // For draft04 and later, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
         let interval = match task_config.version {
@@ -802,7 +805,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
         match req.media_type {
             DapMediaType::AggregationJobInitReq => {
                 let agg_job_init_req =
-                    AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)?;
+                    AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
+                        .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
                 metrics.agg_job_observe_batch_size(agg_job_init_req.report_shares.len());
 
@@ -987,7 +991,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 }
 
                 let agg_job_cont_req =
-                    AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)?;
+                    AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)
+                        .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
                 // draft02 compatibility: In draft02, the aggregation job ID is parsed from the
                 // HTTP request payload; in the latest, the aggregation job ID is parsed from the
@@ -1093,7 +1098,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::version_mismatch(req.version, task_config.version));
         }
 
-        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)?;
+        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
+            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
