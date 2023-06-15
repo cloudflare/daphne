@@ -32,6 +32,7 @@ use daphne::{
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,
 };
+use futures::TryFutureExt;
 use matchit::Router;
 use prio::{
     codec::Decode,
@@ -732,31 +733,36 @@ impl<'srv> DaphneWorker<'srv> {
     ///
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
     pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
-        let durable = self.durable();
-        let future_delete_durable = durable.post(
-            BINDING_DAP_GARBAGE_COLLECTOR,
-            DURABLE_DELETE_ALL,
-            "garbage_collector".to_string(),
-            &(),
-        );
-
         let kv_store = self.kv().map_err(|e| fatal_error!(err = e))?;
-        for kv_key in kv_store
-            .list()
-            .execute()
-            .await
-            .map_err(|e| fatal_error!(err = e, "failed to list all keys from kv"))?
-            .keys
-        {
-            kv_store.delete(kv_key.name.as_str()).await.map_err(
-                |e| fatal_error!(err = e, name = %kv_key.name, "failed to delete key from kv"),
-            )?;
-            trace!("deleted KV item {}", kv_key.name);
-        }
+        let kv_task = async {
+            for kv_key in kv_store
+                .list()
+                .execute()
+                .await
+                .map_err(|e| fatal_error!(err = e, "failed to list all keys from kv"))?
+                .keys
+            {
+                kv_store.delete(kv_key.name.as_str()).await.map_err(
+                    |e| fatal_error!(err = e, name = %kv_key.name, "failed to delete key from kv"),
+                )?;
+                trace!("deleted KV item {}", kv_key.name);
+            }
+            Ok::<_, DapError>(())
+        };
 
-        future_delete_durable
-            .await
-            .map_err(|e| fatal_error!(err = e))?;
+        let durable = self.durable();
+
+        let future_delete_durable = durable
+            .post::<_, ()>(
+                BINDING_DAP_GARBAGE_COLLECTOR,
+                DURABLE_DELETE_ALL,
+                "garbage_collector".to_string(),
+                &(),
+            )
+            .map_err(|e| fatal_error!(err = e));
+
+        futures::try_join!(kv_task, future_delete_durable)?;
+
         Ok(())
     }
 
