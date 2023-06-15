@@ -48,6 +48,7 @@ use daphne::{
     audit_log::AuditLog,
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
+    error::DapAbort,
     fatal_error,
     hpke::HpkeDecrypter,
     messages::{
@@ -644,9 +645,10 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             };
             for report_id_hex in reports_processed.into_iter() {
                 let report_id = ReportId::get_decoded(
-                    &hex::decode(report_id_hex).map_err(|e| fatal_error!(err = e))?,
+                    &hex::decode(report_id_hex)
+                        .map_err(|e| DapAbort::from_hex_error(e, task_id.clone()))?,
                 )
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
                 early_fails.insert(report_id, failure);
             }
         }
@@ -806,9 +808,8 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 .map_err(|e| fatal_error!(err = e))?;
 
             for pending_report in reports_from_durable {
-                let report_bytes = hex::decode(&pending_report.report_hex).map_err(|_| {
-                    fatal_error!(err = "response from ReportsPending is not valid hex")
-                })?;
+                let report_bytes = hex::decode(&pending_report.report_hex)
+                    .map_err(|e| DapAbort::from_hex_error(e, pending_report.task_id.clone()))?;
 
                 let version = self
                     .try_get_task_config(&pending_report.task_id)
@@ -816,7 +817,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     .as_ref()
                     .version;
                 let report = Report::get_decoded_with_param(&version, &report_bytes)
-                    .map_err(|e| fatal_error!(err = e))?;
+                    .map_err(|e| DapAbort::from_codec_error(e, pending_report.task_id.clone()))?;
                 if let Some(reports) = reports_per_task.get_mut(&pending_report.task_id) {
                     reports.push(report);
                 } else {
@@ -1053,7 +1054,8 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         match res {
             Some(helper_state_hex) => {
-                let data = hex::decode(helper_state_hex).map_err(|e| fatal_error!(err = e))?;
+                let data = hex::decode(helper_state_hex)
+                    .map_err(|e| DapAbort::from_hex_error(e, task_id.clone()))?;
                 let helper_state = DapHelperState::get_decoded(&task_config.as_ref().vdaf, &data)?;
                 Ok(Some(helper_state))
             }

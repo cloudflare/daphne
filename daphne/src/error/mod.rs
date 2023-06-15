@@ -1,9 +1,12 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub mod aborts;
+
 use std::fmt::Display;
 
-use crate::{aborts::DapAbort, messages::TransitionFailure, vdaf::VdafError};
+use crate::{messages::TransitionFailure, vdaf::VdafError};
+pub use aborts::DapAbort;
 
 /// DAP errors.
 #[derive(Debug, thiserror::Error)]
@@ -94,8 +97,8 @@ macro_rules! fatal_error {
     (@@@ err = $e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
         ::tracing::error!(fatal_error = ?error, $($($rest)*)*);
-        $crate::dap_error::DapError::Fatal(
-            $crate::dap_error::FatalDapError::__use_the_macro(::std::format!("{error}"))
+        $crate::error::DapError::Fatal(
+            $crate::error::FatalDapError::__use_the_macro(::std::format!("{error}"))
         )
     }};
 }

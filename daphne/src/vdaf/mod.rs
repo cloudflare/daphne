@@ -5,6 +5,7 @@
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
 use crate::{
+    error::DapAbort,
     fatal_error,
     hpke::HpkeDecrypter,
     messages::{
@@ -24,7 +25,7 @@ use crate::{
             prio3_prepare_init, prio3_shard, prio3_unshard,
         },
     },
-    DapAbort, DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
+    DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
     DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
@@ -118,14 +119,14 @@ impl VdafConfig {
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
-            Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(
-                <[u8; 16]>::try_from(bytes)
-                    .map_err(|e| fatal_error!(err = CodecError::Other(Box::new(e))))?,
-            )),
-            Self::Prio2 { .. } => Ok(VdafVerifyKey::Prio2(
-                <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| fatal_error!(err = CodecError::Other(Box::new(e))))?,
-            )),
+            Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(<[u8; 16]>::try_from(bytes).map_err(
+                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
+            )?)),
+            Self::Prio2 { .. } => {
+                Ok(VdafVerifyKey::Prio2(<[u8; 32]>::try_from(bytes).map_err(
+                    |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
+                )?))
+            }
         }
     }
 
@@ -389,7 +390,7 @@ impl VdafConfig {
                 payload: encoded_input_share,
             },
             _ => PlaintextInputShare::get_decoded(&encoded_input_share)
-                .map_err(|e| fatal_error!(err = e))?,
+                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?,
         };
 
         let agg_id = usize::from(!is_leader);

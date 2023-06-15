@@ -205,8 +205,8 @@ fn get_taskprov_task_config<S>(
     }
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
-    let task_config =
-        TaskConfig::get_decoded_with_param(&taskprov_version, taskprov_data.as_ref())?;
+    let task_config = TaskConfig::get_decoded_with_param(&taskprov_version, taskprov_data.as_ref())
+        .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
     Ok(Some(task_config))
 }

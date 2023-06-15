@@ -159,10 +159,10 @@ use crate::{
     dap::dap_response_to_worker,
 };
 use daphne::{
-    aborts::DapAbort,
     audit_log::{AuditLog, NoopAuditLog},
     auth::BearerToken,
     constants::DapMediaType,
+    error::DapAbort,
     messages::{CollectionJobId, Duration, TaskId, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
     DapCollectJob, DapError, DapRequest, DapResponse, DapVersion,

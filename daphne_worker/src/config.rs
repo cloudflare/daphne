@@ -19,10 +19,10 @@ use crate::{
     InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
 };
 use daphne::{
-    aborts::DapAbort,
     audit_log::AuditLog,
     auth::BearerToken,
     constants::DapMediaType,
+    error::DapAbort,
     fatal_error,
     hpke::HpkeReceiverConfig,
     messages::{

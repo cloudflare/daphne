@@ -3,7 +3,7 @@
 
 //! Daphne-Worker error reporting trait and default implementation.
 
-use daphne::aborts::DapAbort;
+use daphne::error::DapAbort;
 
 /// Interface for error reporting in Daphne
 /// Refer to NoopErrorReporter for implementation example.
