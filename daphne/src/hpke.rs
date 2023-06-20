@@ -13,16 +13,19 @@ use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
 use crate::{
     fatal_error,
-    messages::{
-        decode_u16_bytes, encode_u16_bytes, HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId,
-        HpkeKemId, TaskId, TransitionFailure,
-    },
+    messages::{decode_u16_bytes, encode_u16_bytes, HpkeCiphertext, TaskId, TransitionFailure},
     DapError, DapVersion,
 };
 use async_trait::async_trait;
 use prio::codec::{CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+
+// Various algorithm constants
+const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
+const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
+const KDF_ID_HKDF_SHA256: u16 = 0x0001;
+const AEAD_ID_AES128GCM: u16 = 0x0001;
 
 impl From<HpkeError> for DapError {
     fn from(_e: HpkeError) -> Self {
@@ -57,6 +60,104 @@ fn check_suite<T: HpkeCrypto>(
             Ok(Hpke::new(Mode::Base, kem, kdf, aead))
         }
         _ => Err(fatal_error!(err = s)),
+    }
+}
+
+/// Codepoint for KEM schemes compatible with HPKE.
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HpkeKemId {
+    P256HkdfSha256,
+    X25519HkdfSha256,
+    NotImplemented(u16),
+}
+
+impl From<HpkeKemId> for u16 {
+    fn from(kem_id: HpkeKemId) -> Self {
+        match kem_id {
+            HpkeKemId::P256HkdfSha256 => KEM_ID_P256_HKDF_SHA256,
+            HpkeKemId::X25519HkdfSha256 => KEM_ID_X25519_HKDF_SHA256,
+            HpkeKemId::NotImplemented(x) => x,
+        }
+    }
+}
+
+impl From<u16> for HpkeKemId {
+    fn from(value: u16) -> Self {
+        match value {
+            KEM_ID_P256_HKDF_SHA256 => Self::P256HkdfSha256,
+            KEM_ID_X25519_HKDF_SHA256 => Self::X25519HkdfSha256,
+            x => Self::NotImplemented(x),
+        }
+    }
+}
+
+/// Codepoint for KDF schemes compatible with HPKE.
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HpkeKdfId {
+    HkdfSha256,
+    NotImplemented(u16),
+}
+
+impl From<HpkeKdfId> for u16 {
+    fn from(kdf_id: HpkeKdfId) -> Self {
+        match kdf_id {
+            HpkeKdfId::HkdfSha256 => KDF_ID_HKDF_SHA256,
+            HpkeKdfId::NotImplemented(x) => x,
+        }
+    }
+}
+
+impl From<u16> for HpkeKdfId {
+    fn from(value: u16) -> Self {
+        match value {
+            KDF_ID_HKDF_SHA256 => Self::HkdfSha256,
+            x => Self::NotImplemented(x),
+        }
+    }
+}
+
+/// Codepoint for AEAD schemes compatible with HPKE.
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HpkeAeadId {
+    Aes128Gcm,
+    NotImplemented(u16),
+}
+
+impl From<HpkeAeadId> for u16 {
+    fn from(aead_id: HpkeAeadId) -> Self {
+        match aead_id {
+            HpkeAeadId::Aes128Gcm => AEAD_ID_AES128GCM,
+            HpkeAeadId::NotImplemented(x) => x,
+        }
+    }
+}
+
+impl From<u16> for HpkeAeadId {
+    fn from(value: u16) -> Self {
+        match value {
+            AEAD_ID_AES128GCM => Self::Aes128Gcm,
+            x => Self::NotImplemented(x),
+        }
+    }
+}
+
+/// The HPKE public key configuration of a Server.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct HpkeConfig {
+    pub id: u8,
+    pub kem_id: HpkeKemId,
+    pub kdf_id: HpkeKdfId,
+    pub aead_id: HpkeAeadId,
+    #[serde(with = "HpkePublicKeySerde")]
+    pub public_key: HpkePublicKey,
+}
+
+impl AsRef<HpkeConfig> for HpkeConfig {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 

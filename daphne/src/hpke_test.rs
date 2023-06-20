@@ -1,8 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::hpke::HpkeReceiverConfig;
-use crate::messages::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId};
+use crate::hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig};
 use hpke_rs::{Hpke, HpkePrivateKey, HpkePublicKey, Mode};
 use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
 use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;

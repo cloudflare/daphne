@@ -24,10 +24,9 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
-    hpke::HpkeReceiverConfig,
+    hpke::{HpkeConfig, HpkeReceiverConfig},
     messages::{
-        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, HpkeConfig,
-        ReportMetadata, TaskId,
+        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, ReportMetadata, TaskId,
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,

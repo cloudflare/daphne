@@ -5,9 +5,9 @@ use prio::codec::ParameterizedEncode;
 
 use crate::{
     auth::BearerToken,
-    hpke::HpkeReceiverConfig,
+    hpke::{HpkeKemId, HpkeReceiverConfig},
+    messages::taskprov::VdafType,
     messages::{encode_base64url, taskprov::*, Extension, ReportId, ReportMetadata, TaskId},
-    messages::{taskprov::VdafType, HpkeKemId},
     taskprov::{
         compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config, TaskprovVersion,
     },

@@ -6,8 +6,8 @@ use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
-    hpke::HpkeReceiverConfig,
-    messages::{BatchSelector, Collection, CollectionReq, HpkeConfig, HpkeKemId, Query, TaskId},
+    hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
+    messages::{BatchSelector, Collection, CollectionReq, Query, TaskId},
     DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};

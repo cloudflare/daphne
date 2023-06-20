@@ -3,7 +3,11 @@
 
 //! Messages in the DAP protocol.
 
-use crate::{fatal_error, hpke::HpkePublicKeySerde, DapError, DapVersion};
+use crate::{
+    fatal_error,
+    hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
+    DapError, DapVersion,
+};
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use hpke_rs::HpkePublicKey;
 use prio::codec::{
@@ -17,12 +21,6 @@ use std::{
     fmt,
     io::{Cursor, Read},
 };
-
-// Various algorithm constants
-const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
-const KEM_ID_P256_HKDF_SHA256: u16 = 0x0010;
-const KDF_ID_HKDF_SHA256: u16 = 0x0001;
-const AEAD_ID_AES128GCM: u16 = 0x0001;
 
 // Query types
 const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
@@ -956,23 +954,10 @@ impl Decode for AggregateShare {
     }
 }
 
-/// Codepoint for KEM schemes compatible with HPKE.
-#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum HpkeKemId {
-    P256HkdfSha256,
-    X25519HkdfSha256,
-    NotImplemented(u16),
-}
-
-impl From<HpkeKemId> for u16 {
-    fn from(kem_id: HpkeKemId) -> Self {
-        match kem_id {
-            HpkeKemId::P256HkdfSha256 => KEM_ID_P256_HKDF_SHA256,
-            HpkeKemId::X25519HkdfSha256 => KEM_ID_X25519_HKDF_SHA256,
-            HpkeKemId::NotImplemented(x) => x,
-        }
-    }
+/// A list of HPKE public key configurations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HpkeConfigList {
+    pub hpke_configs: Vec<HpkeConfig>,
 }
 
 impl Encode for HpkeKemId {
@@ -983,28 +968,7 @@ impl Encode for HpkeKemId {
 
 impl Decode for HpkeKemId {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u16::decode(bytes)? {
-            x if x == KEM_ID_P256_HKDF_SHA256 => Ok(Self::P256HkdfSha256),
-            x if x == KEM_ID_X25519_HKDF_SHA256 => Ok(Self::X25519HkdfSha256),
-            x => Ok(Self::NotImplemented(x)),
-        }
-    }
-}
-
-/// Codepoint for KDF schemes compatible with HPKE.
-#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum HpkeKdfId {
-    HkdfSha256,
-    NotImplemented(u16),
-}
-
-impl From<HpkeKdfId> for u16 {
-    fn from(kdf_id: HpkeKdfId) -> Self {
-        match kdf_id {
-            HpkeKdfId::HkdfSha256 => KDF_ID_HKDF_SHA256,
-            HpkeKdfId::NotImplemented(x) => x,
-        }
+        Ok(u16::decode(bytes)?.into())
     }
 }
 
@@ -1016,27 +980,7 @@ impl Encode for HpkeKdfId {
 
 impl Decode for HpkeKdfId {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u16::decode(bytes)? {
-            x if x == KDF_ID_HKDF_SHA256 => Ok(Self::HkdfSha256),
-            x => Ok(Self::NotImplemented(x)),
-        }
-    }
-}
-
-/// Codepoint for AEAD schemes compatible with HPKE.
-#[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum HpkeAeadId {
-    Aes128Gcm,
-    NotImplemented(u16),
-}
-
-impl From<HpkeAeadId> for u16 {
-    fn from(aead_id: HpkeAeadId) -> Self {
-        match aead_id {
-            HpkeAeadId::Aes128Gcm => AEAD_ID_AES128GCM,
-            HpkeAeadId::NotImplemented(x) => x,
-        }
+        Ok(u16::decode(bytes)?.into())
     }
 }
 
@@ -1048,27 +992,7 @@ impl Encode for HpkeAeadId {
 
 impl Decode for HpkeAeadId {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u16::decode(bytes)? {
-            x if x == AEAD_ID_AES128GCM => Ok(Self::Aes128Gcm),
-            x => Ok(Self::NotImplemented(x)),
-        }
-    }
-}
-
-/// The HPKE public key configuration of a Server.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct HpkeConfig {
-    pub id: u8,
-    pub kem_id: HpkeKemId,
-    pub kdf_id: HpkeKdfId,
-    pub aead_id: HpkeAeadId,
-    #[serde(with = "HpkePublicKeySerde")]
-    pub public_key: HpkePublicKey,
-}
-
-impl AsRef<HpkeConfig> for HpkeConfig {
-    fn as_ref(&self) -> &Self {
-        self
+        Ok(u16::decode(bytes)?.into())
     }
 }
 
@@ -1092,12 +1016,6 @@ impl Decode for HpkeConfig {
             public_key: HpkePublicKey::from(decode_u16_bytes(bytes)?),
         })
     }
-}
-
-/// A list of HPKE public key configurations.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HpkeConfigList {
-    pub hpke_configs: Vec<HpkeConfig>,
 }
 
 impl Encode for HpkeConfigList {

@@ -3,10 +3,11 @@
 
 use crate::{
     fatal_error,
+    hpke::HpkeConfig,
     messages::{
         decode_base64url_vec,
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
-        Extension, HpkeConfig, ReportMetadata, TaskId,
+        Extension, ReportMetadata, TaskId,
     },
     vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config,

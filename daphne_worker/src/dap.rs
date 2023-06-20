@@ -50,11 +50,10 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
-    hpke::HpkeDecrypter,
+    hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
-        HpkeConfig, PartialBatchSelector, Report, ReportId, ReportMetadata, TaskId,
-        TransitionFailure,
+        PartialBatchSelector, Report, ReportId, ReportMetadata, TaskId, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
