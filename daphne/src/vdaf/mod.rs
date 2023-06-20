@@ -7,12 +7,12 @@
 use crate::{
     error::DapAbort,
     fatal_error,
-    hpke::HpkeDecrypter,
+    hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
         encode_u32_bytes, AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp,
-        BatchSelector, Extension, HpkeCiphertext, HpkeConfig, PartialBatchSelector,
-        PlaintextInputShare, Report, ReportId, ReportMetadata, ReportShare, TaskId, Time,
-        Transition, TransitionFailure, TransitionVar,
+        BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector, PlaintextInputShare,
+        Report, ReportId, ReportMetadata, ReportShare, TaskId, Time, Transition, TransitionFailure,
+        TransitionVar,
     },
     metrics::ContextualizedDaphneMetrics,
     vdaf::{

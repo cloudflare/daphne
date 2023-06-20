@@ -6,10 +6,9 @@
 use assert_matches::assert_matches;
 use daphne::{
     constants::DapMediaType,
-    hpke::HpkeReceiverConfig,
+    hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        encode_base64url, BatchId, CollectionJobId, Duration, HpkeAeadId, HpkeConfig,
-        HpkeConfigList, HpkeKdfId, HpkeKemId, Interval, TaskId,
+        encode_base64url, BatchId, CollectionJobId, Duration, HpkeConfigList, Interval, TaskId,
     },
     taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,

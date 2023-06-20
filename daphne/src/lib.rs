@@ -42,8 +42,8 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
-        Draft02AggregationJobId, Duration, HpkeConfig, HpkeKemId, Interval, PartialBatchSelector,
-        ReportId, ReportMetadata, TaskId, Time,
+        Draft02AggregationJobId, Duration, Interval, PartialBatchSelector, ReportId,
+        ReportMetadata, TaskId, Time,
     },
     taskprov::TaskprovVersion,
     vdaf::{
@@ -54,6 +54,7 @@ use crate::{
 };
 use constants::DapMediaType;
 pub use error::DapError;
+use hpke::{HpkeConfig, HpkeKemId};
 use prio::{
     codec::{Decode, Encode},
     vdaf::Aggregatable as AggregatableTrait,
