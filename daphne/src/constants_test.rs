@@ -70,70 +70,70 @@ fn from_str_for_version() {
         DapMediaType::Collection,
     );
 
-    // draft04, Section 8.1
+    // draft05, Section 8.1
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-hpke-config-list")
         ),
         DapMediaType::HpkeConfigList
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-aggregation-job-init-req")
         ),
         DapMediaType::AggregationJobInitReq,
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-aggregation-job-resp")
         ),
         DapMediaType::AggregationJobResp,
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-aggregation-job-continue-req")
         ),
         DapMediaType::AggregationJobContinueReq,
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-aggregate-share-req")
         ),
         DapMediaType::AggregateShareReq,
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-aggregate-share")
         ),
         DapMediaType::AggregateShare,
     );
     assert_eq!(
         DapMediaType::from_str_for_version(
-            DapVersion::Draft04,
+            DapVersion::Draft05,
             Some("application/dap-collect-req")
         ),
         DapMediaType::CollectReq,
     );
     assert_eq!(
-        DapMediaType::from_str_for_version(DapVersion::Draft04, Some("application/dap-collection")),
+        DapMediaType::from_str_for_version(DapVersion::Draft05, Some("application/dap-collection")),
         DapMediaType::Collection,
     );
 
     // Invalid media type
     assert_eq!(
-        DapMediaType::from_str_for_version(DapVersion::Draft04, Some("blah-blah-blah")),
+        DapMediaType::from_str_for_version(DapVersion::Draft05, Some("blah-blah-blah")),
         DapMediaType::Invalid("blah-blah-blah".into()),
     );
 
     // Missing media type
     assert_eq!(
-        DapMediaType::from_str_for_version(DapVersion::Draft04, None),
+        DapMediaType::from_str_for_version(DapVersion::Draft05, None),
         DapMediaType::Missing,
     );
 }
@@ -142,27 +142,27 @@ fn from_str_for_version() {
 fn round_trip() {
     for (version, media_type) in [
         (DapVersion::Draft02, DapMediaType::AggregationJobInitReq),
-        (DapVersion::Draft04, DapMediaType::AggregationJobInitReq),
+        (DapVersion::Draft05, DapMediaType::AggregationJobInitReq),
         (DapVersion::Draft02, DapMediaType::AggregationJobResp),
-        (DapVersion::Draft04, DapMediaType::AggregationJobResp),
+        (DapVersion::Draft05, DapMediaType::AggregationJobResp),
         (DapVersion::Draft02, DapMediaType::AggregationJobContinueReq),
-        (DapVersion::Draft04, DapMediaType::AggregationJobContinueReq),
+        (DapVersion::Draft05, DapMediaType::AggregationJobContinueReq),
         (
             DapVersion::Draft02,
             DapMediaType::Draft02AggregateContinueResp,
         ),
         (DapVersion::Draft02, DapMediaType::AggregateShareReq),
-        (DapVersion::Draft04, DapMediaType::AggregateShareReq),
+        (DapVersion::Draft05, DapMediaType::AggregateShareReq),
         (DapVersion::Draft02, DapMediaType::AggregateShare),
-        (DapVersion::Draft04, DapMediaType::AggregateShare),
+        (DapVersion::Draft05, DapMediaType::AggregateShare),
         (DapVersion::Draft02, DapMediaType::CollectReq),
-        (DapVersion::Draft04, DapMediaType::CollectReq),
+        (DapVersion::Draft05, DapMediaType::CollectReq),
         (DapVersion::Draft02, DapMediaType::Collection),
-        (DapVersion::Draft04, DapMediaType::Collection),
+        (DapVersion::Draft05, DapMediaType::Collection),
         (DapVersion::Draft02, DapMediaType::HpkeConfigList),
-        (DapVersion::Draft04, DapMediaType::HpkeConfigList),
+        (DapVersion::Draft05, DapMediaType::HpkeConfigList),
         (DapVersion::Draft02, DapMediaType::Report),
-        (DapVersion::Draft04, DapMediaType::Report),
+        (DapVersion::Draft05, DapMediaType::Report),
     ] {
         assert_eq!(
             DapMediaType::from_str_for_version(version, media_type.as_str_for_version(version)),
@@ -183,6 +183,6 @@ fn media_type_for_agg_cont_req() {
 
     assert_eq!(
         DapMediaType::AggregationJobResp,
-        DapMediaType::agg_job_cont_resp_for_version(DapVersion::Draft04)
+        DapMediaType::agg_job_cont_resp_for_version(DapVersion::Draft05)
     );
 }
