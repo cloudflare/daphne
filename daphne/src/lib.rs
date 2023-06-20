@@ -161,7 +161,7 @@ impl DapGlobalConfig {
         &self,
         first_config_id: u8,
     ) -> impl Iterator<Item = Result<HpkeReceiverConfig, DapError>> {
-        assert!(self.supported_hpke_kems.len() <= 256);
+        assert!(self.supported_hpke_kems.len() <= u8::MAX.into());
         let kem_ids = self.supported_hpke_kems.clone();
         kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {
             let (config_id, _overflowed) = first_config_id.overflowing_add(i as u8);

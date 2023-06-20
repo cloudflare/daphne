@@ -8,10 +8,7 @@
 
 use crate::{
     auth::DaphneWorkerAuth,
-    config::{
-        BearerTokenKvPair, DapTaskConfigKvPair, DaphneWorker, HpkeReceiverConfigKvPair,
-        HpkeReceiverKvKey, KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
-    },
+    config::{BearerTokenKvPair, DapTaskConfigKvPair, DaphneWorker},
     durable::{
         aggregate_store::{
             DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, DURABLE_AGGREGATE_STORE_GET,
@@ -86,83 +83,25 @@ pub(crate) fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
 
 #[async_trait(?Send)]
 impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
-    type WrappedHpkeConfig<'a> = HpkeReceiverConfigKvPair<'a>
+    type WrappedHpkeConfig<'a> = HpkeConfig
         where Self: 'a;
 
     async fn get_hpke_config_for<'s>(
         &'s self,
         version: DapVersion,
         _task_id: Option<&TaskId>,
-    ) -> std::result::Result<HpkeReceiverConfigKvPair<'s>, DapError> {
-        let kv_store = self.kv().map_err(|e| fatal_error!(err = e))?;
-        let keys = kv_store
-            .list()
-            .limit(1)
-            .prefix(KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG.to_string())
-            .execute()
-            .await
-            .map_err(|e| fatal_error!(err = e, "failed to list hpke keys in kv"))?;
-
-        let hpke_receiver_kv_key = if keys.keys.is_empty() {
-            // Generate a new HPKE receiver config and store it in KV.
-            //
-            // For now, expect that only one KEM algorithm is supported and that only one config
-            // will be used at anyone time.
-            if self.config().global.supported_hpke_kems.len() != 1 {
-                return Err(fatal_error!(
-                    err = "The number of supported HPKE KEMs must be 1",
-                    was = self.config().global.supported_hpke_kems.len(),
-                ));
-            }
-
-            let mut hpke_config_id = None;
-            for it in self
-                .config()
-                .global
-                .gen_hpke_receiver_config_list(rand::random())
-            {
-                let hpke_receiver_config = it.expect("failed to generate HPKE receiver config");
-                if hpke_config_id.is_none() {
-                    hpke_config_id = Some(hpke_receiver_config.config.id);
-                }
-                let new_kv_config_key = format!(
-                    "{}/{}",
-                    KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
-                    HpkeReceiverKvKey {
-                        version,
-                        hpke_config_id: hpke_receiver_config.config.id
-                    },
-                );
-
-                tracing::info!(%new_kv_config_key, "creating a new hpke config");
-                kv_store
-                    .put(&new_kv_config_key, hpke_receiver_config)
-                    .map_err(|e| fatal_error!(err = e, "failed to setup a hpke put request to kv"))?
-                    .execute()
-                    .await
-                    .map_err(|e| {
-                        fatal_error!(err = e, "failed to execute a hpke put request to kv")
-                    })?;
-            }
-
-            HpkeReceiverKvKey {
-                version,
-                hpke_config_id: hpke_config_id.unwrap(),
-            }
-        } else {
-            // Return the first HPKE receiver config in the list.
-            HpkeReceiverKvKey::try_from_name(keys.keys[0].name.as_str())?
-        };
-
-        // Fetch the indicated HPKE config from KV.
-        //
-        // TODO(cjpatton) Figure out how likely this is to fail if we had to generate a new key
-        // pair and write it to KV during this call.
-        Ok(self
-            .get_hpke_receiver_config(hpke_receiver_kv_key)
-            .await
-            .map_err(|e| fatal_error!(err = e))?
-            .ok_or_else(|| fatal_error!(err = "empty HPKE receiver config list"))?)
+    ) -> std::result::Result<Self::WrappedHpkeConfig<'s>, DapError> {
+        self.get_hpke_receiver_config(version, |receiver_config_set| {
+            // TODO: We are currently not doing key rotation so this code assumes that there is only
+            // one element in the hashmap. In the future this should change.
+            receiver_config_set
+                .iter()
+                .next()
+                .map(|(_, receiver_config)| receiver_config.config.clone())
+        })
+        .await
+        .map_err(|e| fatal_error!(err = e, "failed to get list of hpke key configs in kv"))?
+        .ok_or_else(|| fatal_error!(err = "there are no hpke configs in kv!!", %version))
     }
 
     async fn can_hpke_decrypt(
@@ -172,9 +111,11 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
     ) -> std::result::Result<bool, DapError> {
         let version = self.try_get_task_config(task_id).await?.as_ref().version;
         Ok(self
-            .get_hpke_receiver_config(HpkeReceiverKvKey {
-                version,
-                hpke_config_id: config_id,
+            .get_hpke_receiver_config(version, |config_set| {
+                config_set.get(&config_id).map(|_| {
+                    // we just need to know if it exists, so we use a Option<()> as a boolean we
+                    // test bellow with is_some
+                })
             })
             .await
             .map_err(|e| fatal_error!(err = e))?
@@ -189,23 +130,14 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
         let version = self.try_get_task_config(task_id).await?.as_ref().version;
-        if let Some(hpke_receiver_config) = self
-            .get_hpke_receiver_config(HpkeReceiverKvKey {
-                version,
-                hpke_config_id: ciphertext.config_id,
-            })
-            .await
-            .map_err(|e| fatal_error!(err = e))?
-        {
-            Ok(hpke_receiver_config.value().decrypt(
-                info,
-                aad,
-                &ciphertext.enc,
-                &ciphertext.payload,
-            )?)
-        } else {
-            Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
-        }
+        self.get_hpke_receiver_config(version, |config_set| {
+            config_set
+                .get(&ciphertext.config_id)
+                .map(|config| config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload))
+        })
+        .await
+        .map_err(|e| fatal_error!(err = e))?
+        .ok_or_else(|| DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
     }
 }
 
