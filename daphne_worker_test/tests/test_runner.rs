@@ -30,7 +30,7 @@ pub(crate) const MAX_BATCH_SIZE: u64 = 12;
 pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
 
 #[derive(Deserialize)]
-struct InternalTestAddTaskResult {
+struct InternalTestCommandResult {
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -202,7 +202,7 @@ impl TestRunner {
             "task_expiration": t.task_config.expiration,
         });
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
-        let res: InternalTestAddTaskResult = t
+        let res: InternalTestCommandResult = t
             .leader_post_internal(&add_task_path, &leader_add_task_cmd)
             .await;
         assert_eq!(
@@ -227,12 +227,42 @@ impl TestRunner {
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.expiration,
         });
-        let res: InternalTestAddTaskResult = t
+        let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)
             .await;
         assert_eq!(
             res.status, "success",
             "response status: {}, error: {:?}",
+            res.status, res.error
+        );
+
+        let gen_config = || {
+            HpkeReceiverConfig::gen(random(), HpkeKemId::X25519HkdfSha256)
+                .expect("failed to generate receiver config")
+        };
+        let res: InternalTestCommandResult = t
+            .helper_post_internal(
+                &format!("{version}/internal/test/add_hpke_config"),
+                &gen_config(),
+            )
+            .await;
+
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error {:?}",
+            res.status, res.error
+        );
+
+        let res: InternalTestCommandResult = t
+            .leader_post_internal(
+                &format!("{version}/internal/test/add_hpke_config"),
+                &gen_config(),
+            )
+            .await;
+
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error {:?}",
             res.status, res.error
         );
 

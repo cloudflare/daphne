@@ -995,6 +995,34 @@ impl<'srv> DaphneWorker<'srv> {
         }
     }
 
+    pub(crate) async fn internal_add_hpke_config(
+        &self,
+        version: DapVersion,
+        hpke: HpkeReceiverConfig,
+    ) -> Result<()> {
+        let mut configs = self
+            .get_hpke_receiver_config(version, |config_set| Some(config_set.clone()))
+            .await?
+            .unwrap_or_default();
+
+        configs.insert(hpke.config.id, hpke);
+
+        self.kv()?
+            .put(
+                &format!("{KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET}/{version}"),
+                configs.clone(),
+            )?
+            .execute()
+            .await?;
+
+        self.isolate_state()
+            .hpke_receiver_configs
+            .write()
+            .unwrap()
+            .insert(version, configs);
+        Ok(())
+    }
+
     pub(crate) fn extract_version_parameter(&self, req: &Request) -> Result<DapVersion> {
         let url = req.url()?;
         let path = url.path();

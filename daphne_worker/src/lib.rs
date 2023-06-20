@@ -163,6 +163,7 @@ use daphne::{
     auth::BearerToken,
     constants::DapMediaType,
     error::DapAbort,
+    hpke::HpkeReceiverConfig,
     messages::{CollectionJobId, Duration, TaskId, Time},
     roles::{DapAggregator, DapHelper, DapLeader},
     DapCollectJob, DapError, DapRequest, DapResponse, DapVersion,
@@ -576,6 +577,20 @@ impl DaphneWorkerRouter<'_> {
                         let version = daph.extract_version_parameter(&req)?;
                         daph.internal_add_task(version, cmd)
                             .instrument(info_span!("add_task"))
+                            .await?;
+                        Response::from_json(&serde_json::json!({
+                            "status": "success",
+                        }))
+                    },
+                )
+                .post_async(
+                    "/:version/internal/test/add_hpke_config",
+                    |mut req, ctx| async move {
+                        let daph = ctx.data.handler(&ctx.env);
+                        let hpke: HpkeReceiverConfig = req.json().await?;
+                        let version = daph.extract_version_parameter(&req)?;
+                        daph.internal_add_hpke_config(version, hpke)
+                            .instrument(info_span!("add_hpke_config"))
                             .await?;
                         Response::from_json(&serde_json::json!({
                             "status": "success",
