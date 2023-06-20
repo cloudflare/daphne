@@ -90,7 +90,7 @@ async fn e2e_leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v04/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v05/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -131,7 +131,7 @@ async fn e2e_helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v04/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v05/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -317,7 +317,7 @@ async fn e2e_leader_upload(version: DapVersion) {
     );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::Draft04 => client.put(url.as_str()),
+        DapVersion::Draft05 => client.put(url.as_str()),
         _ => unreachable!("unhandled version {}", t.version),
     };
     let resp = builder
@@ -1154,7 +1154,7 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     if version == DapVersion::Draft02 && use_current {
         // The "current batch" isn't a feature in Draft02, but we allow it
         // and immediately return for testing flexibility, as this allows us
-        // to not have a test coverage regression if we add a Draft04 in
+        // to not have a test coverage regression if we add a Draft05 in
         // the future.
         return;
     }

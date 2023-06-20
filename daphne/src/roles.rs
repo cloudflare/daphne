@@ -179,7 +179,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
 
         let payload = match req.version {
             DapVersion::Draft02 => hpke_config.as_ref().get_encoded(),
-            DapVersion::Draft04 => {
+            DapVersion::Draft05 => {
                 let hpke_config_list = HpkeConfigList {
                     hpke_configs: vec![hpke_config.as_ref().clone()],
                 };
@@ -443,10 +443,10 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // from the request path.
         let collect_job_id = match (req.version, &req.resource) {
             (DapVersion::Draft02, DapResource::Undefined) => None,
-            (DapVersion::Draft04, DapResource::CollectionJob(ref collect_job_id)) => {
+            (DapVersion::Draft05, DapResource::CollectionJob(ref collect_job_id)) => {
                 Some(collect_job_id.clone())
             }
-            (DapVersion::Draft04, DapResource::Undefined) => {
+            (DapVersion::Draft05, DapResource::Undefined) => {
                 return Err(DapAbort::BadRequest("undefined resource".into()));
             }
             _ => unreachable!("unhandled resource {:?}", req.resource),
@@ -658,11 +658,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         );
         let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
-        // For draft04 and later, the Collection message includes the smallest quantized time
+        // For draft05 and later, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
         let interval = match task_config.version {
             DapVersion::Draft02 => None,
-            DapVersion::Draft04 => {
+            DapVersion::Draft05 => {
                 let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
                 let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
                 Some(Interval {
@@ -861,10 +861,10 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     (DapVersion::Draft02, DapResource::Undefined, Some(ref agg_job_id)) => {
                         MetaAggregationJobId::Draft02(Cow::Borrowed(agg_job_id))
                     }
-                    (DapVersion::Draft04, DapResource::AggregationJob(ref agg_job_id), None) => {
-                        MetaAggregationJobId::Draft04(Cow::Borrowed(agg_job_id))
+                    (DapVersion::Draft05, DapResource::AggregationJob(ref agg_job_id), None) => {
+                        MetaAggregationJobId::Draft05(Cow::Borrowed(agg_job_id))
                     }
-                    (DapVersion::Draft04, DapResource::Undefined, None) => {
+                    (DapVersion::Draft05, DapResource::Undefined, None) => {
                         return Err(DapAbort::BadRequest("undefined resource".into()));
                     }
                     _ => unreachable!("unhandled resource {:?}", req.resource),
@@ -1005,10 +1005,10 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     (DapVersion::Draft02, DapResource::Undefined, Some(ref agg_job_id)) => {
                         MetaAggregationJobId::Draft02(Cow::Borrowed(agg_job_id))
                     }
-                    (DapVersion::Draft04, DapResource::AggregationJob(ref agg_job_id), None) => {
-                        MetaAggregationJobId::Draft04(Cow::Borrowed(agg_job_id))
+                    (DapVersion::Draft05, DapResource::AggregationJob(ref agg_job_id), None) => {
+                        MetaAggregationJobId::Draft05(Cow::Borrowed(agg_job_id))
                     }
-                    (DapVersion::Draft04, DapResource::Undefined, None) => {
+                    (DapVersion::Draft05, DapResource::Undefined, None) => {
                         return Err(DapAbort::BadRequest("undefined resource".into()));
                     }
                     _ => unreachable!("unhandled resource {:?}", req.resource),

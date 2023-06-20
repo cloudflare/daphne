@@ -233,7 +233,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_INPUT_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -358,7 +358,7 @@ impl VdafConfig {
 
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_INPUT_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -966,7 +966,7 @@ impl VdafConfig {
     ) -> Result<DapAggregateResult, DapError> {
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_AGG_SHARE_DRAFT04,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = agg_share_text.len();
@@ -1028,7 +1028,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
+        DapVersion::Draft05 => CTX_AGG_SHARE_DRAFT04,
         _ => return Err(unimplemented_version_abort()),
     };
     let n: usize = agg_share_text.len();
