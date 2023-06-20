@@ -42,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fmt::Display,
     io::Cursor,
     sync::{Arc, RwLock},
     time::Duration,
@@ -595,7 +596,7 @@ impl<'srv> DaphneWorker<'srv> {
         kv_key_suffix: Cow<'req, K>,
     ) -> Result<Option<KvPair<'req, K, V>>>
     where
-        K: Clone + Eq + std::hash::Hash + ToString,
+        K: Clone + Eq + std::hash::Hash + Display,
         V: Clone + for<'de> Deserialize<'de>,
     {
         // If the value is cached, then return immediately.
@@ -613,7 +614,7 @@ impl<'srv> DaphneWorker<'srv> {
         }
 
         // If the value is not cached, try to populate it from KV before returning.
-        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix.to_string());
+        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix);
         let kv_store = self.kv()?;
         let builder = kv_store.get(&kv_key);
         if let Some(kv_value) = builder.json::<V>().await? {
