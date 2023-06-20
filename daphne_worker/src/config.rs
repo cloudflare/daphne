@@ -50,7 +50,7 @@ use std::{
 use tracing::{error, info, trace};
 use worker::{kv::KvStore, *};
 
-pub(crate) const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG: &str = "hpke_receiver_config";
+const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET: &str = "hpke_receiver_config_set";
 pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_LEADER: &str = "bearer_token/leader/task";
 pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR: &str = "bearer_token/collector/task";
 pub(crate) const KV_KEY_PREFIX_TASK_CONFIG: &str = "config/task";
@@ -360,6 +360,8 @@ impl DaphneWorkerConfig {
     }
 }
 
+pub(crate) type HpkeRecieverConfigSet = HashMap<u8, HpkeReceiverConfig>;
+
 /// Daphne-Worker per-isolate state, which may be used by multiple requests. Includes long-lived configuration,
 /// cached responses from KV, etc.
 pub(crate) struct DaphneWorkerIsolateState {
@@ -370,7 +372,7 @@ pub(crate) struct DaphneWorkerIsolateState {
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
-    hpke_receiver_configs: Arc<RwLock<HashMap<HpkeReceiverKvKey, HpkeReceiverConfig>>>,
+    hpke_receiver_configs: Arc<RwLock<HashMap<DapVersion, HpkeRecieverConfigSet>>>,
 
     /// Laeder bearer token per task.
     pub(crate) leader_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
@@ -565,6 +567,63 @@ impl<'srv> DaphneWorker<'srv> {
         Ok(None)
     }
 
+    async fn kv_get_cached_mapped<'req, K, V, R>(
+        &self,
+        map: &'srv Arc<RwLock<HashMap<K, V>>>,
+        kv_key_prefix: &str,
+        kv_key_suffix: Cow<'req, K>,
+        mapper: impl FnOnce(KvPair<'req, K, &V>) -> R,
+    ) -> Result<Option<R>>
+    where
+        K: Clone + Eq + std::hash::Hash + Display,
+        V: for<'de> Deserialize<'de>,
+    {
+        // If the value is cached, then return immediately.
+        {
+            let guarded_map = map
+                .read()
+                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
+
+            if let Some(value) = guarded_map.get(&kv_key_suffix) {
+                tracing::debug!(%kv_key_suffix, "found kv value in cache");
+                return Ok(Some(mapper(KvPair {
+                    value,
+                    key: kv_key_suffix,
+                })));
+            }
+        }
+
+        // If the value is not cached, try to populate it from KV before returning.
+        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix);
+
+        tracing::debug!(%kv_key, "looking up key in kv");
+        let kv_store = self.kv()?;
+        let builder = kv_store.get(&kv_key);
+        if let Some(kv_value) = builder.json::<V>().await? {
+            // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE
+            // configs, this would avoid hitting KV multiple times when the same expired config is
+            // used for multiple reports.
+            let mut guarded_map = map
+                .write()
+                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {e}")))?;
+            guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
+        }
+
+        let guarded_map = map
+            .read()
+            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
+
+        if let Some(value) = guarded_map.get(kv_key_suffix.as_ref()) {
+            tracing::debug!(%kv_key, "found key in kv");
+            Ok(Some(mapper(KvPair {
+                value,
+                key: kv_key_suffix,
+            })))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// In memory cache on-top of KV to avoid hitting KV API limits.
     // NOTE: We shouldn't return guards from this function as they could be held across await points.
     //
@@ -599,60 +658,48 @@ impl<'srv> DaphneWorker<'srv> {
         K: Clone + Eq + std::hash::Hash + Display,
         V: Clone + for<'de> Deserialize<'de>,
     {
-        // If the value is cached, then return immediately.
-        {
-            let guarded_map = map
-                .read()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
-
-            if let Some(value) = guarded_map.get(&kv_key_suffix) {
-                return Ok(Some(KvPair {
-                    value: value.clone(),
-                    key: kv_key_suffix,
-                }));
-            }
-        }
-
-        // If the value is not cached, try to populate it from KV before returning.
-        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix);
-        let kv_store = self.kv()?;
-        let builder = kv_store.get(&kv_key);
-        if let Some(kv_value) = builder.json::<V>().await? {
-            // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE
-            // configs, this would avoid hitting KV multiple times when the same expired config is
-            // used for multiple reports.
-            let mut guarded_map = map
-                .write()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {e}")))?;
-            guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
-        }
-
-        let guarded_map = map
-            .read()
-            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
-
-        if let Some(value) = guarded_map.get(kv_key_suffix.as_ref()) {
-            Ok(Some(KvPair {
-                value: value.clone(),
-                key: kv_key_suffix,
-            }))
-        } else {
-            Ok(None)
-        }
+        self.kv_get_cached_mapped(map, kv_key_prefix, kv_key_suffix, |pair| KvPair {
+            value: pair.value.clone(),
+            key: pair.key,
+        })
+        .await
     }
 
     /// Get a reference to the HPKE receiver configs, ensuring that the config indicated by
-    /// `hpke_config_id` is cached (if it exists).
-    pub(crate) async fn get_hpke_receiver_config(
+    /// `version` is cached (if it exists).
+    ///
+    /// The `mapper` let's you extract the minimum you need from the [`HpkeRecieverConfigSet`],
+    /// the goal being that you can clone as little as possible.
+    ///
+    /// If the `mapper` returns [`None`], then kv will be hit in order to make sure that we don't
+    /// miss a new value due to having a stale cache.
+    pub(crate) async fn get_hpke_receiver_config<F, R>(
         &self,
-        hpke_receiver_kv_key: HpkeReceiverKvKey,
-    ) -> Result<Option<HpkeReceiverConfigKvPair>> {
-        self.kv_get_cached(
-            &self.isolate_state().hpke_receiver_configs,
-            KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG,
-            Cow::Owned(hpke_receiver_kv_key),
-        )
-        .await
+        version: DapVersion,
+        mut mapper: F,
+    ) -> Result<Option<R>>
+    where
+        F: FnMut(&HpkeRecieverConfigSet) -> Option<R>,
+    {
+        let cached_config = self
+            .isolate_state()
+            .hpke_receiver_configs
+            .read()
+            .unwrap()
+            .get(&version)
+            .and_then(&mut mapper);
+        match cached_config {
+            Some(config) => Ok(Some(config)),
+            None => Ok(self
+                .kv_get_cached_mapped(
+                    &self.isolate_state().hpke_receiver_configs,
+                    KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET,
+                    Cow::Owned(version),
+                    |pair| mapper(pair.value),
+                )
+                .await?
+                .flatten()),
+        }
     }
 
     /// Retrieve from KV the Leader's bearer token for the given task.
@@ -1168,14 +1215,6 @@ impl<K: Clone + Eq + std::hash::Hash, V> KvPair<'_, K, V> {
     }
 }
 
-pub(crate) type HpkeReceiverConfigKvPair<'a> = KvPair<'a, HpkeReceiverKvKey, HpkeReceiverConfig>;
-
-impl AsRef<HpkeConfig> for HpkeReceiverConfigKvPair<'_> {
-    fn as_ref(&self) -> &HpkeConfig {
-        &self.value().config
-    }
-}
-
 pub(crate) type BearerTokenKvPair<'a> = KvPair<'a, TaskId, BearerToken>;
 
 impl AsRef<BearerToken> for BearerTokenKvPair<'_> {
@@ -1203,60 +1242,4 @@ pub(crate) enum DaphneWorkerDeployment {
     /// will be registered by the garbage collector so that they can be deleted manually using the
     /// internal test API.
     Dev,
-}
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub(crate) struct HpkeReceiverKvKey {
-    pub(crate) version: DapVersion,
-    pub(crate) hpke_config_id: u8,
-}
-
-impl HpkeReceiverKvKey {
-    fn parse_from_name(name: &str) -> Option<Self> {
-        let mut iter = name.split('/');
-
-        // Read "{KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG}/version".
-        if iter.next()? != KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG || iter.next()? != "version" {
-            return None;
-        }
-
-        // Read and parse the version.
-        let version = DapVersion::from(iter.next()?);
-        if matches!(version, DapVersion::Unknown) {
-            return None;
-        }
-
-        // Read "config_id".
-        if iter.next()? != "config_id" {
-            return None;
-        }
-
-        // Read and parse the config ID.
-        let hpke_config_id = iter.next()?.parse::<u8>().ok()?;
-
-        // Make sure there is no trailing data.
-        if iter.next().is_some() {
-            return None;
-        }
-
-        Some(HpkeReceiverKvKey {
-            version,
-            hpke_config_id,
-        })
-    }
-
-    pub(crate) fn try_from_name(name: &str) -> std::result::Result<Self, DapError> {
-        Self::parse_from_name(name)
-            .ok_or_else(|| fatal_error!(err = "encountored invalid KV name", %name))
-    }
-}
-
-impl std::fmt::Display for HpkeReceiverKvKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "version/{}/config_id/{}",
-            self.version, self.hpke_config_id
-        )
-    }
 }
