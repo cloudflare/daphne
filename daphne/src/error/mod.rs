@@ -3,7 +3,7 @@
 
 pub mod aborts;
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use crate::{messages::TransitionFailure, vdaf::VdafError};
 pub use aborts::DapAbort;
@@ -45,7 +45,7 @@ impl From<VdafError> for DapError {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct FatalDapError(String);
 
 impl std::error::Error for FatalDapError {}
@@ -53,6 +53,12 @@ impl std::error::Error for FatalDapError {}
 impl Display for FatalDapError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl Debug for FatalDapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
