@@ -237,7 +237,7 @@ impl TestRunner {
         );
 
         let gen_config = || {
-            HpkeReceiverConfig::gen(random(), HpkeKemId::X25519HkdfSha256)
+            HpkeReceiverConfig::gen(0, HpkeKemId::X25519HkdfSha256)
                 .expect("failed to generate receiver config")
         };
         let res: InternalTestCommandResult = t

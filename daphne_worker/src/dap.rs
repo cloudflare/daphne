@@ -91,13 +91,16 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
         version: DapVersion,
         _task_id: Option<&TaskId>,
     ) -> std::result::Result<Self::WrappedHpkeConfig<'s>, DapError> {
-        self.get_hpke_receiver_config(version, |receiver_config_set| {
-            // TODO: We are currently not doing key rotation so this code assumes that there is only
-            // one element in the hashmap. In the future this should change.
-            receiver_config_set
+        self.get_hpke_receiver_config(version, |receiver_config_list| {
+            // Assume the first HPKE config in the receiver list has the highest preference.
+            //
+            // NOTE draft02 compatibility: The spec allows us to return multiple configs, but
+            // draft02 does not. In order to keep things imple we preserve the semantics of the old
+            // version for now.
+            receiver_config_list
                 .iter()
                 .next()
-                .map(|(_, receiver_config)| receiver_config.config.clone())
+                .map(|receiver| receiver.config.clone())
         })
         .await
         .map_err(|e| fatal_error!(err = e, "failed to get list of hpke key configs in kv"))?
@@ -111,11 +114,11 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
     ) -> std::result::Result<bool, DapError> {
         let version = self.try_get_task_config(task_id).await?.as_ref().version;
         Ok(self
-            .get_hpke_receiver_config(version, |config_set| {
-                config_set.get(&config_id).map(|_| {
-                    // we just need to know if it exists, so we use a Option<()> as a boolean we
-                    // test bellow with is_some
-                })
+            .get_hpke_receiver_config(version, |config_list| {
+                config_list
+                    .iter()
+                    .find(|receiver| receiver.config.id == config_id)
+                    .map(|_| ())
             })
             .await
             .map_err(|e| fatal_error!(err = e))?
@@ -130,10 +133,11 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
         ciphertext: &HpkeCiphertext,
     ) -> std::result::Result<Vec<u8>, DapError> {
         let version = self.try_get_task_config(task_id).await?.as_ref().version;
-        self.get_hpke_receiver_config(version, |config_set| {
-            config_set
-                .get(&ciphertext.config_id)
-                .map(|config| config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload))
+        self.get_hpke_receiver_config(version, |config_list| {
+            config_list
+                .iter()
+                .find(|receiver| receiver.config.id == ciphertext.config_id)
+                .map(|receiver| receiver.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload))
         })
         .await
         .map_err(|e| fatal_error!(err = e))?
