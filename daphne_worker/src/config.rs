@@ -360,7 +360,7 @@ impl DaphneWorkerConfig {
     }
 }
 
-pub(crate) type HpkeRecieverConfigSet = HashMap<u8, HpkeReceiverConfig>;
+pub(crate) type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;
 
 /// Daphne-Worker per-isolate state, which may be used by multiple requests. Includes long-lived configuration,
 /// cached responses from KV, etc.
@@ -372,7 +372,7 @@ pub(crate) struct DaphneWorkerIsolateState {
 
     /// Cached HPKE receiver config. This will be populated when Daphne-Worker obtains an HPKE
     /// receiver config for the first time from Cloudflare KV.
-    hpke_receiver_configs: Arc<RwLock<HashMap<DapVersion, HpkeRecieverConfigSet>>>,
+    hpke_receiver_configs: Arc<RwLock<HashMap<DapVersion, HpkeRecieverConfigList>>>,
 
     /// Laeder bearer token per task.
     pub(crate) leader_bearer_tokens: Arc<RwLock<HashMap<TaskId, BearerToken>>>,
@@ -399,6 +399,23 @@ impl DaphneWorkerIsolateState {
             collector_bearer_tokens: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    fn delete_all(&self) -> std::result::Result<(), DapError> {
+        macro_rules! clear_guarded_map {
+            ($name:ident) => {{
+                let mut guarded_map = self.$name.write().map_err(|e| {
+                    fatal_error!(err = format!("Failed to lock {} for writing: {e}", "$name"))
+                })?;
+                guarded_map.clear();
+            }};
+        }
+
+        clear_guarded_map!(hpke_receiver_configs);
+        clear_guarded_map!(leader_bearer_tokens);
+        clear_guarded_map!(collector_bearer_tokens);
+        clear_guarded_map!(tasks);
+        Ok(())
     }
 }
 
@@ -668,7 +685,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Get a reference to the HPKE receiver configs, ensuring that the config indicated by
     /// `version` is cached (if it exists).
     ///
-    /// The `mapper` let's you extract the minimum you need from the [`HpkeRecieverConfigSet`],
+    /// The `mapper` let's you extract the minimum you need from the [`HpkeRecieverConfigList`],
     /// the goal being that you can clone as little as possible.
     ///
     /// If the `mapper` returns [`None`], then kv will be hit in order to make sure that we don't
@@ -679,7 +696,7 @@ impl<'srv> DaphneWorker<'srv> {
         mut mapper: F,
     ) -> Result<Option<R>>
     where
-        F: FnMut(&HpkeRecieverConfigSet) -> Option<R>,
+        F: FnMut(&HpkeRecieverConfigList) -> Option<R>,
     {
         let cached_config = self
             .isolate_state()
@@ -780,6 +797,7 @@ impl<'srv> DaphneWorker<'srv> {
     ///
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
     pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
+        // Clear KV storage.
         let kv_store = self.kv().map_err(|e| fatal_error!(err = e))?;
         let kv_task = async {
             for kv_key in kv_store
@@ -797,6 +815,7 @@ impl<'srv> DaphneWorker<'srv> {
             Ok::<_, DapError>(())
         };
 
+        // Clear DO storage.
         let durable = self.durable();
 
         let future_delete_durable = durable
@@ -809,6 +828,9 @@ impl<'srv> DaphneWorker<'srv> {
             .map_err(|e| fatal_error!(err = e));
 
         futures::try_join!(kv_task, future_delete_durable)?;
+
+        // Clear the isolate state.
+        self.isolate_state().delete_all()?;
 
         Ok(())
     }
@@ -998,19 +1020,29 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn internal_add_hpke_config(
         &self,
         version: DapVersion,
-        hpke: HpkeReceiverConfig,
+        new_receiver: HpkeReceiverConfig,
     ) -> Result<()> {
-        let mut configs = self
-            .get_hpke_receiver_config(version, |config_set| Some(config_set.clone()))
+        let mut config_list = self
+            .get_hpke_receiver_config(version, |config_list| Some(config_list.clone()))
             .await?
             .unwrap_or_default();
 
-        configs.insert(hpke.config.id, hpke);
+        if config_list
+            .iter()
+            .any(|receiver| new_receiver.config.id == receiver.config.id)
+        {
+            return Err(int_err(format!(
+                "receiver config with id {} already exists",
+                new_receiver.config.id
+            )));
+        }
+
+        config_list.push(new_receiver);
 
         self.kv()?
             .put(
                 &format!("{KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET}/{version}"),
-                configs.clone(),
+                config_list.clone(),
             )?
             .execute()
             .await?;
@@ -1019,7 +1051,7 @@ impl<'srv> DaphneWorker<'srv> {
             .hpke_receiver_configs
             .write()
             .unwrap()
-            .insert(version, configs);
+            .insert(version, config_list);
         Ok(())
     }
 
