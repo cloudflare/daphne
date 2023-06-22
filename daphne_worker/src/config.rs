@@ -522,7 +522,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         };
         self.metrics
             .dap_abort_counter
-            .with_label_values(&[&self.host, &e.to_string()])
+            .with_label_values(&[&self.host])
             .inc();
         let problem_details = e.into_problem_details();
         error!(
