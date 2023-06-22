@@ -37,7 +37,7 @@ impl DaphneWorkerMetrics {
         let dap_abort_counter = register_int_counter_vec_with_registry!(
             format!("{front}dap_abort"),
             "DAP aborts.",
-            &["host", "type"],
+            &["host"],
             registry
         )
         .map_err(|e| fatal_error!(err = e, "failed to register dap_abort"))?;
