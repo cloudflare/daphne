@@ -122,6 +122,12 @@ where
             }
         }
 
+        let metadata = event.metadata();
+        if let (Some(file), Some(line)) = (metadata.file(), metadata.line()) {
+            fields.insert("source_file".to_owned(), file.into());
+            fields.insert("source_line".to_owned(), line.into());
+        }
+
         // If there is no `message`, repurpose the error meessage is there is one or the
         // `current_span` as the `message`. This helps normalize the `WasmTimingLayer` events.
         if !fields.contains_key("message") {
@@ -134,7 +140,7 @@ where
 
         let log_line = LogLine {
             timestamp,
-            log_level: event.metadata().level().as_str(),
+            log_level: metadata.level().as_str(),
             fields,
         };
 
