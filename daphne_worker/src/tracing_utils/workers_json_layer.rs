@@ -122,10 +122,12 @@ where
             }
         }
 
-        // If there is no `message`, repurpose the `current_span` as the `message`.
-        // This helps normalize the `WasmTimingLayer` events.
+        // If there is no `message`, repurpose the error meessage is there is one or the
+        // `current_span` as the `message`. This helps normalize the `WasmTimingLayer` events.
         if !fields.contains_key("message") {
-            if let Some(span_name) = fields.remove("current_span") {
+            if let Some(error) = fields.get("error") {
+                fields.insert("message".into(), error.clone());
+            } else if let Some(span_name) = fields.remove("current_span") {
                 fields.insert("message".to_owned(), span_name);
             }
         }
