@@ -94,15 +94,15 @@ impl Debug for FatalDapError {
 /// macro, pass a string only when there is no error value you can use.
 #[macro_export]
 macro_rules! fatal_error {
-    (err = $e:expr $(,)?) => {
-        $crate::fatal_error!(@@@ err = $e,)
+    (err = $e:expr) => {
+        $crate::fatal_error!(@@@ err = $e)
     };
-    (err = $e:expr $(, $($rest:tt)*)?) => {
-        $crate::fatal_error!(@@@ err = $e, $($($rest)*)*)
+    (err = $e:expr, $($rest:tt)*) => {
+        $crate::fatal_error!(@@@ err = $e, $($rest)*)
     };
     (@@@ err = $e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
-        ::tracing::error!(fatal_error = ?error, $($($rest)*)*);
+        ::tracing::error!(?error, $($($rest)*)*);
         $crate::error::DapError::Fatal(
             $crate::error::FatalDapError::__use_the_macro(::std::format!("{error}"))
         )
