@@ -36,8 +36,8 @@ const ERR_NO_VALUE: &str = "No such value in storage.";
 // TODO(bhalley) does this need to be configurable?
 const MAX_KEYS: usize = 128;
 
-const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-const DEFAULT_MAX_RETRIES: usize = 3;
+const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+const DEFAULT_MAX_RETRIES: u32 = 3;
 
 /// Used to send HTTP requests to a durable object (DO) instance.
 pub(crate) struct DurableConnector<'srv> {
@@ -207,7 +207,14 @@ impl<'srv> DurableConnector<'srv> {
                 Err(err) => {
                     if attempt < attempts {
                         warn!("DO {durable_binding}: post {durable_path}: attempt #{attempt} failed: {err}");
-                        Delay::from(DEFAULT_RETRY_INTERVAL).await;
+                        Delay::from(Duration::from_millis(
+                            DEFAULT_RETRY_INTERVAL
+                                .as_millis()
+                                .pow(attempt)
+                                .try_into()
+                                .expect("delay time in retries should never overflow"),
+                        ))
+                        .await;
                         attempt += 1;
                     } else {
                         return Err(err);
