@@ -124,8 +124,7 @@ where
 
         let metadata = event.metadata();
         if let (Some(file), Some(line)) = (metadata.file(), metadata.line()) {
-            fields.insert("source_file".to_owned(), file.into());
-            fields.insert("source_line".to_owned(), line.into());
+            fields.insert("at".to_owned(), format!("{}:{}", file, line).into());
         }
 
         // If there is no `message`, repurpose the error meessage is there is one or the
@@ -133,8 +132,8 @@ where
         if !fields.contains_key("message") {
             if let Some(error) = fields.get("error") {
                 fields.insert("message".into(), error.clone());
-            } else if let Some(span_name) = fields.remove("current_span") {
-                fields.insert("message".to_owned(), span_name);
+            } else {
+                fields.insert("message".to_owned(), "(no message)".into());
             }
         }
 
