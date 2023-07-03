@@ -7,7 +7,7 @@ use crate::DapError;
 use daphne::{fatal_error, metrics::DaphneMetrics};
 use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
-pub(crate) struct DaphneWorkerMetrics {
+pub struct DaphneWorkerMetrics {
     /// Daphne metrics.
     pub(crate) daphne: DaphneMetrics,
 

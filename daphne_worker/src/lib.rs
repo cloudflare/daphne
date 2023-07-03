@@ -157,6 +157,7 @@ pub use crate::tracing_utils::initialize_tracing;
 use crate::{
     config::{DaphneWorkerIsolateState, DaphneWorkerRequestState},
     dap::dap_response_to_worker,
+    tracing_utils::MeasuredSpanName,
 };
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
@@ -660,7 +661,15 @@ async fn handle_agg_job(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    let span = info_span_from_dap_request!("aggregate", req);
+    let span = match req.media_type {
+        DapMediaType::AggregationJobInitReq => {
+            info_span_from_dap_request!(MeasuredSpanName::AggregateInit.as_str(), req)
+        }
+        DapMediaType::AggregationJobContinueReq => {
+            info_span_from_dap_request!(MeasuredSpanName::AggregateContinue.as_str(), req)
+        }
+        _ => info_span_from_dap_request!("aggregate", req),
+    };
 
     match daph.handle_agg_job_req(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),
@@ -675,7 +684,7 @@ async fn handle_agg_share_req(
     let daph = ctx.data.handler(&ctx.env);
     let req = daph.worker_request_to_dap(req, &ctx).await?;
 
-    let span = info_span_from_dap_request!("aggregate_share", req);
+    let span = info_span_from_dap_request!(MeasuredSpanName::AggregateShares.as_str(), req);
 
     match daph.handle_agg_share_req(&req).instrument(span).await {
         Ok(resp) => dap_response_to_worker(resp),

@@ -3,17 +3,17 @@
 
 use chrono::{SecondsFormat, Utc};
 use std::{fmt::Result as FmtResult, io, str, sync::Once};
-use tracing::{event, Level, Subscriber};
-use tracing_core::span;
 use tracing_subscriber::{
     fmt,
     fmt::{format::Writer, time::FormatTime},
-    layer::Context as LayerContext,
     layer::*,
     prelude::*,
     registry, EnvFilter, Layer,
 };
-use worker::*;
+use worker::{console_log, Env};
+
+use wasm_timing::WasmTimingLayer;
+pub(crate) use wasm_timing::{initialize_timing_histograms, MeasuredSpanName};
 
 use self::workers_json_layer::WorkersJsonLayer;
 
@@ -72,79 +72,6 @@ impl io::Write for LogWriter {
     }
 }
 
-/// WasmTimingLayer provides a span's elapsed time.
-pub struct WasmTimingLayer {}
-
-impl WasmTimingLayer {
-    fn new() -> Self {
-        WasmTimingLayer {}
-    }
-}
-
-fn milli_now() -> i64 {
-    Date::now().as_millis() as i64
-}
-
-struct Timestamps {
-    busy: i64,
-    entered_at: i64,
-    started_at: i64,
-}
-
-impl Timestamps {
-    fn new() -> Self {
-        Timestamps {
-            busy: 0,
-            entered_at: 0,
-            started_at: milli_now(),
-        }
-    }
-}
-
-impl<S> Layer<S> for WasmTimingLayer
-where
-    S: Subscriber + for<'a> registry::LookupSpan<'a>,
-{
-    fn on_new_span(&self, _attrs: &span::Attributes<'_>, id: &span::Id, ctx: LayerContext<'_, S>) {
-        let span = ctx.span(id).expect("span should exist!");
-        let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<Timestamps>().is_none() {
-            extensions.insert(Timestamps::new());
-        }
-    }
-
-    fn on_enter(&self, id: &span::Id, ctx: LayerContext<'_, S>) {
-        let span = ctx.span(id).expect("span should exist!");
-        let mut extensions = span.extensions_mut();
-        if let Some(timestamps) = extensions.get_mut::<Timestamps>() {
-            timestamps.entered_at = milli_now();
-        }
-    }
-
-    fn on_exit(&self, id: &span::Id, ctx: LayerContext<'_, S>) {
-        let span = ctx.span(id).expect("span should exist!");
-        let mut extensions = span.extensions_mut();
-        if let Some(timestamps) = extensions.get_mut::<Timestamps>() {
-            timestamps.busy += milli_now().saturating_sub(timestamps.entered_at);
-        }
-    }
-
-    fn on_close(&self, id: span::Id, ctx: LayerContext<'_, S>) {
-        let span = ctx.span(&id).expect("span should exist!");
-        let extensions = span.extensions();
-        if let Some(timestamps) = extensions.get::<Timestamps>() {
-            let elapsed = milli_now().saturating_sub(timestamps.started_at);
-            event!(
-                parent: id,
-                Level::INFO,
-                busy = timestamps.busy,
-                elapsed,
-                unit = "ms"
-            );
-        }
-    }
-}
-
 static INITIALIZE_TRACING: Once = Once::new();
 
 /// Setup logging.
@@ -168,7 +95,7 @@ pub fn initialize_tracing(env: &Env) {
         let (ansi, json) = match env.var("DAP_DEPLOYMENT") {
             Ok(format) if format.to_string() == "prod" => {
                 // JSON output
-                let json = WorkersJsonLayer.and_then(WasmTimingLayer::new());
+                let json = WorkersJsonLayer.and_then(WasmTimingLayer);
                 (None, Some(json))
             }
             Ok(_) | Err(_) => {
@@ -177,7 +104,7 @@ pub fn initialize_tracing(env: &Env) {
                     .with_ansi(true)
                     .with_writer(LogWriter::new)
                     .with_timer(WasmTime::new())
-                    .and_then(WasmTimingLayer::new());
+                    .and_then(WasmTimingLayer);
 
                 (Some(ansi), None)
             }
@@ -191,4 +118,5 @@ pub fn initialize_tracing(env: &Env) {
     });
 }
 
+mod wasm_timing;
 mod workers_json_layer;

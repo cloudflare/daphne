@@ -451,6 +451,9 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         let prometheus_registry = Registry::new();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
             .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
+
+        crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
+            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
         let host = req
             .url()?
             .host_str()
