@@ -8,17 +8,19 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter, HpkeReceiverConfig},
+    hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-        Draft02AggregationJobId, HpkeCiphertext, PartialBatchSelector, Report, ReportId,
+        AggregationJobContinueReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
+        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
+        Draft02AggregationJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report, ReportId,
         ReportMetadata, TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
-    DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
-    DapHelperState, DapOutputShare, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
-    DapVersion, MetaAggregationJobId,
+    DapAbort, DapAggregateResult, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
+    DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition,
+    DapLeaderUncommitted, DapMeasurement, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
+    DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -1060,4 +1062,376 @@ macro_rules! assert_metrics_include {
                    got_str, want.into_iter().collect::<Vec<String>>().join("\n"));
         }
     }}
+}
+
+/// Scaffolding for testing the aggregation flow.
+pub struct AggregationJobTest {
+    // task parameters
+    pub(crate) task_id: TaskId,
+    pub(crate) task_config: DapTaskConfig,
+    pub(crate) leader_hpke_receiver_config: HpkeReceiverConfig,
+    pub(crate) helper_hpke_receiver_config: HpkeReceiverConfig,
+    pub(crate) client_hpke_config_list: Vec<HpkeConfig>,
+    pub(crate) collector_hpke_receiver_config: HpkeReceiverConfig,
+
+    // aggregation job ID
+    pub(crate) agg_job_id: MetaAggregationJobId<'static>,
+
+    // the current time
+    pub(crate) now: Time,
+
+    // operational parameters
+    #[allow(dead_code)]
+    pub(crate) prometheus_registry: prometheus::Registry,
+    pub(crate) leader_metrics: DaphneMetrics,
+    pub(crate) helper_metrics: DaphneMetrics,
+}
+
+impl AggregationJobTest {
+    /// Create an aggregation job test with the given VDAF config, HPKE KEM algorithm, DAP protocol
+    /// version. The KEM algorithm is used to generate an HPKE config for each party.
+    pub fn new(vdaf: &VdafConfig, kem_id: HpkeKemId, version: DapVersion) -> Self {
+        let mut rng = thread_rng();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let task_id = TaskId(rng.gen());
+        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+        let vdaf_verify_key = vdaf.gen_verify_key();
+        let leader_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
+        let helper_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
+        let collector_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
+        let leader_hpke_config = leader_hpke_receiver_config.clone().config;
+        let helper_hpke_config = helper_hpke_receiver_config.clone().config;
+        let collector_hpke_config = collector_hpke_receiver_config.clone().config;
+        let prometheus_registry = prometheus::Registry::new();
+        let leader_metrics =
+            DaphneMetrics::register(&prometheus_registry, Some("test_leader")).unwrap();
+        let helper_metrics =
+            DaphneMetrics::register(&prometheus_registry, Some("test_helper")).unwrap();
+
+        Self {
+            now,
+            task_id,
+            agg_job_id,
+            leader_hpke_receiver_config,
+            helper_hpke_receiver_config,
+            client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
+            collector_hpke_receiver_config,
+            task_config: DapTaskConfig {
+                version,
+                leader_url: Url::parse("http://leader.com").unwrap(),
+                helper_url: Url::parse("https://helper.org").unwrap(),
+                time_precision: 500,
+                expiration: now + 500,
+                min_batch_size: 10,
+                query: DapQueryConfig::TimeInterval,
+                vdaf: vdaf.clone(),
+                vdaf_verify_key,
+                collector_hpke_config,
+                taskprov: false,
+            },
+            prometheus_registry,
+            leader_metrics,
+            helper_metrics,
+        }
+    }
+
+    /// For each measurement, generate a report for the given task.
+    ///
+    /// Panics if a measurement is incompatible with the given VDAF.
+    pub fn produce_reports(&self, measurements: Vec<DapMeasurement>) -> Vec<Report> {
+        let mut reports = Vec::with_capacity(measurements.len());
+
+        for measurement in measurements.into_iter() {
+            reports.push(
+                self.task_config
+                    .vdaf
+                    .produce_report(
+                        &self.client_hpke_config_list,
+                        self.now,
+                        &self.task_id,
+                        measurement,
+                        self.task_config.version,
+                    )
+                    .unwrap(),
+            );
+        }
+        reports
+    }
+
+    /// Leader: Produce AggregationJobInitReq.
+    ///
+    /// Panics if the Leader aborts.
+    pub async fn produce_agg_job_init_req(
+        &self,
+        reports: Vec<Report>,
+    ) -> DapLeaderTransition<AggregationJobInitReq> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .produce_agg_job_init_req(
+                &self.leader_hpke_receiver_config,
+                &self.task_id,
+                &self.task_config,
+                &self.agg_job_id,
+                &PartialBatchSelector::TimeInterval,
+                reports,
+                &metrics,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Helper: Handle AggregationJobInitReq, produce first AggregationJobResp.
+    ///
+    /// Panics if the Helper aborts.
+    pub async fn handle_agg_job_init_req(
+        &mut self,
+        agg_job_init_req: AggregationJobInitReq,
+    ) -> DapHelperTransition<AggregationJobResp> {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_agg_job_init_req(
+                &self.helper_hpke_receiver_config,
+                &self.task_id,
+                &self.task_config,
+                &agg_job_init_req,
+                &metrics,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Leader: Handle first AggregationJobResp, produce AggregationJobContinueReq.
+    ///
+    /// Panics if the Leader aborts.
+    pub fn handle_agg_job_resp(
+        &self,
+        leader_state: DapLeaderState,
+        agg_job_resp: AggregationJobResp,
+    ) -> DapLeaderTransition<AggregationJobContinueReq> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_agg_job_resp(
+                &self.task_id,
+                &self.agg_job_id,
+                leader_state,
+                agg_job_resp,
+                self.task_config.version,
+                &metrics,
+            )
+            .unwrap()
+    }
+
+    /// Like [`handle_agg_job_resp`] but expect the Leader to abort.
+    pub fn handle_agg_job_resp_expect_err(
+        &self,
+        leader_state: DapLeaderState,
+        agg_job_resp: AggregationJobResp,
+    ) -> DapAbort {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_agg_job_resp(
+                &self.task_id,
+                &self.agg_job_id,
+                leader_state,
+                agg_job_resp,
+                self.task_config.version,
+                &metrics,
+            )
+            .expect_err("handle_agg_job_resp() succeeded; expected failure")
+    }
+
+    /// Helper: Handle AggregationJobContinueReq, produce second AggregationJobResp.
+    ///
+    /// Panics if the Helper aborts.
+    pub fn handle_agg_job_cont_req(
+        &self,
+        helper_state: DapHelperState,
+        agg_job_cont_req: &AggregationJobContinueReq,
+    ) -> DapHelperTransition<AggregationJobResp> {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_agg_job_cont_req(
+                &self.task_id,
+                &self.agg_job_id,
+                helper_state,
+                agg_job_cont_req,
+                &metrics,
+            )
+            .unwrap()
+    }
+
+    /// Like [`handle_agg_job_cont_req`] but expect the Helper to abort.
+    pub fn handle_agg_job_cont_req_expect_err(
+        &self,
+        helper_state: DapHelperState,
+        agg_job_cont_req: &AggregationJobContinueReq,
+    ) -> DapAbort {
+        let metrics = self
+            .helper_metrics
+            .with_host(self.task_config.helper_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_agg_job_cont_req(
+                &self.task_id,
+                &self.agg_job_id,
+                helper_state,
+                agg_job_cont_req,
+                &metrics,
+            )
+            .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
+    }
+
+    /// Leader: Handle the last AggregationJobResp.
+    ///
+    /// Panics if the Leader aborts.
+    pub fn handle_final_agg_job_resp(
+        &self,
+        leader_uncommitted: DapLeaderUncommitted,
+        agg_job_resp: AggregationJobResp,
+    ) -> Vec<DapOutputShare> {
+        let metrics = self
+            .leader_metrics
+            .with_host(self.task_config.leader_url.host_str().unwrap());
+        self.task_config
+            .vdaf
+            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, &metrics)
+            .unwrap()
+    }
+
+    /// Produce the Leader's encrypted aggregate share.
+    pub fn produce_leader_encrypted_agg_share(
+        &self,
+        batch_selector: &BatchSelector,
+        agg_share: &DapAggregateShare,
+    ) -> HpkeCiphertext {
+        self.task_config
+            .vdaf
+            .produce_leader_encrypted_agg_share(
+                &self.task_config.collector_hpke_config,
+                &self.task_id,
+                batch_selector,
+                agg_share,
+                self.task_config.version,
+            )
+            .unwrap()
+    }
+
+    /// Produce the Helper's encrypted aggregate share.
+    pub fn produce_helper_encrypted_agg_share(
+        &self,
+        batch_selector: &BatchSelector,
+        agg_share: &DapAggregateShare,
+    ) -> HpkeCiphertext {
+        self.task_config
+            .vdaf
+            .produce_helper_encrypted_agg_share(
+                &self.task_config.collector_hpke_config,
+                &self.task_id,
+                batch_selector,
+                agg_share,
+                self.task_config.version,
+            )
+            .unwrap()
+    }
+
+    /// Collector: Consume the aggregate shares.
+    pub async fn consume_encrypted_agg_shares(
+        &self,
+        batch_selector: &BatchSelector,
+        report_count: u64,
+        enc_agg_shares: Vec<HpkeCiphertext>,
+    ) -> DapAggregateResult {
+        self.task_config
+            .vdaf
+            .consume_encrypted_agg_shares(
+                &self.collector_hpke_receiver_config,
+                &self.task_id,
+                batch_selector,
+                report_count,
+                enc_agg_shares,
+                self.task_config.version,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Generate a set of reports, aggregate them, and unshard the result.
+    pub async fn roundtrip(&mut self, measurements: Vec<DapMeasurement>) -> DapAggregateResult {
+        let batch_selector = BatchSelector::TimeInterval {
+            batch_interval: Interval {
+                start: self.now,
+                duration: 3600,
+            },
+        };
+
+        // Clients: Shard
+        let reports = self.produce_reports(measurements);
+
+        // Aggregators: Preparation
+        let DapLeaderTransition::Continue(leader_state, agg_init) = self
+            .produce_agg_job_init_req(reports)
+            .await else {
+                panic!("unexpected transition");
+        };
+        let DapHelperTransition::Continue(helper_state, agg_job_resp) = self
+            .handle_agg_job_init_req(agg_init)
+            .await else {
+                panic!("unexpected transition");
+        };
+        let got = DapHelperState::get_decoded(
+            &self.task_config.vdaf,
+            &helper_state
+                .get_encoded(&self.task_config.vdaf)
+                .expect("failed to encode helper state"),
+        )
+        .expect("failed to decode helper state");
+        assert_eq!(got, helper_state);
+
+        let DapLeaderTransition::Uncommitted(uncommitted, agg_cont) = self
+            .handle_agg_job_resp(leader_state, agg_job_resp) else {
+                panic!("unexpected transition");
+            };
+        let DapHelperTransition::Finish(helper_out_shares, agg_job_resp) = self
+            .handle_agg_job_cont_req(helper_state, &agg_cont) else {
+                panic!("unexpected transition");
+            };
+        let leader_out_shares = self.handle_final_agg_job_resp(uncommitted, agg_job_resp);
+        let report_count = u64::try_from(leader_out_shares.len()).unwrap();
+
+        // Leader: Aggregation
+        let leader_agg_share = DapAggregateShare::try_from_out_shares(leader_out_shares).unwrap();
+        let leader_encrypted_agg_share =
+            self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
+
+        // Helper: Aggregation
+        let helper_agg_share = DapAggregateShare::try_from_out_shares(helper_out_shares).unwrap();
+        let helper_encrypted_agg_share =
+            self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
+
+        // Collector: Unshard
+        self.consume_encrypted_agg_shares(
+            &batch_selector,
+            report_count,
+            vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
+        )
+        .await
+    }
 }

@@ -602,8 +602,8 @@ impl DapAggregateShare {
         self.data = None;
     }
 
-    #[cfg(test)]
-    pub(crate) fn try_from_out_shares(
+    /// Aggregate a set of output shares into an aggregate share.
+    pub fn try_from_out_shares(
         out_shares: impl IntoIterator<Item = DapOutputShare>,
     ) -> Result<Self, DapError> {
         let mut agg_share = Self::default();
