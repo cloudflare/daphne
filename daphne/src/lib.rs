@@ -53,6 +53,8 @@ use crate::{
     },
 };
 use constants::DapMediaType;
+#[cfg(test)]
+use criterion as _;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use prio::{
@@ -427,7 +429,7 @@ impl AsRef<DapTaskConfig> for DapTaskConfig {
 }
 
 /// A measurement from which a Client generates a report.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapMeasurement {
     U64(u64),

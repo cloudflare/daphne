@@ -64,7 +64,7 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
             Ok(shard!(vdaf, &measurement, nonce))
         }
-        _ => panic!("prio3_shard: unexpected VDAF config"),
+        _ => panic!("prio3_shard: unexpected VDAF config {config:?}"),
     }
 }
 

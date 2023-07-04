@@ -1190,8 +1190,8 @@ impl AggregationJobTest {
     ///
     /// Panics if the Helper aborts.
     pub async fn handle_agg_job_init_req(
-        &mut self,
-        agg_job_init_req: AggregationJobInitReq,
+        &self,
+        agg_job_init_req: &AggregationJobInitReq,
     ) -> DapHelperTransition<AggregationJobResp> {
         let metrics = self
             .helper_metrics
@@ -1202,7 +1202,7 @@ impl AggregationJobTest {
                 &self.helper_hpke_receiver_config,
                 &self.task_id,
                 &self.task_config,
-                &agg_job_init_req,
+                agg_job_init_req,
                 &metrics,
             )
             .await
@@ -1386,13 +1386,13 @@ impl AggregationJobTest {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let DapLeaderTransition::Continue(leader_state, agg_init) = self
+        let DapLeaderTransition::Continue(leader_state, agg_job_init_req) = self
             .produce_agg_job_init_req(reports)
             .await else {
                 panic!("unexpected transition");
         };
         let DapHelperTransition::Continue(helper_state, agg_job_resp) = self
-            .handle_agg_job_init_req(agg_init)
+            .handle_agg_job_init_req(&agg_job_init_req)
             .await else {
                 panic!("unexpected transition");
         };
