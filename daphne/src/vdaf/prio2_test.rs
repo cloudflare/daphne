@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    async_test_version, async_test_versions, vdaf::mod_test::Test, DapAggregateResult,
-    DapMeasurement, DapVersion, VdafConfig,
+    async_test_version, async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest,
+    DapAggregateResult, DapMeasurement, DapVersion, VdafConfig,
 };
 use paste::paste;
 
 async fn roundtrip(version: DapVersion) {
-    let mut t = Test::new(&VdafConfig::Prio2 { dimension: 5 }, version);
+    let mut t = AggregationJobTest::new(
+        &VdafConfig::Prio2 { dimension: 5 },
+        HpkeKemId::X25519HkdfSha256,
+        version,
+    );
     let got = t
         .roundtrip(vec![
             DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
