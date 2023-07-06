@@ -47,9 +47,9 @@ use crate::{
     },
     taskprov::TaskprovVersion,
     vdaf::{
-        prio2::prio2_decode_prepare_state,
-        prio3::{prio3_append_prepare_state, prio3_decode_prepare_state},
-        VdafAggregateShare, VdafMessage, VdafState, VdafVerifyKey,
+        prio2::{prio2_decode_prepare_state, prio2_prepare_init},
+        prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, prio3_prepare_init},
+        VdafAggregateShare, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
     },
 };
 use constants::DapMediaType;
@@ -420,6 +420,40 @@ impl DapTaskConfig {
 
         Ok(report_count >= self.min_batch_size)
     }
+
+    /// Initialize VDAF preparation of a report share.
+    pub fn prep_init(
+        &self,
+        is_leader: bool,
+        report_id: &ReportId,
+        public_share: &[u8],
+        input_share: &[u8],
+    ) -> Result<(VdafPrepState, VdafPrepMessage), DapError> {
+        let agg_id = usize::from(!is_leader);
+        match (&self.vdaf, &self.vdaf_verify_key) {
+            (VdafConfig::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
+                Ok(prio3_prepare_init(
+                    prio3_config,
+                    verify_key,
+                    agg_id,
+                    &report_id.0,
+                    public_share,
+                    input_share,
+                )?)
+            }
+            (VdafConfig::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
+                Ok(prio2_prepare_init(
+                    *dimension,
+                    verify_key,
+                    agg_id,
+                    &report_id.0,
+                    public_share,
+                    input_share,
+                )?)
+            }
+            _ => Err(fatal_error!(err = "VDAF verify key does not match config")),
+        }
+    }
 }
 
 impl AsRef<DapTaskConfig> for DapTaskConfig {
@@ -450,7 +484,7 @@ pub enum DapAggregateResult {
 /// The Leader's state after sending an AggregateInitReq.
 #[derive(Debug)]
 pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafState, VdafMessage, Time, ReportId)>,
+    pub(crate) seq: Vec<(VdafPrepState, VdafPrepMessage, Time, ReportId)>,
 }
 
 /// The Leader's state after sending an AggregateContReq.
@@ -463,7 +497,7 @@ pub struct DapLeaderUncommitted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DapHelperState {
     pub(crate) part_batch_sel: PartialBatchSelector,
-    pub(crate) seq: Vec<(VdafState, Time, ReportId)>,
+    pub(crate) seq: Vec<(VdafPrepState, Time, ReportId)>,
 }
 
 impl DapHelperState {
@@ -482,7 +516,7 @@ impl DapHelperState {
                 (VdafConfig::Prio3(prio3_config), _) => {
                     prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
                 }
-                (VdafConfig::Prio2 { .. }, VdafState::Prio2(state)) => {
+                (VdafConfig::Prio2 { .. }, VdafPrepState::Prio2(state)) => {
                     state.encode(&mut bytes);
                 }
                 _ => return Err(fatal_error!(err = "VDAF config and prep state mismatch")),

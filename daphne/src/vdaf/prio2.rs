@@ -5,7 +5,8 @@
 //! [VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
-    vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare, VdafMessage, VdafState,
+    vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare, VdafPrepMessage,
+    VdafPrepState,
 };
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
@@ -46,25 +47,28 @@ pub(crate) fn prio2_prepare_init(
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
-) -> Result<(VdafState, VdafMessage), VdafError> {
+) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
     let vdaf = Prio2::new(dimension)?;
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
     let (state, share) = vdaf.prepare_init(verify_key, agg_id, &(), nonce, &(), &input_share)?;
-    Ok((VdafState::Prio2(state), VdafMessage::Prio2Share(share)))
+    Ok((
+        VdafPrepState::Prio2(state),
+        VdafPrepMessage::Prio2Share(share),
+    ))
 }
 
 /// Consume the verifier shares and return the output share and serialized outbound message.
 pub(crate) fn prio2_leader_prepare_finish(
     dimension: usize,
-    leader_state: VdafState,
-    leader_share: VdafMessage,
+    leader_state: VdafPrepState,
+    leader_share: VdafPrepMessage,
     helper_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     let vdaf = Prio2::new(dimension)?;
     let (out_share, outbound) = match (leader_state, leader_share) {
-        (VdafState::Prio2(state), VdafMessage::Prio2Share(share)) => {
+        (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
             let helper_share =
                 Prio2PrepareShare::get_decoded_with_param(&state, helper_share_data)?;
             vdaf.prepare_preprocess([share, helper_share])?;
@@ -84,13 +88,13 @@ pub(crate) fn prio2_leader_prepare_finish(
 /// Consume the peer's prepare message and return an output share.
 pub(crate) fn prio2_helper_prepare_finish(
     dimension: usize,
-    helper_state: VdafState,
+    helper_state: VdafPrepState,
     leader_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
     let vdaf = Prio2::new(dimension)?;
     <()>::get_decoded(leader_message_data)?;
     let out_share = match helper_state {
-        VdafState::Prio2(state) => match vdaf.prepare_step(state, ())? {
+        VdafPrepState::Prio2(state) => match vdaf.prepare_step(state, ())? {
             PrepareTransition::Continue(..) => {
                 panic!("prio2_helper_prepare_finish: unexpected transition (continued)")
             }
@@ -107,18 +111,18 @@ pub(crate) fn prio2_decode_prepare_state(
     dimension: usize,
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,
-) -> Result<VdafState, VdafError> {
+) -> Result<VdafPrepState, VdafError> {
     let vdaf = Prio2::new(dimension)?;
-    Ok(VdafState::Prio2(Prio2PrepareState::decode_with_param(
+    Ok(VdafPrepState::Prio2(Prio2PrepareState::decode_with_param(
         &(&vdaf, agg_id),
         bytes,
     )?))
 }
 
 /// Encode `message` as a byte string.
-pub(crate) fn prio2_encode_prepare_message(message: &VdafMessage) -> Vec<u8> {
+pub(crate) fn prio2_encode_prepare_message(message: &VdafPrepMessage) -> Vec<u8> {
     match message {
-        VdafMessage::Prio2Share(message) => message.get_encoded(),
+        VdafPrepMessage::Prio2Share(message) => message.get_encoded(),
         _ => panic!("prio2_encode_prepare_message: unexpected message type"),
     }
 }

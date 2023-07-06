@@ -18,11 +18,11 @@ use crate::{
     vdaf::{
         prio2::{
             prio2_encode_prepare_message, prio2_helper_prepare_finish, prio2_leader_prepare_finish,
-            prio2_prepare_init, prio2_shard, prio2_unshard,
+            prio2_shard, prio2_unshard,
         },
         prio3::{
             prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-            prio3_prepare_init, prio3_shard, prio3_unshard,
+            prio3_shard, prio3_unshard,
         },
     },
     DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
@@ -75,15 +75,17 @@ impl AsRef<[u8]> for VdafVerifyKey {
     }
 }
 
+/// VDAF preparation state.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum VdafState {
+pub enum VdafPrepState {
     Prio2(Prio2PrepareState),
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
+/// VDAF preparation message.
 #[derive(Clone, Debug)]
-pub(crate) enum VdafMessage {
+pub enum VdafPrepMessage {
     Prio2Share(Prio2PrepareShare),
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
@@ -351,7 +353,7 @@ impl VdafConfig {
         metadata: &ReportMetadata,
         public_share: &[u8],
         encrypted_input_share: &HpkeCiphertext,
-    ) -> Result<(VdafState, VdafMessage), DapError> {
+    ) -> Result<(VdafPrepState, VdafPrepMessage), DapError> {
         if metadata.time >= task_config.expiration {
             return Err(DapError::Transition(TransitionFailure::TaskExpired));
         }
@@ -393,30 +395,7 @@ impl VdafConfig {
                 .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?,
         };
 
-        let agg_id = usize::from(!is_leader);
-        match (self, &task_config.vdaf_verify_key) {
-            (Self::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
-                Ok(prio3_prepare_init(
-                    prio3_config,
-                    verify_key,
-                    agg_id,
-                    &metadata.id.0,
-                    public_share,
-                    &input_share.payload,
-                )?)
-            }
-            (Self::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
-                Ok(prio2_prepare_init(
-                    *dimension,
-                    verify_key,
-                    agg_id,
-                    &metadata.id.0,
-                    public_share,
-                    &input_share.payload,
-                )?)
-            }
-            _ => Err(fatal_error!(err = "VDAF verify key does not match config")),
-        }
+        task_config.prep_init(is_leader, &metadata.id, public_share, &input_share.payload)
     }
 
     /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's

@@ -14,7 +14,7 @@ use crate::{
     testing::AggregationJobTest,
     DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
     DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapVersion, Prio3Config, VdafAggregateShare, VdafConfig, VdafMessage, VdafState,
+    DapVersion, Prio3Config, VdafAggregateShare, VdafConfig, VdafPrepMessage, VdafPrepState,
 };
 use assert_matches::assert_matches;
 use hpke_rs::HpkePublicKey;
@@ -114,10 +114,10 @@ async fn roundtrip_report(version: DapVersion) {
 
     match (leader_step, helper_step, leader_share, helper_share) {
         (
-            VdafState::Prio3Field64(leader_step),
-            VdafState::Prio3Field64(helper_step),
-            VdafMessage::Prio3ShareField64(leader_share),
-            VdafMessage::Prio3ShareField64(helper_share),
+            VdafPrepState::Prio3Field64(leader_step),
+            VdafPrepState::Prio3Field64(helper_step),
+            VdafPrepMessage::Prio3ShareField64(leader_share),
+            VdafPrepMessage::Prio3ShareField64(helper_share),
         ) => {
             let vdaf = Prio3::new_count(2).unwrap();
             let message = vdaf
