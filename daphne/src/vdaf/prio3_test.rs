@@ -4,8 +4,8 @@
 use crate::{
     vdaf::{
         prio3::{
-            prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-            prio3_prepare_init, prio3_shard, prio3_unshard,
+            prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_prepare_init,
+            prio3_shard, prio3_unshard,
         },
         VdafError,
     },
@@ -96,10 +96,12 @@ fn test_prepare(
         &encoded_input_shares[1],
     )?;
 
-    let helper_share_data = prio3_encode_prepare_message(&helper_share);
-
-    let (leader_out_share, leader_message_data) =
-        prio3_leader_prepare_finish(config, leader_state, leader_share, &helper_share_data)?;
+    let (leader_out_share, leader_message_data) = prio3_leader_prepare_finish(
+        config,
+        leader_state,
+        leader_share,
+        &helper_share.get_encoded(),
+    )?;
 
     let helper_out_share = prio3_helper_prepare_finish(config, helper_state, &leader_message_data)?;
 

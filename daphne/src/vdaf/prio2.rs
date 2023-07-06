@@ -119,14 +119,6 @@ pub(crate) fn prio2_decode_prepare_state(
     )?))
 }
 
-/// Encode `message` as a byte string.
-pub(crate) fn prio2_encode_prepare_message(message: &VdafPrepMessage) -> Vec<u8> {
-    match message {
-        VdafPrepMessage::Prio2Share(message) => message.get_encoded(),
-        _ => panic!("prio2_encode_prepare_message: unexpected message type"),
-    }
-}
-
 /// Interpret `encoded_agg_shares` as a sequence of encoded aggregate shares and unshard them.
 pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
     dimension: usize,

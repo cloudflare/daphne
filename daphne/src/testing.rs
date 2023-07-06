@@ -24,6 +24,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
+use prio::codec::Encode;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1396,13 +1397,8 @@ impl AggregationJobTest {
             .await else {
                 panic!("unexpected transition");
         };
-        let got = DapHelperState::get_decoded(
-            &self.task_config.vdaf,
-            &helper_state
-                .get_encoded(&self.task_config.vdaf)
-                .expect("failed to encode helper state"),
-        )
-        .expect("failed to decode helper state");
+        let got = DapHelperState::get_decoded(&self.task_config.vdaf, &helper_state.get_encoded())
+            .expect("failed to decode helper state");
         assert_eq!(got, helper_state);
 
         let DapLeaderTransition::Uncommitted(uncommitted, agg_cont) = self
