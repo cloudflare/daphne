@@ -27,7 +27,7 @@ use prio::{
     },
 };
 use rand::prelude::*;
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 impl<M: Debug> DapLeaderTransition<M> {
     pub(crate) fn unwrap_continue(self) -> (DapLeaderState, M) {
@@ -86,31 +86,33 @@ async fn roundtrip_report(version: DapVersion) {
         )
         .unwrap();
 
-    let (leader_step, leader_share) = TEST_VDAF
+    let leader_prep_input = TEST_VDAF
         .consume_report_share(
             &t.leader_hpke_receiver_config,
             true, // is_leader
             &t.task_id,
             &t.task_config,
-            &report.report_metadata,
-            &report.public_share,
+            Cow::Borrowed(&report.report_metadata),
+            Cow::Borrowed(&report.public_share),
             &report.encrypted_input_shares[0],
         )
         .await
         .unwrap();
+    let (leader_step, leader_share) = t.task_config.prep_init(true, &leader_prep_input).unwrap();
 
-    let (helper_step, helper_share) = TEST_VDAF
+    let helper_prep_input = TEST_VDAF
         .consume_report_share(
             &t.helper_hpke_receiver_config,
             false, // is_leader
             &t.task_id,
             &t.task_config,
-            &report.report_metadata,
-            &report.public_share,
+            Cow::Borrowed(&report.report_metadata),
+            Cow::Borrowed(&report.public_share),
             &report.encrypted_input_shares[1],
         )
         .await
         .unwrap();
+    let (helper_step, helper_share) = t.task_config.prep_init(false, &helper_prep_input).unwrap();
 
     match (leader_step, helper_step, leader_share, helper_share) {
         (
