@@ -70,6 +70,7 @@ use std::{
     fmt::{Debug, Display},
 };
 use url::Url;
+use vdaf::VdafPrepInput;
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -425,9 +426,7 @@ impl DapTaskConfig {
     pub fn prep_init(
         &self,
         is_leader: bool,
-        report_id: &ReportId,
-        public_share: &[u8],
-        input_share: &[u8],
+        prep_input: &VdafPrepInput,
     ) -> Result<(VdafPrepState, VdafPrepMessage), DapError> {
         let agg_id = usize::from(!is_leader);
         match (&self.vdaf, &self.vdaf_verify_key) {
@@ -436,9 +435,9 @@ impl DapTaskConfig {
                     prio3_config,
                     verify_key,
                     agg_id,
-                    &report_id.0,
-                    public_share,
-                    input_share,
+                    &prep_input.metadata.id.0,
+                    &prep_input.public_share,
+                    &prep_input.input_share,
                 )?)
             }
             (VdafConfig::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
@@ -446,9 +445,9 @@ impl DapTaskConfig {
                     *dimension,
                     verify_key,
                     agg_id,
-                    &report_id.0,
-                    public_share,
-                    input_share,
+                    &prep_input.metadata.id.0,
+                    &prep_input.public_share,
+                    &prep_input.input_share,
                 )?)
             }
             _ => Err(fatal_error!(err = "VDAF verify key does not match config")),

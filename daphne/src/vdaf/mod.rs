@@ -39,7 +39,7 @@ use prio::{
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::TryInto};
+use std::{borrow::Cow, collections::HashSet, convert::TryInto};
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
 const CTX_INPUT_SHARE_DRAFT04: &[u8] = b"dap-04 input share";
@@ -73,6 +73,14 @@ impl AsRef<[u8]> for VdafVerifyKey {
             Self::Prio2(ref bytes) => &bytes[..],
         }
     }
+}
+
+/// An Aggregator's inputs for VDAF preparation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VdafPrepInput<'req> {
+    pub(crate) public_share: Cow<'req, Vec<u8>>,
+    pub(crate) input_share: Vec<u8>,
+    pub(crate) metadata: Cow<'req, ReportMetadata>,
 }
 
 /// VDAF preparation state.
@@ -344,16 +352,16 @@ impl VdafConfig {
     ///
     /// * `version` is the DapVersion to use.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn consume_report_share(
+    pub(crate) async fn consume_report_share<'req>(
         &self,
         decrypter: &impl HpkeDecrypter,
         is_leader: bool,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        metadata: &ReportMetadata,
-        public_share: &[u8],
+        metadata: Cow<'req, ReportMetadata>,
+        public_share: Cow<'req, Vec<u8>>,
         encrypted_input_share: &HpkeCiphertext,
-    ) -> Result<(VdafPrepState, VdafPrepMessage), DapError> {
+    ) -> Result<VdafPrepInput<'req>, DapError> {
         if metadata.time >= task_config.expiration {
             return Err(DapError::Transition(TransitionFailure::TaskExpired));
         }
@@ -378,7 +386,7 @@ impl VdafConfig {
         task_id.encode(&mut aad);
         metadata.encode_with_param(&task_config.version, &mut aad);
         // TODO spec: Consider folding the public share into a field called "header".
-        encode_u32_bytes(&mut aad, public_share);
+        encode_u32_bytes(&mut aad, &public_share);
 
         let encoded_input_share = decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
@@ -395,7 +403,11 @@ impl VdafConfig {
                 .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?,
         };
 
-        task_config.prep_init(is_leader, &metadata.id, public_share, &input_share.payload)
+        Ok(VdafPrepInput {
+            public_share,
+            input_share: input_share.payload,
+            metadata,
+        })
     }
 
     /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
@@ -430,28 +442,40 @@ impl VdafConfig {
                 (it.next().unwrap(), it.next().unwrap())
             };
 
-            match self
+            let prep_input = match self
                 .consume_report_share(
                     decrypter,
-                    true, // is_leader
+                    true,
                     task_id,
                     task_config,
-                    &report.report_metadata,
-                    &report.public_share,
+                    Cow::Owned(report.report_metadata),
+                    Cow::Owned(report.public_share),
                     &leader_share,
                 )
                 .await
             {
-                Ok((step, message)) => {
+                Ok(prep_input) => prep_input,
+
+                // Skip report that can't be processed any further.
+                Err(DapError::Transition(failure)) => {
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    continue;
+                }
+
+                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
+            };
+
+            match task_config.prep_init(true, &prep_input) {
+                Ok((state, message)) => {
                     states.push((
-                        step,
+                        state,
                         message,
-                        report.report_metadata.time,
-                        report.report_metadata.id.clone(),
+                        prep_input.metadata.time,
+                        prep_input.metadata.id.clone(),
                     ));
                     seq.push(ReportShare {
-                        report_metadata: report.report_metadata,
-                        public_share: report.public_share,
+                        report_metadata: prep_input.metadata.into_owned(),
+                        public_share: prep_input.public_share.into_owned(),
                         encrypted_input_share: helper_share,
                     });
                 }
@@ -526,27 +550,43 @@ impl VdafConfig {
             }
             processed.insert(report_share.report_metadata.id.clone());
 
-            let var = match self
+            let prep_input = match self
                 .consume_report_share(
                     decrypter,
-                    false, // is_leader
+                    false,
                     task_id,
                     task_config,
-                    &report_share.report_metadata,
-                    &report_share.public_share,
+                    Cow::Borrowed(&report_share.report_metadata),
+                    Cow::Borrowed(&report_share.public_share),
                     &report_share.encrypted_input_share,
                 )
                 .await
             {
-                Ok((step, message)) => {
+                Ok(prep_input) => prep_input,
+
+                // Skip report that can't be processed any further.
+                Err(DapError::Transition(failure)) => {
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    transitions.push(Transition {
+                        report_id: report_share.report_metadata.id.clone(),
+                        var: TransitionVar::Failed(failure),
+                    });
+                    continue;
+                }
+
+                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
+            };
+
+            let var = match task_config.prep_init(false, &prep_input) {
+                Ok((state, message)) => {
                     let message_data = match self {
                         Self::Prio3(..) => prio3_encode_prepare_message(&message),
                         Self::Prio2 { .. } => prio2_encode_prepare_message(&message),
                     };
                     states.push((
-                        step,
-                        report_share.report_metadata.time,
-                        report_share.report_metadata.id.clone(),
+                        state,
+                        prep_input.metadata.time,
+                        prep_input.metadata.id.clone(),
                     ));
                     TransitionVar::Continued(message_data)
                 }
@@ -560,7 +600,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                report_id: report_share.report_metadata.id.clone(),
+                report_id: prep_input.metadata.into_owned().id,
                 var,
             });
         }
