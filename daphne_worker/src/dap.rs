@@ -954,7 +954,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
         helper_state: &DapHelperState,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
-        let helper_state_hex = hex::encode(helper_state.get_encoded(&task_config.as_ref().vdaf)?);
+        let helper_state_hex = hex::encode(helper_state.get_encoded());
         Ok(self
             .durable()
             .with_retry()

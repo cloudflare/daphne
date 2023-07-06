@@ -17,12 +17,10 @@ use crate::{
     metrics::ContextualizedDaphneMetrics,
     vdaf::{
         prio2::{
-            prio2_encode_prepare_message, prio2_helper_prepare_finish, prio2_leader_prepare_finish,
-            prio2_shard, prio2_unshard,
+            prio2_helper_prepare_finish, prio2_leader_prepare_finish, prio2_shard, prio2_unshard,
         },
         prio3::{
-            prio3_encode_prepare_message, prio3_helper_prepare_finish, prio3_leader_prepare_finish,
-            prio3_shard, prio3_unshard,
+            prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_shard, prio3_unshard,
         },
     },
     DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
@@ -30,7 +28,7 @@ use crate::{
     DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
 use prio::{
-    codec::{CodecError, Decode, Encode, ParameterizedEncode},
+    codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
         prio2::{Prio2PrepareShare, Prio2PrepareState},
@@ -40,6 +38,8 @@ use prio::{
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, convert::TryInto};
+
+use self::{prio2::prio2_decode_prepare_state, prio3::prio3_decode_prepare_state};
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
 const CTX_INPUT_SHARE_DRAFT04: &[u8] = b"dap-04 input share";
@@ -91,12 +91,48 @@ pub enum VdafPrepState {
     Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
+impl Encode for VdafPrepState {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::Prio3Field64(state) => state.encode(bytes),
+            Self::Prio3Field128(state) => state.encode(bytes),
+            Self::Prio2(state) => state.encode(bytes),
+        }
+    }
+}
+
+impl ParameterizedDecode<VdafConfig> for VdafPrepState {
+    fn decode_with_param(
+        vdaf_config: &VdafConfig,
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        match vdaf_config {
+            VdafConfig::Prio3(ref prio3_config) => {
+                Ok(prio3_decode_prepare_state(prio3_config, 1, bytes)
+                    .map_err(|e| CodecError::Other(Box::new(e)))?)
+            }
+            VdafConfig::Prio2 { dimension } => Ok(prio2_decode_prepare_state(*dimension, 1, bytes)
+                .map_err(|e| CodecError::Other(Box::new(e)))?),
+        }
+    }
+}
+
 /// VDAF preparation message.
 #[derive(Clone, Debug)]
 pub enum VdafPrepMessage {
     Prio2Share(Prio2PrepareShare),
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
+}
+
+impl Encode for VdafPrepMessage {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::Prio3ShareField64(share) => share.encode(bytes),
+            Self::Prio3ShareField128(share) => share.encode(bytes),
+            Self::Prio2Share(share) => share.encode(bytes),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -579,16 +615,12 @@ impl VdafConfig {
 
             let var = match task_config.prep_init(false, &prep_input) {
                 Ok((state, message)) => {
-                    let message_data = match self {
-                        Self::Prio3(..) => prio3_encode_prepare_message(&message),
-                        Self::Prio2 { .. } => prio2_encode_prepare_message(&message),
-                    };
                     states.push((
                         state,
                         prep_input.metadata.time,
                         prep_input.metadata.id.clone(),
                     ));
-                    TransitionVar::Continued(message_data)
+                    TransitionVar::Continued(message.get_encoded())
                 }
 
                 Err(DapError::Transition(failure)) => {

@@ -302,26 +302,6 @@ pub(crate) fn prio3_helper_prepare_finish(
     Ok(agg_share)
 }
 
-/// Interpret `step` as a prepare message for prio3 and append it to `bytes`. Returns an error if
-/// the `step` is not compatible with `param`.
-pub(crate) fn prio3_append_prepare_state(
-    bytes: &mut Vec<u8>,
-    config: &Prio3Config,
-    state: &VdafPrepState,
-) -> Result<(), VdafError> {
-    match (&config, state) {
-        (Prio3Config::Count, VdafPrepState::Prio3Field64(state)) => {
-            state.encode(bytes);
-        }
-        (Prio3Config::Histogram { buckets: _ }, VdafPrepState::Prio3Field128(state))
-        | (Prio3Config::Sum { bits: _ }, VdafPrepState::Prio3Field128(state)) => {
-            state.encode(bytes);
-        }
-        _ => panic!("prio3_append_prepare_state: {ERR_FIELD_TYPE}"),
-    }
-    Ok(())
-}
-
 /// Parse a prio3 prepare message from the front of `reader` whose type is compatible with `param`.
 pub(crate) fn prio3_decode_prepare_state(
     config: &Prio3Config,
@@ -353,15 +333,6 @@ pub(crate) fn prio3_decode_prepare_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
-    }
-}
-
-/// Encode `message` as a byte string.
-pub(crate) fn prio3_encode_prepare_message(message: &VdafPrepMessage) -> Vec<u8> {
-    match message {
-        VdafPrepMessage::Prio3ShareField64(message) => message.get_encoded(),
-        VdafPrepMessage::Prio3ShareField128(message) => message.get_encoded(),
-        _ => panic!("prio3_encode_prepare_message: unexpected message type"),
     }
 }
 

@@ -20,6 +20,7 @@ use assert_matches::assert_matches;
 use hpke_rs::HpkePublicKey;
 use paste::paste;
 use prio::{
+    codec::Encode,
     field::Field64,
     vdaf::{
         prio3::Prio3, Aggregatable, AggregateShare, Aggregator as VdafAggregator,
@@ -718,8 +719,7 @@ async fn helper_state_serialization(version: DapVersion) {
         .await
         .unwrap_continue();
 
-    let got =
-        DapHelperState::get_decoded(TEST_VDAF, &want.get_encoded(TEST_VDAF).unwrap()).unwrap();
+    let got = DapHelperState::get_decoded(TEST_VDAF, &want.get_encoded()).unwrap();
     assert_eq!(got, want);
 
     assert!(DapHelperState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())

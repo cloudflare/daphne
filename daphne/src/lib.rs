@@ -47,9 +47,8 @@ use crate::{
     },
     taskprov::TaskprovVersion,
     vdaf::{
-        prio2::{prio2_decode_prepare_state, prio2_prepare_init},
-        prio3::{prio3_append_prepare_state, prio3_decode_prepare_state, prio3_prepare_init},
-        VdafAggregateShare, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+        prio2::prio2_prepare_init, prio3::prio3_prepare_init, VdafAggregateShare, VdafPrepMessage,
+        VdafPrepState, VdafVerifyKey,
     },
 };
 use constants::DapMediaType;
@@ -58,7 +57,7 @@ use criterion as _;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use prio::{
-    codec::{Decode, Encode},
+    codec::{Decode, Encode, ParameterizedDecode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 use rand::prelude::*;
@@ -499,33 +498,18 @@ pub struct DapHelperState {
     pub(crate) seq: Vec<(VdafPrepState, Time, ReportId)>,
 }
 
-impl DapHelperState {
-    /// Encode the Helper state as a byte string.
-    ///
-    /// This method is used by the Helper in order to offload its state to the Leader. For
-    /// example, it might encrypt the output and add the ciphertext to an outgoing aggregate
-    /// response.
-    ///
-    /// Note that the encoding format is not specified by the DAP standard.
-    pub fn get_encoded(&self, vdaf_config: &VdafConfig) -> Result<Vec<u8>, DapError> {
-        let mut bytes = vec![];
-        self.part_batch_sel.encode(&mut bytes);
+impl Encode for DapHelperState {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        self.part_batch_sel.encode(bytes);
         for (state, time, report_id) in self.seq.iter() {
-            match (vdaf_config, state) {
-                (VdafConfig::Prio3(prio3_config), _) => {
-                    prio3_append_prepare_state(&mut bytes, prio3_config, state)?;
-                }
-                (VdafConfig::Prio2 { .. }, VdafPrepState::Prio2(state)) => {
-                    state.encode(&mut bytes);
-                }
-                _ => return Err(fatal_error!(err = "VDAF config and prep state mismatch")),
-            }
-            time.encode(&mut bytes);
-            report_id.encode(&mut bytes);
+            state.encode(bytes);
+            time.encode(bytes);
+            report_id.encode(bytes);
         }
-        Ok(bytes)
     }
+}
 
+impl DapHelperState {
     /// Decode the Helper state from a byte string.
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut r = std::io::Cursor::new(data);
@@ -533,14 +517,8 @@ impl DapHelperState {
             .map_err(|e| DapAbort::from_codec_error(e, None))?;
         let mut seq = vec![];
         while (r.position() as usize) < data.len() {
-            let state = match vdaf_config {
-                VdafConfig::Prio3(ref prio3_config) => {
-                    prio3_decode_prepare_state(prio3_config, 1, &mut r)?
-                }
-                VdafConfig::Prio2 { dimension } => {
-                    prio2_decode_prepare_state(*dimension, 1, &mut r)?
-                }
-            };
+            let state = VdafPrepState::decode_with_param(vdaf_config, &mut r)
+                .map_err(|e| DapAbort::from_codec_error(e, None))?;
             let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             let report_id =
                 ReportId::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
