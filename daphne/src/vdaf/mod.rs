@@ -17,10 +17,12 @@ use crate::{
     metrics::ContextualizedDaphneMetrics,
     vdaf::{
         prio2::{
-            prio2_helper_prepare_finish, prio2_leader_prepare_finish, prio2_shard, prio2_unshard,
+            prio2_helper_prepare_finish, prio2_leader_prepare_finish, prio2_prepare_init,
+            prio2_shard, prio2_unshard,
         },
         prio3::{
-            prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_shard, prio3_unshard,
+            prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_prepare_init,
+            prio3_shard, prio3_unshard,
         },
     },
     DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
@@ -75,12 +77,142 @@ impl AsRef<[u8]> for VdafVerifyKey {
     }
 }
 
-/// An Aggregator's inputs for VDAF preparation.
+/// Report state during aggregation initialization after consuming the report share. This involves
+/// decryption as well a few validation steps.
 #[derive(Clone, Debug, PartialEq)]
-pub struct VdafPrepInput<'req> {
-    pub(crate) public_share: Cow<'req, Vec<u8>>,
-    pub(crate) input_share: Vec<u8>,
-    pub(crate) metadata: Cow<'req, ReportMetadata>,
+pub enum EarlyReportStateConsumed<'req> {
+    Ready {
+        metadata: Cow<'req, ReportMetadata>,
+        public_share: Cow<'req, [u8]>,
+        input_share: Vec<u8>,
+    },
+    Rejected(TransitionFailure),
+}
+
+impl<'req> EarlyReportStateConsumed<'req> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn consume(
+        decrypter: &impl HpkeDecrypter,
+        is_leader: bool,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        metadata: &'req ReportMetadata,
+        public_share: &'req [u8],
+        encrypted_input_share: &HpkeCiphertext,
+    ) -> Result<EarlyReportStateConsumed<'req>, DapError> {
+        if metadata.time >= task_config.expiration {
+            return Ok(Self::Rejected(TransitionFailure::TaskExpired));
+        }
+
+        let input_share_text = match task_config.version {
+            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
+            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
+            _ => return Err(unimplemented_version()),
+        };
+        let n: usize = input_share_text.len();
+        let mut info = Vec::new();
+        info.reserve(n + 2);
+        info.extend_from_slice(input_share_text);
+        info.push(CTX_ROLE_CLIENT); // Sender role (receiver role set below)
+        info.push(if is_leader {
+            CTX_ROLE_LEADER
+        } else {
+            CTX_ROLE_HELPER
+        }); // Receiver role
+
+        let mut aad = Vec::with_capacity(58);
+        task_id.encode(&mut aad);
+        metadata.encode_with_param(&task_config.version, &mut aad);
+        // TODO spec: Consider folding the public share into a field called "header".
+        encode_u32_bytes(&mut aad, public_share);
+
+        let encoded_input_share = match decrypter
+            .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
+            .await
+        {
+            Ok(encoded_input_share) => encoded_input_share,
+            Err(DapError::Transition(failure)) => return Ok(Self::Rejected(failure)),
+            Err(e) => return Err(e),
+        };
+
+        // For Draft02, the encoded input share is the VDAF-specific payload, but for Draft03 and
+        // later it is a serialized PlaintextInputShare.  For simplicity in later code, we wrap the Draft02
+        // payload into a PlaintextInputShare.
+        let input_share = match task_config.version {
+            DapVersion::Draft02 => PlaintextInputShare {
+                extensions: vec![],
+                payload: encoded_input_share,
+            },
+            DapVersion::Draft04 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
+                Ok(input_share) => input_share,
+                Err(..) => return Ok(Self::Rejected(TransitionFailure::UnrecognizedMessage)),
+            },
+            _ => return Err(unimplemented_version()),
+        };
+
+        Ok(Self::Ready {
+            metadata: Cow::Borrowed(metadata),
+            public_share: Cow::Borrowed(public_share),
+            input_share: input_share.payload,
+        })
+    }
+}
+
+/// Report state during aggregation initialization after the VDAF preparation step.
+pub enum EarlyReportStateInitialized {
+    Ready {
+        state: VdafPrepState,
+        message: VdafPrepMessage,
+    },
+    Rejected(TransitionFailure),
+}
+
+impl EarlyReportStateInitialized {
+    pub(crate) fn initialize(
+        is_leader: bool,
+        task_config: &DapTaskConfig,
+        early_report_state_consumed: EarlyReportStateConsumed,
+    ) -> Result<Self, DapError> {
+        let (metadata, public_share, input_share) = match early_report_state_consumed {
+            EarlyReportStateConsumed::Ready {
+                metadata,
+                public_share,
+                input_share,
+            } => (metadata, public_share, input_share),
+            EarlyReportStateConsumed::Rejected(failure) => return Ok(Self::Rejected(failure)),
+        };
+
+        let agg_id = usize::from(!is_leader);
+        let res = match (&task_config.vdaf, &task_config.vdaf_verify_key) {
+            (VdafConfig::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
+                prio3_prepare_init(
+                    prio3_config,
+                    verify_key,
+                    agg_id,
+                    &metadata.as_ref().id.0,
+                    public_share.as_ref(),
+                    input_share.as_ref(),
+                )
+            }
+            (VdafConfig::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
+                prio2_prepare_init(
+                    *dimension,
+                    verify_key,
+                    agg_id,
+                    &metadata.as_ref().id.0,
+                    public_share.as_ref(),
+                    input_share.as_ref(),
+                )
+            }
+            _ => return Err(fatal_error!(err = "VDAF verify key does not match config")),
+        };
+
+        let early_report_state_initialized = match res {
+            Ok((state, message)) => Self::Ready { state, message },
+            Err(..) => Self::Rejected(TransitionFailure::VdafPrepError),
+        };
+        Ok(early_report_state_initialized)
+    }
 }
 
 /// VDAF preparation state.
@@ -371,81 +503,6 @@ impl VdafConfig {
         )
     }
 
-    /// Consume a report share sent by the Client and return the initial Prepare step. This is run
-    /// by each Aggregator.
-    ///
-    /// # Inputs
-    ///
-    /// * `decryptor` is used to decrypt the input share.
-    ///
-    /// * `verify_key` is the secret VDAF verification key shared by the Aggregators.
-    ///
-    /// * `task_id` is the DAP task ID indicated by the report.
-    ///
-    /// * `report_id` is the report ID.
-    ///
-    /// * `encrypted_input_share` is the encrypted input share.
-    ///
-    /// * `version` is the DapVersion to use.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn consume_report_share<'req>(
-        &self,
-        decrypter: &impl HpkeDecrypter,
-        is_leader: bool,
-        task_id: &TaskId,
-        task_config: &DapTaskConfig,
-        metadata: Cow<'req, ReportMetadata>,
-        public_share: Cow<'req, Vec<u8>>,
-        encrypted_input_share: &HpkeCiphertext,
-    ) -> Result<VdafPrepInput<'req>, DapError> {
-        if metadata.time >= task_config.expiration {
-            return Err(DapError::Transition(TransitionFailure::TaskExpired));
-        }
-
-        let input_share_text = match task_config.version {
-            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
-            _ => return Err(unimplemented_version()),
-        };
-        let n: usize = input_share_text.len();
-        let mut info = Vec::new();
-        info.reserve(n + 2);
-        info.extend_from_slice(input_share_text);
-        info.push(CTX_ROLE_CLIENT); // Sender role (receiver role set below)
-        info.push(if is_leader {
-            CTX_ROLE_LEADER
-        } else {
-            CTX_ROLE_HELPER
-        }); // Receiver role
-
-        let mut aad = Vec::with_capacity(58);
-        task_id.encode(&mut aad);
-        metadata.encode_with_param(&task_config.version, &mut aad);
-        // TODO spec: Consider folding the public share into a field called "header".
-        encode_u32_bytes(&mut aad, &public_share);
-
-        let encoded_input_share = decrypter
-            .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
-            .await?;
-        // For Draft02, the encoded input share is the VDAF-specific payload, but for Draft03 and
-        // later it is a serialized PlaintextInputShare.  For simplicity in later code, we wrap the Draft02
-        // payload into a PlaintextInputShare.
-        let input_share = match task_config.version {
-            DapVersion::Draft02 => PlaintextInputShare {
-                extensions: vec![],
-                payload: encoded_input_share,
-            },
-            _ => PlaintextInputShare::get_decoded(&encoded_input_share)
-                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?,
-        };
-
-        Ok(VdafPrepInput {
-            public_share,
-            input_share: input_share.payload,
-            metadata,
-        })
-    }
-
     /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the initial aggregate request to be sent to the Helper.
     /// This method is called by the Leader.
@@ -478,51 +535,44 @@ impl VdafConfig {
                 (it.next().unwrap(), it.next().unwrap())
             };
 
-            let prep_input = match self
-                .consume_report_share(
-                    decrypter,
-                    true,
-                    task_id,
-                    task_config,
-                    Cow::Owned(report.report_metadata),
-                    Cow::Owned(report.public_share),
-                    &leader_share,
-                )
-                .await
-            {
-                Ok(prep_input) => prep_input,
+            let early_report_state_consumed = EarlyReportStateConsumed::consume(
+                decrypter,
+                true,
+                task_id,
+                task_config,
+                &report.report_metadata,
+                &report.public_share,
+                &leader_share,
+            )
+            .await?;
 
-                // Skip report that can't be processed any further.
-                Err(DapError::Transition(failure)) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                    continue;
-                }
+            let early_report_state_initialized = EarlyReportStateInitialized::initialize(
+                true,
+                task_config,
+                early_report_state_consumed,
+            )?;
 
-                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
-            };
-
-            match task_config.prep_init(true, &prep_input) {
-                Ok((state, message)) => {
+            match early_report_state_initialized {
+                EarlyReportStateInitialized::Ready { state, message } => {
                     states.push((
                         state,
                         message,
-                        prep_input.metadata.time,
-                        prep_input.metadata.id.clone(),
+                        report.report_metadata.time,
+                        report.report_metadata.id.clone(),
                     ));
                     seq.push(ReportShare {
-                        report_metadata: prep_input.metadata.into_owned(),
-                        public_share: prep_input.public_share.into_owned(),
+                        report_metadata: report.report_metadata,
+                        public_share: report.public_share,
                         encrypted_input_share: helper_share,
                     });
                 }
 
-                // Skip report that can't be processed any further.
-                Err(DapError::Transition(failure)) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1)
+                EarlyReportStateInitialized::Rejected(failure) => {
+                    // Skip report that can't be processed any further.
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    continue;
                 }
-
-                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
-            };
+            }
         }
 
         if seq.is_empty() {
@@ -586,53 +636,41 @@ impl VdafConfig {
             }
             processed.insert(report_share.report_metadata.id.clone());
 
-            let prep_input = match self
-                .consume_report_share(
-                    decrypter,
-                    false,
-                    task_id,
-                    task_config,
-                    Cow::Borrowed(&report_share.report_metadata),
-                    Cow::Borrowed(&report_share.public_share),
-                    &report_share.encrypted_input_share,
-                )
-                .await
-            {
-                Ok(prep_input) => prep_input,
+            let early_report_state_consumed = EarlyReportStateConsumed::consume(
+                decrypter,
+                false,
+                task_id,
+                task_config,
+                &report_share.report_metadata,
+                &report_share.public_share,
+                &report_share.encrypted_input_share,
+            )
+            .await?;
 
-                // Skip report that can't be processed any further.
-                Err(DapError::Transition(failure)) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                    transitions.push(Transition {
-                        report_id: report_share.report_metadata.id.clone(),
-                        var: TransitionVar::Failed(failure),
-                    });
-                    continue;
-                }
+            let early_report_state_initialized = EarlyReportStateInitialized::initialize(
+                false,
+                task_config,
+                early_report_state_consumed,
+            )?;
 
-                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
-            };
-
-            let var = match task_config.prep_init(false, &prep_input) {
-                Ok((state, message)) => {
+            let var = match early_report_state_initialized {
+                EarlyReportStateInitialized::Ready { state, message } => {
                     states.push((
                         state,
-                        prep_input.metadata.time,
-                        prep_input.metadata.id.clone(),
+                        report_share.report_metadata.time,
+                        report_share.report_metadata.id.clone(),
                     ));
                     TransitionVar::Continued(message.get_encoded())
                 }
 
-                Err(DapError::Transition(failure)) => {
+                EarlyReportStateInitialized::Rejected(failure) => {
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                     TransitionVar::Failed(failure)
                 }
-
-                Err(e) => return Err(DapAbort::Internal(Box::new(e))),
             };
 
             transitions.push(Transition {
-                report_id: prep_input.metadata.into_owned().id,
+                report_id: report_share.report_metadata.id.clone(),
                 var,
             });
         }
