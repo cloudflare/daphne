@@ -28,7 +28,9 @@ use prio::{
     },
 };
 use rand::prelude::*;
-use std::{borrow::Cow, fmt::Debug};
+use std::fmt::Debug;
+
+use super::{EarlyReportStateConsumed, EarlyReportStateInitialized};
 
 impl<M: Debug> DapLeaderTransition<M> {
     pub(crate) fn unwrap_continue(self) -> (DapLeaderState, M) {
@@ -87,33 +89,37 @@ async fn roundtrip_report(version: DapVersion) {
         )
         .unwrap();
 
-    let leader_prep_input = TEST_VDAF
-        .consume_report_share(
-            &t.leader_hpke_receiver_config,
-            true, // is_leader
-            &t.task_id,
-            &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
-            &report.encrypted_input_shares[0],
-        )
-        .await
-        .unwrap();
-    let (leader_step, leader_share) = t.task_config.prep_init(true, &leader_prep_input).unwrap();
+    let early_report_state_consumed = EarlyReportStateConsumed::consume(
+        &t.leader_hpke_receiver_config,
+        true, // is_leader
+        &t.task_id,
+        &t.task_config,
+        &report.report_metadata,
+        &report.public_share,
+        &report.encrypted_input_shares[0],
+    )
+    .await
+    .unwrap();
+    let EarlyReportStateInitialized::Ready{ state: leader_step, message: leader_share } =
+        EarlyReportStateInitialized::initialize(true, &t.task_config, early_report_state_consumed).unwrap() else {
+        panic!("rejected unexpectedly");
+    };
 
-    let helper_prep_input = TEST_VDAF
-        .consume_report_share(
-            &t.helper_hpke_receiver_config,
-            false, // is_leader
-            &t.task_id,
-            &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
-            &report.encrypted_input_shares[1],
-        )
-        .await
-        .unwrap();
-    let (helper_step, helper_share) = t.task_config.prep_init(false, &helper_prep_input).unwrap();
+    let early_report_state_consumed = EarlyReportStateConsumed::consume(
+        &t.helper_hpke_receiver_config,
+        false, // is_helper
+        &t.task_id,
+        &t.task_config,
+        &report.report_metadata,
+        &report.public_share,
+        &report.encrypted_input_shares[1],
+    )
+    .await
+    .unwrap();
+    let EarlyReportStateInitialized::Ready{ state: helper_step, message: helper_share } =
+        EarlyReportStateInitialized::initialize(false, &t.task_config, early_report_state_consumed).unwrap() else {
+        panic!("rejected unexpectedly");
+    };
 
     match (leader_step, helper_step, leader_share, helper_share) {
         (
