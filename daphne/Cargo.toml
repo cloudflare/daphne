@@ -27,9 +27,9 @@ async-trait.workspace = true
 base64 = "0.21.2"
 futures.workspace = true
 hex.workspace = true
-hpke-rs = { workspace = true , features = ["hazmat", "serialization"] }
-hpke-rs-crypto = { version = "0.1.1" }
-hpke-rs-rust-crypto = { version = "0.1.1"}
+hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
+hpke-rs-crypto.workspace = true
+hpke-rs-rust-crypto.workspace = true
 prio = { workspace = true, features = ["prio2"] }
 prometheus.workspace = true
 rand.workspace = true
