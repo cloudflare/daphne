@@ -16,7 +16,8 @@ use crate::{
         ReportMetadata, TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader},
+    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
+    vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAbort, DapAggregateResult, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
     DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition,
     DapLeaderUncommitted, DapMeasurement, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
@@ -356,6 +357,66 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait(?Send)]
+impl DapReportInitializer for MockAggregator {
+    async fn initialize_reports<'req>(
+        &self,
+        is_leader: bool,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        part_batch_sel: &PartialBatchSelector,
+        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
+    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        let span = task_config.batch_span_for_meta(
+            part_batch_sel,
+            consumed_reports.iter().filter(|report| report.is_ready()),
+        )?;
+
+        let mut early_fails = HashMap::new();
+        for (bucket, reports_consumed_per_bucket) in span.iter() {
+            for metadata in reports_consumed_per_bucket
+                .iter()
+                .map(|report| report.metadata())
+            {
+                // Check whether Report has been collected or replayed.
+                if let Some(transition_failure) = self
+                    .check_report_early_fail(task_id, &bucket.to_owned_bucket(), metadata)
+                    .await
+                {
+                    early_fails.insert(metadata.id.clone(), transition_failure);
+                };
+
+                // Mark report processed.
+                let mut guard = self
+                    .report_store
+                    .lock()
+                    .expect("report_store: failed to lock");
+                let report_store = guard.entry(task_id.clone()).or_default();
+                report_store.processed.insert(metadata.id.clone());
+            }
+        }
+
+        Ok(consumed_reports
+            .into_iter()
+            .map(|consumed| {
+                if let Some(failure) = early_fails.get(&consumed.metadata().id) {
+                    Ok(EarlyReportStateInitialized::Rejected {
+                        metadata: Cow::Owned(consumed.metadata().clone()),
+                        failure: *failure,
+                    })
+                } else {
+                    EarlyReportStateInitialized::initialize(
+                        is_leader,
+                        &task_config.vdaf_verify_key,
+                        &task_config.vdaf,
+                        consumed,
+                    )
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+#[async_trait(?Send)]
 impl DapAggregator<BearerToken> for MockAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
     // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
@@ -506,42 +567,6 @@ impl DapAggregator<BearerToken> for MockAggregator {
         }
 
         Ok(agg_share)
-    }
-
-    async fn check_early_reject(
-        &self,
-        task_id: &TaskId,
-        part_batch_sel: &PartialBatchSelector,
-        report_meta: impl Iterator<Item = &ReportMetadata>,
-    ) -> Result<HashMap<ReportId, TransitionFailure>, DapError> {
-        let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
-            .await
-            .unwrap()
-            .expect("tasks: unrecognized task");
-        let span = task_config.batch_span_for_meta(part_batch_sel, report_meta)?;
-        let mut early_fails = HashMap::new();
-        for (bucket, report_meta) in span.iter() {
-            for metadata in report_meta.iter() {
-                // Check whether Report has been collected or replayed.
-                if let Some(transition_failure) = self
-                    .check_report_early_fail(task_id, &bucket.to_owned_bucket(), metadata)
-                    .await
-                {
-                    early_fails.insert(metadata.id.clone(), transition_failure);
-                };
-
-                // Mark report processed.
-                let mut guard = self
-                    .report_store
-                    .lock()
-                    .expect("report_store: failed to lock");
-                let report_store = guard.entry(task_id.clone()).or_default();
-                report_store.processed.insert(metadata.id.clone());
-            }
-        }
-
-        Ok(early_fails)
     }
 
     async fn mark_collected(
@@ -1086,6 +1111,49 @@ pub struct AggregationJobTest {
     pub(crate) prometheus_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphneMetrics,
     pub(crate) helper_metrics: DaphneMetrics,
+    pub(crate) leader_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
+    pub(crate) helper_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
+}
+
+// NOTE(cjpatton) This implementation of the report initializer is not feature complete. Since
+// [`AggrregationJobTest`], is only used to test the aggregation flow, features that are not
+// directly relevant to the tests aren't implemented.
+#[async_trait(?Send)]
+impl DapReportInitializer for AggregationJobTest {
+    async fn initialize_reports<'req>(
+        &self,
+        is_leader: bool,
+        _task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        _part_batch_sel: &PartialBatchSelector,
+        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
+    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        let mut reports_processed = if is_leader {
+            self.leader_reports_processed.lock().unwrap()
+        } else {
+            self.helper_reports_processed.lock().unwrap()
+        };
+
+        Ok(consumed_reports
+            .into_iter()
+            .map(|consumed| {
+                if reports_processed.contains(&consumed.metadata().id) {
+                    Ok(EarlyReportStateInitialized::Rejected {
+                        metadata: Cow::Owned(consumed.metadata().clone()),
+                        failure: TransitionFailure::ReportReplayed,
+                    })
+                } else {
+                    reports_processed.insert(consumed.metadata().id.clone());
+                    EarlyReportStateInitialized::initialize(
+                        is_leader,
+                        &task_config.vdaf_verify_key,
+                        &task_config.vdaf,
+                        consumed,
+                    )
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 impl AggregationJobTest {
@@ -1136,6 +1204,8 @@ impl AggregationJobTest {
             prometheus_registry,
             leader_metrics,
             helper_metrics,
+            leader_reports_processed: Default::default(),
+            helper_reports_processed: Default::default(),
         }
     }
 
@@ -1176,6 +1246,7 @@ impl AggregationJobTest {
             .vdaf
             .produce_agg_job_init_req(
                 &self.leader_hpke_receiver_config,
+                self,
                 &self.task_id,
                 &self.task_config,
                 &self.agg_job_id,
@@ -1201,6 +1272,7 @@ impl AggregationJobTest {
             .vdaf
             .handle_agg_job_init_req(
                 &self.helper_hpke_receiver_config,
+                self,
                 &self.task_id,
                 &self.task_config,
                 agg_job_init_req,

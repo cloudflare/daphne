@@ -42,8 +42,7 @@ use crate::{
     hpke::HpkeReceiverConfig,
     messages::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
-        Draft02AggregationJobId, Duration, Interval, PartialBatchSelector, ReportId,
-        ReportMetadata, TaskId, Time,
+        Draft02AggregationJobId, Duration, Interval, PartialBatchSelector, ReportId, TaskId, Time,
     },
     taskprov::TaskprovVersion,
     vdaf::{VdafAggregateShare, VdafPrepMessage, VdafPrepState, VdafVerifyKey},
@@ -66,6 +65,7 @@ use std::{
     fmt::{Debug, Display},
 };
 use url::Url;
+use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -364,12 +364,13 @@ impl DapTaskConfig {
         }
     }
 
-    /// Return the batch span of a set of reports with the given metadata.
+    /// Return the batch span of a set of reports.
     pub fn batch_span_for_meta<'sel, 'rep>(
         &self,
         part_batch_sel: &'sel PartialBatchSelector,
-        report_meta: impl Iterator<Item = &'rep ReportMetadata>,
-    ) -> Result<HashMap<DapBatchBucket<'sel>, Vec<&'rep ReportMetadata>>, DapError> {
+        consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed<'rep>>,
+    ) -> Result<HashMap<DapBatchBucket<'sel>, Vec<&'rep EarlyReportStateConsumed<'rep>>>, DapError>
+    {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
                 err = "partial batch selector not compatible with task",
@@ -377,18 +378,19 @@ impl DapTaskConfig {
         }
 
         let mut span: HashMap<_, Vec<_>> = HashMap::new();
-        for metadata in report_meta {
+        for consumed_report in consumed_reports.filter(|consumed_report| consumed_report.is_ready())
+        {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                    batch_window: self.quantized_time_lower_bound(metadata.time),
+                    batch_window: self.quantized_time_lower_bound(consumed_report.metadata().time),
                 },
                 PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
                     DapBatchBucket::FixedSize { batch_id }
                 }
             };
 
-            let report_ids = span.entry(bucket).or_default();
-            report_ids.push(metadata);
+            let consumed_reports_per_bucket = span.entry(bucket).or_default();
+            consumed_reports_per_bucket.push(consumed_report);
         }
 
         Ok(span)
@@ -481,7 +483,7 @@ impl DapHelperState {
             .map_err(|e| DapAbort::from_codec_error(e, None))?;
         let mut seq = vec![];
         while (r.position() as usize) < data.len() {
-            let state = VdafPrepState::decode_with_param(vdaf_config, &mut r)
+            let state = VdafPrepState::decode_with_param(&(vdaf_config, false), &mut r)
                 .map_err(|e| DapAbort::from_codec_error(e, None))?;
             let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             let report_id =

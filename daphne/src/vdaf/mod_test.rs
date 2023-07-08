@@ -28,7 +28,7 @@ use prio::{
     },
 };
 use rand::prelude::*;
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 use super::{EarlyReportStateConsumed, EarlyReportStateInitialized};
 
@@ -94,14 +94,14 @@ async fn roundtrip_report(version: DapVersion) {
         true, // is_leader
         &t.task_id,
         &t.task_config,
-        &report.report_metadata,
-        &report.public_share,
+        Cow::Borrowed(&report.report_metadata),
+        Cow::Borrowed(&report.public_share),
         &report.encrypted_input_shares[0],
     )
     .await
     .unwrap();
-    let EarlyReportStateInitialized::Ready{ state: leader_step, message: leader_share } =
-        EarlyReportStateInitialized::initialize(true, &t.task_config, early_report_state_consumed).unwrap() else {
+    let EarlyReportStateInitialized::Ready{ state: leader_step, message: leader_share, .. } =
+        EarlyReportStateInitialized::initialize(true, &t.task_config.vdaf_verify_key, &t.task_config.vdaf, early_report_state_consumed).unwrap() else {
         panic!("rejected unexpectedly");
     };
 
@@ -110,14 +110,14 @@ async fn roundtrip_report(version: DapVersion) {
         false, // is_helper
         &t.task_id,
         &t.task_config,
-        &report.report_metadata,
-        &report.public_share,
+        Cow::Borrowed(&report.report_metadata),
+        Cow::Borrowed(&report.public_share),
         &report.encrypted_input_shares[1],
     )
     .await
     .unwrap();
-    let EarlyReportStateInitialized::Ready{ state: helper_step, message: helper_share } =
-        EarlyReportStateInitialized::initialize(false, &t.task_config, early_report_state_consumed).unwrap() else {
+    let EarlyReportStateInitialized::Ready{ state: helper_step, message: helper_share, .. } =
+        EarlyReportStateInitialized::initialize(false, &t.task_config.vdaf_verify_key, &t.task_config.vdaf, early_report_state_consumed).unwrap() else {
         panic!("rejected unexpectedly");
     };
 
