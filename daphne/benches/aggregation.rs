@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use daphne::{
     hpke::HpkeKemId, testing::AggregationJobTest, DapLeaderTransition, DapMeasurement, DapVersion,
     Prio3Config, VdafConfig,
@@ -45,10 +45,10 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
         });
 
         c.bench_function(&format!("handle_agg_job_init_req {vdaf:?}"), |b| {
+            // XXX Benchmarks have "improved" by 1000%. Obviously there is some sort of measurement
+            // issue going on...
             b.to_async(&rt).iter(|| async {
-                agg_job_test
-                    .handle_agg_job_init_req(&agg_job_init_req)
-                    .await
+                black_box(agg_job_test.handle_agg_job_init_req(&agg_job_init_req)).await
             })
         });
     }

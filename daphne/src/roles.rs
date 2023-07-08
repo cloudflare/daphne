@@ -12,14 +12,15 @@ use crate::{
         constant_time_eq, decode_base64url, AggregateShare, AggregateShareReq,
         AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchId,
         BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeConfigList, Interval,
-        PartialBatchSelector, Query, Report, ReportId, ReportMetadata, TaskId, Time,
-        TransitionFailure, TransitionVar,
+        PartialBatchSelector, Query, Report, ReportMetadata, TaskId, Time, TransitionFailure,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
-    taskprov, DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig,
-    DapHelperState, DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition,
-    DapOutputShare, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
-    DapVersion, MetaAggregationJobId,
+    taskprov,
+    vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    DapAbort, DapAggregateShare, DapCollectJob, DapError, DapGlobalConfig, DapHelperState,
+    DapHelperTransition, DapLeaderProcessTelemetry, DapLeaderTransition, DapOutputShare,
+    DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion,
+    MetaAggregationJobId,
 };
 use async_trait::async_trait;
 use futures::TryFutureExt;
@@ -41,9 +42,26 @@ pub trait DapAuthorizedSender<S> {
     ) -> Result<S, DapError>;
 }
 
+/// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
+/// job.
+#[async_trait(?Send)]
+pub trait DapReportInitializer {
+    /// Initialize a sequence of reports that are in the "consumed" state by performing the early
+    /// validation steps (check if the report was replayed, belongs to a batch that has been
+    /// collected) and initializing VDAF preparation.
+    async fn initialize_reports<'req>(
+        &self,
+        is_leader: bool,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        part_batch_sel: &PartialBatchSelector,
+        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
+    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError>;
+}
+
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
-pub trait DapAggregator<S>: HpkeDecrypter + Sized {
+pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
     type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig>;
 
@@ -119,16 +137,6 @@ pub trait DapAggregator<S>: HpkeDecrypter + Sized {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError>;
-
-    /// Ensure a set of reorts can be aggregated. Return a transition failure for each report
-    /// that must be rejected early, due to the repot being replayed, the bucket that contains the
-    /// report being collected, etc.
-    async fn check_early_reject(
-        &self,
-        task_id: &TaskId,
-        part_batch_sel: &PartialBatchSelector,
-        report_meta: impl Iterator<Item = &ReportMetadata>,
-    ) -> Result<HashMap<ReportId, TransitionFailure>, DapError>;
 
     /// Mark a batch as collected.
     async fn mark_collected(
@@ -477,34 +485,12 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     ) -> Result<u64, DapAbort> {
         let metrics = self.metrics().with_host(host);
 
-        // Filter out early rejected reports.
-        //
-        // TODO Add a test similar to http_post_aggregate_init_expired_task() in roles_test.rs that
-        // verifies that the Leader properly checks for expiration. This will require extending the
-        // test framework to run run_agg_job() directly.
-        let early_rejects = self
-            .check_early_reject(
-                task_id,
-                part_batch_sel,
-                reports.iter().map(|report| &report.report_metadata),
-            )
-            .await?;
-        let reports = reports
-            .into_iter()
-            .filter(|report| {
-                if let Some(failure) = early_rejects.get(&report.report_metadata.id) {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                    return false;
-                }
-                true
-            })
-            .collect();
-
         // Prepare AggregationJobInitReq.
         let agg_job_id = MetaAggregationJobId::gen_for_version(&task_config.version);
         let transition = task_config
             .vdaf
             .produce_agg_job_init_req(
+                self,
                 self,
                 task_id,
                 task_config,
@@ -883,68 +869,21 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     &agg_job_init_req.agg_param,
                 )?;
 
-                let early_rejects_future = self.check_early_reject(
-                    task_id,
-                    &agg_job_init_req.part_batch_sel,
-                    agg_job_init_req
-                        .report_shares
-                        .iter()
-                        .map(|report_share| &report_share.report_metadata),
-                );
-
-                let transition_future = task_config
+                let transition = task_config
                     .vdaf
                     .handle_agg_job_init_req(
+                        self,
                         self,
                         task_id,
                         task_config,
                         &agg_job_init_req,
                         &metrics,
                     )
-                    .map_err(DapError::Abort);
-
-                let (early_rejects, transition) =
-                    futures::try_join!(early_rejects_future, transition_future)?;
+                    .map_err(DapError::Abort)
+                    .await?;
 
                 let agg_job_resp = match transition {
-                    DapHelperTransition::Continue(mut state, mut agg_job_resp) => {
-                        // Filter out early rejected reports.
-                        let mut state_index = 0;
-                        for transition in agg_job_resp.transitions.iter_mut() {
-                            let early_failure = early_rejects.get(&transition.report_id);
-                            if !matches!(transition.var, TransitionVar::Failed(..))
-                                && early_failure.is_some()
-                            {
-                                // NOTE(cjpatton) Clippy wants us to use and `if let` statement to
-                                // unwrap `early_failure`. I don't think this works becauase we
-                                // only want to enter this loop if `early_failure.is_some()` and
-                                // the current `transition` is not a failure. As far as I know, `if
-                                // let` statements can't yet be combined with other conditions.
-                                #[allow(clippy::unnecessary_unwrap)]
-                                let failure = early_failure.unwrap();
-                                transition.var = TransitionVar::Failed(*failure);
-
-                                // Remove VDAF preparation state of reports that were rejected early.
-                                if transition.report_id == state.seq[state_index].2 {
-                                    let _val = state.seq.remove(state_index);
-                                } else {
-                                    // The report ID in the Helper state and Aggregate response
-                                    // must be aligned. If not, handle as an internal error.
-                                    return Err(fatal_error!(err = "report IDs not aligned").into());
-                                }
-
-                                // NOTE(cjpatton) Unlike the Leader, the Helper filters out early
-                                // rejects after processing all of the reports. (This is an
-                                // optimization intended to reduce latency.) To avoid overcounting
-                                // rejection metrics, the latter rejections take precedence. The
-                                // Leader has the opposite behavior: Early rejections are resolved
-                                // first, so take precedence.
-                                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                            } else {
-                                state_index += 1;
-                            }
-                        }
-
+                    DapHelperTransition::Continue(state, agg_job_resp) => {
                         if !self
                             .put_helper_state_if_not_exists(task_id, &agg_job_id, &state)
                             .await?

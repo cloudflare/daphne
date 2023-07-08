@@ -6,13 +6,23 @@ use crate::{
     durable::{state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
     initialize_tracing, int_err,
 };
+use daphne::{
+    messages::{ReportId, ReportMetadata, TransitionFailure},
+    vdaf::{
+        EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized, VdafPrepMessage,
+        VdafPrepState, VdafVerifyKey,
+    },
+    DapError, VdafConfig,
+};
 use futures::future::try_join_all;
-use std::time::Duration;
+use prio::codec::{CodecError, Decode, ParameterizedDecode};
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, collections::HashSet, time::Duration};
 use tracing::warn;
 use worker::*;
 
-pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
-    "/internal/do/report_store/mark_aggregated";
+pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
+    "/internal/do/reports_processed/initialize";
 
 /// Durable Object (DO) for tracking which reports have been processed.
 ///
@@ -77,22 +87,69 @@ impl DurableObject for ReportsProcessed {
         );
 
         match (req.path().as_ref(), req.method()) {
-            // Mark a set of reports as aggregated. Return the set of report IDs that already
-            // exist.
+            // Initialize a report:
+            //  * Ensure the report wasn't replayed
+            //  * Ensure the report won't be included in a batch that was already collected
+            //  * Initialize VDAF preparation.
             //
             // Non-idempotent
-            // Input: `report_id_hex_set: Vec<String>` (hex-encoded report IDs)
-            // Output: `Vec<String>` (subset of the inputs that already exist).
-            (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
-                let report_id_hex_set: Vec<String> = req.json().await?;
-                let mut requests = Vec::new();
-                for report_id_hex in report_id_hex_set.into_iter() {
-                    requests.push(self.to_checked(report_id_hex));
-                }
+            // Input: `ReportsProcessedReq`
+            // Output: `ReportsProcessedResp`
+            (DURABLE_REPORTS_PROCESSED_INITIALIZE, Method::Post) => {
+                let reports_processed_request: ReportsProcessedReq = req.json().await?;
+                let replayed_reports = try_join_all(
+                    reports_processed_request
+                        .consumed_reports
+                        .iter()
+                        .filter(|consumed_report| consumed_report.is_ready())
+                        .map(|consumed_report| {
+                            self.to_checked(consumed_report.metadata().id.to_hex())
+                        }),
+                )
+                .await?
+                .into_iter()
+                .flatten()
+                .map(|report_id_hex| {
+                    hex::decode(report_id_hex)
+                        .map_err(|e| format!("Failed to hex decode ReportId: {e}"))
+                        .and_then(|report_id_data| {
+                            ReportId::get_decoded(&report_id_data)
+                                .map_err(|e| format!("Failed to decode ReportId: {e}"))
+                        })
+                })
+                .collect::<std::result::Result<HashSet<ReportId>, String>>()
+                .map_err(|e| int_err(format!("ReportsProcessed: {e}")))?;
 
-                let responses: Vec<Option<String>> = try_join_all(requests).await?;
-                let res: Vec<String> = responses.into_iter().flatten().collect();
-                Response::from_json(&res)
+                let initialized_reports = reports_processed_request
+                    .consumed_reports
+                    .into_iter()
+                    .map(|consumed_report| {
+                        if replayed_reports.contains(&consumed_report.metadata().id) {
+                            Ok(EarlyReportStateInitialized::Rejected {
+                                metadata: Cow::Owned(consumed_report.metadata().clone()),
+                                failure: TransitionFailure::ReportReplayed,
+                            })
+                        } else {
+                            EarlyReportStateInitialized::initialize(
+                                reports_processed_request.is_leader,
+                                &reports_processed_request.vdaf_verify_key,
+                                &reports_processed_request.vdaf_config,
+                                consumed_report,
+                            )
+                        }
+                    })
+                    .collect::<std::result::Result<Vec<EarlyReportStateInitialized>, DapError>>()
+                    .map_err(|e| {
+                        int_err(format!(
+                            "ReportsProcessed: failed to initialize a report: {e}"
+                        ))
+                    })?;
+
+                Response::from_json(&ReportsProcessedResp {
+                    is_leader: reports_processed_request.is_leader,
+                    vdaf_config: reports_processed_request.vdaf_config,
+                    initialized_reports,
+                })
             }
 
             _ => Err(int_err(format!(
@@ -108,5 +165,150 @@ impl DurableObject for ReportsProcessed {
         self.alarmed = false;
         self.touched = false;
         Response::from_json(&())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(try_from = "ShadowReportsProcessedReq")]
+pub(crate) struct ReportsProcessedReq<'req> {
+    pub(crate) is_leader: bool,
+    pub(crate) vdaf_verify_key: VdafVerifyKey,
+    pub(crate) vdaf_config: VdafConfig,
+    pub(crate) consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
+}
+
+#[derive(Deserialize)]
+struct ShadowReportsProcessedReq {
+    pub(crate) is_leader: bool,
+    pub(crate) vdaf_verify_key: VdafVerifyKey,
+    pub(crate) vdaf_config: VdafConfig,
+    pub(crate) consumed_reports: Vec<EarlyReportStateConsumedOwned>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EarlyReportStateConsumedOwned {
+    Ready {
+        metadata: ReportMetadata,
+        #[serde(with = "hex")]
+        public_share: Vec<u8>,
+        #[serde(with = "hex")]
+        input_share: Vec<u8>,
+    },
+    Rejected {
+        metadata: ReportMetadata,
+        failure: TransitionFailure,
+    },
+}
+
+impl TryFrom<ShadowReportsProcessedReq> for ReportsProcessedReq<'_> {
+    type Error = std::convert::Infallible;
+
+    fn try_from(
+        other: ShadowReportsProcessedReq,
+    ) -> std::result::Result<Self, std::convert::Infallible> {
+        let consumed_reports = other
+            .consumed_reports
+            .into_iter()
+            .map(|consumed_report| match consumed_report {
+                EarlyReportStateConsumedOwned::Ready {
+                    metadata,
+                    public_share,
+                    input_share,
+                } => EarlyReportStateConsumed::Ready {
+                    metadata: Cow::Owned(metadata),
+                    public_share: Cow::Owned(public_share),
+                    input_share,
+                },
+                EarlyReportStateConsumedOwned::Rejected { metadata, failure } => {
+                    EarlyReportStateConsumed::Rejected {
+                        metadata: Cow::Owned(metadata),
+                        failure,
+                    }
+                }
+            })
+            .collect();
+        Ok(Self {
+            is_leader: other.is_leader,
+            vdaf_verify_key: other.vdaf_verify_key,
+            vdaf_config: other.vdaf_config,
+            consumed_reports,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(try_from = "ShadowReportsProcessedResp")]
+pub(crate) struct ReportsProcessedResp<'req> {
+    pub(crate) is_leader: bool,
+    pub(crate) vdaf_config: VdafConfig,
+    pub(crate) initialized_reports: Vec<EarlyReportStateInitialized<'req>>,
+}
+
+#[derive(Deserialize)]
+struct ShadowReportsProcessedResp {
+    pub(crate) is_leader: bool,
+    pub(crate) vdaf_config: VdafConfig,
+    pub(crate) initialized_reports: Vec<EarlyReportStateInitializedOwned>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EarlyReportStateInitializedOwned {
+    Ready {
+        metadata: ReportMetadata,
+        #[serde(with = "hex")]
+        public_share: Vec<u8>,
+        #[serde(with = "hex")]
+        state: Vec<u8>,
+        #[serde(with = "hex")]
+        message: Vec<u8>,
+    },
+    Rejected {
+        metadata: ReportMetadata,
+        failure: TransitionFailure,
+    },
+}
+
+impl TryFrom<ShadowReportsProcessedResp> for ReportsProcessedResp<'_> {
+    type Error = CodecError;
+
+    fn try_from(other: ShadowReportsProcessedResp) -> std::result::Result<Self, CodecError> {
+        let initialized_reports = other
+            .initialized_reports
+            .into_iter()
+            .map(|initialized_report| match initialized_report {
+                EarlyReportStateInitializedOwned::Ready {
+                    metadata,
+                    public_share,
+                    state,
+                    message,
+                } => {
+                    let state = VdafPrepState::get_decoded_with_param(
+                        &(&other.vdaf_config, other.is_leader),
+                        &state,
+                    )?;
+                    let message = VdafPrepMessage::get_decoded_with_param(&state, &message)?;
+
+                    Ok(EarlyReportStateInitialized::Ready {
+                        metadata: Cow::Owned(metadata),
+                        public_share: Cow::Owned(public_share),
+                        state,
+                        message,
+                    })
+                }
+                EarlyReportStateInitializedOwned::Rejected { metadata, failure } => {
+                    Ok(EarlyReportStateInitialized::Rejected {
+                        metadata: Cow::Owned(metadata),
+                        failure,
+                    })
+                }
+            })
+            .collect::<std::result::Result<Vec<EarlyReportStateInitialized>, CodecError>>()?;
+        Ok(Self {
+            is_leader: other.is_leader,
+            vdaf_config: other.vdaf_config,
+            initialized_reports,
+        })
     }
 }
