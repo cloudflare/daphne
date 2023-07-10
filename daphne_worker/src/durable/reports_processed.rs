@@ -169,72 +169,11 @@ impl DurableObject for ReportsProcessed {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(try_from = "ShadowReportsProcessedReq")]
 pub(crate) struct ReportsProcessedReq<'req> {
     pub(crate) is_leader: bool,
     pub(crate) vdaf_verify_key: VdafVerifyKey,
     pub(crate) vdaf_config: VdafConfig,
     pub(crate) consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-}
-
-#[derive(Deserialize)]
-struct ShadowReportsProcessedReq {
-    pub(crate) is_leader: bool,
-    pub(crate) vdaf_verify_key: VdafVerifyKey,
-    pub(crate) vdaf_config: VdafConfig,
-    pub(crate) consumed_reports: Vec<EarlyReportStateConsumedOwned>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EarlyReportStateConsumedOwned {
-    Ready {
-        metadata: ReportMetadata,
-        #[serde(with = "hex")]
-        public_share: Vec<u8>,
-        #[serde(with = "hex")]
-        input_share: Vec<u8>,
-    },
-    Rejected {
-        metadata: ReportMetadata,
-        failure: TransitionFailure,
-    },
-}
-
-impl TryFrom<ShadowReportsProcessedReq> for ReportsProcessedReq<'_> {
-    type Error = std::convert::Infallible;
-
-    fn try_from(
-        other: ShadowReportsProcessedReq,
-    ) -> std::result::Result<Self, std::convert::Infallible> {
-        let consumed_reports = other
-            .consumed_reports
-            .into_iter()
-            .map(|consumed_report| match consumed_report {
-                EarlyReportStateConsumedOwned::Ready {
-                    metadata,
-                    public_share,
-                    input_share,
-                } => EarlyReportStateConsumed::Ready {
-                    metadata: Cow::Owned(metadata),
-                    public_share: Cow::Owned(public_share),
-                    input_share,
-                },
-                EarlyReportStateConsumedOwned::Rejected { metadata, failure } => {
-                    EarlyReportStateConsumed::Rejected {
-                        metadata: Cow::Owned(metadata),
-                        failure,
-                    }
-                }
-            })
-            .collect();
-        Ok(Self {
-            is_leader: other.is_leader,
-            vdaf_verify_key: other.vdaf_verify_key,
-            vdaf_config: other.vdaf_config,
-            consumed_reports,
-        })
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -245,6 +184,8 @@ pub(crate) struct ReportsProcessedResp<'req> {
     pub(crate) initialized_reports: Vec<EarlyReportStateInitialized<'req>>,
 }
 
+// we need this custom deserializer because VdafPrepState and VdafPrepMessage don't implement
+// Decode, only ParameterizedDecode.
 #[derive(Deserialize)]
 struct ShadowReportsProcessedResp {
     pub(crate) is_leader: bool,

@@ -86,14 +86,14 @@ pub trait EarlyReportState {
 
 /// Report state during aggregation initialization after consuming the report share. This involves
 /// decryption as well a few validation steps.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EarlyReportStateConsumed<'req> {
     Ready {
         metadata: Cow<'req, ReportMetadata>,
-        #[serde(serialize_with = "serialize_bytes")]
+        #[serde(with = "serialize_bytes")]
         public_share: Cow<'req, [u8]>,
-        #[serde(serialize_with = "serialize_bytes")]
+        #[serde(with = "serialize_bytes")]
         input_share: Vec<u8>,
     },
     Rejected {
@@ -198,11 +198,11 @@ impl EarlyReportState for EarlyReportStateConsumed<'_> {
 pub enum EarlyReportStateInitialized<'req> {
     Ready {
         metadata: Cow<'req, ReportMetadata>,
-        #[serde(serialize_with = "serialize_bytes")]
+        #[serde(with = "serialize_bytes")]
         public_share: Cow<'req, [u8]>,
-        #[serde(serialize_with = "serialize_encoodable")]
+        #[serde(serialize_with = "serialize_encodable")]
         state: VdafPrepState,
-        #[serde(serialize_with = "serialize_encoodable")]
+        #[serde(serialize_with = "serialize_encodable")]
         message: VdafPrepMessage,
     },
     Rejected {
@@ -211,15 +211,28 @@ pub enum EarlyReportStateInitialized<'req> {
     },
 }
 
-fn serialize_bytes<S, T>(x: &T, s: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    T: AsRef<[u8]>,
-{
-    s.serialize_str(&hex::encode(x.as_ref()))
+mod serialize_bytes {
+    use serde::{de, Deserializer, Serializer};
+    pub(super) fn serialize<S, T>(x: &T, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: AsRef<[u8]>,
+    {
+        s.serialize_str(&hex::encode(x.as_ref()))
+    }
+
+    pub(super) fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: TryFrom<Vec<u8>>,
+        <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
+    {
+        hex::deserialize::<_, Vec<u8>>(deserializer)
+            .and_then(|bytes| bytes.try_into().map_err(de::Error::custom))
+    }
 }
 
-fn serialize_encoodable<S, T>(x: &T, s: S) -> Result<S::Ok, S::Error>
+fn serialize_encodable<S, T>(x: &T, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
     T: Encode,
