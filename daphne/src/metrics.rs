@@ -5,8 +5,8 @@
 
 use crate::{fatal_error, DapError};
 use prometheus::{
-    linear_buckets, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    HistogramVec, IntCounterVec, Registry,
+    exponential_buckets, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, HistogramVec, IntCounterVec, Registry,
 };
 
 pub struct DaphneMetrics {
@@ -54,7 +54,7 @@ impl DaphneMetrics {
             format!("{front}aggregation_job_batch_size"),
             "Number of records in an incoming AggregationJobInitReq.",
             &["host"],
-            linear_buckets(250.0, 250.0, 6)
+            exponential_buckets(5.0, 3.0, 6)
                 .expect("this shouldn't panic for these hardcoded values"), // <250, <500, ... <1500, +Inf
             registry
         )
