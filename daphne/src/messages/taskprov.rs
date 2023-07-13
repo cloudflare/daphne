@@ -10,8 +10,8 @@ use crate::messages::{
 };
 use crate::taskprov::TaskprovVersion;
 use prio::codec::{
-    decode_u16_items, decode_u24_items, decode_u8_items, encode_u16_items, encode_u24_items,
-    encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
+    decode_u16_items, decode_u8_items, encode_u16_items, encode_u8_items, CodecError, Decode,
+    Encode, ParameterizedDecode, ParameterizedEncode,
 };
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ impl KeyType for VdafType {
 pub enum VdafTypeVar {
     Prio3Aes128Count,
     Prio3Aes128Sum { bit_length: u8 },
-    Prio3Aes128Histogram { buckets: Vec<u64> },
+    Prio3Aes128Histogram { len_length: u8 },
     Poplar1Aes128 { bit_length: u16 },
     NotImplemented(u32),
 }
@@ -67,9 +67,9 @@ impl Encode for VdafTypeVar {
                 VDAF_TYPE_PRIO3_AES128_SUM.encode(bytes);
                 bit_length.encode(bytes);
             }
-            VdafTypeVar::Prio3Aes128Histogram { buckets } => {
+            VdafTypeVar::Prio3Aes128Histogram { len_length } => {
                 VDAF_TYPE_PRIO3_AES128_HISTOGRAM.encode(bytes);
-                encode_u24_items(bytes, &(), buckets);
+                len_length.encode(bytes);
             }
             VdafTypeVar::Poplar1Aes128 { bit_length } => {
                 VDAF_TYPE_POPLAR1_AES128.encode(bytes);
@@ -91,7 +91,7 @@ impl Decode for VdafTypeVar {
                 bit_length: u8::decode(bytes)?,
             }),
             VDAF_TYPE_PRIO3_AES128_HISTOGRAM => Ok(Self::Prio3Aes128Histogram {
-                buckets: decode_u24_items(&(), bytes)?,
+                len_length: u8::decode(bytes)?,
             }),
             VDAF_TYPE_POPLAR1_AES128 => Ok(Self::Poplar1Aes128 {
                 bit_length: u16::decode(bytes)?,

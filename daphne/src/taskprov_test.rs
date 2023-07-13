@@ -69,9 +69,7 @@ fn test_resolve_advertised_task_config() {
         task_expiration: 0x6352f9a5,
         vdaf_config: VdafConfig {
             dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Histogram {
-                buckets: vec![1, 2, 3],
-            },
+            var: VdafTypeVar::Prio3Aes128Histogram { len_length: 1 },
         },
     };
 

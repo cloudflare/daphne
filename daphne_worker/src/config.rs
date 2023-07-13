@@ -924,6 +924,12 @@ impl<'srv> DaphneWorker<'srv> {
                 let len = length.parse().map_err(int_err)?;
                 VdafConfig::Prio3(Prio3Config::SumVec { bits, len })
             }
+            // NOTE: the VDAF-06 format is not supported yet
+            // https://datatracker.ietf.org/doc/html/draft-dcook-ppm-dap-interop-test-design-04#name-internal-test-add_task
+            ("Prio3Histogram", Some(len), None) => {
+                let len = len.parse().map_err(int_err)?;
+                VdafConfig::Prio3(Prio3Config::Histogram { len })
+            }
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 

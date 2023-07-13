@@ -664,7 +664,7 @@ pub enum Prio3Config {
 
     /// A histogram for estimating the distribution of 64-bit, unsigned integers using pre-defined
     /// bucket boundaries.
-    Histogram { buckets: Vec<u64> },
+    Histogram { len: usize },
 
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
     /// 2^bits)`.
@@ -679,9 +679,7 @@ impl Display for Prio3Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Prio3Config::Count => write!(f, "Count"),
-            Prio3Config::Histogram { buckets } => {
-                write!(f, "Histogram({})", buckets.len())
-            }
+            Prio3Config::Histogram { len } => write!(f, "Histogram({len})"),
             Prio3Config::Sum { bits } => write!(f, "Sum({bits})"),
             Prio3Config::SumVec { bits, len } => write!(f, "SumVec({bits},{len})"),
         }

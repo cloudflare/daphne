@@ -1,9 +1,6 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::messages::taskprov::{
-    DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
-};
 use crate::messages::{
     decode_base64url, decode_base64url_vec, encode_base64url, AggregateShareReq,
     AggregationJobContinueReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
@@ -11,7 +8,6 @@ use crate::messages::{
     HpkeAeadId, HpkeCiphertext, HpkeConfig, HpkeKdfId, HpkeKemId, PartialBatchSelector, Report,
     ReportId, ReportMetadata, ReportShare, TaskId, Transition, TransitionVar,
 };
-use crate::taskprov::{compute_task_id, TaskprovVersion};
 use crate::{test_version, test_versions};
 use hpke_rs::HpkePublicKey;
 use paste::paste;
@@ -329,76 +325,81 @@ fn read_unsupported_hpke_config() {
     );
 }
 
-#[test]
-fn read_vdaf_config() {
-    let data = [
-        0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02,
-        0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04, 0x03,
-        0x02, 0x03,
-    ];
+// NOTE: these test vectors are no longer valid, TaskProv doesn't match the VDAF-06
+// Tracking the issue here: https://github.com/wangshan/draft-wang-ppm-dap-taskprov/issues/33.
+// #[test]
+// fn read_vdaf_config() {
+//     let data = [
+//         0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02,
+//         0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04, 0x03,
+//         0x02, 0x03,
+//     ];
 
-    let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
-    let vdaf_config = VdafConfig::get_decoded(&data).unwrap();
-    assert_eq!(
-        vdaf_config,
-        VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Histogram { buckets },
-        }
-    );
-}
+//     // let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
+//     let len_length: u8 = 1;
+//     let vdaf_config = VdafConfig::get_decoded(&data).unwrap();
+//     assert_eq!(
+//         vdaf_config,
+//         VdafConfig {
+//             dp_config: DpConfig::None,
+//             // var: VdafTypeVar::Prio3Aes128Histogram { buckets },
+//             var: VdafTypeVar::Prio3Aes128Histogram { len_length },
+//         }
+//     );
+// }
 
-#[test]
-fn read_task_config_taskprov_draft02() {
-    let data = [
-        0x02, 0x48, 0x69, 0x00, 0x0e, 0x00, 0x0c, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f,
-        0x74, 0x65, 0x73, 0x74, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x80,
-        0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x52, 0xf9,
-        0xa5, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03,
-        0x02, 0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04,
-        0x03, 0x02, 0x03,
-    ];
+// #[test]
+// fn read_task_config_taskprov_draft02() {
+//     let data = [
+//         0x02, 0x48, 0x69, 0x00, 0x0e, 0x00, 0x0c, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f,
+//         0x74, 0x65, 0x73, 0x74, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x80,
+//         0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x52, 0xf9,
+//         0xa5, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x18, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03,
+//         0x02, 0x01, 0x02, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x02, 0x03, 0x02, 0x03, 0x04, 0x04,
+//         0x03, 0x02, 0x03,
+//     ];
 
-    let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
-    let task_config = TaskConfig::get_decoded_with_param(&TaskprovVersion::Draft02, &data).unwrap();
-    assert_eq!(
-        task_config,
-        TaskConfig {
-            task_info: "Hi".as_bytes().to_vec(),
-            aggregator_endpoints: vec![UrlBytes {
-                bytes: "https://test".as_bytes().to_vec()
-            }],
-            query_config: QueryConfig {
-                time_precision: 0x01,
-                max_batch_query_count: 128,
-                min_batch_size: 1024,
-                var: QueryConfigVar::FixedSize {
-                    max_batch_size: 2048
-                },
-            },
-            task_expiration: 0x6352f9a5,
-            vdaf_config: VdafConfig {
-                dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio3Aes128Histogram { buckets },
-            },
-        }
-    );
+//     // let buckets = vec![0x0102030404030201, 0x0202030404030202, 0x0302030404030203];
+//     let len_length: u8 = 1;
+//     let task_config = TaskConfig::get_decoded_with_param(&TaskprovVersion::Draft02, &data).unwrap();
+//     assert_eq!(
+//         task_config,
+//         TaskConfig {
+//             task_info: "Hi".as_bytes().to_vec(),
+//             aggregator_endpoints: vec![UrlBytes {
+//                 bytes: "https://test".as_bytes().to_vec()
+//             }],
+//             query_config: QueryConfig {
+//                 time_precision: 0x01,
+//                 max_batch_query_count: 128,
+//                 min_batch_size: 1024,
+//                 var: QueryConfigVar::FixedSize {
+//                     max_batch_size: 2048
+//                 },
+//             },
+//             task_expiration: 0x6352f9a5,
+//             vdaf_config: VdafConfig {
+//                 dp_config: DpConfig::None,
+//                 var: VdafTypeVar::Prio3Aes128Histogram { len_length },
+//             },
+//         }
+//     );
 
-    assert_eq!(
-        compute_task_id(
-            TaskprovVersion::Draft02,
-            &task_config.get_encoded_with_param(&TaskprovVersion::Draft02)
-        )
-        .unwrap()
-        .to_hex(),
-        "2b585fcbb48c21fb5f05221a241fdd8cb9ebe99bd183d66326fcecd85fe06fd5",
-    );
+//     assert_eq!(
+//         compute_task_id(
+//             TaskprovVersion::Draft02,
+//             &task_config.get_encoded_with_param(&TaskprovVersion::Draft02)
+//         )
+//         .unwrap()
+//         .to_hex(),
+//         "2b585fcbb48c21fb5f05221a241fdd8cb9ebe99bd183d66326fcecd85fe06fd5",
+//     );
 
-    assert_eq!(
-        task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
-        &data
-    );
-}
+//     assert_eq!(
+//         task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
+//         &data
+//     );
+// }
 
 #[test]
 fn test_base64url() {
