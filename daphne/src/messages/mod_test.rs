@@ -172,8 +172,8 @@ fn read_agg_job_init_req() {
     };
 
     let got = AggregationJobInitReq::get_decoded_with_param(
-        &DapVersion::Draft04,
-        &want.get_encoded_with_param(&DapVersion::Draft04),
+        &DapVersion::Draft05,
+        &want.get_encoded_with_param(&DapVersion::Draft05),
     )
     .unwrap();
     assert_eq!(got, want);
@@ -225,8 +225,8 @@ fn read_agg_job_cont_req() {
     };
 
     let got = AggregationJobContinueReq::get_decoded_with_param(
-        &DapVersion::Draft04,
-        &want.get_encoded_with_param(&DapVersion::Draft04),
+        &DapVersion::Draft05,
+        &want.get_encoded_with_param(&DapVersion::Draft05),
     )
     .unwrap();
     assert_eq!(got, want);
@@ -261,8 +261,8 @@ fn read_agg_share_req() {
         checksum: [0; 32],
     };
     let got = AggregateShareReq::get_decoded_with_param(
-        &DapVersion::Draft04,
-        &want.get_encoded_with_param(&DapVersion::Draft04),
+        &DapVersion::Draft05,
+        &want.get_encoded_with_param(&DapVersion::Draft05),
     )
     .unwrap();
     assert_eq!(got, want);

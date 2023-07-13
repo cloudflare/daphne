@@ -635,7 +635,7 @@ async fn handle_agg_job_req_bad_round(version: DapVersion) {
     // Test wrong round
     let req = t
         .gen_test_agg_job_cont_req_with_round(
-            &MetaAggregationJobId::Draft04(Cow::Borrowed(&agg_job_id)),
+            &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
             Vec::default(),
             Some(2),
         )
@@ -683,7 +683,7 @@ async fn handle_agg_job_req_zero_round(version: DapVersion) {
     // Test wrong round
     let req = t
         .gen_test_agg_job_cont_req_with_round(
-            &MetaAggregationJobId::Draft04(Cow::Borrowed(&agg_job_id)),
+            &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
             Vec::default(),
             Some(0),
         )
