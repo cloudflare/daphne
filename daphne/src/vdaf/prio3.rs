@@ -52,9 +52,9 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_count(2)?;
             Ok(shard!(vdaf, &measurement, nonce))
         }
-        (Prio3Config::Histogram { buckets }, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
-            Ok(shard!(vdaf, &(measurement as u128), nonce))
+        (Prio3Config::Histogram { len }, DapMeasurement::U64(measurement)) => {
+            let vdaf = Prio3::new_histogram(2, *len)?;
+            Ok(shard!(vdaf, &(measurement as usize), nonce))
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
@@ -121,8 +121,8 @@ pub(crate) fn prio3_prepare_init(
                 VdafPrepMessage::Prio3ShareField64(share),
             ))
         }
-        Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
+        Prio3Config::Histogram { len } => {
+            let vdaf = Prio3::new_histogram(2, *len)?;
             let (state, share) = prep_init!(
                 vdaf,
                 verify_key,
@@ -213,11 +213,11 @@ pub(crate) fn prio3_leader_prepare_finish(
             (agg_share, outbound)
         }
         (
-            Prio3Config::Histogram { buckets },
+            Prio3Config::Histogram { len },
             VdafPrepState::Prio3Field128(state),
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
+            let vdaf = Prio3::new_histogram(2, *len)?;
             let (out_share, outbound) = leader_prep_fin!(vdaf, state, share, helper_share_data);
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -281,8 +281,8 @@ pub(crate) fn prio3_helper_prepare_finish(
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::Histogram { buckets }, VdafPrepState::Prio3Field128(state)) => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
+        (Prio3Config::Histogram { len }, VdafPrepState::Prio3Field128(state)) => {
+            let vdaf = Prio3::new_histogram(2, *len)?;
             let out_share = helper_prep_fin!(vdaf, state, peer_message_data);
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -315,8 +315,8 @@ pub(crate) fn prio3_decode_prepare_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
-        Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
+        Prio3Config::Histogram { len } => {
+            let vdaf = Prio3::new_histogram(2, *len)?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -363,8 +363,8 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64(agg_res))
         }
-        Prio3Config::Histogram { buckets } => {
-            let vdaf = Prio3::new_histogram(2, buckets)?;
+        Prio3Config::Histogram { len } => {
+            let vdaf = Prio3::new_histogram(2, *len)?;
             let agg_res = unshard!(vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }

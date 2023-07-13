@@ -37,11 +37,9 @@ fn prepare_sum() {
 #[test]
 fn prepare_histogram() {
     test_prepare(
-        &Prio3Config::Histogram {
-            buckets: vec![0, 23, 9999999],
-        },
-        DapMeasurement::U64(1337),
-        DapAggregateResult::U128Vec(vec![0, 0, 1, 0]),
+        &Prio3Config::Histogram { len: 3 },
+        DapMeasurement::U64(2),
+        DapAggregateResult::U128Vec(vec![0, 0, 1]),
     )
     .unwrap();
 }
