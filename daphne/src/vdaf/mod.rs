@@ -45,9 +45,9 @@ use std::{borrow::Cow, collections::HashSet, convert::TryInto};
 use self::{prio2::prio2_decode_prepare_state, prio3::prio3_decode_prepare_state};
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
-const CTX_INPUT_SHARE_DRAFT04: &[u8] = b"dap-04 input share";
+const CTX_INPUT_SHARE_DRAFT05: &[u8] = b"dap-05 input share";
 const CTX_AGG_SHARE_DRAFT02: &[u8] = b"dap-02 aggregate share";
-const CTX_AGG_SHARE_DRAFT04: &[u8] = b"dap-04 aggregate share";
+const CTX_AGG_SHARE_DRAFT05: &[u8] = b"dap-05 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -122,7 +122,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_INPUT_SHARE_DRAFT05,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -159,7 +159,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
                 extensions: vec![],
                 payload: encoded_input_share,
             },
-            DapVersion::Draft04 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
+            DapVersion::Draft05 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
                 Ok(input_share) => input_share,
                 Err(..) => {
                     return Ok(Self::Rejected {
@@ -532,7 +532,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_INPUT_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_INPUT_SHARE_DRAFT05,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
@@ -1200,7 +1200,7 @@ impl VdafConfig {
     ) -> Result<DapAggregateResult, DapError> {
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
+            DapVersion::Draft05 => CTX_AGG_SHARE_DRAFT05,
             _ => return Err(unimplemented_version()),
         };
         let n: usize = agg_share_text.len();
@@ -1262,7 +1262,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Draft04 => CTX_AGG_SHARE_DRAFT04,
+        DapVersion::Draft05 => CTX_AGG_SHARE_DRAFT05,
         _ => return Err(unimplemented_version_abort()),
     };
     let n: usize = agg_share_text.len();

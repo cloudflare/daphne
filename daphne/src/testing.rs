@@ -44,7 +44,7 @@ use url::Url;
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub(crate) enum MetaAggregationJobIdOwned {
     Draft02(Draft02AggregationJobId),
-    Draft04(AggregationJobId),
+    Draft05(AggregationJobId),
 }
 
 impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
@@ -53,8 +53,8 @@ impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
             MetaAggregationJobId::Draft02(agg_job_id) => {
                 Self::Draft02(agg_job_id.clone().into_owned())
             }
-            MetaAggregationJobId::Draft04(agg_job_id) => {
-                Self::Draft04(agg_job_id.clone().into_owned())
+            MetaAggregationJobId::Draft05(agg_job_id) => {
+                Self::Draft05(agg_job_id.clone().into_owned())
             }
         }
     }
@@ -981,7 +981,7 @@ pub(crate) struct AggStore {
 //
 // and
 //
-//     something_draft04
+//     something_draft05
 //
 // that called something(version) with the appropriate version.
 //
@@ -1005,7 +1005,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             test_version! { $fname, Draft02 }
-            test_version! { $fname, Draft04 }
+            test_version! { $fname, Draft05 }
         )*
     };
 }
@@ -1027,7 +1027,7 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             async_test_version! { $fname, Draft02 }
-            async_test_version! { $fname, Draft04 }
+            async_test_version! { $fname, Draft05 }
         )*
     };
 }
