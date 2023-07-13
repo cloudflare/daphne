@@ -29,7 +29,7 @@ use prio::codec::Encode;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::{Borrow, Cow},
+    borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     ops::DerefMut,
@@ -679,7 +679,7 @@ impl DapLeader<BearerToken> for MockAggregator {
 
         // Check whether Report has been collected or replayed.
         if let Some(transition_failure) = self
-            .check_report_early_fail(task_id, bucket.borrow(), &report.report_metadata)
+            .check_report_early_fail(task_id, &bucket, &report.report_metadata)
             .await
         {
             return Err(DapError::Transition(transition_failure));
