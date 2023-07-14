@@ -662,8 +662,8 @@ pub enum Prio3Config {
     /// equal to `0` or `1`.
     Count,
 
-    /// A histogram for estimating the distribution of 64-bit, unsigned integers using pre-defined
-    /// bucket boundaries.
+    /// A histogram for estimating the distribution of 64-bit, unsigned integers where each
+    /// measurement is a bucket index in range `[0, len)`.
     Histogram { len: usize },
 
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,

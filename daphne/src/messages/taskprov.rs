@@ -54,7 +54,9 @@ impl KeyType for VdafType {
 pub enum VdafTypeVar {
     Prio3Aes128Count,
     Prio3Aes128Sum { bit_length: u8 },
-    Prio3Aes128Histogram { len_length: u8 },
+    // NOTE: this doesn't comply with the TaskProv spec, which doesn't match the VDAF-06 spec.
+    // Tracking the issue here: https://github.com/wangshan/draft-wang-ppm-dap-taskprov/issues/33.
+    Prio3Aes128Histogram { len: u32 },
     Poplar1Aes128 { bit_length: u16 },
     NotImplemented(u32),
 }
@@ -67,9 +69,9 @@ impl Encode for VdafTypeVar {
                 VDAF_TYPE_PRIO3_AES128_SUM.encode(bytes);
                 bit_length.encode(bytes);
             }
-            VdafTypeVar::Prio3Aes128Histogram { len_length } => {
+            VdafTypeVar::Prio3Aes128Histogram { len } => {
                 VDAF_TYPE_PRIO3_AES128_HISTOGRAM.encode(bytes);
-                len_length.encode(bytes);
+                len.encode(bytes);
             }
             VdafTypeVar::Poplar1Aes128 { bit_length } => {
                 VDAF_TYPE_POPLAR1_AES128.encode(bytes);
@@ -91,7 +93,7 @@ impl Decode for VdafTypeVar {
                 bit_length: u8::decode(bytes)?,
             }),
             VDAF_TYPE_PRIO3_AES128_HISTOGRAM => Ok(Self::Prio3Aes128Histogram {
-                len_length: u8::decode(bytes)?,
+                len: u32::decode(bytes)?,
             }),
             VDAF_TYPE_POPLAR1_AES128 => Ok(Self::Poplar1Aes128 {
                 bit_length: u16::decode(bytes)?,

@@ -926,6 +926,7 @@ impl<'srv> DaphneWorker<'srv> {
             }
             // NOTE: the VDAF-06 format is not supported yet
             // https://datatracker.ietf.org/doc/html/draft-dcook-ppm-dap-interop-test-design-04#name-internal-test-add_task
+            // Issue tracked here: https://github.com/divergentdave/draft-dcook-ppm-dap-interop-test-design/issues/40
             ("Prio3Histogram", Some(len), None) => {
                 let len = len.parse().map_err(int_err)?;
                 VdafConfig::Prio3(Prio3Config::Histogram { len })
