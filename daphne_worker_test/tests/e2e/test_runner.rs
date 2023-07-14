@@ -36,7 +36,6 @@ struct InternalTestCommandResult {
     error: Option<String>,
 }
 
-#[allow(dead_code)]
 pub struct TestRunner {
     pub global_config: DapGlobalConfig,
     pub task_id: TaskId,
@@ -52,14 +51,9 @@ pub struct TestRunner {
     pub version: DapVersion,
 }
 
-#[allow(dead_code)]
 impl TestRunner {
     pub async fn default_with_version(version: DapVersion) -> Self {
         Self::with(version, &DapQueryConfig::TimeInterval).await
-    }
-
-    pub async fn default() -> Self {
-        Self::default_with_version(DapVersion::Draft02).await
     }
 
     pub async fn fixed_size(version: DapVersion) -> Self {
@@ -591,7 +585,6 @@ impl TestRunner {
             .await
     }
 
-    #[allow(dead_code)]
     pub async fn internal_process(
         &self,
         client: &reqwest::Client,
@@ -641,7 +634,6 @@ impl TestRunner {
         resp.json().await.expect("failed to parse result")
     }
 
-    #[allow(dead_code)]
     pub async fn leader_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
         &self,
         path: &str,
@@ -650,7 +642,6 @@ impl TestRunner {
         self.post_internal(true /* is_leader */, path, data).await
     }
 
-    #[allow(dead_code)]
     pub async fn helper_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
         &self,
         path: &str,
@@ -659,14 +650,12 @@ impl TestRunner {
         self.post_internal(false /* is_leader */, path, data).await
     }
 
-    #[allow(dead_code)]
     pub async fn internal_delete_all(&self, batch_interval: &Interval) {
         let client = self.http_client();
         post_internal_delete_all(&client, &self.leader_url, batch_interval).await;
         post_internal_delete_all(&client, &self.helper_url, batch_interval).await;
     }
 
-    #[allow(dead_code)]
     pub async fn internal_current_batch(&self, task_id: &TaskId) -> BatchId {
         let client = self.http_client();
         let mut url = self.leader_url.clone();
@@ -746,7 +735,6 @@ impl TestRunner {
     }
 }
 
-#[allow(dead_code)]
 async fn get_raw_hpke_config(
     client: &reqwest::Client,
     task_id: &[u8],
@@ -786,7 +774,6 @@ async fn get_raw_hpke_config(
     panic!("{} at {} is down.", svc, url)
 }
 
-#[allow(dead_code)]
 async fn post_internal_delete_all(
     client: &reqwest::Client,
     base_url: &Url,

@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! End-to-end tests for daphne.
-
-mod test_runner;
-
 use daphne::{
     async_test_versions,
     constants::DapMediaType,
@@ -25,7 +22,7 @@ use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::cmp::{max, min};
-use test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
+use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 
 // Redefine async_test_version locally because we want a
 // cfg_attr as well.

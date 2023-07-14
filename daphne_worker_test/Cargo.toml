@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["console_error_panic_hook"]
 test_e2e = []
+test_acceptance = []
 
 [dependencies]
 cfg-if = "1.0.0"
@@ -29,14 +30,16 @@ tracing.workspace = true
 worker.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 assert_matches.workspace = true
 daphne = { path = "../daphne" }
 hex.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true
 prio.workspace = true
+prometheus.workspace = true
 rand.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
