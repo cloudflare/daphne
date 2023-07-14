@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! End-to-end tests for daphne.
+use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 use daphne::{
     async_test_versions,
     constants::DapMediaType,
@@ -22,7 +23,6 @@ use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::cmp::{max, min};
-use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 
 // Redefine async_test_version locally because we want a
 // cfg_attr as well.
@@ -47,23 +47,23 @@ struct InternalTestEndpointForTaskResult {
     endpoint: Option<String>,
 }
 
-async fn e2e_helper_ready(version: DapVersion) {
+async fn helper_ready(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     t.helper_post_internal::<_, ()>("/internal/test/ready", &())
         .await;
 }
 
-async_test_versions! { e2e_helper_ready }
+async_test_versions! { helper_ready }
 
-async fn e2e_leader_ready(version: DapVersion) {
+async fn leader_ready(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     t.leader_post_internal::<_, ()>("/internal/test/ready", &())
         .await;
 }
 
-async_test_versions! { e2e_leader_ready }
+async_test_versions! { leader_ready }
 
-async fn e2e_leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
+async fn leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let prefix = if want_prefix {
         format!("/{}", version.as_ref())
     } else {
@@ -92,19 +92,19 @@ async fn e2e_leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     assert_eq!(res.endpoint.unwrap(), expected);
 }
 
-async fn e2e_leader_endpoint_for_task_unprefixed(version: DapVersion) {
-    e2e_leader_endpoint_for_task(version, false).await
+async fn leader_endpoint_for_task_unprefixed(version: DapVersion) {
+    leader_endpoint_for_task(version, false).await
 }
 
-async_test_versions! { e2e_leader_endpoint_for_task_unprefixed }
+async_test_versions! { leader_endpoint_for_task_unprefixed }
 
-async fn e2e_leader_endpoint_for_task_prefixed(version: DapVersion) {
-    e2e_leader_endpoint_for_task(version, true).await
+async fn leader_endpoint_for_task_prefixed(version: DapVersion) {
+    leader_endpoint_for_task(version, true).await
 }
 
-async_test_versions! { e2e_leader_endpoint_for_task_prefixed }
+async_test_versions! { leader_endpoint_for_task_prefixed }
 
-async fn e2e_helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
+async fn helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let prefix = if want_prefix {
         format!("/{}", version.as_ref())
     } else {
@@ -133,35 +133,35 @@ async fn e2e_helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     assert_eq!(res.endpoint.unwrap(), expected);
 }
 
-async fn e2e_helper_endpoint_for_task_unprefixed(version: DapVersion) {
-    e2e_helper_endpoint_for_task(version, false).await
+async fn helper_endpoint_for_task_unprefixed(version: DapVersion) {
+    helper_endpoint_for_task(version, false).await
 }
 
-async_test_versions! { e2e_helper_endpoint_for_task_unprefixed }
+async_test_versions! { helper_endpoint_for_task_unprefixed }
 
-async fn e2e_helper_endpoint_for_task_prefixed(version: DapVersion) {
-    e2e_helper_endpoint_for_task(version, true).await
+async fn helper_endpoint_for_task_prefixed(version: DapVersion) {
+    helper_endpoint_for_task(version, true).await
 }
 
-async_test_versions! { e2e_helper_endpoint_for_task_prefixed }
+async_test_versions! { helper_endpoint_for_task_prefixed }
 
-async fn e2e_leader_hpke_config(version: DapVersion) {
+async fn leader_hpke_config(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     t.leader_get_raw_hpke_config(&client).await;
 }
 
-async_test_versions! { e2e_leader_hpke_config }
+async_test_versions! { leader_hpke_config }
 
-async fn e2e_helper_hpke_config(version: DapVersion) {
+async fn helper_hpke_config(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     t.helper_get_raw_hpke_config(&client).await;
 }
 
-async_test_versions! { e2e_helper_hpke_config }
+async_test_versions! { helper_hpke_config }
 
-async fn e2e_hpke_configs_are_cached(version: DapVersion) {
+async fn hpke_configs_are_cached(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     // Get a set of HPKE configs from leader and helper.
@@ -175,9 +175,9 @@ async fn e2e_hpke_configs_are_cached(version: DapVersion) {
     assert_eq!(hpke_config_list_0[1], hpke_config_list_1[1]);
 }
 
-async_test_versions! { e2e_hpke_configs_are_cached }
+async_test_versions! { hpke_configs_are_cached }
 
-async fn e2e_leader_upload(version: DapVersion) {
+async fn leader_upload(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
     let client = t.http_client();
@@ -354,11 +354,11 @@ async fn e2e_leader_upload(version: DapVersion) {
     );
 }
 
-async_test_versions! { e2e_leader_upload }
+async_test_versions! { leader_upload }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
-async fn e2e_leader_upload_taskprov() {
+async fn leader_upload_taskprov() {
     let version = DapVersion::Draft02;
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
@@ -527,7 +527,7 @@ async fn e2e_leader_upload_taskprov() {
     .await;
 }
 
-async fn e2e_internal_leader_process(version: DapVersion) {
+async fn internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let path = t.upload_path();
 
@@ -584,10 +584,10 @@ async fn e2e_internal_leader_process(version: DapVersion) {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
-async_test_versions! { e2e_internal_leader_process }
+async_test_versions! { internal_leader_process }
 
 // Test that all reports eventually get drained at minimum aggregation rate.
-async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
+async fn leader_process_min_agg_rate(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
@@ -633,9 +633,9 @@ async fn e2e_leader_process_min_agg_rate(version: DapVersion) {
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
 }
 
-async_test_versions! { e2e_leader_process_min_agg_rate }
+async_test_versions! { leader_process_min_agg_rate }
 
-async fn e2e_leader_collect_ok(version: DapVersion) {
+async fn leader_collect_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
@@ -776,11 +776,11 @@ async fn e2e_leader_collect_ok(version: DapVersion) {
     //  .await;
 }
 
-async_test_versions! { e2e_leader_collect_ok }
+async_test_versions! { leader_collect_ok }
 
 // Test that collect jobs complete even if the request is issued after all reports for the task
 // have been processed.
-async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
+async fn leader_collect_ok_interleaved(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
@@ -842,9 +842,9 @@ async fn e2e_leader_collect_ok_interleaved(version: DapVersion) {
     );
 }
 
-async_test_versions! { e2e_leader_collect_ok_interleaved }
+async_test_versions! { leader_collect_ok_interleaved }
 
-async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
+async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
     let client = t.http_client();
@@ -912,9 +912,9 @@ async fn e2e_leader_collect_not_ready_min_batch_size(version: DapVersion) {
     assert_eq!(resp.status(), 202);
 }
 
-async_test_versions! { e2e_leader_collect_not_ready_min_batch_size }
+async_test_versions! { leader_collect_not_ready_min_batch_size }
 
-async fn e2e_leader_collect_abort_unknown_request(version: DapVersion) {
+async fn leader_collect_abort_unknown_request(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
 
@@ -936,9 +936,9 @@ async fn e2e_leader_collect_abort_unknown_request(version: DapVersion) {
     assert_eq!(resp.status(), expected_status);
 }
 
-async_test_versions! { e2e_leader_collect_abort_unknown_request }
+async_test_versions! { leader_collect_abort_unknown_request }
 
-async fn e2e_leader_collect_accept_global_config_max_batch_duration(version: DapVersion) {
+async fn leader_collect_accept_global_config_max_batch_duration(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = Interval {
@@ -958,9 +958,9 @@ async fn e2e_leader_collect_accept_global_config_max_batch_duration(version: Dap
         .await;
 }
 
-async_test_versions! { e2e_leader_collect_accept_global_config_max_batch_duration }
+async_test_versions! { leader_collect_accept_global_config_max_batch_duration }
 
-async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
+async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
@@ -1037,9 +1037,9 @@ async fn e2e_leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     }
 }
 
-async_test_versions! { e2e_leader_collect_abort_invalid_batch_interval }
+async_test_versions! { leader_collect_abort_invalid_batch_interval }
 
-async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
+async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
     let client = t.http_client();
@@ -1145,9 +1145,9 @@ async fn e2e_leader_collect_abort_overlapping_batch_interval(version: DapVersion
     }
 }
 
-async_test_versions! { e2e_leader_collect_abort_overlapping_batch_interval }
+async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
-async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
+async fn fixed_size(version: DapVersion, use_current: bool) {
     if version == DapVersion::Draft02 && use_current {
         // The "current batch" isn't a feature in Draft02, but we allow it
         // and immediately return for testing flexibility, as this allows us
@@ -1342,19 +1342,19 @@ async fn e2e_fixed_size(version: DapVersion, use_current: bool) {
     }
 }
 
-async fn e2e_fixed_size_no_current(version: DapVersion) {
-    e2e_fixed_size(version, true).await;
+async fn fixed_size_no_current(version: DapVersion) {
+    fixed_size(version, true).await;
 }
 
-async_test_versions! { e2e_fixed_size_no_current }
+async_test_versions! { fixed_size_no_current }
 
-async fn e2e_fixed_size_current(version: DapVersion) {
-    e2e_fixed_size(version, true).await;
+async fn fixed_size_current(version: DapVersion) {
+    fixed_size(version, true).await;
 }
 
-async_test_versions! { e2e_fixed_size_current }
+async_test_versions! { fixed_size_current }
 
-async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
+async fn leader_collect_taskprov_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
@@ -1502,9 +1502,9 @@ async fn e2e_leader_collect_taskprov_ok(version: DapVersion) {
     );
 }
 
-async_test_version! { e2e_leader_collect_taskprov_ok, Draft02 }
+async_test_version! { leader_collect_taskprov_ok, Draft02 }
 
-async fn e2e_helper_admin_add_task(version: DapVersion) {
+async fn helper_admin_add_task(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
 
     let add_task_cmd = serde_json::json!({
@@ -1549,4 +1549,4 @@ async fn e2e_helper_admin_add_task(version: DapVersion) {
     }
 }
 
-async_test_versions! { e2e_helper_admin_add_task }
+async_test_versions! { helper_admin_add_task }

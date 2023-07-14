@@ -10,7 +10,8 @@ env RUST_BACKTRACE=1 cargo test \
     --features=test_e2e \
     -- \
     --nocapture \
-    --test-threads 1
+    --test-threads 1 \
+    e2e
 
 echo "Running clippy."
 cargo clippy -- -Dwarnings
