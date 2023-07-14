@@ -242,9 +242,9 @@ impl From<VdafTypeVar> for VdafConfig {
     fn from(var: VdafTypeVar) -> Self {
         match var {
             VdafTypeVar::Prio3Aes128Count => VdafConfig::Prio3(Prio3Config::Count),
-            VdafTypeVar::Prio3Aes128Histogram { len_length } => {
+            VdafTypeVar::Prio3Aes128Histogram { len } => {
                 VdafConfig::Prio3(Prio3Config::Histogram {
-                    len: len_length.into(),
+                    len: len.try_into().unwrap(),
                 })
             }
             VdafTypeVar::Prio3Aes128Sum { bit_length } => VdafConfig::Prio3(Prio3Config::Sum {

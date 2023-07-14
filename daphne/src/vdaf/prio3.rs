@@ -54,7 +54,8 @@ pub(crate) fn prio3_shard(
         }
         (Prio3Config::Histogram { len }, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_histogram(2, *len)?;
-            Ok(shard!(vdaf, &(measurement as usize), nonce))
+            let m: usize = measurement.try_into().unwrap();
+            Ok(shard!(vdaf, &m, nonce))
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;

@@ -325,7 +325,7 @@ fn read_unsupported_hpke_config() {
     );
 }
 
-// NOTE: these test vectors are no longer valid, TaskProv doesn't match the VDAF-06
+// NOTE: these test vectors are no longer valid, TaskProv doesn't match the VDAF-06 spec.
 // Tracking the issue here: https://github.com/wangshan/draft-wang-ppm-dap-taskprov/issues/33.
 // #[test]
 // fn read_vdaf_config() {
