@@ -5,8 +5,12 @@
 
 set -e
 
-echo "Running tests."
-env RUST_BACKTRACE=1 cargo test --features=test_e2e -p daphne-worker-test -- --nocapture --test-threads 1
+echo "Running e2e tests."
+env RUST_BACKTRACE=1 cargo test \
+    --features=test_e2e \
+    -- \
+    --nocapture \
+    --test-threads 1
 
 echo "Running clippy."
 cargo clippy -- -Dwarnings

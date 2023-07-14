@@ -14,8 +14,10 @@ members = [
 opt-level = "s"
 
 [workspace.dependencies]
+anyhow = "1.0.71"
 assert_matches = "1.5.0"
 async-trait = "0.1.71"
+base64 = "0.21.2"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 futures = "0.3.28"
 getrandom = { version = "0.2.10", features = ["js"] } # Required for prio
