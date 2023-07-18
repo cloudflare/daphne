@@ -161,7 +161,7 @@ impl DapGlobalConfig {
         &self,
         first_config_id: u8,
     ) -> impl Iterator<Item = Result<HpkeReceiverConfig, DapError>> {
-        assert!(self.supported_hpke_kems.len() <= u8::MAX.into());
+        assert!(self.supported_hpke_kems.len() <= (u8::MAX as usize));
         let kem_ids = self.supported_hpke_kems.clone();
         kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {
             let (config_id, _overflowed) = first_config_id.overflowing_add(i as u8);
@@ -261,6 +261,11 @@ pub struct DapTaskConfig {
 
     /// The VDAF configuration for this task.
     pub vdaf: VdafConfig,
+
+    /// The DP configuration for this task.
+    /// TODO(tholop): import the right things, wrapper or directly the Prio object?
+    #[serde(default)]
+    pub dp_config: Option<DpStrategy>,
 
     /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
     pub vdaf_verify_key: VdafVerifyKey,
@@ -598,6 +603,17 @@ impl DapAggregateShare {
             })?;
         }
         Ok(agg_share)
+    }
+
+    pub fn maybe_add_noise(
+        &mut self, 
+        dp_strategy: &DpStrategy,
+        agg_param: &mut AggregationParam.
+    ) {
+        // TODO(tholop): instantiate vdaf and call add_noise
+        // Or do that when we create the AggregateShare?
+        
+
     }
 }
 

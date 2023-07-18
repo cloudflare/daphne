@@ -597,6 +597,15 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self.get_agg_share(task_id, &batch_selector).await?;
 
+        // Add differential privacy noise
+        // TODO(tholop): check example of vdaf config above, pass it so we can instantiate AggregatorWithNoise
+        // also check the agg param
+        match task_config.dp_config {
+            Some(dp_strategy) => {
+                leader_agg_share.maybe_add_noise(&dp_strategy, &collect_req.agg_param)
+            }
+        }
+
         // Check the batch size. If not not ready, then return early.
         //
         // TODO Consider logging this error, as it should never happen.
@@ -966,7 +975,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     state,
                     &agg_job_cont_req,
                     &metrics,
-                )?;
+                )?; // TODO(tholop): example of vdaf config
 
                 let (agg_job_resp, out_shares_count) = match transition {
                     DapHelperTransition::Continue(..) => {
@@ -1055,6 +1064,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
         let agg_share = self
             .get_agg_share(task_id, &agg_share_req.batch_sel)
             .await?;
+
+        // TODO(tholop): add noise like the Leader.
 
         // Check that we have aggreagted the same set of reports as the Leader.
         if agg_share_req.report_count != agg_share.report_count
