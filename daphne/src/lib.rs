@@ -54,9 +54,18 @@ use constants::DapMediaType;
 use criterion as _;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
+use prio::vdaf::prio3::Prio3;
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
-    vdaf::Aggregatable as AggregatableTrait,
+    dp::DifferentialPrivacyBudget,
+    dp::{distributions::DiscreteGaussian, ZeroConcentratedDifferentialPrivacyBudget},
+    dp::{
+        distributions::ZCdpDiscreteGaussian, DifferentialPrivacyDistribution,
+        DifferentialPrivacyStrategy,
+    },
+    vdaf::{
+        prio3::Prio3Histogram, Aggregatable as AggregatableTrait, AggregatorWithNoise, VdafError,
+    },
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -66,6 +75,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
 };
+use tracing::{debug, error, warn};
 use url::Url;
 use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
@@ -264,8 +274,9 @@ pub struct DapTaskConfig {
 
     /// The DP configuration for this task.
     /// TODO(tholop): import the right things, wrapper or directly the Prio object?
+    /// TODO(tholop): actually do this inside VdafConfig.
     #[serde(default)]
-    pub dp_config: Option<DpStrategy>,
+    pub dp_config: Option<VdafDpConfig>,
 
     /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
     pub vdaf_verify_key: VdafVerifyKey,
@@ -606,14 +617,54 @@ impl DapAggregateShare {
     }
 
     pub fn maybe_add_noise(
-        &mut self, 
-        dp_strategy: &DpStrategy,
-        agg_param: &mut AggregationParam.
-    ) {
+        &mut self,
+        vdaf_config: &VdafConfig,
+        vdaf_dp_config: &VdafDpConfig,
+        agg_param: &Vec<u8>,
+    ) -> Result<(), VdafError> {
         // TODO(tholop): instantiate vdaf and call add_noise
         // Or do that when we create the AggregateShare?
-        
+        match vdaf_config {
+            VdafConfig::Prio3(Prio3Config::Histogram { len }) => {
+                let vdaf = Prio3::new_histogram(2, *len)?;
+                let num_measurements = self.report_count.try_into().unwrap();
+                // TODO(tholop): is it going to mutate the share for real? Actually wrong type?
 
+                let vdaf_agg_share = self.data.as_mut().unwrap();
+                let maybe_agg_share = match vdaf_agg_share {
+                    VdafAggregateShare::Field128(prio128_agg_share) => Ok(prio128_agg_share),
+                    _ => Err(VdafError::Uncategorized("wrong field".to_string())),
+                };
+                let agg_share = maybe_agg_share?;
+
+                let dp_strategy = ZCdpDiscreteGaussian::from_budget(vdaf_dp_config.budget);
+                let agg_param = ();
+
+                match vdaf_dp_config.distribution {
+                    DistributionCodepoint::Gaussian => {
+                        vdaf.add_noise_to_agg_share(
+                            &dp_strategy,
+                            &agg_param,
+                            agg_share,
+                            num_measurements,
+                        );
+                    }
+                    DistributionCodepoint::Laplace { .. } => {
+                        debug!("Unsupported");
+                        // TODO(tholop): more custom error
+                    }
+                }
+                Ok(())
+            }
+            VdafConfig::Prio3 { .. } => {
+                debug!("Not supporting other Prio3 VDAFs for now, only histogram.");
+                Ok(())
+            }
+            VdafConfig::Prio2 { .. } => {
+                debug!("DP not supported by Prio2, not adding any noise");
+                Ok(())
+            }
+        }
     }
 }
 
@@ -651,6 +702,22 @@ pub enum DapHelperTransition<M: Debug> {
 pub enum VdafConfig {
     Prio3(Prio3Config),
     Prio2 { dimension: usize },
+}
+
+/// Codepoint for distributions
+/// TODO(tholop): fix some numbers like for Vdafs?
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum DistributionCodepoint {
+    Gaussian,
+    Laplace,
+}
+
+/// DP budget for a particular VDAF
+/// TODO(tholop): might change things. Harcoded Gaussian zCDP for now?
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct VdafDpConfig {
+    pub distribution: DistributionCodepoint,
+    pub budget: ZeroConcentratedDifferentialPrivacyBudget,
 }
 
 impl std::str::FromStr for VdafConfig {

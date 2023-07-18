@@ -600,11 +600,15 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // Add differential privacy noise
         // TODO(tholop): check example of vdaf config above, pass it so we can instantiate AggregatorWithNoise
         // also check the agg param
-        match task_config.dp_config {
-            Some(dp_strategy) => {
-                leader_agg_share.maybe_add_noise(&dp_strategy, &collect_req.agg_param)
-            }
-        }
+        let noise_status = match task_config.dp_config {
+            Some(vdaf_dp_config) => leader_agg_share.maybe_add_noise(
+                &task_config.vdaf,
+                &vdaf_dp_config,
+                &collect_req.agg_param,
+            ),
+            _ => Ok(()),
+        };
+        // TODO(tholop): handle error? Abort?
 
         // Check the batch size. If not not ready, then return early.
         //
