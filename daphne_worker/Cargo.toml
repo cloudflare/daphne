@@ -21,6 +21,8 @@ crate-type = ["cdylib", "rlib"]
 arc-swap = "1.6.0"
 async-trait.workspace = true
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "wasmbind"] }
+# num-bigint = { version = "0.4.3", features = ["rand", "serde"] }
+
 daphne = { path = "../daphne" }
 futures.workspace = true
 hex.workspace = true

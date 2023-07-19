@@ -53,20 +53,13 @@ use constants::DapMediaType;
 #[cfg(test)]
 use criterion as _;
 pub use error::DapError;
-use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use prio::vdaf::prio3::Prio3;
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
-    dp::DifferentialPrivacyBudget,
-    dp::{distributions::DiscreteGaussian, ZeroConcentratedDifferentialPrivacyBudget},
-    dp::{
-        distributions::ZCdpDiscreteGaussian, DifferentialPrivacyDistribution,
-        DifferentialPrivacyStrategy,
-    },
-    vdaf::{
-        prio3::Prio3Histogram, Aggregatable as AggregatableTrait, AggregatorWithNoise, VdafError,
-    },
+    dp::ZeroConcentratedDifferentialPrivacyBudget,
+    dp::{distributions::ZCdpDiscreteGaussian, DifferentialPrivacyStrategy},
+    vdaf::{Aggregatable as AggregatableTrait, AggregatorWithNoise},
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -76,7 +69,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
 };
-use tracing::{debug, error, warn};
+use tracing::warn;
 use url::Url;
 use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
@@ -652,7 +645,15 @@ impl DapAggregateShare {
                 let dp_strategy = ZCdpDiscreteGaussian::from_budget(zcdp_budget.clone());
                 let agg_param = ();
 
-                vdaf.add_noise_to_agg_share(&dp_strategy, &agg_param, agg_share, num_measurements);
+                match vdaf.add_noise_to_agg_share(
+                    &dp_strategy,
+                    &agg_param,
+                    agg_share,
+                    num_measurements,
+                ) {
+                    Ok(()) => (),
+                    Err(e) => return Err(DapAbort::Internal(Box::new(fatal_error!(err = e)))),
+                }
 
                 Ok(())
             }

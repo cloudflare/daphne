@@ -2,8 +2,9 @@ name = "daphne_worker_test"
 main = "build/worker/shim.mjs"
 compatibility_date = "2022-10-14"
 
-[build]
-command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build"
+# Commented out because I prefer to build manually only when needed
+# [build]
+# command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build"
 
 [[rules]]
 globs = ["**/*.wasm"]

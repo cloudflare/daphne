@@ -723,6 +723,16 @@ pub(crate) struct InternalTestVdaf {
     length: Option<String>,
 }
 
+// TODO(tholop): handle other types of budget
+#[derive(Deserialize)]
+pub(crate) struct InternalTestDpConfig {
+    distribution: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zcdp_numerator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zcdp_denominator: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct InternalTestAddTask {
@@ -730,6 +740,7 @@ pub(crate) struct InternalTestAddTask {
     leader: Url,
     helper: Url,
     vdaf: InternalTestVdaf,
+    dp_config: InternalTestDpConfig,
     leader_authentication_token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     collector_authentication_token: Option<String>,

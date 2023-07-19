@@ -29,12 +29,13 @@ use daphne::{
         decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, ReportMetadata, TaskId,
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
-    DapVersion, Prio3Config, VdafConfig,
+    DapVersion, Prio3Config, VdafConfig, VdafDpConfig,
 };
 use futures::TryFutureExt;
 use matchit::Router;
 use prio::{
     codec::Decode,
+    dp::{Rational, ZeroConcentratedDifferentialPrivacyBudget},
     vdaf::prg::{Prg, PrgSha3, Seed, SeedStream},
 };
 use prometheus::{Encoder, Registry};
@@ -47,7 +48,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 use worker::{kv::KvStore, *};
 
 const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET: &str = "hpke_receiver_config_set";
@@ -935,7 +936,31 @@ impl<'srv> DaphneWorker<'srv> {
         };
 
         // TODO(tholop): we can run the compatibility check here too.
-        let dp_config = todo!();
+        let dp_config = match (
+            cmd.dp_config.distribution.as_ref(),
+            cmd.dp_config.zcdp_numerator,
+            cmd.dp_config.zcdp_denominator,
+        ) {
+            ("Gaussian", Some(n), Some(d)) => {
+                // let n: BigUint = n.parse().map_err(int_err)?;
+                // let d: BigUint = d.parse().map_err(int_err)?;
+                // TODO(tholop): we could also use Rational without the from u128 method.
+                let n: u128 = n.parse().map_err(int_err)?;
+                let d: u128 = d.parse().map_err(int_err)?;
+                let epsilon = Rational::from_unsigned(n, d).map_err(int_err)?;
+
+                let zcdp_budget = ZeroConcentratedDifferentialPrivacyBudget::new(epsilon);
+                debug!("got zcdp budget");
+                Some(VdafDpConfig {
+                    distribution: daphne::DistributionCodepoint::Gaussian,
+                    budget: daphne::DpBudget::ZCdp { zcdp_budget },
+                })
+            }
+            _ => {
+                debug!("no valid dp config");
+                None
+            }
+        };
 
         // VDAF verification key.
         let vdaf_verify_key_data = decode_base64url_vec(cmd.vdaf_verify_key.as_bytes())
