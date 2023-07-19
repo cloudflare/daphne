@@ -39,6 +39,18 @@
 //!     > request to the collect job  URI. The leader responds with HTTP status 204 No Content for
 //!     > requests to a collect job URI whose results have been removed.
 
+pub mod audit_log;
+pub mod auth;
+pub mod constants;
+pub mod error;
+pub mod hpke;
+pub mod messages;
+pub mod metrics;
+pub mod roles;
+pub mod taskprov;
+pub mod testing;
+pub mod vdaf;
+
 use crate::{
     error::DapAbort,
     hpke::HpkeReceiverConfig,
@@ -899,23 +911,3 @@ impl MetaAggregationJobId<'_> {
         }
     }
 }
-
-pub mod audit_log;
-pub mod auth;
-pub mod constants;
-#[cfg(test)]
-mod constants_test;
-pub mod error;
-pub mod hpke;
-#[cfg(test)]
-mod hpke_test;
-pub mod messages;
-pub mod metrics;
-pub mod roles;
-#[cfg(test)]
-mod roles_test;
-pub mod taskprov;
-#[cfg(test)]
-mod taskprov_test;
-pub mod testing;
-pub mod vdaf;

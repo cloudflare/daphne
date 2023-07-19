@@ -1,3 +1,6 @@
+// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::borrow::Cow;
 
 use async_trait::async_trait;
