@@ -1197,6 +1197,7 @@ impl AggregationJobTest {
                 min_batch_size: 10,
                 query: DapQueryConfig::TimeInterval,
                 vdaf: vdaf.clone(),
+                dp_config: None,
                 vdaf_verify_key,
                 collector_hpke_config,
                 taskprov: false,

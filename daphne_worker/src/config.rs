@@ -934,6 +934,9 @@ impl<'srv> DaphneWorker<'srv> {
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 
+        // TODO(tholop): we can run the compatibility check here too.
+        let dp_config = todo!();
+
         // VDAF verification key.
         let vdaf_verify_key_data = decode_base64url_vec(cmd.vdaf_verify_key.as_bytes())
             .ok_or_else(|| int_err("VDAF verify key is not valid URL-safe base64"))?;
@@ -1010,6 +1013,7 @@ impl<'srv> DaphneWorker<'srv> {
                     min_batch_size: cmd.min_batch_size,
                     query,
                     vdaf,
+                    dp_config,
                     vdaf_verify_key,
                     collector_hpke_config,
                     taskprov: false,

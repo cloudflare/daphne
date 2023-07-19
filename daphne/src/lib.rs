@@ -53,6 +53,7 @@ use constants::DapMediaType;
 #[cfg(test)]
 use criterion as _;
 pub use error::DapError;
+use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use prio::vdaf::prio3::Prio3;
 use prio::{
@@ -273,7 +274,6 @@ pub struct DapTaskConfig {
     pub vdaf: VdafConfig,
 
     /// The DP configuration for this task.
-    /// TODO(tholop): import the right things, wrapper or directly the Prio object?
     /// TODO(tholop): actually do this inside VdafConfig.
     #[serde(default)]
     pub dp_config: Option<VdafDpConfig>,
@@ -619,51 +619,46 @@ impl DapAggregateShare {
     pub fn maybe_add_noise(
         &mut self,
         vdaf_config: &VdafConfig,
-        vdaf_dp_config: &VdafDpConfig,
-        agg_param: &Vec<u8>,
-    ) -> Result<(), VdafError> {
-        // TODO(tholop): instantiate vdaf and call add_noise
-        // Or do that when we create the AggregateShare?
-        match vdaf_config {
-            VdafConfig::Prio3(Prio3Config::Histogram { len }) => {
-                let vdaf = Prio3::new_histogram(2, *len)?;
+        budget: &DpBudget,
+        distribution: &DistributionCodepoint,
+        _agg_param: &Vec<u8>,
+    ) -> Result<(), DapAbort> {
+        // TODO(tholop): wrapping the FatalDapError in a DapAbort because the caller already returns a DapAbort
+        // but it looks a bit ugly.
+        match (vdaf_config, budget, distribution) {
+            (
+                &VdafConfig::Prio3(Prio3Config::Histogram { len }),
+                &DpBudget::ZCdp { ref zcdp_budget },
+                &DistributionCodepoint::Gaussian,
+            ) => {
+                let vdaf = match Prio3::new_histogram(2, len) {
+                    Ok(vdaf) => vdaf,
+                    Err(e) => return Err(DapAbort::Internal(Box::new(fatal_error!(err = e)))),
+                };
                 let num_measurements = self.report_count.try_into().unwrap();
-                // TODO(tholop): is it going to mutate the share for real? Actually wrong type?
+                // TODO(tholop): is it going to mutate the share for real?
 
                 let vdaf_agg_share = self.data.as_mut().unwrap();
+
                 let maybe_agg_share = match vdaf_agg_share {
                     VdafAggregateShare::Field128(prio128_agg_share) => Ok(prio128_agg_share),
-                    _ => Err(VdafError::Uncategorized("wrong field".to_string())),
+                    _ => Err(DapAbort::Internal(Box::new(fatal_error!(
+                        err = "Invalid VDAF aggregate share type"
+                    )))),
                 };
+
                 let agg_share = maybe_agg_share?;
 
-                let dp_strategy = ZCdpDiscreteGaussian::from_budget(vdaf_dp_config.budget);
+                let dp_strategy = ZCdpDiscreteGaussian::from_budget(zcdp_budget.clone());
                 let agg_param = ();
 
-                match vdaf_dp_config.distribution {
-                    DistributionCodepoint::Gaussian => {
-                        vdaf.add_noise_to_agg_share(
-                            &dp_strategy,
-                            &agg_param,
-                            agg_share,
-                            num_measurements,
-                        );
-                    }
-                    DistributionCodepoint::Laplace { .. } => {
-                        debug!("Unsupported");
-                        // TODO(tholop): more custom error
-                    }
-                }
+                vdaf.add_noise_to_agg_share(&dp_strategy, &agg_param, agg_share, num_measurements);
+
                 Ok(())
             }
-            VdafConfig::Prio3 { .. } => {
-                debug!("Not supporting other Prio3 VDAFs for now, only histogram.");
-                Ok(())
-            }
-            VdafConfig::Prio2 { .. } => {
-                debug!("DP not supported by Prio2, not adding any noise");
-                Ok(())
-            }
+            _ => Err(DapAbort::Internal(Box::new(fatal_error!(
+                err = "Unsupported combination of distribution, budget, and vdaf config" // err = format!("Unsupported combination of distribution, budget, and vdaf config: {:?}, {:?}, {:?}", budget, distribution, vdaf_config)))
+            )))),
         }
     }
 }
@@ -701,15 +696,8 @@ pub enum DapHelperTransition<M: Debug> {
 #[serde(rename_all = "snake_case")]
 pub enum VdafConfig {
     Prio3(Prio3Config),
+    // DpPrio3(DpPrio3Config),
     Prio2 { dimension: usize },
-}
-
-/// Codepoint for distributions
-/// TODO(tholop): fix some numbers like for Vdafs?
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum DistributionCodepoint {
-    Gaussian,
-    Laplace,
 }
 
 /// DP budget for a particular VDAF
@@ -717,7 +705,7 @@ pub enum DistributionCodepoint {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VdafDpConfig {
     pub distribution: DistributionCodepoint,
-    pub budget: ZeroConcentratedDifferentialPrivacyBudget,
+    pub budget: DpBudget,
 }
 
 impl std::str::FromStr for VdafConfig {
@@ -757,6 +745,56 @@ pub enum Prio3Config {
     /// Each element is a 64-bit unsigned integer in range `[0,2^bits)`.
     SumVec { bits: usize, len: usize },
 }
+
+/// Codepoint for distributions
+/// TODO(tholop): fix some numbers like for Vdafs?
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum DistributionCodepoint {
+    Gaussian,
+    // Laplace,
+}
+
+/// DP budgets
+/// TODO(tholop): add other budgets
+/// TODO(tholop): could also use usize ratios here?
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum DpBudget {
+    ZCdp {
+        zcdp_budget: ZeroConcentratedDifferentialPrivacyBudget,
+    },
+    // PureDp { ...},
+}
+
+/// Prio3 config with differential privacy. Use the constructor to check for compatibility.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DpPrio3Config {
+    distribution: DistributionCodepoint,
+    budget: DpBudget,
+    prio3_config: Prio3Config,
+}
+
+// impl DpPrio3Config {
+//     /// Check that the DP configuration is compatible with the Prio3 VDAF.
+//     pub fn new(
+//         distribution: DistributionCodepoint,
+//         budget: DpBudget,
+//         prio3_config: Prio3Config,
+//     ) -> Result<Self, String> {
+//         match (distribution, budget, prio3_config) {
+//             (DistributionCodepoint::Gaussian, DpBudget::ZCdp { .. }, Prio3Config::Histogram { .. })
+//             // | (DistributionCodepoint::Gaussian, DpBudget::ZCdp { .. }, Prio3Config::Sum { .. })
+//              => Ok(Self {
+//                 distribution,
+//                 budget,
+//                 prio3_config,
+//             }),
+//             _ => Err(format!(
+//                 "Unsupported combination of distribution, budget, and prio3 config."
+//             )),
+//         }
+//     }
+// }
 
 impl Display for Prio3Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

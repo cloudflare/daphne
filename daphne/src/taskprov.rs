@@ -285,6 +285,7 @@ impl DapTaskConfig {
             min_batch_size: task_config.query_config.min_batch_size.into(),
             query: DapQueryConfig::from(task_config.query_config.var),
             vdaf: VdafConfig::from(task_config.vdaf_config.var),
+            dp_config: None, // TaskProv has its own support for DP.
             vdaf_verify_key: compute_vdaf_verify_key(
                 taskprov_version,
                 vdaf_verify_key_init,
