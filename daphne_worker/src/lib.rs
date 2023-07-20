@@ -726,7 +726,8 @@ pub(crate) struct InternalTestVdaf {
 // TODO(tholop): handle other types of budget
 #[derive(Deserialize)]
 pub(crate) struct InternalTestDpConfig {
-    distribution: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    distribution: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     zcdp_numerator: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -48,7 +48,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use worker::{kv::KvStore, *};
 
 const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET: &str = "hpke_receiver_config_set";
@@ -935,16 +935,19 @@ impl<'srv> DaphneWorker<'srv> {
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };
 
+        warn!("vdaf config: {:?}", vdaf);
+
         // TODO(tholop): we can run the compatibility check here too.
         let dp_config = match (
-            cmd.dp_config.distribution.as_ref(),
+            cmd.dp_config.distribution.as_deref(),
             cmd.dp_config.zcdp_numerator,
             cmd.dp_config.zcdp_denominator,
         ) {
-            ("Gaussian", Some(n), Some(d)) => {
+            (Some("Gaussian"), Some(n), Some(d)) => {
                 // let n: BigUint = n.parse().map_err(int_err)?;
                 // let d: BigUint = d.parse().map_err(int_err)?;
                 // TODO(tholop): we could also use Rational without the from u128 method.
+
                 let n: u128 = n.parse().map_err(int_err)?;
                 let d: u128 = d.parse().map_err(int_err)?;
                 let epsilon = Rational::from_unsigned(n, d).map_err(int_err)?;
