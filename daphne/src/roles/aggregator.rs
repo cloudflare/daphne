@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use async_trait::async_trait;
 use prio::codec::Encode;
@@ -12,8 +12,8 @@ use crate::{
     error::DapAbort,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
-        decode_base64url, BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, TaskId,
-        Time,
+        decode_base64url, BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId,
+        TaskId, Time,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -102,13 +102,17 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for fixed-size tasks.
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError>;
 
-    /// Store a set of output shares.
+    /// Store a set of output shares and mark the corresponding reports as aggregated. Any reports
+    /// that were already aggregated are not committed.
+    ///
+    /// TODO spec: Ensure the spec allows rejecting due to replay at this stage.
     async fn put_out_shares(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
-    ) -> Result<(), DapError>;
+    ) -> Result<HashSet<ReportId>, DapError>;
 
     /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(

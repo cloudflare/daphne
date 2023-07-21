@@ -3,7 +3,7 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
+    durable::{state_get, state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
     initialize_tracing, int_err,
 };
 use daphne::{
@@ -15,7 +15,7 @@ use daphne::{
     DapError, VdafConfig,
 };
 use futures::future::try_join_all;
-use prio::codec::{CodecError, Decode, ParameterizedDecode};
+use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, time::Duration};
 use tracing::warn;
@@ -23,6 +23,8 @@ use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
     "/internal/do/reports_processed/initialize";
+pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
+    "/internal/do/reports_processed/mark_aggregated";
 
 /// Durable Object (DO) for tracking which reports have been processed.
 ///
@@ -49,13 +51,13 @@ pub struct ReportsProcessed {
 
 impl ReportsProcessed {
     /// Check if the report has been processed. If not, return None; otherwise, return the ID.
-    async fn to_checked(&self, report_id_hex: String) -> Result<Option<String>> {
-        let key = format!("processed/{report_id_hex}");
+    async fn to_checked(&self, report_id: ReportId) -> Result<Option<ReportId>> {
+        let key = format!("processed/{}", report_id.to_hex());
         let processed: bool = state_set_if_not_exists(&self.state, &key, &true)
             .await?
             .unwrap_or(false);
         if processed {
-            Ok(Some(report_id_hex))
+            Ok(Some(report_id))
         } else {
             Ok(None)
         }
@@ -92,35 +94,32 @@ impl DurableObject for ReportsProcessed {
             //  * Ensure the report won't be included in a batch that was already collected
             //  * Initialize VDAF preparation.
             //
-            // Non-idempotent
+            // Idempotent
             // Input: `ReportsProcessedReq`
             // Output: `ReportsProcessedResp`
             (DURABLE_REPORTS_PROCESSED_INITIALIZE, Method::Post) => {
                 let reports_processed_request: ReportsProcessedReq = req.json().await?;
-                let replayed_reports = try_join_all(
+                let result = try_join_all(
                     reports_processed_request
                         .consumed_reports
                         .iter()
                         .filter(|consumed_report| consumed_report.is_ready())
-                        .map(|consumed_report| {
-                            self.to_checked(consumed_report.metadata().id.to_hex())
+                        .map(|consumed_report| async {
+                            if let Some(replayed) = state_get::<bool>(
+                                &self.state,
+                                &format!("processed/{}", consumed_report.metadata().id.to_hex()),
+                            )
+                            .await?
+                            {
+                                if replayed {
+                                    return Result::Ok(Some(consumed_report.metadata().id.clone()));
+                                }
+                            }
+                            Ok(None)
                         }),
                 )
-                .await?
-                .into_iter()
-                // The iterator here is on `Option<String>`. What we want to do is filter out
-                // values that are `None` and unwrap the `String`.
-                .flatten()
-                .map(|report_id_hex| {
-                    hex::decode(report_id_hex)
-                        .map_err(|e| format!("Failed to hex decode ReportId: {e}"))
-                        .and_then(|report_id_data| {
-                            ReportId::get_decoded(&report_id_data)
-                                .map_err(|e| format!("Failed to decode ReportId: {e}"))
-                        })
-                })
-                .collect::<std::result::Result<HashSet<ReportId>, String>>()
-                .map_err(|e| int_err(format!("ReportsProcessed: {e}")))?;
+                .await?;
+                let replayed_reports = result.into_iter().flatten().collect::<HashSet<ReportId>>();
 
                 let initialized_reports = reports_processed_request
                     .consumed_reports
@@ -152,6 +151,26 @@ impl DurableObject for ReportsProcessed {
                     vdaf_config: reports_processed_request.vdaf_config,
                     initialized_reports,
                 })
+            }
+
+            // Mark reports as aggregated. Return the subset that were already aggregated.
+            //
+            // Non-idempotent
+            // Input: `Vec<ReportId>`
+            // Output: `Vec<ReportId>`
+            (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
+                let report_ids: Vec<ReportId> = req.json().await?;
+                let replayed_reports = try_join_all(
+                    report_ids
+                        .into_iter()
+                        .map(|report_id| self.to_checked(report_id)),
+                )
+                .await?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<ReportId>>();
+
+                Response::from_json(&replayed_reports)
             }
 
             _ => Err(int_err(format!(

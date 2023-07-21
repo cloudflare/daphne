@@ -26,7 +26,7 @@ use daphne::{
     fatal_error,
     hpke::{HpkeConfig, HpkeReceiverConfig},
     messages::{
-        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, ReportMetadata, TaskId,
+        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, ReportId, TaskId, Time,
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,
@@ -345,17 +345,14 @@ impl DaphneWorkerConfig {
         &self,
         task_config: &DapTaskConfig,
         task_id_hex: &str,
-        metadata: &ReportMetadata,
+        report_id: &ReportId,
+        report_time: Time,
     ) -> String {
         let mut shard_seed = [0; 8];
-        PrgSha3::seed_stream(
-            &self.report_shard_key,
-            b"report shard",
-            metadata.id.as_ref(),
-        )
-        .fill(&mut shard_seed);
+        PrgSha3::seed_stream(&self.report_shard_key, b"report shard", report_id.as_ref())
+            .fill(&mut shard_seed);
         let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
-        let epoch = metadata.time - (metadata.time % self.global.report_storage_epoch_duration);
+        let epoch = report_time - (report_time % self.global.report_storage_epoch_duration);
         durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
     }
 }

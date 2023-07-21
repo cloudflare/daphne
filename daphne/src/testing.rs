@@ -384,14 +384,6 @@ impl DapReportInitializer for MockAggregator {
                 {
                     early_fails.insert(metadata.id.clone(), transition_failure);
                 };
-
-                // Mark report processed.
-                let mut guard = self
-                    .report_store
-                    .lock()
-                    .expect("report_store: failed to lock");
-                let report_store = guard.entry(task_id.clone()).or_default();
-                report_store.processed.insert(metadata.id.clone());
             }
         }
 
@@ -520,25 +512,41 @@ impl DapAggregator<BearerToken> for MockAggregator {
     async fn put_out_shares(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
-    ) -> Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
-            .await?
-            .ok_or_else(|| fatal_error!(err = "task not found"))?;
+    ) -> Result<HashSet<ReportId>, DapError> {
+        let mut report_store_guard = self
+            .report_store
+            .lock()
+            .expect("report_store: failed to lock");
+        let report_store = report_store_guard.entry(task_id.clone()).or_default();
+        let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
+        let agg_store = agg_store_guard.entry(task_id.clone()).or_default();
 
-        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(task_id.clone()).or_default();
-        for (bucket, agg_share_delta) in task_config
+        let mut replayed = HashSet::new();
+        for (bucket, out_shares) in task_config
             .batch_span_for_out_shares(part_batch_sel, out_shares)?
             .into_iter()
         {
-            let inner_agg_store = agg_store.entry(bucket.to_owned_bucket()).or_default();
-            inner_agg_store.agg_share.merge(agg_share_delta)?;
+            for out_share in out_shares.into_iter() {
+                if !report_store.processed.contains(&out_share.report_id) {
+                    // Mark report processed.
+                    report_store.processed.insert(out_share.report_id.clone());
+
+                    // Add to aggregate share.
+                    agg_store
+                        .entry(bucket.to_owned_bucket())
+                        .or_default()
+                        .agg_share
+                        .merge(DapAggregateShare::try_from_out_shares([out_share])?)?;
+                } else {
+                    replayed.insert(out_share.report_id);
+                }
+            }
         }
 
-        Ok(())
+        Ok(replayed)
     }
 
     async fn get_agg_share(

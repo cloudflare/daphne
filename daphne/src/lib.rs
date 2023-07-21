@@ -310,20 +310,19 @@ impl DapTaskConfig {
         self.quantized_time_lower_bound(time) + self.time_precision
     }
 
-    /// Compute the "batch span" of a set of output shares and, for each buckent in the span,
-    /// aggregate the output shares into an aggregate share.
+    /// Compute the "batch span" of a set of output shares.
     pub fn batch_span_for_out_shares<'a>(
         &self,
         part_batch_sel: &'a PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
-    ) -> Result<HashMap<DapBatchBucket<'a>, DapAggregateShare>, DapError> {
+    ) -> Result<HashMap<DapBatchBucket<'a>, Vec<DapOutputShare>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
                 err = "partial batch selector not compatible with task",
             ));
         }
 
-        let mut span: HashMap<DapBatchBucket<'a>, DapAggregateShare> = HashMap::new();
+        let mut span: HashMap<DapBatchBucket<'a>, Vec<DapOutputShare>> = HashMap::new();
         for out_share in out_shares.into_iter() {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
@@ -334,14 +333,7 @@ impl DapTaskConfig {
                 }
             };
 
-            let agg_share = span.entry(bucket).or_default();
-            agg_share.merge(DapAggregateShare {
-                report_count: 1,
-                min_time: out_share.time,
-                max_time: out_share.time,
-                checksum: out_share.checksum,
-                data: Some(out_share.data),
-            })?;
+            span.entry(bucket).or_default().push(out_share);
         }
 
         Ok(span)
@@ -515,7 +507,8 @@ impl DapHelperState {
 #[derive(Debug)]
 /// An ouptut share produced by an Aggregator for a single report.
 pub struct DapOutputShare {
-    pub(crate) time: u64, // Value from the report
+    pub report_id: ReportId, // Value from report
+    pub time: u64,           // Value from the report
     pub(crate) checksum: [u8; 32],
     pub(crate) data: VdafAggregateShare,
 }
