@@ -12,6 +12,9 @@ use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
+// NOTE:
+// The display implementation of this error is used for metrics, as such, it can't be changed to
+// include field values
 /// DAP aborts.
 #[derive(Debug, thiserror::Error)]
 pub enum DapAbort {
@@ -33,7 +36,7 @@ pub enum DapAbort {
     BatchOverlap { detail: String, task_id: TaskId },
 
     /// Internal error.
-    #[error("internal error: {0:?}")]
+    #[error("internal error")]
     Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
 
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or

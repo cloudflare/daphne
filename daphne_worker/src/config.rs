@@ -525,13 +525,12 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         };
         self.metrics
             .dap_abort_counter
-            .with_label_values(&[&self.host])
+            // this to string is bounded by the
+            // number of variants in the enum
+            .with_label_values(&[&self.host, &e.to_string()])
             .inc();
+        error!(error = ?e, "request aborted");
         let problem_details = e.into_problem_details();
-        error!(
-            "request aborted: {}",
-            serde_json::to_string(&problem_details)?
-        );
         let mut headers = Headers::new();
         headers.set("Content-Type", "application/problem+json")?;
         Ok(Response::from_json(&problem_details)?
