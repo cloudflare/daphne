@@ -34,6 +34,7 @@ use crate::{
         },
         reports_processed::{
             ReportsProcessedReq, ReportsProcessedResp, DURABLE_REPORTS_PROCESSED_INITIALIZE,
+            DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
         },
         BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_HELPER_STATE_STORE,
         BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_LEADER_BATCH_QUEUE,
@@ -52,7 +53,7 @@ use daphne::{
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
-        PartialBatchSelector, Report, TaskId, TransitionFailure,
+        PartialBatchSelector, Report, ReportId, TaskId, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{
@@ -66,7 +67,10 @@ use daphne::{
 };
 use futures::future::try_join_all;
 use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
-use std::{borrow::Cow, collections::HashMap};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 use tracing::debug;
 use worker::*;
 
@@ -255,7 +259,8 @@ impl DapReportInitializer for DaphneWorker<'_> {
                 let durable_name = self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
-                    consumed_report.metadata(),
+                    &consumed_report.metadata().id,
+                    consumed_report.metadata().time,
                 );
 
                 reports_processed_request_data
@@ -274,38 +279,22 @@ impl DapReportInitializer for DaphneWorker<'_> {
         // Send ReportsProcessed requests.
         let mut reports_processed_requests = Vec::new();
         for (durable_name, consumed_reports) in reports_processed_request_data.into_iter() {
-            reports_processed_requests.push(durable.post_with_handler(
+            reports_processed_requests.push(durable.post(
                 BINDING_DAP_REPORTS_PROCESSED,
                 DURABLE_REPORTS_PROCESSED_INITIALIZE,
                 durable_name,
                 consumed_reports,
-                |output: ReportsProcessedResp, retried| (output, retried),
             ));
         }
-        let reports_processed_responses: Vec<(ReportsProcessedResp, bool)> =
+        let reports_processed_responses: Vec<ReportsProcessedResp> =
             try_join_all(reports_processed_requests)
                 .await
                 .map_err(|e| fatal_error!(err = e))?;
 
         // Flatten the responses from ReportsProcessed into a hash map.
         let mut initialized_reports = HashMap::new();
-        for (reports_processed_response, retried) in reports_processed_responses.into_iter() {
-            for mut initialized_report in reports_processed_response.initialized_reports.into_iter()
-            {
-                if let EarlyReportStateInitialized::Rejected {
-                    ref mut failure, ..
-                } = initialized_report
-                {
-                    // The request to ReportsProcessed is not idempotent. If it was retried, then
-                    // it's possible that one or more of the reports were erroneously marked as
-                    // replayed. This would happen if, for example, a fresh report was marked as
-                    // aggregated in the failed request, then marked as replayed by a retried
-                    // request. In this case we cannot determine definitively if the report was
-                    // replayed, so we drop it to be safe.
-                    if retried && matches!(failure, TransitionFailure::ReportReplayed) {
-                        *failure = TransitionFailure::ReportDropped;
-                    }
-                }
+        for reports_processed_response in reports_processed_responses.into_iter() {
+            for initialized_report in reports_processed_response.initialized_reports.into_iter() {
                 initialized_reports
                     .insert(initialized_report.metadata().id.clone(), initialized_report);
             }
@@ -607,30 +596,82 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
     async fn put_out_shares(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
-    ) -> std::result::Result<(), DapError> {
-        let task_config = self.try_get_task_config(task_id).await?;
-
+    ) -> std::result::Result<HashSet<ReportId>, DapError> {
+        let task_id_hex = task_id.to_hex();
         let durable = self.durable();
-        let mut requests = Vec::new();
-        for (bucket, agg_share) in task_config
+        let mut agg_store_request_data: HashMap<String, Vec<DapOutputShare>> = HashMap::new();
+        let mut reports_processed_request_data: HashMap<String, Vec<ReportId>> = HashMap::new();
+        for (bucket, out_shares) in task_config
             .as_ref()
             .batch_span_for_out_shares(part_batch_sel, out_shares)?
         {
-            let durable_name =
-                durable_name_agg_store(&task_config.as_ref().version, &task_id.to_hex(), &bucket);
-            requests.push(durable.post::<_, ()>(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_MERGE,
-                durable_name,
-                agg_share,
-            ));
+            for out_share in out_shares.into_iter() {
+                let reports_processed_name = self.config().durable_name_report_store(
+                    task_config.as_ref(),
+                    &task_id_hex,
+                    &out_share.report_id,
+                    out_share.time,
+                );
+                reports_processed_request_data
+                    .entry(reports_processed_name)
+                    .or_default()
+                    .push(out_share.report_id.clone());
+
+                let agg_store_name =
+                    durable_name_agg_store(&task_config.version, &task_id_hex, &bucket);
+                agg_store_request_data
+                    .entry(agg_store_name)
+                    .or_default()
+                    .push(out_share);
+            }
         }
-        try_join_all(requests)
-            .await
-            .map_err(|e| fatal_error!(err = e))?;
-        Ok(())
+
+        let replayed = try_join_all(reports_processed_request_data.into_iter().map(
+            |(durable_name, report_ids)| async {
+                durable
+                    .post::<_, Vec<ReportId>>(
+                        BINDING_DAP_REPORTS_PROCESSED,
+                        DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
+                        durable_name,
+                        report_ids,
+                    )
+                    .await
+            },
+        ))
+        .await
+        .map_err(|e| fatal_error!(err = e))?
+        .into_iter()
+        .flatten()
+        .collect::<HashSet<ReportId>>();
+
+        try_join_all(agg_store_request_data.into_iter().map(
+            |(agg_store_name, out_shares)| async {
+                // Only aggregate the output shares that haven't been replayed.
+                let agg_share = DapAggregateShare::try_from_out_shares(
+                    out_shares
+                        .into_iter()
+                        .filter(|out_share| !replayed.contains(&out_share.report_id)),
+                )?;
+
+                std::result::Result::<_, DapError>::Ok(
+                    durable
+                        .post::<_, ()>(
+                            BINDING_DAP_AGGREGATE_STORE,
+                            DURABLE_AGGREGATE_STORE_MERGE,
+                            agg_store_name,
+                            agg_share,
+                        )
+                        .await,
+                )
+            },
+        ))
+        .await
+        .map_err(|e| fatal_error!(err = e))?;
+
+        Ok(replayed)
     }
 
     async fn get_agg_share(
@@ -726,7 +767,8 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
-                    &report.report_metadata,
+                    &report.report_metadata.id,
+                    report.report_metadata.time,
                 ),
                 &pending_report,
             )

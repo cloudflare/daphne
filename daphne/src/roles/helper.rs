@@ -16,7 +16,8 @@ use crate::{
     fatal_error,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
-        AggregationJobInitReq, PartialBatchSelector, ReportMetadata, TaskId,
+        AggregationJobInitReq, PartialBatchSelector, ReportMetadata, TaskId, TransitionFailure,
+        TransitionVar,
     },
     metrics::DaphneRequestType,
     DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
@@ -245,10 +246,24 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     DapHelperTransition::Continue(..) => {
                         return Err(fatal_error!(err = "unexpected transition (continued)").into());
                     }
-                    DapHelperTransition::Finish(out_shares, agg_job_resp) => {
+                    DapHelperTransition::Finish(out_shares, mut agg_job_resp) => {
                         let out_shares_count = u64::try_from(out_shares.len()).unwrap();
-                        self.put_out_shares(task_id, &part_batch_sel, out_shares)
+                        let replayed = self
+                            .put_out_shares(task_id, task_config, &part_batch_sel, out_shares)
                             .await?;
+
+                        // If there are multiple aggregation jobs in flight that contain the
+                        // same report, then we may need to reject the report at this late stage.
+                        if !replayed.is_empty() {
+                            for transition in agg_job_resp.transitions.iter_mut() {
+                                if replayed.contains(&transition.report_id) {
+                                    let failure = TransitionFailure::ReportReplayed;
+                                    transition.var = TransitionVar::Failed(failure);
+                                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                                }
+                            }
+                        }
+
                         (agg_job_resp, out_shares_count)
                     }
                 };

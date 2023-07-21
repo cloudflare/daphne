@@ -913,6 +913,7 @@ impl VdafConfig {
 
                     states.push((
                         DapOutputShare {
+                            report_id: leader_report_id.clone(),
                             time: leader_time,
                             checksum: checksum.as_ref().try_into().unwrap(),
                             data,
@@ -1063,6 +1064,7 @@ impl VdafConfig {
                         );
 
                         out_shares.push(DapOutputShare {
+                            report_id: helper_report_id.clone(),
                             time: helper_time,
                             checksum: checksum.as_ref().try_into().unwrap(),
                             data,
