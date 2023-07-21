@@ -15,7 +15,6 @@ pub(crate) enum MeasuredSpanName {
     AggregateContinue,
     AggregateShares,
 }
-
 impl MeasuredSpanName {
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -176,7 +175,7 @@ where
             }
             event!(
                 parent: id,
-                Level::INFO,
+                Level::DEBUG,
                 busy = timestamps.busy,
                 elapsed,
                 unit = "ms",
