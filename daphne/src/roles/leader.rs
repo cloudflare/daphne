@@ -22,47 +22,54 @@ use crate::{
     DapResource, DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
 
-macro_rules! leader_post {
-    (
-        $role:expr,
-        $task_id:expr,
-        $task_config:expr,
-        $path:expr,
-        $req_media_type:expr,
-        $resp_media_type:expr,
-        $resource:expr,
-        $req_data:expr,
-        $is_put:expr
-    ) => {{
-        let url = $task_config
-            .helper_url
-            .join($path)
-            .map_err(|e| fatal_error!(err = e))?;
+struct LeaderPostOptions<'p> {
+    path: &'p str,
+    req_media_type: DapMediaType,
+    resp_media_type: DapMediaType,
+    resource: DapResource,
+    req_data: Vec<u8>,
+    is_put: bool,
+}
 
-        let req = DapRequest {
-            version: $task_config.version,
-            media_type: $req_media_type,
-            task_id: Some($task_id.clone()),
-            resource: $resource,
-            payload: $req_data,
-            url,
-            sender_auth: Some(
-                $role
-                    .authorize(&$task_id, &$req_media_type, &$req_data)
-                    .await?,
-            ),
-            taskprov: None,
-        };
+async fn leader_post<S>(
+    role: &impl DapLeader<S>,
+    task_id: &TaskId,
+    task_config: &DapTaskConfig,
+    opts: LeaderPostOptions<'_>,
+) -> Result<DapResponse, DapError> {
+    let LeaderPostOptions {
+        path,
+        req_media_type,
+        resp_media_type,
+        resource,
+        req_data,
+        is_put,
+    } = opts;
 
-        let resp = if $is_put {
-            $role.send_http_put(req).await?
-        } else {
-            $role.send_http_post(req).await?
-        };
+    let url = task_config
+        .helper_url
+        .join(path)
+        .map_err(|e| fatal_error!(err = e))?;
 
-        check_response_content_type(&resp, $resp_media_type)?;
-        resp
-    }};
+    let req = DapRequest {
+        version: task_config.version,
+        media_type: req_media_type.clone(),
+        task_id: Some(task_id.clone()),
+        resource,
+        url,
+        sender_auth: Some(role.authorize(task_id, &req_media_type, &req_data).await?),
+        payload: req_data,
+        taskprov: None,
+    };
+
+    let resp = if is_put {
+        role.send_http_put(req).await?
+    } else {
+        role.send_http_post(req).await?
+    };
+
+    check_response_content_type(&resp, resp_media_type)?;
+    Ok(resp)
 }
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
@@ -338,17 +345,20 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         };
 
         // Send AggregationJobInitReq and receive AggregationJobResp.
-        let resp = leader_post!(
+        let resp = leader_post(
             self,
             task_id,
             task_config,
-            &url_path,
-            DapMediaType::AggregationJobInitReq,
-            DapMediaType::AggregationJobResp,
-            agg_job_id.for_request_path(),
-            agg_job_init_req.get_encoded_with_param(&task_config.version),
-            is_put
-        );
+            LeaderPostOptions {
+                path: &url_path,
+                req_media_type: DapMediaType::AggregationJobInitReq,
+                resp_media_type: DapMediaType::AggregationJobResp,
+                resource: agg_job_id.for_request_path(),
+                req_data: agg_job_init_req.get_encoded_with_param(&task_config.version),
+                is_put,
+            },
+        )
+        .await?;
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
@@ -372,17 +382,20 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         };
 
         // Send AggregationJobContinueReq and receive AggregationJobResp.
-        let resp = leader_post!(
+        let resp = leader_post(
             self,
             task_id,
             task_config,
-            &url_path,
-            DapMediaType::AggregationJobContinueReq,
-            DapMediaType::agg_job_cont_resp_for_version(task_config.version),
-            agg_job_id.for_request_path(),
-            agg_job_cont_req.get_encoded_with_param(&task_config.version),
-            false
-        );
+            LeaderPostOptions {
+                path: &url_path,
+                req_media_type: DapMediaType::AggregationJobContinueReq,
+                resp_media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
+                resource: agg_job_id.for_request_path(),
+                req_data: agg_job_cont_req.get_encoded_with_param(&task_config.version),
+                is_put: false,
+            },
+        )
+        .await?;
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
@@ -456,17 +469,20 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         };
 
         // Send AggregateShareReq and receive AggregateShareResp.
-        let resp = leader_post!(
+        let resp = leader_post(
             self,
             task_id,
             task_config,
-            &url_path,
-            DapMediaType::AggregateShareReq,
-            DapMediaType::AggregateShare,
-            DapResource::Undefined,
-            agg_share_req.get_encoded_with_param(&task_config.version),
-            false
-        );
+            LeaderPostOptions {
+                path: &url_path,
+                req_media_type: DapMediaType::AggregateShareReq,
+                resp_media_type: DapMediaType::AggregateShare,
+                resource: DapResource::Undefined,
+                req_data: agg_share_req.get_encoded_with_param(&task_config.version),
+                is_put: false,
+            },
+        )
+        .await?;
         let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
         // For draft05 and later, the Collection message includes the smallest quantized time

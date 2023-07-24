@@ -15,7 +15,7 @@ use crate::{
 };
 use daphne::{messages::TaskId, DapVersion};
 use serde::{Deserialize, Serialize};
-use std::cmp::min;
+use std::{cmp::min, ops::ControlFlow};
 use tracing::{debug, Instrument};
 use worker::*;
 
@@ -100,16 +100,26 @@ impl DurableObject for ReportsPending {
     }
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PENDING);
-
         let span = create_span_from_request(&req);
-        self.handle(req, id_hex).instrument(span).await
+        self.handle(req).instrument(span).await
     }
 }
 
 impl ReportsPending {
-    async fn handle(&mut self, mut req: Request, id_hex: String) -> Result<Response> {
+    async fn handle(&mut self, req: Request) -> Result<Response> {
+        let id_hex = self.state.id().to_string();
+        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
+            req,
+            &self.state,
+            &self.env,
+            self.config.deployment,
+            &mut self.touched,
+            id_hex.clone(),
+            BINDING_DAP_REPORTS_PENDING,
+        )
+        .await? else {
+            return Response::from_json(&());
+        };
         let durable = DurableConnector::new(&self.env);
         match (req.path().as_ref(), req.method()) {
             // Drain the requested number of reports from storage.

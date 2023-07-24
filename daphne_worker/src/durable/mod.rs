@@ -235,70 +235,86 @@ impl<'srv> DurableConnector<'srv> {
     }
 }
 
-macro_rules! ensure_garbage_collected {
-    ($req:expr, $object:expr, $id:expr, $binding:expr) => {{
-        if $req.path() == crate::durable::DURABLE_DELETE_ALL && $req.method() == Method::Post {
-            $object.state.storage().delete_all().await?;
-            $object.touched = false;
-            return Response::from_json(&());
-        } else if !$object.touched {
+/// Run garbage collection requests.
+///
+/// If a garbage collection request is handled no further processing needs to be done, as such,
+/// this function will consume the request, otherwise it will return the passed in request for
+/// further handling.
+async fn run_garbage_collection(
+    req: Request,
+    state: &State,
+    env: &Env,
+    deployment: crate::config::DaphneWorkerDeployment,
+    touched: &mut bool,
+    id: String,
+    binding: &'static str,
+) -> Result<std::ops::ControlFlow<(), Request>> {
+    match (req.path().as_str(), req.method()) {
+        (DURABLE_DELETE_ALL, Method::Post) => {
+            state.storage().delete_all().await?;
+            *touched = false;
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
+        _ if !*touched => {
             // The GarbageCollector should only be used when running tests. In production, the DO->DO
             // communication overhead adds unacceptable latency, and there's no need to do the
             // bulk deletes of state that test suites require.
-            if matches!($object.config.deployment, crate::config::DaphneWorkerDeployment::Dev) {
-                let touched: bool =
-                    crate::durable::state_set_if_not_exists(&$object.state, "touched", &true)
-                        .await?
-                        .unwrap_or(false);
+            if matches!(deployment, crate::config::DaphneWorkerDeployment::Dev) {
+                let touched = state_set_if_not_exists(state, "touched", &true)
+                    .await?
+                    .unwrap_or(false);
                 if !touched {
-                    let durable = crate::durable::DurableConnector::new(&$object.env);
+                    let durable = crate::durable::DurableConnector::new(env);
                     durable
                         .post(
                             crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
                             crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
                             "garbage_collector".to_string(),
                             &crate::durable::DurableReference {
-                                binding: $binding.to_string(),
-                                id_hex: $id,
+                                binding: binding.to_string(),
+                                id_hex: id,
                                 task_id: None,
                             },
                         )
                         .await?;
                 }
             }
-            $object.touched = true;
+            *touched = true
         }
-    }};
+        _ => {}
+    }
+    Ok(std::ops::ControlFlow::Continue(req))
 }
 
-macro_rules! ensure_alarmed {
-    ($object:expr, $lifetime:expr) => {{
-        if !$object.alarmed {
-            let result = $object.state.storage().get_alarm().await;
-            match result {
-                Ok(existing) => {
-                    if existing.is_none() {
-                        $object.state.storage().set_alarm($lifetime).await?;
-                    }
-                }
-                Err(e) => {
-                    if matches!(
-                        $object.config.deployment,
-                        crate::config::DaphneWorkerDeployment::Dev
-                    ) {
-                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}")
-                    } else {
-                        // We only return an error if not in the "dev" deployment as
-                        // the experimental-local dev environment doesn't have
-                        // working get_alarm() and set_alarm() yet, so we want to
-                        // ignore errors in that case.
-                        return Result::Err(e);
-                    }
+/// Ensure the alarm call is setup for this DO.
+async fn ensure_alarmed<L: Into<ScheduledTime>>(
+    state: &State,
+    deployment: crate::config::DaphneWorkerDeployment,
+    alarmed: &mut bool,
+    lifetime: L,
+) -> Result<()> {
+    if !*alarmed {
+        let result = state.storage().get_alarm().await;
+        match result {
+            Ok(None) => {
+                state.storage().set_alarm(lifetime).await?;
+            }
+            Ok(Some(_)) => { /* alarm already setup */ }
+            Err(e) => {
+                if matches!(deployment, crate::config::DaphneWorkerDeployment::Dev) {
+                    warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}")
+                } else {
+                    // We only return an error if not in the "dev" deployment as
+                    // the experimental-local dev environment doesn't have
+                    // working get_alarm() and set_alarm() yet, so we want to
+                    // ignore errors in that case.
+                    return Err(e);
                 }
             }
-            $object.alarmed = true;
         }
-    }};
+        *alarmed = true;
+    }
+    Ok(())
 }
 
 /// Fetch the value associated with the given key from durable storage. If the key/value pair does

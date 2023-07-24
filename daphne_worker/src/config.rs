@@ -1299,7 +1299,7 @@ impl AsRef<DapTaskConfig> for DapTaskConfigKvPair<'_> {
 
 /// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator
 /// communication.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) enum DaphneWorkerDeployment {
     /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
     #[default]

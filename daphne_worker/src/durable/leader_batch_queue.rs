@@ -1,6 +1,8 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops::ControlFlow;
+
 use crate::{
     config::DaphneWorkerConfig,
     durable::{
@@ -106,7 +108,18 @@ impl DurableObject for LeaderBatchQueue {
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_LEADER_BATCH_QUEUE);
+        let ControlFlow::Continue(req) = super::run_garbage_collection(
+            req,
+            &self.state,
+            &self.env,
+            self.config.deployment,
+            &mut self.touched,
+            id_hex.clone(),
+            BINDING_DAP_LEADER_BATCH_QUEUE,
+        )
+        .await? else {
+            return Response::from_json(&());
+        };
 
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await
