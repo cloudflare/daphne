@@ -1,6 +1,10 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub mod fields_recording_layer;
+mod wasm_timing;
+mod workers_json_layer;
+
 use chrono::{SecondsFormat, Utc};
 use std::{collections::HashMap, fmt::Result as FmtResult, io, path::PathBuf, str, sync::Once};
 use tracing::field::Visit;
@@ -213,10 +217,6 @@ pub fn initialize_tracing(env: &Env) {
         x.init();
     });
 }
-
-pub mod fields_recording_layer;
-mod wasm_timing;
-mod workers_json_layer;
 
 #[cfg(test)]
 mod test {

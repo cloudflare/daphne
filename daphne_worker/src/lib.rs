@@ -153,6 +153,15 @@
 //! | `DAP_DEPLOYMENT` | `String` | no | Deployment type, only "prod" for now. |
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
+
+mod auth;
+mod config;
+mod dap;
+mod durable;
+mod error_reporting;
+mod metrics;
+mod tracing_utils;
+
 pub use crate::tracing_utils::initialize_tracing;
 use crate::{
     config::{DaphneWorkerIsolateState, DaphneWorkerRequestState},
@@ -743,11 +752,3 @@ pub(crate) struct InternalTestAddTask {
     collector_hpke_config: String, // base64url
     task_expiration: Time,
 }
-
-mod auth;
-mod config;
-mod dap;
-mod durable;
-mod error_reporting;
-mod metrics;
-mod tracing_utils;

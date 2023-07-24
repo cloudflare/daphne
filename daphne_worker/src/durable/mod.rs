@@ -1,6 +1,15 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub(crate) mod aggregate_store;
+pub(crate) mod garbage_collector;
+pub(crate) mod helper_state_store;
+pub(crate) mod leader_agg_job_queue;
+pub(crate) mod leader_batch_queue;
+pub(crate) mod leader_col_job_queue;
+pub(crate) mod reports_pending;
+pub(crate) mod reports_processed;
+
 use crate::{
     int_err, now,
     tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
@@ -632,15 +641,6 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
     let path = req.path();
     info_span!("DO span", p = %shorten_paths(path.split('/')).display())
 }
-
-pub(crate) mod aggregate_store;
-pub(crate) mod garbage_collector;
-pub(crate) mod helper_state_store;
-pub(crate) mod leader_agg_job_queue;
-pub(crate) mod leader_batch_queue;
-pub(crate) mod leader_col_job_queue;
-pub(crate) mod reports_pending;
-pub(crate) mod reports_processed;
 
 #[cfg(test)]
 mod test {
