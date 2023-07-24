@@ -745,8 +745,6 @@ pub(crate) struct InternalTestAddTask {
 }
 
 mod auth;
-#[cfg(test)]
-mod auth_test;
 mod config;
 mod dap;
 mod durable;
