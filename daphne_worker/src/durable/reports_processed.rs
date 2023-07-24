@@ -19,8 +19,8 @@ use daphne::{
 use futures::future::try_join_all;
 use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashSet, time::Duration};
-use tracing::{warn, Instrument};
+use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
+use tracing::Instrument;
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
@@ -83,12 +83,26 @@ impl DurableObject for ReportsProcessed {
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PROCESSED);
-        ensure_alarmed!(
-            self,
+        let ControlFlow::Continue(req) = super::run_garbage_collection(
+            req,
+            &self.state,
+            &self.env,
+            self.config.deployment,
+            &mut self.touched,
+            id_hex.clone(),
+            BINDING_DAP_REPORTS_PROCESSED,
+        )
+        .await? else {
+            return Response::from_json(&());
+        };
+        super::ensure_alarmed(
+            &self.state,
+            self.config.deployment,
+            &mut self.alarmed,
             Duration::from_secs(self.config.global.report_storage_epoch_duration)
-                .saturating_add(self.config.processed_alarm_safety_interval)
-        );
+                .saturating_add(self.config.processed_alarm_safety_interval),
+        )
+        .await?;
 
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await

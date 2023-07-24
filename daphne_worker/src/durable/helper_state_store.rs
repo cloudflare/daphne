@@ -7,7 +7,7 @@ use crate::{
     initialize_tracing, int_err,
 };
 use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
-use tracing::{trace, warn, Instrument};
+use tracing::{trace, Instrument};
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -58,12 +58,15 @@ impl DurableObject for HelperStateStore {
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
         // Ensure this DO instance is garbage collected eventually.
-        ensure_alarmed!(
-            self,
+        super::ensure_alarmed(
+            &self.state,
+            self.config.deployment,
+            &mut self.alarmed,
             self.config
                 .helper_state_store_garbage_collect_after_secs
-                .expect("Daphne-Worker not configured as helper")
-        );
+                .expect("Daphne-Worker not configured as helper"),
+        )
+        .await?;
 
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await

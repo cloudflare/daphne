@@ -1,6 +1,8 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops::ControlFlow;
+
 use crate::{
     config::DaphneWorkerConfig,
     durable::{create_span_from_request, state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
@@ -59,15 +61,27 @@ impl DurableObject for AggregateStore {
     }
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_AGGREGATE_STORE);
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await
     }
 }
 
 impl AggregateStore {
-    async fn handle(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle(&mut self, req: Request) -> Result<Response> {
+        let id_hex = self.state.id().to_string();
+        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
+            req,
+            &self.state,
+            &self.env,
+            self.config.deployment,
+            &mut self.touched,
+            id_hex,
+            BINDING_DAP_AGGREGATE_STORE,
+        )
+        .await? else {
+            return Response::from_json(&());
+        };
+
         match (req.path().as_ref(), req.method()) {
             // Merge an aggregate share into the stored aggregate.
             //
