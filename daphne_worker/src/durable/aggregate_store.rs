@@ -39,6 +39,7 @@ pub struct AggregateStore {
     env: Env,
     config: DaphneWorkerConfig,
     touched: bool,
+    collected: Option<bool>,
 }
 
 #[durable_object]
@@ -52,6 +53,7 @@ impl DurableObject for AggregateStore {
             env,
             config,
             touched: false,
+            collected: None,
         }
     }
 
@@ -96,6 +98,7 @@ impl DurableObject for AggregateStore {
             // Output: `()`
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
                 self.state.storage().put("collected", true).await?;
+                self.collected = Some(true);
                 Response::from_json(&())
             }
 
@@ -104,7 +107,13 @@ impl DurableObject for AggregateStore {
             // Idempotent
             // Output: `bool`
             (DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, Method::Get) => {
-                let collected: bool = state_get_or_default(&self.state, "collected").await?;
+                let collected = if let Some(collected) = self.collected {
+                    collected
+                } else {
+                    let collected = state_get_or_default(&self.state, "collected").await?;
+                    self.collected = Some(collected);
+                    collected
+                };
                 Response::from_json(&collected)
             }
 
