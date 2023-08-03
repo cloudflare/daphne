@@ -3,56 +3,11 @@
 
 use std::collections::HashMap;
 
-use tracing::{field::Visit, span::Attributes, Id, Subscriber};
-use tracing_core::Field;
+use tracing::Subscriber;
 use tracing_subscriber::{layer::Context as LayerContext, registry, Layer};
 use worker::console_log;
 
-pub struct JsonVisitor<'a>(&'a mut JsonFields);
-
-impl<'a> Visit for JsonVisitor<'a> {
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        if let Ok(value) = serde_json::to_value(value) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        if let Ok(value) = serde_json::to_value(value) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        if let Ok(value) = serde_json::to_value(value) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        if let Ok(value) = serde_json::to_value(value) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if let Ok(value) = serde_json::to_value(value) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        if let Ok(value) = serde_json::to_value(value.to_string()) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if let Ok(value) = serde_json::to_value(format!("{:?}", value)) {
-            self.0.insert(field.name().to_string(), value);
-        }
-    }
-}
+use super::{shorten_paths, JsonFields, JsonVisitor};
 
 #[derive(serde::Serialize)]
 struct LogLine {
@@ -73,25 +28,10 @@ struct LogLine {
 /// Logs all messages to `console.log` with their tracing log level in a `level` field of the JSON.
 pub struct WorkersJsonLayer;
 
-// Type used to store formatted JSON span fields within span extensions.
-type JsonFields = HashMap<String, serde_json::Value>;
-
 impl<S> Layer<S> for WorkersJsonLayer
 where
     S: Subscriber + for<'a> registry::LookupSpan<'a>,
 {
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
-        let span = ctx.span(id).expect("span should exist");
-        let mut fields = HashMap::new();
-        let mut visitor = JsonVisitor(&mut fields);
-        attrs.record(&mut visitor);
-
-        let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<JsonFields>().is_none() {
-            extensions.insert(fields);
-        }
-    }
-
     fn on_event(&self, event: &tracing::Event<'_>, ctx: LayerContext<'_, S>) {
         let timestamp = worker::Date::now().as_millis();
 
