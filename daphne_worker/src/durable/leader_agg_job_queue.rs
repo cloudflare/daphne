@@ -11,6 +11,8 @@ use crate::{
 use tracing::{debug, Instrument};
 use worker::*;
 
+use super::{DapDurableObject, GarbageCollectable};
+
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET: &str = "/internal/do/agg_job_queue/get";
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_FINISH: &str = "/internal/do/agg_job_queue/finish";
@@ -65,18 +67,13 @@ impl DurableObject for LeaderAggregationJobQueue {
 
 impl LeaderAggregationJobQueue {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex,
-            BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-        )
-        .await? else {
-            return Response::from_json(&());
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_AGG_JOB_QUEUE)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
         };
         match (req.path().as_ref(), req.method()) {
             // Put a job (near) the back of the queue.
@@ -127,5 +124,30 @@ impl LeaderAggregationJobQueue {
                 req.path()
             ))),
         }
+    }
+}
+
+impl DapDurableObject for LeaderAggregationJobQueue {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for LeaderAggregationJobQueue {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
     }
 }

@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use worker::*;
 
+use super::{DapDurableObject, GarbageCollectable};
+
 const PENDING_PREFIX: &str = "pending";
 const PROCESSED_PREFIX: &str = "processed";
 
@@ -94,18 +96,13 @@ impl DurableObject for LeaderCollectionJobQueue {
 
 impl LeaderCollectionJobQueue {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex,
-            BINDING_DAP_LEADER_COL_JOB_QUEUE,
-        )
-        .await? else {
-            return Response::from_json(&());
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_COL_JOB_QUEUE)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
         };
         match (req.path().as_ref(), req.method()) {
             // Create a collect job for a collect request issued by the Collector.
@@ -260,4 +257,29 @@ fn processed_key(task_id: &TaskId, collection_job_id: &CollectionJobId) -> Strin
         task_id.to_base64url(),
         collection_job_id.to_base64url()
     )
+}
+
+impl DapDurableObject for LeaderCollectionJobQueue {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for LeaderCollectionJobQueue {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
+    }
 }

@@ -19,6 +19,8 @@ use std::{cmp::min, ops::ControlFlow};
 use tracing::{debug, Instrument};
 use worker::*;
 
+use super::{DapDurableObject, GarbageCollectable};
+
 pub(crate) const DURABLE_REPORTS_PENDING_GET: &str = "/internal/do/reports_pending/get";
 pub(crate) const DURABLE_REPORTS_PENDING_PUT: &str = "/internal/do/reports_pending/put";
 
@@ -108,19 +110,18 @@ impl DurableObject for ReportsPending {
 impl ReportsPending {
     async fn handle(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex.clone(),
-            BINDING_DAP_REPORTS_PENDING,
-        )
-        .await? else {
-            return Response::from_json(&());
+
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_REPORTS_PENDING)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
         };
+
         let durable = DurableConnector::new(&self.env);
+
         match (req.path().as_ref(), req.method()) {
             // Drain the requested number of reports from storage.
             //
@@ -237,5 +238,30 @@ impl ReportsPending {
                 req.path()
             ))),
         }
+    }
+}
+
+impl DapDurableObject for ReportsPending {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for ReportsPending {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
     }
 }

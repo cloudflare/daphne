@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, Instrument};
 use worker::*;
 
+use super::{DapDurableObject, GarbageCollectable};
+
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_ASSIGN: &str = "/internal/do/leader_batch_queue/assign";
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_CURRENT: &str =
     "/internal/do/leader_batch_queue/current";
@@ -107,27 +109,22 @@ impl DurableObject for LeaderBatchQueue {
     }
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex.clone(),
-            BINDING_DAP_LEADER_BATCH_QUEUE,
-        )
-        .await? else {
-            return Response::from_json(&());
-        };
-
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await
     }
 }
 
 impl LeaderBatchQueue {
-    async fn handle(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle(&mut self, req: Request) -> Result<Response> {
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_BATCH_QUEUE)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
+        };
+
         match (req.path().as_ref(), req.method()) {
             // Return the ID of the oldest, not-yet-collected batch.
             //
@@ -215,4 +212,29 @@ impl LeaderBatchQueue {
 
 fn lookup_key(batch_id_hex: &str) -> String {
     format!("{PENDING_PREFIX}/id/{batch_id_hex}")
+}
+
+impl DapDurableObject for LeaderBatchQueue {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for LeaderBatchQueue {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
+    }
 }

@@ -23,6 +23,8 @@ use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
 use tracing::Instrument;
 use worker::*;
 
+use super::{Alarmed, DapDurableObject, GarbageCollectable};
+
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
     "/internal/do/reports_processed/initialize";
 pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
@@ -82,28 +84,6 @@ impl DurableObject for ReportsProcessed {
     }
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex.clone(),
-            BINDING_DAP_REPORTS_PROCESSED,
-        )
-        .await? else {
-            return Response::from_json(&());
-        };
-        super::ensure_alarmed(
-            &self.state,
-            self.config.deployment,
-            &mut self.alarmed,
-            Duration::from_secs(self.config.global.report_storage_epoch_duration)
-                .saturating_add(self.config.processed_alarm_safety_interval),
-        )
-        .await?;
-
         let span = create_span_from_request(&req);
         self.handle(req).instrument(span).await
     }
@@ -117,7 +97,22 @@ impl DurableObject for ReportsProcessed {
 }
 
 impl ReportsProcessed {
-    async fn handle(&mut self, mut req: Request) -> Result<Response> {
+    async fn handle(&mut self, req: Request) -> Result<Response> {
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_REPORTS_PROCESSED)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
+        };
+
+        self.ensure_alarmed(
+            Duration::from_secs(self.config.global.report_storage_epoch_duration)
+                .saturating_add(self.config.processed_alarm_safety_interval),
+        )
+        .await?;
+
         match (req.path().as_ref(), req.method()) {
             // Initialize a report:
             //  * Ensure the report wasn't replayed
@@ -209,6 +204,39 @@ impl ReportsProcessed {
                 req.path()
             ))),
         }
+    }
+}
+
+impl DapDurableObject for ReportsProcessed {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait]
+impl Alarmed for ReportsProcessed {
+    #[inline(always)]
+    fn alarmed(&mut self) -> &mut bool {
+        &mut self.alarmed
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for ReportsProcessed {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
     }
 }
 
