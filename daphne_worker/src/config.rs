@@ -937,17 +937,13 @@ impl<'srv> DaphneWorker<'srv> {
 
         warn!("vdaf config: {:?}", vdaf);
 
-        // TODO(tholop): we can run the compatibility check here too.
+        // TODO(tholop): we can run the VDAF-DPConfig compatibility check here too.
         let dp_config = match (
             cmd.dp_config.distribution.as_deref(),
             cmd.dp_config.zcdp_numerator,
             cmd.dp_config.zcdp_denominator,
         ) {
             (Some("Gaussian"), Some(n), Some(d)) => {
-                // let n: BigUint = n.parse().map_err(int_err)?;
-                // let d: BigUint = d.parse().map_err(int_err)?;
-                // TODO(tholop): we could also use Rational without the from u128 method.
-
                 let n: u128 = n.parse().map_err(int_err)?;
                 let d: u128 = d.parse().map_err(int_err)?;
                 let epsilon = Rational::from_unsigned(n, d).map_err(int_err)?;

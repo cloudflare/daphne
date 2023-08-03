@@ -267,7 +267,6 @@ pub struct DapTaskConfig {
     pub vdaf: VdafConfig,
 
     /// The DP configuration for this task.
-    /// TODO(tholop): actually do this inside VdafConfig.
     #[serde(default)]
     pub dp_config: Option<VdafDpConfig>,
 
@@ -616,8 +615,7 @@ impl DapAggregateShare {
         distribution: &DistributionCodepoint,
         _agg_param: &Vec<u8>,
     ) -> Result<(), DapAbort> {
-        // TODO(tholop): wrapping the FatalDapError in a DapAbort because the caller already returns a DapAbort
-        // but it looks a bit ugly.
+        // TODO(tholop): better way of wrapping the FatalDapError in a DapAbort?
         match (vdaf_config, budget, distribution) {
             (
                 &VdafConfig::Prio3(Prio3Config::Histogram { len }),
@@ -629,8 +627,6 @@ impl DapAggregateShare {
                     Err(e) => return Err(DapAbort::Internal(Box::new(fatal_error!(err = e)))),
                 };
                 let num_measurements = self.report_count.try_into().unwrap();
-                // TODO(tholop): is it going to mutate the share for real?
-
                 let vdaf_agg_share = self.data.as_mut().unwrap();
 
                 let maybe_agg_share = match vdaf_agg_share {
@@ -639,9 +635,7 @@ impl DapAggregateShare {
                         err = "Invalid VDAF aggregate share type"
                     )))),
                 };
-
                 let agg_share = maybe_agg_share?;
-
                 let dp_strategy = ZCdpDiscreteGaussian::from_budget(zcdp_budget.clone());
                 let agg_param = ();
 
@@ -657,6 +651,7 @@ impl DapAggregateShare {
 
                 Ok(())
             }
+            // TODO(tholop): handle other VDAFs and budgetds
             _ => Err(DapAbort::Internal(Box::new(fatal_error!(
                 err = "Unsupported combination of distribution, budget, and vdaf config" // err = format!("Unsupported combination of distribution, budget, and vdaf config: {:?}, {:?}, {:?}", budget, distribution, vdaf_config)))
             )))),
@@ -701,8 +696,7 @@ pub enum VdafConfig {
     Prio2 { dimension: usize },
 }
 
-/// DP budget for a particular VDAF
-/// TODO(tholop): might change things. Harcoded Gaussian zCDP for now?
+/// DP config for a particular VDAF
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VdafDpConfig {
     pub distribution: DistributionCodepoint,
@@ -748,11 +742,10 @@ pub enum Prio3Config {
 }
 
 /// Codepoint for distributions
-/// TODO(tholop): fix some numbers like for Vdafs?
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum DistributionCodepoint {
     Gaussian,
-    // Laplace,
+    // TODO(tholop): add Laplace when implemented in libprio
 }
 
 /// DP budgets

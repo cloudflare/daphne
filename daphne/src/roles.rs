@@ -978,7 +978,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     state,
                     &agg_job_cont_req,
                     &metrics,
-                )?; // TODO(tholop): example of vdaf config
+                )?;
 
                 let (agg_job_resp, out_shares_count) = match transition {
                     DapHelperTransition::Continue(..) => {
@@ -1064,11 +1064,21 @@ pub trait DapHelper<S>: DapAggregator<S> {
         )
         .await?;
 
-        let agg_share = self
+        let mut agg_share = self
             .get_agg_share(task_id, &agg_share_req.batch_sel)
             .await?;
 
-        // TODO(tholop): add noise like the Leader.
+        // Add noise like the Leader.
+        let noise_status = match &task_config.dp_config {
+            Some(vdaf_dp_config) => agg_share.maybe_add_noise(
+                &task_config.vdaf,
+                &vdaf_dp_config.budget,
+                &vdaf_dp_config.distribution,
+                &agg_share_req.agg_param,
+            ),
+            _ => Ok(()), // TODO(tholop): log something to warn that we didn't add DP?
+        };
+        noise_status?;
 
         // Check that we have aggreagted the same set of reports as the Leader.
         if agg_share_req.report_count != agg_share.report_count

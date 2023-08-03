@@ -106,6 +106,7 @@ impl TestRunner {
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
             vdaf: VDAF_CONFIG.clone(),
+            dp_config: None,
             vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
             taskprov: false,

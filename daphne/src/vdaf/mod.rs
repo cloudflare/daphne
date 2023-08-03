@@ -1044,7 +1044,6 @@ impl VdafConfig {
                 };
 
                 let res = match self {
-                    // TODO(tholop): good example of how to get the vdaf config.
                     Self::Prio3(prio3_config) => {
                         prio3_helper_prepare_finish(prio3_config, helper_step, leader_message)
                     }
