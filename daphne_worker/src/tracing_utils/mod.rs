@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use chrono::{SecondsFormat, Utc};
-use std::{fmt::Result as FmtResult, io, path::PathBuf, str, sync::Once};
+use std::{collections::HashMap, fmt::Result as FmtResult, io, path::PathBuf, str, sync::Once};
+use tracing::field::Visit;
+use tracing_core::Field;
 use tracing_subscriber::{
     fmt,
     fmt::{format::Writer, time::FormatTime},
@@ -16,6 +18,55 @@ use wasm_timing::WasmTimingLayer;
 pub(crate) use wasm_timing::{initialize_timing_histograms, MeasuredSpanName};
 
 use self::workers_json_layer::WorkersJsonLayer;
+
+// Type used to store formatted JSON span fields within span extensions.
+pub type JsonFields = HashMap<String, serde_json::Value>;
+
+pub struct JsonVisitor<'a>(&'a mut JsonFields);
+
+impl<'a> Visit for JsonVisitor<'a> {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        if let Ok(value) = serde_json::to_value(value) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        if let Ok(value) = serde_json::to_value(value) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if let Ok(value) = serde_json::to_value(value) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        if let Ok(value) = serde_json::to_value(value) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if let Ok(value) = serde_json::to_value(value) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        if let Ok(value) = serde_json::to_value(value.to_string()) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if let Ok(value) = serde_json::to_value(format!("{:?}", value)) {
+            self.0.insert(field.name().to_string(), value);
+        }
+    }
+}
 
 /// WasmTime provides a `tracing_subscriber::fmt::time::FormatTime` implementation that works
 /// using the clock available to WASM code, as the default FormatTime implementation does not
@@ -152,6 +203,7 @@ pub fn initialize_tracing(env: &Env) {
     });
 }
 
+pub mod fields_recording_layer;
 mod wasm_timing;
 mod workers_json_layer;
 
