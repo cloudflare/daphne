@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use chrono::{SecondsFormat, Utc};
-use std::{fmt::Result as FmtResult, io, str, sync::Once};
+use std::{fmt::Result as FmtResult, io, path::PathBuf, str, sync::Once};
 use tracing_subscriber::{
     fmt,
     fmt::{format::Writer, time::FormatTime},
@@ -74,6 +74,40 @@ impl io::Write for LogWriter {
 
 static INITIALIZE_TRACING: Once = Once::new();
 
+/// Utility function that takes a path (ex: `path/to/something`) and shortens it in by preserving
+/// only the first letter of each segment except the last word, which is kept as is.
+pub(crate) fn shorten_paths<'s, I>(segments: I) -> PathBuf
+where
+    I: IntoIterator<Item = &'s str>,
+{
+    struct LastItemIter<I: Iterator> {
+        iter: std::iter::Peekable<I>,
+    }
+
+    impl<I: Iterator> Iterator for LastItemIter<I> {
+        type Item = (bool, I::Item);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let next = self.iter.next()?;
+            Some((self.iter.peek().is_none(), next))
+        }
+    }
+
+    LastItemIter {
+        iter: segments.into_iter().peekable(),
+    }
+    .map(|(is_last, s)| {
+        if is_last {
+            s
+        } else if let Some((first_char_idx, _)) = s.char_indices().nth(2) {
+            &s[0..first_char_idx]
+        } else {
+            s
+        }
+    })
+    .collect::<PathBuf>()
+}
+
 /// Setup logging.
 ///
 /// Initialize tracing using configuration from DAP_TRACING in the environment
@@ -120,3 +154,26 @@ pub fn initialize_tracing(env: &Env) {
 
 mod wasm_timing;
 mod workers_json_layer;
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    use super::shorten_paths;
+
+    #[test]
+    fn shorten_paths_simple() {
+        let got = shorten_paths("path/to/object".split('/'));
+        let expect = ["pa", "to", "object"].into_iter().collect::<PathBuf>();
+
+        assert_eq!(got, expect);
+    }
+
+    #[test]
+    fn shorten_paths_single_segment() {
+        let got = shorten_paths("object".split('/'));
+        let expect = PathBuf::from("object");
+
+        assert_eq!(got, expect);
+    }
+}
