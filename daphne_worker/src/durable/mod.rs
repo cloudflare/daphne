@@ -247,86 +247,103 @@ impl<'srv> DurableConnector<'srv> {
     }
 }
 
-/// Run garbage collection requests.
-///
-/// If a garbage collection request is handled no further processing needs to be done, as such,
-/// this function will consume the request, otherwise it will return the passed in request for
-/// further handling.
-async fn run_garbage_collection(
-    req: Request,
-    state: &State,
-    env: &Env,
-    deployment: crate::config::DaphneWorkerDeployment,
-    touched: &mut bool,
-    id: String,
-    binding: &'static str,
-) -> Result<std::ops::ControlFlow<(), Request>> {
-    match (req.path().as_str(), req.method()) {
-        (DURABLE_DELETE_ALL, Method::Post) => {
-            state.storage().delete_all().await?;
-            *touched = false;
-            return Ok(std::ops::ControlFlow::Break(()));
-        }
-        _ if !*touched => {
-            // The GarbageCollector should only be used when running tests. In production, the DO->DO
-            // communication overhead adds unacceptable latency, and there's no need to do the
-            // bulk deletes of state that test suites require.
-            if matches!(deployment, crate::config::DaphneWorkerDeployment::Dev) {
-                let touched = state_set_if_not_exists(state, "touched", &true)
-                    .await?
-                    .unwrap_or(false);
-                if !touched {
-                    let durable = crate::durable::DurableConnector::new(env);
-                    durable
-                        .post(
-                            crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
-                            crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
-                            "garbage_collector".to_string(),
-                            &crate::durable::DurableReference {
-                                binding: binding.to_string(),
-                                id_hex: id,
-                                task_id: None,
-                            },
-                        )
-                        .await?;
-                }
-            }
-            *touched = true
-        }
-        _ => {}
-    }
-    Ok(std::ops::ControlFlow::Continue(req))
+trait DapDurableObject {
+    fn state(&self) -> &State;
+
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment;
 }
 
-/// Ensure the alarm call is setup for this DO.
-async fn ensure_alarmed<L: Into<ScheduledTime>>(
-    state: &State,
-    deployment: crate::config::DaphneWorkerDeployment,
-    alarmed: &mut bool,
-    lifetime: L,
-) -> Result<()> {
-    if !*alarmed {
-        let result = state.storage().get_alarm().await;
-        match result {
-            Ok(None) => {
-                state.storage().set_alarm(lifetime).await?;
-            }
-            Ok(Some(_)) => { /* alarm already setup */ }
-            Err(e) => {
-                if matches!(deployment, crate::config::DaphneWorkerDeployment::Dev) {
-                    warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}")
-                } else {
-                    // We only return an error if not in the "dev" deployment as
-                    // the experimental-local dev environment doesn't have
-                    // working get_alarm() and set_alarm() yet, so we want to
-                    // ignore errors in that case.
-                    return Err(e);
+#[async_trait::async_trait(?Send)]
+trait Alarmed: DapDurableObject {
+    /// A mutable property used to track whether this DO has been alarmed.
+    fn alarmed(&mut self) -> &mut bool;
+
+    /// Ensure the alarm call is setup for this DO.
+    async fn ensure_alarmed<L: Into<ScheduledTime>>(&mut self, lifetime: L) -> Result<()> {
+        if !*self.alarmed() {
+            let result = self.state().storage().get_alarm().await;
+            match result {
+                Ok(None) => {
+                    self.state().storage().set_alarm(lifetime).await?;
+                }
+                Ok(Some(_)) => { /* alarm already setup */ }
+                Err(e) => {
+                    if matches!(
+                        self.deployment(),
+                        crate::config::DaphneWorkerDeployment::Dev
+                    ) {
+                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}")
+                    } else {
+                        // We only return an error if not in the "dev" deployment as
+                        // the experimental-local dev environment doesn't have
+                        // working get_alarm() and set_alarm() yet, so we want to
+                        // ignore errors in that case.
+                        return Err(e);
+                    }
                 }
             }
+            *self.alarmed() = true;
         }
-        *alarmed = true;
+        Ok(())
     }
-    Ok(())
+}
+
+#[async_trait::async_trait(?Send)]
+trait GarbageCollectable: DapDurableObject {
+    /// A mutable property used to track whether this DO has been touched.
+    fn touched(&mut self) -> &mut bool;
+
+    fn env(&self) -> &Env;
+
+    /// Run garbage collection requests.
+    ///
+    /// If a garbage collection request is handled no further processing needs to be done, as such,
+    /// this function will consume the request, otherwise it will return the passed in request for
+    /// further handling.
+    async fn schedule_for_garbage_collection(
+        &mut self,
+        req: Request,
+        binding: &'static str,
+    ) -> Result<std::ops::ControlFlow<(), Request>> {
+        match (req.path().as_str(), req.method()) {
+            (DURABLE_DELETE_ALL, Method::Post) => {
+                self.state().storage().delete_all().await?;
+                *self.touched() = false;
+                return Ok(std::ops::ControlFlow::Break(()));
+            }
+            _ if !*self.touched() => {
+                // The GarbageCollector should only be used when running tests. In production, the DO->DO
+                // communication overhead adds unacceptable latency, and there's no need to do the
+                // bulk deletes of state that test suites require.
+                if matches!(
+                    self.deployment(),
+                    crate::config::DaphneWorkerDeployment::Dev
+                ) {
+                    let touched = state_set_if_not_exists(self.state(), "touched", &true)
+                        .await?
+                        .unwrap_or(false);
+                    if !touched {
+                        let durable = crate::durable::DurableConnector::new(self.env());
+                        durable
+                            .post(
+                                crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
+                                crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
+                                "garbage_collector".to_string(),
+                                &crate::durable::DurableReference {
+                                    binding: binding.to_string(),
+                                    id_hex: self.state().id().to_string(),
+                                    task_id: None,
+                                },
+                            )
+                            .await?;
+                    }
+                }
+                *self.touched() = true
+            }
+            _ => {}
+        }
+        Ok(std::ops::ControlFlow::Continue(req))
+    }
 }
 
 /// Fetch the value associated with the given key from durable storage. If the key/value pair does

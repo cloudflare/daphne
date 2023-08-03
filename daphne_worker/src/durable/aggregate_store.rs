@@ -12,6 +12,8 @@ use daphne::DapAggregateShare;
 use tracing::Instrument;
 use worker::*;
 
+use super::{DapDurableObject, GarbageCollectable};
+
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
 pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
@@ -68,18 +70,13 @@ impl DurableObject for AggregateStore {
 
 impl AggregateStore {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let id_hex = self.state.id().to_string();
-        let ControlFlow::Continue(mut req) = super::run_garbage_collection(
-            req,
-            &self.state,
-            &self.env,
-            self.config.deployment,
-            &mut self.touched,
-            id_hex,
-            BINDING_DAP_AGGREGATE_STORE,
-        )
-        .await? else {
-            return Response::from_json(&());
+        let mut req = match self
+            .schedule_for_garbage_collection(req, BINDING_DAP_AGGREGATE_STORE)
+            .await?
+        {
+            ControlFlow::Continue(req) => req,
+            // This req was a GC request and as such we must return from this function.
+            ControlFlow::Break(_) => return Response::from_json(&()),
         };
 
         match (req.path().as_ref(), req.method()) {
@@ -144,5 +141,30 @@ impl AggregateStore {
                 req.path()
             ))),
         }
+    }
+}
+
+impl DapDurableObject for AggregateStore {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl GarbageCollectable for AggregateStore {
+    #[inline(always)]
+    fn touched(&mut self) -> &mut bool {
+        &mut self.touched
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &Env {
+        &self.env
     }
 }

@@ -10,6 +10,8 @@ use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
 use tracing::{trace, Instrument};
 use worker::*;
 
+use super::{Alarmed, DapDurableObject};
+
 pub(crate) fn durable_helper_state_name(
     version: &DapVersion,
     task_id: &TaskId,
@@ -58,10 +60,7 @@ impl DurableObject for HelperStateStore {
 
     async fn fetch(&mut self, req: Request) -> Result<Response> {
         // Ensure this DO instance is garbage collected eventually.
-        super::ensure_alarmed(
-            &self.state,
-            self.config.deployment,
-            &mut self.alarmed,
+        self.ensure_alarmed(
             self.config
                 .helper_state_store_garbage_collect_after_secs
                 .expect("Daphne-Worker not configured as helper"),
@@ -115,5 +114,25 @@ impl HelperStateStore {
                 req.path()
             ))),
         }
+    }
+}
+
+impl DapDurableObject for HelperStateStore {
+    #[inline(always)]
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    #[inline(always)]
+    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+        self.config.deployment
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Alarmed for HelperStateStore {
+    #[inline(always)]
+    fn alarmed(&mut self) -> &mut bool {
+        &mut self.alarmed
     }
 }
