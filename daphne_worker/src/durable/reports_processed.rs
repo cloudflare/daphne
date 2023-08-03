@@ -3,7 +3,9 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_get, state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED},
+    durable::{
+        create_span_from_request, state_get, state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED,
+    },
     initialize_tracing, int_err,
 };
 use daphne::{
@@ -18,7 +20,7 @@ use futures::future::try_join_all;
 use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, time::Duration};
-use tracing::warn;
+use tracing::{warn, Instrument};
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
@@ -79,7 +81,7 @@ impl DurableObject for ReportsProcessed {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PROCESSED);
         ensure_alarmed!(
@@ -88,6 +90,20 @@ impl DurableObject for ReportsProcessed {
                 .saturating_add(self.config.processed_alarm_safety_interval)
         );
 
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+
+    async fn alarm(&mut self) -> Result<Response> {
+        self.state.storage().delete_all().await?;
+        self.alarmed = false;
+        self.touched = false;
+        Response::from_json(&())
+    }
+}
+
+impl ReportsProcessed {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Initialize a report:
             //  * Ensure the report wasn't replayed
@@ -179,13 +195,6 @@ impl DurableObject for ReportsProcessed {
                 req.path()
             ))),
         }
-    }
-
-    async fn alarm(&mut self) -> Result<Response> {
-        self.state.storage().delete_all().await?;
-        self.alarmed = false;
-        self.touched = false;
-        Response::from_json(&())
     }
 }
 

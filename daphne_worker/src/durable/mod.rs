@@ -1,12 +1,15 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::{int_err, now};
+use crate::{
+    int_err, now,
+    tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
+};
 use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
-use tracing::warn;
+use tracing::{info_span, warn};
 use worker::*;
 
 pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
@@ -182,18 +185,26 @@ impl<'srv> DurableConnector<'srv> {
         } else {
             1
         };
+
+        let tracing_headers = span_to_headers();
+
         let mut attempt = 1;
         loop {
             let req = match (&method, &data) {
                 (Method::Post, Some(data)) => Request::new_with_init(
                     &format!("https://fake-host{durable_path}"),
-                    RequestInit::new().with_method(Method::Post).with_body(Some(
-                        wasm_bindgen::JsValue::from_str(&serde_json::to_string(&data)?),
-                    )),
+                    RequestInit::new()
+                        .with_method(Method::Post)
+                        .with_body(Some(wasm_bindgen::JsValue::from_str(
+                            &serde_json::to_string(&data)?,
+                        )))
+                        .with_headers(tracing_headers.clone()),
                 )?,
                 (Method::Get, None) => Request::new_with_init(
                     &format!("https://fake-host{durable_path}"),
-                    RequestInit::new().with_method(Method::Get),
+                    RequestInit::new()
+                        .with_method(Method::Get)
+                        .with_headers(tracing_headers.clone()),
                 )?,
                 _ => {
                     return Err(Error::RustError(format!(
@@ -201,6 +212,8 @@ impl<'srv> DurableConnector<'srv> {
                     )));
                 }
             };
+
+            tracing::info!("sending req: {req:?}");
 
             match durable_stub.fetch_with_request(req).await {
                 Ok(mut resp) => return Ok(handler(resp.json().await?, attempt > 1)),
@@ -545,6 +558,66 @@ async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
         js_item = iter.next()?;
     }
     Ok(res)
+}
+
+fn span_to_headers() -> Headers {
+    // get the current span.
+    let span = tracing::Span::current();
+
+    // get the current global subscriber
+    tracing::dispatcher::get_default(|d| {
+        use tracing_subscriber::registry::LookupSpan;
+
+        // downcast it to our subscriber
+        let Some(sub) = d.downcast_ref::<DaphneSubscriber>() else {
+            return Default::default();
+        };
+
+        // get the span id, so we can ask the subscriber for the current span
+        let Some(id) = span.id() else {
+            return Default::default();
+        };
+
+        let mut headers = Headers::default();
+
+        // loop over the stack of spans, starting with the current one and going up.
+        for span_ref in std::iter::successors(sub.span(&id), |span| span.parent()) {
+            // get the json fields extension provided by the [JsonFieldsLayer].
+            let ext = span_ref.extensions();
+            let Some(fields) = ext.get::<JsonFields>() else {
+                continue;
+            };
+
+            for (k, v) in fields {
+                let non_string_stack_slot: String;
+                let (k, v) = (
+                    // prepend "tracing-" to all the headers to avoid accidental collisions.
+                    format!("tracing-{k}"),
+                    match v {
+                        serde_json::Value::String(s) => s,
+                        v => {
+                            non_string_stack_slot = v.to_string();
+                            &non_string_stack_slot
+                        }
+                    },
+                );
+                if let Err(e) = headers.append(&k, v) {
+                    tracing::warn!(
+                        error = %e,
+                        key = %k,
+                        "invalid name passed to headers"
+                    );
+                }
+            }
+        }
+
+        headers
+    })
+}
+
+fn create_span_from_request(req: &Request) -> tracing::Span {
+    let path = req.path();
+    info_span!("DO span", p = %shorten_paths(path.split('/')).display())
 }
 
 pub(crate) mod aggregate_store;

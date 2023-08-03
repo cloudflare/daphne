@@ -3,10 +3,11 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
+    durable::{create_span_from_request, state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     initialize_tracing, int_err,
 };
 use daphne::DapAggregateShare;
+use tracing::Instrument;
 use worker::*;
 
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
@@ -55,10 +56,16 @@ impl DurableObject for AggregateStore {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_AGGREGATE_STORE);
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+}
 
+impl AggregateStore {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Merge an aggregate share into the stored aggregate.
             //

@@ -3,10 +3,10 @@
 
 use crate::{
     durable,
-    durable::{DurableConnector, DurableOrdered, DurableReference},
+    durable::{create_span_from_request, DurableConnector, DurableOrdered, DurableReference},
     initialize_tracing, int_err,
 };
-use tracing::{error, trace};
+use tracing::{error, trace, Instrument};
 use worker::*;
 
 pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
@@ -26,7 +26,14 @@ impl DurableObject for GarbageCollector {
         Self { state, env }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+}
+
+impl GarbageCollector {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         let durable = DurableConnector::new(&self.env);
         match (req.path().as_ref(), req.method()) {
             // Schedule a durable object (DO) instance for deletion.

@@ -3,7 +3,10 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_get, state_get_or_default, DurableOrdered, BINDING_DAP_LEADER_COL_JOB_QUEUE},
+    durable::{
+        create_span_from_request, state_get, state_get_or_default, DurableOrdered,
+        BINDING_DAP_LEADER_COL_JOB_QUEUE,
+    },
     initialize_tracing, int_err,
 };
 use daphne::{
@@ -15,6 +18,7 @@ use prio::{
     vdaf::prg::{Prg, PrgSha3, SeedStream},
 };
 use serde::{Deserialize, Serialize};
+use tracing::Instrument;
 use worker::*;
 
 const PENDING_PREFIX: &str = "pending";
@@ -80,10 +84,16 @@ impl DurableObject for LeaderCollectionJobQueue {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_LEADER_COL_JOB_QUEUE);
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+}
 
+impl LeaderCollectionJobQueue {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Create a collect job for a collect request issued by the Collector.
             //
