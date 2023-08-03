@@ -124,7 +124,12 @@ where
 
         let metadata = event.metadata();
         if let (Some(file), Some(line)) = (metadata.file(), metadata.line()) {
-            fields.insert("at".to_owned(), format!("{}:{}", file, line).into());
+            // we need to keep log lines as short as possible otherwise logpush will truncate them.
+            let file_parts = shorten_paths(file.trim_start_matches("daphne_").split('/'));
+            fields.insert(
+                "at".to_owned(),
+                format!("{}:{}", file_parts.display(), line).into(),
+            );
         }
 
         // If there is no `message`, repurpose the error meessage is there is one or the
