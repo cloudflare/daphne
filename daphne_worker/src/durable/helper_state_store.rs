@@ -3,11 +3,11 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_get, state_set_if_not_exists},
+    durable::{create_span_from_request, state_get, state_set_if_not_exists},
     initialize_tracing, int_err,
 };
 use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
-use tracing::{trace, warn};
+use tracing::{trace, warn, Instrument};
 use worker::*;
 
 pub(crate) fn durable_helper_state_name(
@@ -56,7 +56,7 @@ impl DurableObject for HelperStateStore {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         // Ensure this DO instance is garbage collected eventually.
         ensure_alarmed!(
             self,
@@ -65,6 +65,23 @@ impl DurableObject for HelperStateStore {
                 .expect("Daphne-Worker not configured as helper")
         );
 
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+
+    async fn alarm(&mut self) -> Result<Response> {
+        self.state.storage().delete_all().await?;
+        self.alarmed = false;
+        trace!(
+            "HelperStateStore: deleted instance {}",
+            self.state.id().to_string()
+        );
+        Response::from_json(&())
+    }
+}
+
+impl HelperStateStore {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Store the Helper's state.
             //
@@ -95,15 +112,5 @@ impl DurableObject for HelperStateStore {
                 req.path()
             ))),
         }
-    }
-
-    async fn alarm(&mut self) -> Result<Response> {
-        self.state.storage().delete_all().await?;
-        self.alarmed = false;
-        trace!(
-            "HelperStateStore: deleted instance {}",
-            self.state.id().to_string()
-        );
-        Response::from_json(&())
     }
 }

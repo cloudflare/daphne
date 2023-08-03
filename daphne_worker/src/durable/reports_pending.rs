@@ -4,7 +4,7 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{
-        durable_name_queue,
+        create_span_from_request, durable_name_queue,
         leader_agg_job_queue::{
             DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
@@ -16,7 +16,7 @@ use crate::{
 use daphne::{messages::TaskId, DapVersion};
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
-use tracing::debug;
+use tracing::{debug, Instrument};
 use worker::*;
 
 pub(crate) const DURABLE_REPORTS_PENDING_GET: &str = "/internal/do/reports_pending/get";
@@ -99,11 +99,18 @@ impl DurableObject for ReportsPending {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
-        let durable = DurableConnector::new(&self.env);
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_REPORTS_PENDING);
 
+        let span = create_span_from_request(&req);
+        self.handle(req, id_hex).instrument(span).await
+    }
+}
+
+impl ReportsPending {
+    async fn handle(&mut self, mut req: Request, id_hex: String) -> Result<Response> {
+        let durable = DurableConnector::new(&self.env);
         match (req.path().as_ref(), req.method()) {
             // Drain the requested number of reports from storage.
             //

@@ -3,13 +3,15 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE},
+    durable::{
+        create_span_from_request, state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE,
+    },
     initialize_tracing, int_err,
 };
 use daphne::messages::BatchId;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, Instrument};
 use worker::*;
 
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_ASSIGN: &str = "/internal/do/leader_batch_queue/assign";
@@ -102,10 +104,17 @@ impl DurableObject for LeaderBatchQueue {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex.clone(), BINDING_DAP_LEADER_BATCH_QUEUE);
 
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+}
+
+impl LeaderBatchQueue {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Return the ID of the oldest, not-yet-collected batch.
             //

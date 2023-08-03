@@ -3,10 +3,10 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE},
+    durable::{create_span_from_request, DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE},
     initialize_tracing, int_err,
 };
-use tracing::debug;
+use tracing::{debug, Instrument};
 use worker::*;
 
 pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
@@ -55,10 +55,17 @@ impl DurableObject for LeaderAggregationJobQueue {
         }
     }
 
-    async fn fetch(&mut self, mut req: Request) -> Result<Response> {
+    async fn fetch(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
         ensure_garbage_collected!(req, self, id_hex, BINDING_DAP_LEADER_AGG_JOB_QUEUE);
 
+        let span = create_span_from_request(&req);
+        self.handle(req).instrument(span).await
+    }
+}
+
+impl LeaderAggregationJobQueue {
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match (req.path().as_ref(), req.method()) {
             // Put a job (near) the back of the queue.
             //

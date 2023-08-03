@@ -125,6 +125,11 @@ impl io::Write for LogWriter {
 
 static INITIALIZE_TRACING: Once = Once::new();
 
+pub(crate) type DaphneSubscriber = Layered<
+    Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>,
+    tracing_subscriber::Registry,
+>;
+
 /// Utility function that takes a path (ex: `path/to/something`) and shortens it in by preserving
 /// only the first letter of each segment except the last word, which is kept as is.
 pub(crate) fn shorten_paths<'s, I>(segments: I) -> PathBuf
@@ -195,11 +200,17 @@ pub fn initialize_tracing(env: &Env) {
             }
         };
 
-        registry()
-            .with(ansi)
-            .with(json)
-            .with(EnvFilter::new(filter))
-            .init();
+        // NOTE: this type alias is important as it allows us to fetch the subscriber at runtime in
+        // order to pass the fields in a request to a DO.
+        //
+        // Hence all the boxing in order to erase the types as much as possible.
+        let x: DaphneSubscriber = registry().with(vec![
+            fields_recording_layer::SpanFieldsRecorderLayer.boxed(),
+            ansi.boxed(),
+            json.boxed(),
+            EnvFilter::new(filter).boxed(),
+        ]);
+        x.init();
     });
 }
 
