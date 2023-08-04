@@ -226,8 +226,6 @@ impl<'srv> DurableConnector<'srv> {
                 }
             };
 
-            tracing::info!("sending req: {req:?}");
-
             match durable_stub.fetch_with_request(req).await {
                 Ok(mut resp) => return Ok(handler(resp.json().await?, attempt > 1)),
                 Err(err) => {
