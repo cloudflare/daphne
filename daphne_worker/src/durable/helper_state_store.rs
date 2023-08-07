@@ -10,7 +10,7 @@ use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
 use tracing::{trace, Instrument};
 use worker::*;
 
-use super::{Alarmed, DapDurableObject};
+use super::{req_parse, Alarmed, DapDurableObject};
 
 pub(crate) fn durable_helper_state_name(
     version: &DapVersion,
@@ -91,7 +91,7 @@ impl HelperStateStore {
             // Input: `helper_state_hex: String` (hex-encoded state)
             // Output: `bool`
             (DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS, Method::Post) => {
-                let helper_state_hex: String = req.json().await?;
+                let helper_state_hex: String = req_parse(&mut req).await?;
                 let success =
                     state_set_if_not_exists(&self.state, "helper_state", &helper_state_hex)
                         .await?

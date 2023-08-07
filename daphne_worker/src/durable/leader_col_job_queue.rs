@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use worker::*;
 
-use super::{DapDurableObject, GarbageCollectable};
+use super::{req_parse, DapDurableObject, GarbageCollectable};
 
 const PENDING_PREFIX: &str = "pending";
 const PROCESSED_PREFIX: &str = "processed";
@@ -110,7 +110,7 @@ impl LeaderCollectionJobQueue {
             // Input: `collect_req: CollectReq`
             // Output: `Id` (collect job ID)
             (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
-                let collect_queue_req: CollectQueueRequest = req.json().await?;
+                let collect_queue_req: CollectQueueRequest = req_parse(&mut req).await?;
                 let collection_job_id: CollectionJobId =
                     if let Some(cid) = &collect_queue_req.collect_job_id {
                         cid.clone()
@@ -181,7 +181,7 @@ impl LeaderCollectionJobQueue {
                     TaskId,
                     CollectionJobId,
                     Collection,
-                ) = req.json().await?;
+                ) = req_parse(&mut req).await?;
                 let processed_key = processed_key(&task_id, &collection_job_id);
                 let processed: Option<Collection> = state_get(&self.state, &processed_key).await?;
                 if processed.is_some() {
@@ -215,7 +215,8 @@ impl LeaderCollectionJobQueue {
             // Input: `collection_job_id: Id`
             // Output: `DapCollectionJob`
             (DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, Method::Post) => {
-                let (task_id, collection_job_id): (TaskId, CollectionJobId) = req.json().await?;
+                let (task_id, collection_job_id): (TaskId, CollectionJobId) =
+                    req_parse(&mut req).await?;
                 let pending_key = pending_key(&task_id, &collection_job_id);
                 let pending = state_get::<String>(&self.state, &pending_key)
                     .await?

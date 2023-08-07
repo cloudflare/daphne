@@ -8,7 +8,7 @@ use crate::{
         leader_agg_job_queue::{
             DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
         },
-        state_get, state_set_if_not_exists, DurableConnector, DurableOrdered,
+        req_parse, state_get, state_set_if_not_exists, DurableConnector, DurableOrdered,
         BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING, MAX_KEYS,
     },
     initialize_tracing, int_err,
@@ -128,7 +128,7 @@ impl ReportsPending {
             // Input: `reports_requested: usize`
             // Output: `Vec<PendingReport>`
             (DURABLE_REPORTS_PENDING_GET, Method::Post) => {
-                let reports_requested: usize = req.json().await?;
+                let reports_requested: usize = req_parse(&mut req).await?;
                 // Note we impose an upper limit on the user's specified limit.
                 let opt = ListOptions::new()
                     .prefix("pending/")
@@ -197,7 +197,7 @@ impl ReportsPending {
             // Input: `pending_report: PendingReport`
             // Output: `ReportsPendingResult`
             (DURABLE_REPORTS_PENDING_PUT, Method::Post) => {
-                let pending_report: PendingReport = req.json().await?;
+                let pending_report: PendingReport = req_parse(&mut req).await?;
                 let report_id_hex = pending_report
                     .report_id_hex()
                     .ok_or_else(|| int_err("failed to parse report ID from report"))?;

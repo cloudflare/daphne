@@ -5,7 +5,9 @@ use std::ops::ControlFlow;
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{create_span_from_request, DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE},
+    durable::{
+        create_span_from_request, req_parse, DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
+    },
     initialize_tracing, int_err,
 };
 use tracing::{debug, Instrument};
@@ -81,7 +83,7 @@ impl LeaderAggregationJobQueue {
             // Input: `agg_job: DurableOrdered<String>` (the `String` is the name of the
             // `ReportsPending` instance)
             (DURABLE_LEADER_AGG_JOB_QUEUE_PUT, Method::Post) => {
-                let agg_job: DurableOrdered<String> = req.json().await?;
+                let agg_job: DurableOrdered<String> = req_parse(&mut req).await?;
                 agg_job.put(&self.state).await?;
                 debug!(
                     "LeaderAggregationJobQueue: {} has been scheduled",
@@ -96,7 +98,7 @@ impl LeaderAggregationJobQueue {
             // Output: `Vec<String>` (the names of the `ReportsPending` instances from which to
             // drain reports)
             (DURABLE_LEADER_AGG_JOB_QUEUE_GET, Method::Post) => {
-                let max_agg_jobs: usize = req.json().await?;
+                let max_agg_jobs: usize = req_parse(&mut req).await?;
                 let res: Vec<String> =
                     DurableOrdered::get_front(&self.state, "agg_job", max_agg_jobs)
                         .await?
@@ -113,7 +115,7 @@ impl LeaderAggregationJobQueue {
             // Input: `agg_job: DurableOrdered<String>` (the `String` is the name of the
             // `ReportsPending` instance that has become empty)
             (DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, Method::Post) => {
-                let agg_job: DurableOrdered<String> = req.json().await?;
+                let agg_job: DurableOrdered<String> = req_parse(&mut req).await?;
                 agg_job.delete(&self.state).await?;
                 Response::from_json(&())
             }
