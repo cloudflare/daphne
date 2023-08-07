@@ -23,7 +23,7 @@ use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
 use tracing::Instrument;
 use worker::*;
 
-use super::{Alarmed, DapDurableObject, GarbageCollectable};
+use super::{req_parse, Alarmed, DapDurableObject, GarbageCollectable};
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
     "/internal/do/reports_processed/initialize";
@@ -123,7 +123,7 @@ impl ReportsProcessed {
             // Input: `ReportsProcessedReq`
             // Output: `ReportsProcessedResp`
             (DURABLE_REPORTS_PROCESSED_INITIALIZE, Method::Post) => {
-                let reports_processed_request: ReportsProcessedReq = req.json().await?;
+                let reports_processed_request: ReportsProcessedReq = req_parse(&mut req).await?;
                 let result = try_join_all(
                     reports_processed_request
                         .consumed_reports
@@ -184,7 +184,7 @@ impl ReportsProcessed {
             // Input: `Vec<ReportId>`
             // Output: `Vec<ReportId>`
             (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
-                let report_ids: Vec<ReportId> = req.json().await?;
+                let report_ids: Vec<ReportId> = req_parse(&mut req).await?;
                 let replayed_reports = try_join_all(
                     report_ids
                         .into_iter()

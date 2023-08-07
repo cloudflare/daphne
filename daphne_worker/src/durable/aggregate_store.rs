@@ -12,7 +12,7 @@ use daphne::DapAggregateShare;
 use tracing::Instrument;
 use worker::*;
 
-use super::{DapDurableObject, GarbageCollectable};
+use super::{req_parse, DapDurableObject, GarbageCollectable};
 
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
@@ -86,7 +86,7 @@ impl AggregateStore {
             // Input: `agg_share_dellta: DapAggregateShare`
             // Output: `()`
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
-                let agg_share_delta = req.json().await?;
+                let agg_share_delta = req_parse(&mut req).await?;
 
                 // To keep this pair of get and put operations atomic, there should be no await
                 // points between them. See the note below `transaction()` on

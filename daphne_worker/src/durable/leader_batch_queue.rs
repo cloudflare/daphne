@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, Instrument};
 use worker::*;
 
-use super::{DapDurableObject, GarbageCollectable};
+use super::{req_parse, DapDurableObject, GarbageCollectable};
 
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_ASSIGN: &str = "/internal/do/leader_batch_queue/assign";
 pub(crate) const DURABLE_LEADER_BATCH_QUEUE_CURRENT: &str =
@@ -147,7 +147,7 @@ impl LeaderBatchQueue {
             // Input: `(batch_size, num_unassigned): (usize, usize)`
             // Output: `Vec<BatchCount>`
             (DURABLE_LEADER_BATCH_QUEUE_ASSIGN, Method::Post) => {
-                let (batch_size, mut num_unassigned): (usize, usize) = req.json().await?;
+                let (batch_size, mut num_unassigned): (usize, usize) = req_parse(&mut req).await?;
                 if batch_size == 0 {
                     return Err(int_err("LeaderBatchQueue: called with batch_size is 0"));
                 }
@@ -190,7 +190,7 @@ impl LeaderBatchQueue {
             //
             // Input: `batch_id_hex: String`
             (DURABLE_LEADER_BATCH_QUEUE_REMOVE, Method::Post) => {
-                let batch_id_hex: String = req.json().await?;
+                let batch_id_hex: String = req_parse(&mut req).await?;
                 let lookup_key = lookup_key(&batch_id_hex);
                 if let Some(lookup_val) = state_get::<String>(&self.state, &lookup_key).await? {
                     self.state.storage().delete(&lookup_val).await?;

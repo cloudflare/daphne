@@ -3,7 +3,9 @@
 
 use crate::{
     durable,
-    durable::{create_span_from_request, DurableConnector, DurableOrdered, DurableReference},
+    durable::{
+        create_span_from_request, req_parse, DurableConnector, DurableOrdered, DurableReference,
+    },
     initialize_tracing, int_err,
 };
 use tracing::{error, trace, Instrument};
@@ -38,7 +40,7 @@ impl GarbageCollector {
         match (req.path().as_ref(), req.method()) {
             // Schedule a durable object (DO) instance for deletion.
             (DURABLE_GARBAGE_COLLECTOR_PUT, Method::Post) => {
-                let durable_ref: DurableReference = req.json().await?;
+                let durable_ref: DurableReference = req_parse(&mut req).await?;
                 match durable_ref.binding.as_ref() {
                     durable::BINDING_DAP_REPORTS_PENDING
                     | durable::BINDING_DAP_REPORTS_PROCESSED

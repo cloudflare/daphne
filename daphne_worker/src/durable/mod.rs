@@ -16,10 +16,10 @@ use crate::{
 };
 use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
 use rand::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
 use tracing::{info_span, warn};
-use worker::*;
+use worker::{js_sys::Uint8Array, *};
 
 pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
 
@@ -204,15 +204,20 @@ impl<'srv> DurableConnector<'srv> {
         let mut attempt = 1;
         loop {
             let req = match (&method, &data) {
-                (Method::Post, Some(data)) => Request::new_with_init(
-                    &format!("https://fake-host{durable_path}"),
-                    RequestInit::new()
-                        .with_method(Method::Post)
-                        .with_body(Some(wasm_bindgen::JsValue::from_str(
-                            &serde_json::to_string(&data)?,
-                        )))
-                        .with_headers(tracing_headers.clone()),
-                )?,
+                (Method::Post, Some(data)) => {
+                    let data = bincode::serialize(&data).map_err(|e| {
+                        Error::RustError(format!("failed to serialize data: {e:?}"))
+                    })?;
+                    let buffer = Uint8Array::new_with_length(data.len() as _);
+                    buffer.copy_from(&data);
+                    Request::new_with_init(
+                        &format!("https://fake-host{durable_path}"),
+                        RequestInit::new()
+                            .with_method(Method::Post)
+                            .with_body(Some(buffer.into()))
+                            .with_headers(tracing_headers.clone()),
+                    )?
+                }
                 (Method::Get, None) => Request::new_with_init(
                     &format!("https://fake-host{durable_path}"),
                     RequestInit::new()
@@ -440,7 +445,6 @@ pub(crate) struct DurableReference {
     pub(crate) id_hex: String,
 
     /// If applicable, the DAP task ID to which the DO instance is associated.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) task_id: Option<TaskId>,
 }
 
@@ -650,6 +654,12 @@ fn span_to_headers() -> Headers {
 
         headers
     })
+}
+
+async fn req_parse<T: DeserializeOwned>(req: &mut Request) -> Result<T> {
+    let bytes = req.bytes().await?;
+    bincode::deserialize(&bytes)
+        .map_err(|e| Error::RustError(format!("failed to deserialize bincode: {e:?}")))
 }
 
 fn create_span_from_request(req: &Request) -> tracing::Span {
