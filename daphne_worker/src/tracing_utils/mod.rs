@@ -129,9 +129,24 @@ impl io::Write for LogWriter {
 
 static INITIALIZE_TRACING: Once = Once::new();
 
+// pub(crate) type DaphneSubscriber = Layered<
+//     Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>,
+//     tracing_subscriber::Registry,
+// >;
 pub(crate) type DaphneSubscriber = Layered<
-    Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>,
-    tracing_subscriber::Registry,
+    Box<
+        dyn Layer<
+                Layered<
+                    Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>,
+                    tracing_subscriber::Registry,
+                >,
+            > + Send
+            + Sync,
+    >,
+    Layered<
+        Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>,
+        tracing_subscriber::Registry,
+    >,
 >;
 
 /// Utility function that takes a path (ex: `path/to/something`) and shortens it in by preserving
@@ -208,12 +223,17 @@ pub fn initialize_tracing(env: &Env) {
         // order to pass the fields in a request to a DO.
         //
         // Hence all the boxing in order to erase the types as much as possible.
-        let x: DaphneSubscriber = registry().with(vec![
-            fields_recording_layer::SpanFieldsRecorderLayer.boxed(),
-            ansi.boxed(),
-            json.boxed(),
-            EnvFilter::new(filter).boxed(),
-        ]);
+        let x: DaphneSubscriber = registry()
+            .with(vec![
+                fields_recording_layer::SpanFieldsRecorderLayer.boxed(),
+                ansi.boxed(),
+                json.boxed(),
+            ])
+            .with(
+                // EnvFilter must seperate from the other layers in order to provide global
+                // filtering
+                EnvFilter::new(filter).boxed(),
+            );
         x.init();
     });
 }
