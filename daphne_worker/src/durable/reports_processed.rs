@@ -3,9 +3,7 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{
-        create_span_from_request, state_get, state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED,
-    },
+    durable::{create_span_from_request, state_get, BINDING_DAP_REPORTS_PROCESSED},
     initialize_tracing, int_err,
 };
 use daphne::{
@@ -16,12 +14,12 @@ use daphne::{
     },
     DapError, VdafConfig,
 };
-use futures::future::try_join_all;
-use prio::codec::{CodecError, ParameterizedDecode};
+use futures::{future::ready, StreamExt, TryStreamExt};
+use prio::codec::{CodecError, Decode, Encode, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
 use tracing::Instrument;
-use worker::*;
+use worker::{js_sys::Uint8Array, *};
 
 use super::{req_parse, Alarmed, DapDurableObject, GarbageCollectable};
 
@@ -45,26 +43,81 @@ pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
 /// where `<report_id>` is the hex-encoded report ID.
 #[durable_object]
 pub struct ReportsProcessed {
-    #[allow(dead_code)]
     state: State,
     env: Env,
     config: DaphneWorkerConfig,
     touched: bool,
     alarmed: bool,
+    reports_processed: Option<HashSet<ReportId>>,
 }
 
+// This is the maximum size of a value in durable object storage.
+const MAX_DURABLE_OBJECT_VALUE_SIZE: usize = 131_072;
+
+// The maximum number of reports we can support per DO instance. After this limit we start dropping
+// reports
+const MAX_REPORT_COUNT: usize =
+    (MAX_DURABLE_OBJECT_VALUE_SIZE / std::mem::size_of::<ReportId>()) * 3;
+
 impl ReportsProcessed {
-    /// Check if the report has been processed. If not, return None; otherwise, return the ID.
-    async fn to_checked(&self, report_id: ReportId) -> Result<Option<ReportId>> {
-        let key = format!("processed/{}", report_id.to_hex());
-        let processed: bool = state_set_if_not_exists(&self.state, &key, &true)
-            .await?
-            .unwrap_or(false);
-        if processed {
-            Ok(Some(report_id))
-        } else {
-            Ok(None)
+    async fn load_processed_reports(&mut self) -> Result<&mut HashSet<ReportId>> {
+        let reps = &mut self.reports_processed;
+        match reps {
+            Some(p) => Ok(p),
+            None => {
+                let processed = futures::stream::iter(0..)
+                    .then(|i| {
+                        let state_ref = &self.state;
+                        async move {
+                            state_get::<Vec<u8>>(state_ref, &format!("processed_reports/{i}"))
+                                .await
+                                .transpose()
+                        }
+                    })
+                    .take_while(|reports| ready(reports.is_some()))
+                    .map(|reports| reports.unwrap())
+                    .try_fold(HashSet::new(), |mut set, reports| async move {
+                        reports
+                            .chunks(std::mem::size_of::<ReportId>())
+                            .map(ReportId::get_decoded)
+                            .try_for_each(|r| {
+                                set.insert(r?);
+                                Ok(())
+                            })
+                            .map_err(|e: CodecError| {
+                                Error::RustError(format!("failed to deserialize report id: {e:?}"))
+                            })
+                            .map(|_| set)
+                    })
+                    .await?;
+
+                Ok(reps.insert(processed))
+            }
         }
+    }
+
+    async fn store_processed_reports(&self) -> Result<()> {
+        let Some(reports) = &self.reports_processed else {
+            return Ok(())
+        };
+        tracing::debug!("Storing {} reports", reports.len());
+        let mut encoded_reports =
+            Vec::with_capacity(reports.len() * std::mem::size_of::<ReportId>());
+        for r in reports {
+            r.encode(&mut encoded_reports);
+        }
+        for (i, chunk) in encoded_reports
+            .chunks(MAX_DURABLE_OBJECT_VALUE_SIZE)
+            .enumerate()
+        {
+            let array = Uint8Array::new_with_length(chunk.len() as _);
+            array.copy_from(chunk);
+            self.state
+                .storage()
+                .put_raw(&format!("processed_reports/{i}"), array)
+                .await?;
+        }
+        Ok(())
     }
 }
 
@@ -80,6 +133,7 @@ impl DurableObject for ReportsProcessed {
             config,
             touched: false,
             alarmed: false,
+            reports_processed: None,
         }
     }
 
@@ -124,33 +178,18 @@ impl ReportsProcessed {
             // Output: `ReportsProcessedResp`
             (DURABLE_REPORTS_PROCESSED_INITIALIZE, Method::Post) => {
                 let reports_processed_request: ReportsProcessedReq = req_parse(&mut req).await?;
-                let result = try_join_all(
-                    reports_processed_request
-                        .consumed_reports
-                        .iter()
-                        .filter(|consumed_report| consumed_report.is_ready())
-                        .map(|consumed_report| async {
-                            if let Some(replayed) = state_get::<bool>(
-                                &self.state,
-                                &format!("processed/{}", consumed_report.metadata().id.to_hex()),
-                            )
-                            .await?
-                            {
-                                if replayed {
-                                    return Result::Ok(Some(consumed_report.metadata().id.clone()));
-                                }
-                            }
-                            Ok(None)
-                        }),
-                )
-                .await?;
-                let replayed_reports = result.into_iter().flatten().collect::<HashSet<ReportId>>();
+
+                let processed = self.load_processed_reports().await?;
+
+                let is_replay = |report: &EarlyReportStateConsumed| {
+                    !report.is_ready() || processed.contains(&report.metadata().id)
+                };
 
                 let initialized_reports = reports_processed_request
                     .consumed_reports
                     .into_iter()
                     .map(|consumed_report| {
-                        if replayed_reports.contains(&consumed_report.metadata().id) {
+                        if is_replay(&consumed_report) {
                             Ok(EarlyReportStateInitialized::Rejected {
                                 metadata: Cow::Owned(consumed_report.metadata().clone()),
                                 failure: TransitionFailure::ReportReplayed,
@@ -185,17 +224,29 @@ impl ReportsProcessed {
             // Output: `Vec<ReportId>`
             (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
                 let report_ids: Vec<ReportId> = req_parse(&mut req).await?;
-                let replayed_reports = try_join_all(
-                    report_ids
-                        .into_iter()
-                        .map(|report_id| self.to_checked(report_id)),
-                )
-                .await?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<ReportId>>();
+                let processed = self.load_processed_reports().await?;
+                let processed_count = processed.len();
 
-                Response::from_json(&replayed_reports)
+                let replayed_or_dropped =
+                    report_ids.into_iter().try_fold(vec![], |mut replayed, id| {
+                        if processed.len() >= MAX_REPORT_COUNT {
+                            if !processed.contains(&id) {
+                                return Err(id);
+                            }
+                        } else if let Some(replayed_id) = processed.replace(id) {
+                            replayed.push(replayed_id)
+                        }
+                        Ok(replayed)
+                    });
+
+                if processed.len() > processed_count {
+                    self.store_processed_reports().await?;
+                }
+
+                match replayed_or_dropped {
+                    Ok(replayed) => Response::from_json(&MarkAggregatedResp::Replayed(replayed)),
+                    Err(dropped) => Response::from_json(&MarkAggregatedResp::Dropped(dropped)),
+                }
             }
 
             _ => Err(int_err(format!(
@@ -254,6 +305,12 @@ pub(crate) struct ReportsProcessedResp<'req> {
     pub(crate) is_leader: bool,
     pub(crate) vdaf_config: VdafConfig,
     pub(crate) initialized_reports: Vec<EarlyReportStateInitialized<'req>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) enum MarkAggregatedResp {
+    Replayed(Vec<ReportId>),
+    Dropped(ReportId),
 }
 
 // we need this custom deserializer because VdafPrepState and VdafPrepMessage don't implement

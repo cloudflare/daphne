@@ -40,6 +40,7 @@ macro_rules! id_struct {
     ($sname:ident, $len:expr, $doc:expr) => {
         #[doc=$doc]
         #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
+        #[repr(transparent)]
         pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
 
         impl $sname {

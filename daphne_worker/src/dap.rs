@@ -33,8 +33,8 @@ use crate::{
             DURABLE_REPORTS_PENDING_PUT,
         },
         reports_processed::{
-            ReportsProcessedReq, ReportsProcessedResp, DURABLE_REPORTS_PROCESSED_INITIALIZE,
-            DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
+            MarkAggregatedResp, ReportsProcessedReq, ReportsProcessedResp,
+            DURABLE_REPORTS_PROCESSED_INITIALIZE, DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
         },
         BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_HELPER_STATE_STORE,
         BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_LEADER_BATCH_QUEUE,
@@ -631,18 +631,24 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         let replayed = try_join_all(reports_processed_request_data.into_iter().map(
             |(durable_name, report_ids)| async {
-                durable
-                    .post::<_, Vec<ReportId>>(
+                let response = durable
+                    .post::<_, MarkAggregatedResp>(
                         BINDING_DAP_REPORTS_PROCESSED,
                         DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
                         durable_name,
                         report_ids,
                     )
                     .await
+                    .map_err(|e| fatal_error!(err = e))?;
+                match response {
+                    MarkAggregatedResp::Replayed(replayed) => Ok(replayed),
+                    MarkAggregatedResp::Dropped(_) => {
+                        Err(DapError::Transition(TransitionFailure::ReportDropped))
+                    }
+                }
             },
         ))
-        .await
-        .map_err(|e| fatal_error!(err = e))?
+        .await?
         .into_iter()
         .flatten()
         .collect::<HashSet<ReportId>>();
