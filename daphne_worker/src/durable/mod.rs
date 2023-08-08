@@ -642,12 +642,14 @@ fn span_to_headers() -> Headers {
                         }
                     },
                 );
-                if let Err(e) = headers.append(&k, v) {
-                    tracing::warn!(
-                        error = %e,
-                        key = %k,
-                        "invalid name passed to headers"
-                    );
+                if matches!(headers.has(&k), Ok(false)) {
+                    if let Err(e) = headers.append(&k, v) {
+                        tracing::warn!(
+                            error = %e,
+                            key = %k,
+                            "invalid name passed to headers"
+                        );
+                    }
                 }
             }
         }
