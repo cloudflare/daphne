@@ -2,12 +2,7 @@
 
 [workspace]
 
-members = [
-    "daphne",
-    "daphne/dapf",
-    "daphne_worker",
-    "daphne_worker_test",
-]
+members = ["daphne", "daphne/dapf", "daphne_worker", "daphne_worker_test"]
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
@@ -20,7 +15,7 @@ async-trait = "0.1.71"
 base64 = "0.21.2"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 futures = "0.3.28"
-getrandom = { version = "0.2.10", features = ["js"] } # Required for prio
+getrandom = { version = "0.2.10", features = ["js"] }         # Required for prio
 hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "=0.1.0"
 hpke-rs-crypto = "=0.1.1"
@@ -28,7 +23,10 @@ hpke-rs-rust-crypto = "=0.1.1"
 matchit = "0.7.0"
 paste = "1.0.13"
 # prio = "0.13.0"
-prio = {path = "../prio-dp", features = ["experimental"]}
+# prio = {path = "../prio-dp", features = ["experimental"]}
+prio = { git = "https://github.com/tholop/libprio-rs", branch = "dp", features = [
+    "experimental",
+] }
 
 prometheus = "0.13.3"
 rand = "0.8.5"
