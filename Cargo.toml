@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 [workspace]
+# This is needed to avoid pulling in tokio features in wasm targets, due to new features in version 0.0.18 of the `worker` crate
+# See: https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html#details
+resolver = "2"
 
 members = [
     "daphne",
@@ -38,4 +41,4 @@ thiserror = "1.0.44"
 tokio = { version = "1.29.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.37"
 url = { version = "2.4.0", features = ["serde"] }
-worker = "0.0.17"
+worker = "0.0.18"
