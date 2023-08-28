@@ -11,8 +11,8 @@ edition = "2021"
 license = "BSD-3-Clause"
 
 [dependencies]
-anyhow = "1.0.72"
-clap = { version = "4.3.19", features = ["derive"] }
+anyhow = "1.0.75"
+clap = { version = "4.4.1", features = ["derive"] }
 daphne = { path = ".." }
 prio.workspace = true
 rand.workspace = true

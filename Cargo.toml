@@ -17,10 +17,10 @@ members = [
 opt-level = "s"
 
 [workspace.dependencies]
-anyhow = "1.0.72"
+anyhow = "1.0.75"
 assert_matches = "1.5.0"
-async-trait = "0.1.72"
-base64 = "0.21.2"
+async-trait = "0.1.73"
+base64 = "0.21.3"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 futures = "0.3.28"
 getrandom = { version = "0.2.10", features = ["js"] } # Required for prio
@@ -30,15 +30,15 @@ hpke-rs-crypto = "=0.1.1"
 hpke-rs-rust-crypto = "=0.1.1"
 matchit = "0.7.2"
 paste = "1.0.14"
-prio = "0.14.0"
+prio = "0.14.1"
 prometheus = "0.13.3"
 rand = "0.8.5"
-reqwest = "0.11.18"
+reqwest = "0.11.20"
 ring = "0.16.20"
-serde = { version = "1.0.181", features = ["derive"] }
-serde_json = "1.0.104"
-thiserror = "1.0.44"
-tokio = { version = "1.29.1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.105"
+thiserror = "1.0.47"
+tokio = { version = "1.32.0", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.37"
-url = { version = "2.4.0", features = ["serde"] }
+url = { version = "2.4.1", features = ["serde"] }
 worker = "0.0.18"
