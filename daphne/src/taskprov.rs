@@ -148,7 +148,9 @@ pub fn resolve_advertised_task_config<S>(
         taskprov_version,
         task_id,
         report_metadata_advertisement,
-    ).map_err(DapError::Abort)? else {
+    )
+    .map_err(DapError::Abort)?
+    else {
         return Ok(None);
     };
 

@@ -38,7 +38,8 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
         let agg_job_init_req = rt.block_on(async {
             let reports = agg_job_test.produce_reports(vec![measurement; batch_size]);
             let DapLeaderTransition::Continue(_leader_state, agg_job_init_req) =
-            agg_job_test.produce_agg_job_init_req(reports).await else {
+                agg_job_test.produce_agg_job_init_req(reports).await
+            else {
                 panic!("unexpected transition");
             };
             agg_job_init_req

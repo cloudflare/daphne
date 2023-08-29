@@ -1467,28 +1467,30 @@ impl AggregationJobTest {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let DapLeaderTransition::Continue(leader_state, agg_job_init_req) = self
-            .produce_agg_job_init_req(reports)
-            .await else {
-                panic!("unexpected transition");
+        let DapLeaderTransition::Continue(leader_state, agg_job_init_req) =
+            self.produce_agg_job_init_req(reports).await
+        else {
+            panic!("unexpected transition");
         };
-        let DapHelperTransition::Continue(helper_state, agg_job_resp) = self
-            .handle_agg_job_init_req(&agg_job_init_req)
-            .await else {
-                panic!("unexpected transition");
+        let DapHelperTransition::Continue(helper_state, agg_job_resp) =
+            self.handle_agg_job_init_req(&agg_job_init_req).await
+        else {
+            panic!("unexpected transition");
         };
         let got = DapHelperState::get_decoded(&self.task_config.vdaf, &helper_state.get_encoded())
             .expect("failed to decode helper state");
         assert_eq!(got, helper_state);
 
-        let DapLeaderTransition::Uncommitted(uncommitted, agg_cont) = self
-            .handle_agg_job_resp(leader_state, agg_job_resp) else {
-                panic!("unexpected transition");
-            };
-        let DapHelperTransition::Finish(helper_out_shares, agg_job_resp) = self
-            .handle_agg_job_cont_req(helper_state, &agg_cont) else {
-                panic!("unexpected transition");
-            };
+        let DapLeaderTransition::Uncommitted(uncommitted, agg_cont) =
+            self.handle_agg_job_resp(leader_state, agg_job_resp)
+        else {
+            panic!("unexpected transition");
+        };
+        let DapHelperTransition::Finish(helper_out_shares, agg_job_resp) =
+            self.handle_agg_job_cont_req(helper_state, &agg_cont)
+        else {
+            panic!("unexpected transition");
+        };
         let leader_out_shares = self.handle_final_agg_job_resp(uncommitted, agg_job_resp);
         let report_count = u64::try_from(leader_out_shares.len()).unwrap();
 
