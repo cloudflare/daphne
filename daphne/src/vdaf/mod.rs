@@ -1397,10 +1397,20 @@ mod test {
         )
         .await
         .unwrap();
-        let EarlyReportStateInitialized::Ready{ state: leader_step, message: leader_share, .. } =
-        EarlyReportStateInitialized::initialize(true, &t.task_config.vdaf_verify_key, &t.task_config.vdaf, early_report_state_consumed).unwrap() else {
-        panic!("rejected unexpectedly");
-    };
+        let EarlyReportStateInitialized::Ready {
+            state: leader_step,
+            message: leader_share,
+            ..
+        } = EarlyReportStateInitialized::initialize(
+            true,
+            &t.task_config.vdaf_verify_key,
+            &t.task_config.vdaf,
+            early_report_state_consumed,
+        )
+        .unwrap()
+        else {
+            panic!("rejected unexpectedly");
+        };
 
         let early_report_state_consumed = EarlyReportStateConsumed::consume(
             &t.helper_hpke_receiver_config,
@@ -1413,10 +1423,20 @@ mod test {
         )
         .await
         .unwrap();
-        let EarlyReportStateInitialized::Ready{ state: helper_step, message: helper_share, .. } =
-        EarlyReportStateInitialized::initialize(false, &t.task_config.vdaf_verify_key, &t.task_config.vdaf, early_report_state_consumed).unwrap() else {
-        panic!("rejected unexpectedly");
-    };
+        let EarlyReportStateInitialized::Ready {
+            state: helper_step,
+            message: helper_share,
+            ..
+        } = EarlyReportStateInitialized::initialize(
+            false,
+            &t.task_config.vdaf_verify_key,
+            &t.task_config.vdaf,
+            early_report_state_consumed,
+        )
+        .unwrap()
+        else {
+            panic!("rejected unexpectedly");
+        };
 
         match (leader_step, helper_step, leader_share, helper_share) {
             (

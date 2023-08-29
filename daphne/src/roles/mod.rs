@@ -173,16 +173,17 @@ async fn resolve_taskprov<S>(
     };
 
     let Some(task_config) = taskprov::resolve_advertised_task_config(
-            req,
-            global_config.taskprov_version,
-            vdaf_verify_key_init,
-            collector_hpke_config,
-            task_id,
-            report_metadata_advertisement,
-        )? else {
-            // No task configuration advertised, so nothing to do.
-            return Ok(());
-        };
+        req,
+        global_config.taskprov_version,
+        vdaf_verify_key_init,
+        collector_hpke_config,
+        task_id,
+        report_metadata_advertisement,
+    )?
+    else {
+        // No task configuration advertised, so nothing to do.
+        return Ok(());
+    };
 
     // This is the opt-in / opt-out decision point.
     if let Some(reason) = agg.taskprov_opt_out_reason(&task_config)? {
