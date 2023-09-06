@@ -1283,6 +1283,15 @@ impl<K: Clone + Eq + std::hash::Hash, V> KvPair<'_, K, V> {
 
 pub(crate) type BearerTokenKvPair<'a> = KvPair<'a, TaskId, BearerToken>;
 
+impl<'a> BearerTokenKvPair<'a> {
+    pub(crate) fn new(task_id: &'a TaskId, bearer_token: &BearerToken) -> Self {
+        Self {
+            key: Cow::Borrowed(task_id),
+            value: bearer_token.clone(),
+        }
+    }
+}
+
 impl AsRef<BearerToken> for BearerTokenKvPair<'_> {
     fn as_ref(&self) -> &BearerToken {
         self.value()

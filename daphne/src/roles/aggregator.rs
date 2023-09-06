@@ -49,7 +49,11 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     /// If the return value is `None`, then the request is authorized. If the return value is
     /// `Some(reason)`, then the request is denied and `reason` conveys details about how the
     /// decision was reached.
-    async fn unauthorized_reason(&self, req: &DapRequest<S>) -> Result<Option<String>, DapError>;
+    async fn unauthorized_reason(
+        &self,
+        task_config: &DapTaskConfig,
+        req: &DapRequest<S>,
+    ) -> Result<Option<String>, DapError>;
 
     /// Look up the DAP global configuration.
     fn get_global_config(&self) -> &DapGlobalConfig;

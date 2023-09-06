@@ -127,9 +127,13 @@ pub(crate) struct MockAggregator {
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucketOwned, AggStore>>>>,
     pub(crate) collector_hpke_config: HpkeConfig,
-    pub(crate) taskprov_vdaf_verify_key_init: [u8; 32],
     pub(crate) metrics: DaphneMetrics,
     pub(crate) audit_log: MockAuditLog,
+
+    // taskprov
+    pub(crate) taskprov_vdaf_verify_key_init: [u8; 32],
+    pub(crate) taskprov_leader_token: BearerToken,
+    pub(crate) taskprov_collector_token: Option<BearerToken>, // Not set by Helper
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `MockAggregator`. Not set by the Helper.
@@ -263,35 +267,29 @@ impl BearerTokenProvider for MockAggregator {
     async fn get_leader_bearer_token_for<'s>(
         &'s self,
         _task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        Ok(Some(&self.leader_token))
+        if task_config.taskprov {
+            Ok(Some(&self.taskprov_leader_token))
+        } else {
+            Ok(Some(&self.leader_token))
+        }
     }
 
     async fn get_collector_bearer_token_for<'s>(
         &'s self,
         _task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if let Some(ref collector_token) = self.collector_token {
-            Ok(Some(collector_token))
+        if task_config.taskprov {
+            Ok(Some(self.taskprov_collector_token.as_ref().expect(
+                "MockAggregator not configured with taskprov collector token",
+            )))
         } else {
-            Err(fatal_error!(
-                err = "MockAggregator not configured with Collector bearer token",
-            ))
+            Ok(Some(self.collector_token.as_ref().expect(
+                "MockAggregator not configured with collector token",
+            )))
         }
-    }
-
-    fn is_taskprov_leader_bearer_token(&self, _token: &BearerToken) -> bool {
-        // MockAggregator currently uses the same token for all tasks, regardless of how the task
-        // is configured. As a result, we don't expect BearerTokenProver::bearer_token_authorized()
-        // to ever reach this point.
-        unreachable!("did not expect to check bearer token");
-    }
-
-    fn is_taskprov_collector_bearer_token(&self, _token: &BearerToken) -> bool {
-        // MockAggregator currently uses the same token for all tasks, regardless of how the task
-        // is configured. As a result, we don't expect BearerTokenProver::bearer_token_authorized()
-        // to ever reach this point.
-        unreachable!("did not expect to check bearer token");
     }
 }
 
@@ -346,11 +344,12 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         media_type: &DapMediaType,
         _payload: &[u8],
     ) -> Result<BearerToken, DapError> {
         Ok(self
-            .authorize_with_bearer_token(task_id, media_type)
+            .authorize_with_bearer_token(task_id, task_config, media_type)
             .await?
             .clone())
     }
@@ -417,9 +416,10 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
     async fn unauthorized_reason(
         &self,
+        task_config: &DapTaskConfig,
         req: &DapRequest<BearerToken>,
     ) -> Result<Option<String>, DapError> {
-        self.bearer_token_authorized(req).await
+        self.bearer_token_authorized(task_config, req).await
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {

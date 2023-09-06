@@ -62,7 +62,10 @@ async fn leader_send_http_request<S>(
         task_id: Some(task_id.clone()),
         resource,
         url,
-        sender_auth: Some(role.authorize(task_id, &req_media_type, &req_data).await?),
+        sender_auth: Some(
+            role.authorize(task_id, task_config, &req_media_type, &req_data)
+                .await?,
+        ),
         payload: req_data,
         taskprov: None,
     };
@@ -83,6 +86,7 @@ pub trait DapAuthorizedSender<S> {
     async fn authorize(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         media_type: &DapMediaType,
         payload: &[u8],
     ) -> Result<S, DapError>;
@@ -226,7 +230,13 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         resolve_taskprov(self, task_id, req, None).await?;
 
-        if let Some(reason) = self.unauthorized_reason(req).await? {
+        let wrapped_task_config = self
+            .get_task_config_for(Cow::Borrowed(req.task_id()?))
+            .await?
+            .ok_or(DapAbort::UnrecognizedTask)?;
+        let task_config = wrapped_task_config.as_ref();
+
+        if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
@@ -237,11 +247,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let mut collect_req =
             CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
                 .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
-        let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(req.task_id()?))
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_config = wrapped_task_config.as_ref();
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {

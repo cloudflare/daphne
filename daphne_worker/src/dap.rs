@@ -46,7 +46,7 @@ use crate::{
 use async_trait::async_trait;
 use daphne::{
     audit_log::AuditLog,
-    auth::{BearerToken, BearerTokenProvider},
+    auth::BearerTokenProvider,
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
@@ -163,7 +163,17 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
     async fn get_leader_bearer_token_for<'s>(
         &'s self,
         task_id: &'s TaskId,
-    ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
+        task_config: &DapTaskConfig,
+    ) -> std::result::Result<Option<BearerTokenKvPair<'s>>, DapError> {
+        if let Some(ref taskprov_config) = self.config().taskprov {
+            if self.get_global_config().allow_taskprov && task_config.taskprov {
+                return Ok(Some(BearerTokenKvPair::new(
+                    task_id,
+                    taskprov_config.leader_auth.as_ref(),
+                )));
+            }
+        }
+
         self.get_leader_bearer_token(task_id)
             .await
             .map_err(|e| fatal_error!(err = e))
@@ -172,33 +182,24 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
     async fn get_collector_bearer_token_for<'s>(
         &'s self,
         task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
     ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        self.get_collector_bearer_token(task_id)
-            .await
-            .map_err(|e| fatal_error!(err = e))
-    }
-
-    fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool {
-        self.get_global_config().allow_taskprov
-            && match &self.config().taskprov {
-                Some(config) => config.leader_auth.as_ref() == token,
-                None => false,
-            }
-    }
-
-    fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool {
-        self.get_global_config().allow_taskprov
-            && match &self.config().taskprov {
-                Some(config) => {
-                    config
+        if let Some(ref taskprov_config) = self.config().taskprov {
+            if self.get_global_config().allow_taskprov && task_config.taskprov {
+                return Ok(Some(BearerTokenKvPair::new(
+                    task_id,
+                    taskprov_config
                         .collector_auth
                         .as_ref()
                         .expect("collector authorization method not set")
-                        .as_ref()
-                        == token
-                }
-                None => false,
+                        .as_ref(),
+                )));
             }
+        }
+
+        self.get_collector_bearer_token(task_id)
+            .await
+            .map_err(|e| fatal_error!(err = e))
     }
 }
 
@@ -207,12 +208,13 @@ impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
     async fn authorize(
         &self,
         task_id: &TaskId,
+        task_config: &DapTaskConfig,
         media_type: &DapMediaType,
         _payload: &[u8],
     ) -> std::result::Result<DaphneWorkerAuth, DapError> {
         Ok(DaphneWorkerAuth {
             bearer_token: Some(
-                self.authorize_with_bearer_token(task_id, media_type)
+                self.authorize_with_bearer_token(task_id, task_config, media_type)
                     .await?
                     .value()
                     .clone(),
@@ -370,6 +372,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     async fn unauthorized_reason(
         &self,
+        task_config: &DapTaskConfig,
         req: &DapRequest<DaphneWorkerAuth>,
     ) -> std::result::Result<Option<String>, DapError> {
         let mut authorized = false;
@@ -380,7 +383,9 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         // If a bearer token is present, verify that it can be used to authorize the request.
         if sender_auth.bearer_token.is_some() {
-            if let Some(unauthorized_reason) = self.bearer_token_authorized(req).await? {
+            if let Some(unauthorized_reason) =
+                self.bearer_token_authorized(task_config, req).await?
+            {
                 return Ok(Some(unauthorized_reason));
             }
             authorized = true;
