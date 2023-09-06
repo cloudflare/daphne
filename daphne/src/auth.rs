@@ -7,7 +7,7 @@ use crate::{
     constants::DapMediaType,
     fatal_error,
     messages::{constant_time_eq, TaskId},
-    DapError, DapRequest, DapSender,
+    DapError, DapRequest, DapSender, DapTaskConfig,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -62,30 +62,27 @@ pub trait BearerTokenProvider {
     async fn get_leader_bearer_token_for<'s>(
         &'s self,
         task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError>;
 
     /// Fetch the Collector's bearer token for the given task, if the task is recognized.
     async fn get_collector_bearer_token_for<'s>(
         &'s self,
         task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError>;
-
-    /// Returns true if the given bearer token matches the leader token configured for the "taskprov" extension.
-    fn is_taskprov_leader_bearer_token(&self, token: &BearerToken) -> bool;
-
-    /// Returns true if the given bearer token matches the collector token configured for the "taskprov" extension.
-    fn is_taskprov_collector_bearer_token(&self, token: &BearerToken) -> bool;
 
     /// Return a bearer token that can be used to authorize a request with the given task ID and
     /// media type.
     async fn authorize_with_bearer_token<'s>(
         &'s self,
         task_id: &'s TaskId,
+        task_config: &DapTaskConfig,
         media_type: &DapMediaType,
     ) -> Result<Self::WrappedBearerToken<'s>, DapError> {
         if matches!(media_type.sender(), Some(DapSender::Leader)) {
             let token = self
-                .get_leader_bearer_token_for(task_id)
+                .get_leader_bearer_token_for(task_id, task_config)
                 .await?
                 .ok_or_else(|| {
                     fatal_error!(err = "attempted to authorize request with unknown task ID")
@@ -105,6 +102,7 @@ pub trait BearerTokenProvider {
     /// is the reason for the failure.
     async fn bearer_token_authorized<T: AsRef<BearerToken>>(
         &self,
+        task_config: &DapTaskConfig,
         req: &DapRequest<T>,
     ) -> Result<Option<String>, DapError> {
         if req.task_id.is_none() {
@@ -121,38 +119,31 @@ pub trait BearerTokenProvider {
         // token is not formatted properly.
         if matches!(req.media_type.sender(), Some(DapSender::Leader)) {
             if let Some(ref got) = req.sender_auth {
-                if let Some(expected) = self.get_leader_bearer_token_for(task_id).await? {
+                if let Some(expected) = self
+                    .get_leader_bearer_token_for(task_id, task_config)
+                    .await?
+                {
                     return Ok(if got.as_ref() == expected.as_ref() {
                         None
                     } else {
-                        Some("The indicated beareer token is incorrect for the Leader.".into())
+                        Some("The indicated bearer token is incorrect for the Leader.".into())
                     });
                 }
-                return Ok(if self.is_taskprov_leader_bearer_token(got.as_ref()) {
-                    None
-                } else {
-                    Some("The indicated beaer token is incorrect for Taskprov Leader.".into())
-                });
             }
         }
 
         if matches!(req.media_type.sender(), Some(DapSender::Collector)) {
             if let Some(ref got) = req.sender_auth {
-                if let Some(expected) = self.get_collector_bearer_token_for(task_id).await? {
+                if let Some(expected) = self
+                    .get_collector_bearer_token_for(task_id, task_config)
+                    .await?
+                {
                     return Ok(if got.as_ref() == expected.as_ref() {
                         None
                     } else {
                         Some("The indicated bearer token is incorrect for the Collector.".into())
                     });
                 }
-                return Ok(if self.is_taskprov_collector_bearer_token(got.as_ref()) {
-                    None
-                } else {
-                    Some(
-                        "The indicated bearer token is incorrect for the Taskprov Collector."
-                            .into(),
-                    )
-                });
             }
         }
 

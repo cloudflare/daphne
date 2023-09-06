@@ -54,14 +54,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::version_unknown());
         }
 
-        if let Some(reason) = self.unauthorized_reason(req).await? {
-            error!("aborted unauthorized collect request: {reason}");
-            return Err(DapAbort::UnauthorizedRequest {
-                detail: reason,
-                task_id: task_id.clone(),
-            });
-        }
-
         match req.media_type {
             DapMediaType::AggregationJobInitReq => {
                 let agg_job_init_req =
@@ -109,6 +101,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();
+
+                if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
+                    error!("aborted unauthorized collect request: {reason}");
+                    return Err(DapAbort::UnauthorizedRequest {
+                        detail: reason,
+                        task_id: task_id.clone(),
+                    });
+                }
 
                 // draft02 compatibility: In draft02, the aggregation job ID is parsed from the
                 // HTTP request payload; in the latest draft, the aggregation job ID is parsed from
@@ -197,6 +197,14 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     .await?
                     .ok_or(DapAbort::UnrecognizedTask)?;
                 let task_config = wrapped_task_config.as_ref();
+
+                if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
+                    error!("aborted unauthorized collect request: {reason}");
+                    return Err(DapAbort::UnauthorizedRequest {
+                        detail: reason,
+                        task_id: task_id.clone(),
+                    });
+                }
 
                 // Check whether the DAP version in the request matches the task config.
                 if task_config.version != req.version {
@@ -306,19 +314,19 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         resolve_taskprov(self, task_id, req, None).await?;
 
-        if let Some(reason) = self.unauthorized_reason(req).await? {
+        let wrapped_task_config = self
+            .get_task_config_for(Cow::Borrowed(req.task_id()?))
+            .await?
+            .ok_or(DapAbort::UnrecognizedTask)?;
+        let task_config = wrapped_task_config.as_ref();
+
+        if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
                 task_id: task_id.clone(),
             });
         }
-
-        let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(req.task_id()?))
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_config = wrapped_task_config.as_ref();
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {

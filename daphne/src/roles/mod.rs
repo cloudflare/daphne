@@ -255,6 +255,7 @@ mod test {
         leader: Arc<MockAggregator>,
         helper: Arc<MockAggregator>,
         collector_token: BearerToken,
+        taskprov_collector_token: BearerToken,
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
@@ -345,12 +346,14 @@ mod test {
                 },
             );
 
-            // Authorization tokens, used for all tasks.
-            let leader_token = BearerToken::from("this is a bearer token!");
-            let collector_token = BearerToken::from("This is a DIFFERENT token.");
+            // Authorization tokens. These are normally chosen at random.
+            let leader_token = BearerToken::from("leader_token");
+            let collector_token = BearerToken::from("collector_token");
 
-            // taskprov: VDAF verification key.
+            // taskprov
             let taskprov_vdaf_verify_key_init = rng.gen::<[u8; 32]>();
+            let taskprov_leader_token = BearerToken::from("taskprov_leader_token");
+            let taskprov_collector_token = BearerToken::from("taskprov_collector_token");
 
             let prometheus_registry = prometheus::Registry::new();
 
@@ -370,6 +373,8 @@ mod test {
                 agg_store: Arc::new(Mutex::new(HashMap::new())),
                 collector_hpke_config: collector_hpke_receiver_config.config.clone(),
                 taskprov_vdaf_verify_key_init,
+                taskprov_leader_token: taskprov_leader_token.clone(),
+                taskprov_collector_token: None,
                 metrics: DaphneMetrics::register(&prometheus_registry, Some("test_helper"))
                     .unwrap(),
                 audit_log: MockAuditLog::default(),
@@ -392,6 +397,8 @@ mod test {
                 agg_store: Arc::new(Mutex::new(HashMap::new())),
                 collector_hpke_config: collector_hpke_receiver_config.config,
                 taskprov_vdaf_verify_key_init,
+                taskprov_leader_token,
+                taskprov_collector_token: Some(taskprov_collector_token.clone()),
                 metrics: DaphneMetrics::register(&prometheus_registry, Some("test_leader"))
                     .unwrap(),
                 audit_log: MockAuditLog::default(),
@@ -403,6 +410,7 @@ mod test {
                 leader,
                 helper,
                 collector_token,
+                taskprov_collector_token,
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
@@ -446,10 +454,10 @@ mod test {
             };
 
             let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
-            self.leader_authorized_req_with_version(
+            self.leader_authorized_req(
                 task_id,
+                &task_config,
                 Some(&agg_job_id),
-                task_config.version,
                 DapMediaType::AggregationJobInitReq,
                 AggregationJobInitReq {
                     draft02_task_id: task_id.for_request_payload(&version),
@@ -474,8 +482,8 @@ mod test {
 
             self.leader_authorized_req(
                 task_id,
+                &task_config,
                 Some(agg_job_id),
-                task_config.version,
                 DapMediaType::AggregationJobContinueReq,
                 AggregationJobContinueReq {
                     draft02_task_id: task_id.for_request_payload(&task_config.version),
@@ -517,10 +525,10 @@ mod test {
                 format!("tasks/{}/aggregate_shares", task_id.to_base64url())
             };
 
-            self.leader_authorized_req_with_version(
+            self.leader_authorized_req(
                 task_id,
+                &task_config,
                 None,
-                task_config.version,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
                     draft02_task_id: task_id.for_request_payload(&task_config.version),
@@ -602,9 +610,9 @@ mod test {
             // Collector->Leader: Initialize collection job.
             let req = self
                 .collector_authorized_req(
-                    task_config.version,
-                    DapMediaType::CollectReq,
                     task_id,
+                    task_config,
+                    DapMediaType::CollectReq,
                     CollectionReq {
                         draft02_task_id: task_id.for_request_payload(&task_config.version),
                         query: query.clone(),
@@ -636,49 +644,21 @@ mod test {
         async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
             &self,
             task_id: &TaskId,
+            task_config: &DapTaskConfig,
             agg_job_id: Option<&MetaAggregationJobId<'_>>,
-            version: DapVersion,
             media_type: DapMediaType,
             msg: M,
             url: Url,
         ) -> DapRequest<BearerToken> {
-            let payload = msg.get_encoded_with_param(&version);
+            let payload = msg.get_encoded_with_param(&task_config.version);
             let sender_auth = Some(
                 self.leader
-                    .authorize(task_id, &media_type, &payload)
+                    .authorize(task_id, task_config, &media_type, &payload)
                     .await
                     .unwrap(),
             );
             DapRequest {
-                version,
-                media_type,
-                task_id: Some(task_id.clone()),
-                resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
-                payload,
-                url,
-                sender_auth,
-                ..Default::default()
-            }
-        }
-
-        async fn leader_authorized_req_with_version<M: ParameterizedEncode<DapVersion>>(
-            &self,
-            task_id: &TaskId,
-            agg_job_id: Option<&MetaAggregationJobId<'_>>,
-            version: DapVersion,
-            media_type: DapMediaType,
-            msg: M,
-            url: Url,
-        ) -> DapRequest<BearerToken> {
-            let payload = msg.get_encoded_with_param(&version);
-            let sender_auth = Some(
-                self.leader
-                    .authorize(task_id, &media_type, &payload)
-                    .await
-                    .unwrap(),
-            );
-            DapRequest {
-                version,
+                version: task_config.version,
                 media_type,
                 task_id: Some(task_id.clone()),
                 resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
@@ -691,26 +671,32 @@ mod test {
 
         async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
             &self,
-            version: DapVersion,
-            media_type: DapMediaType,
             task_id: &TaskId,
+            task_config: &DapTaskConfig,
+            media_type: DapMediaType,
             msg: M,
             url: Url,
         ) -> DapRequest<BearerToken> {
             let mut rng = thread_rng();
             let collect_job_id = CollectionJobId(rng.gen());
+            let sender_auth = if task_config.taskprov {
+                Some(self.taskprov_collector_token.clone())
+            } else {
+                Some(self.collector_token.clone())
+            };
+
             DapRequest {
-                version,
+                version: task_config.version,
                 media_type,
                 task_id: Some(task_id.clone()),
-                resource: if version == DapVersion::Draft02 {
+                resource: if task_config.version == DapVersion::Draft02 {
                     DapResource::Undefined
                 } else {
                     DapResource::CollectionJob(collect_job_id)
                 },
-                payload: msg.get_encoded_with_param(&version),
+                payload: msg.get_encoded_with_param(&task_config.version),
                 url,
-                sender_auth: Some(self.collector_token.clone()),
+                sender_auth,
                 ..Default::default()
             }
         }
@@ -726,10 +712,10 @@ mod test {
 
         // Helper expects "time_interval" query, but Leader indicates "fixed_size".
         let req = t
-            .leader_authorized_req_with_version(
+            .leader_authorized_req(
                 task_id,
+                &task_config,
                 Some(&agg_job_id),
-                task_config.version,
                 DapMediaType::AggregationJobInitReq,
                 AggregationJobInitReq {
                     draft02_task_id: task_id.for_request_payload(&version),
@@ -1008,10 +994,10 @@ mod test {
             .unchecked_get_task_config(&t.time_interval_task_id)
             .await;
         let req = t
-            .leader_authorized_req_with_version(
+            .leader_authorized_req(
                 &t.time_interval_task_id,
+                &task_config,
                 None,
-                task_config.version,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
                     draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
@@ -1036,10 +1022,10 @@ mod test {
             .unchecked_get_task_config(&t.fixed_size_task_id)
             .await;
         let req = t
-            .leader_authorized_req_with_version(
+            .leader_authorized_req(
                 &t.fixed_size_task_id,
+                &task_config,
                 None,
-                task_config.version,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
                     draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
@@ -1441,9 +1427,9 @@ mod test {
         let version = task_config.version;
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&version),
                     query: task_config.query_for_current_batch_window(t.now),
@@ -1517,9 +1503,9 @@ mod test {
         // Collector: Create a CollectReq with a very large batch interval.
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&version),
                     query: Query::TimeInterval {
@@ -1544,9 +1530,9 @@ mod test {
         // Collector: Create a CollectReq with a batch interval in the past.
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&version),
                     query: Query::TimeInterval {
@@ -1572,9 +1558,9 @@ mod test {
         // Collector: Create a CollectReq with a batch interval in the future.
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&version),
                     query: Query::TimeInterval {
@@ -1608,9 +1594,9 @@ mod test {
         // Collector: Create a CollectReq with a very large batch interval.
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: task_id.for_request_payload(&version),
                     query: Query::TimeInterval {
@@ -1676,9 +1662,9 @@ mod test {
         };
         let req = t
             .collector_authorized_req(
-                version,
-                DapMediaType::CollectReq,
                 task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 collector_collect_req.clone(),
                 task_config.leader_url.join("collect").unwrap(),
             )
@@ -1721,9 +1707,9 @@ mod test {
             .await;
         let req = t
             .collector_authorized_req(
-                task_config.version,
-                DapMediaType::CollectReq,
                 &t.time_interval_task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
                     query: Query::FixedSizeByBatchId {
@@ -1746,9 +1732,9 @@ mod test {
             .await;
         let req = t
             .collector_authorized_req(
-                task_config.version,
-                DapMediaType::CollectReq,
                 &t.fixed_size_task_id,
+                &task_config,
+                DapMediaType::CollectReq,
                 CollectionReq {
                     draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
                     query: Query::FixedSizeByBatchId {
