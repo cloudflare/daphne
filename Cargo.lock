@@ -729,6 +729,7 @@ dependencies = [
  "prometheus",
  "rand",
  "reqwest-wasm",
+ "ring",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

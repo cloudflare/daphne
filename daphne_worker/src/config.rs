@@ -33,10 +33,7 @@ use daphne::{
 };
 use futures::TryFutureExt;
 use matchit::Router;
-use prio::{
-    codec::Decode,
-    vdaf::prg::{Prg, PrgSha3, Seed, SeedStream},
-};
+use prio::codec::Decode;
 use prometheus::{Encoder, Registry};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -97,11 +94,11 @@ pub(crate) struct DaphneWorkerConfig {
     pub(crate) deployment: DaphneWorkerDeployment,
 
     /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
-    pub(crate) collection_job_id_key: Option<Seed<16>>,
+    pub(crate) collection_job_id_key: Option<[u8; 32]>,
 
     /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
     /// to (based on the report ID).
-    report_shard_key: Seed<16>,
+    report_shard_key: [u8; 32],
 
     /// Shard count, the number of report storage shards. This should be a power of 2.
     report_shard_count: u64,
@@ -134,6 +131,17 @@ pub(crate) struct DaphneWorkerConfig {
 
 impl DaphneWorkerConfig {
     pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let load_key = |name| {
+            let key = env
+                .secret(name)
+                .map_err(|e| format!("failed to load {name}: {e}"))?
+                .to_string();
+            let key = hex::decode(key)
+                .map_err(|e| format!("failed to load {name}: error while parsing hex: {e}"))?;
+            key.try_into()
+                .map_err(|_| format!("failed to load {name}: unexpected length"))
+        };
+
         let is_leader = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_str() {
             "leader" => true,
             "helper" => false,
@@ -161,24 +169,13 @@ impl DaphneWorkerConfig {
             None
         };
 
-        const DAP_COLLECTION_JOB_ID_KEY: &str = "DAP_COLLECTION_JOB_ID_KEY";
         let collection_job_id_key = if is_leader {
-            let collection_job_id_key_hex = env
-                .secret(DAP_COLLECTION_JOB_ID_KEY)
-                .map_err(|e| format!("failed to load {DAP_COLLECTION_JOB_ID_KEY}: {e}"))?
-                .to_string();
-            let collection_job_id_key =
-                Seed::get_decoded(&hex::decode(collection_job_id_key_hex).map_err(int_err)?)
-                    .map_err(int_err)?;
-            Some(collection_job_id_key)
+            Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
         } else {
             None
         };
 
-        let report_shard_key = Seed::get_decoded(
-            &hex::decode(env.secret("DAP_REPORT_SHARD_KEY")?.to_string()).map_err(int_err)?,
-        )
-        .map_err(int_err)?;
+        let report_shard_key = load_key("DAP_REPORT_SHARD_KEY")?;
 
         let report_shard_count: u64 = env
             .var("DAP_REPORT_SHARD_COUNT")?
@@ -348,10 +345,13 @@ impl DaphneWorkerConfig {
         report_id: &ReportId,
         report_time: Time,
     ) -> String {
-        let mut shard_seed = [0; 8];
-        PrgSha3::seed_stream(&self.report_shard_key, b"report shard", report_id.as_ref())
-            .fill(&mut shard_seed);
-        let shard = u64::from_be_bytes(shard_seed) % self.report_shard_count;
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &self.report_shard_key);
+        let tag = ring::hmac::sign(&key, report_id.as_ref());
+        let shard = u64::from_be_bytes(
+            tag.as_ref()[..std::mem::size_of::<u64>()]
+                .try_into()
+                .unwrap(),
+        ) % self.report_shard_count;
         let epoch = report_time - (report_time % self.global.report_storage_epoch_duration);
         durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
     }
