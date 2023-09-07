@@ -15,10 +15,7 @@ use daphne::{
     messages::{Collection, CollectionJobId, CollectionReq, TaskId},
     DapCollectJob, DapVersion,
 };
-use prio::{
-    codec::ParameterizedEncode,
-    vdaf::prg::{Prg, PrgSha3, SeedStream},
-};
+use prio::codec::ParameterizedEncode;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use worker::*;
@@ -122,16 +119,22 @@ impl LeaderCollectionJobQueue {
                         // enumerating collect URIs. Second, it provides a stable map from requests
                         // to URIs, which prevents us from processing the same collect request more
                         // than once.
-                        let collect_req_bytes = collect_queue_req
-                            .collect_req
-                            .get_encoded_with_param(&DapVersion::Draft02);
-                        let mut collection_job_id_bytes = [0; 16];
-                        PrgSha3::seed_stream(
-                            self.config.collection_job_id_key.as_ref().unwrap(),
-                            b"collection job id",
-                            &collect_req_bytes,
-                        )
-                        .fill(&mut collection_job_id_bytes);
+                        let collection_job_id_bytes = {
+                            let collect_req_bytes = collect_queue_req
+                                .collect_req
+                                .get_encoded_with_param(&DapVersion::Draft02);
+
+                            let mut buf = [0; 16];
+                            let key = ring::hmac::Key::new(
+                                ring::hmac::HMAC_SHA256,
+                                self.config.collection_job_id_key.as_ref().ok_or_else(|| {
+                                    Error::RustError("missing collection job ID key".into())
+                                })?,
+                            );
+                            let tag = ring::hmac::sign(&key, &collect_req_bytes);
+                            buf.copy_from_slice(&tag.as_ref()[..16]);
+                            buf
+                        };
                         CollectionJobId(collection_job_id_bytes)
                     };
 
