@@ -54,7 +54,7 @@ async fn leader_send_http_request<S>(
     let url = task_config
         .helper_url
         .join(path)
-        .map_err(|e| fatal_error!(err = e))?;
+        .map_err(|e| fatal_error!(err = ?e))?;
 
     let req = DapRequest {
         version: task_config.version,

@@ -631,7 +631,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         let mut helper_state_store_mutex_guard = self
             .helper_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
@@ -659,7 +659,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         let mut helper_state_store_mutex_guard = self
             .helper_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
@@ -774,7 +774,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         // Construct a new Collect URI for this CollectReq.
@@ -788,7 +788,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         // Store Collect ID and CollectReq into LeaderState.
         let leader_state = leader_state_store.entry(task_id.clone()).or_default();
@@ -810,7 +810,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store
@@ -833,7 +833,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let mut res = Vec::new();
@@ -859,7 +859,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         let mut leader_state_store_mutex_guard = self
             .leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store

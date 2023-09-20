@@ -113,7 +113,7 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
                 .map(|receiver| receiver.config.clone())
         })
         .await
-        .map_err(|e| fatal_error!(err = e, "failed to get list of hpke key configs in kv"))?
+        .map_err(|e| fatal_error!(err = ?e, "failed to get list of hpke key configs in kv"))?
         .ok_or_else(|| fatal_error!(err = "there are no hpke configs in kv!!", %version))
     }
 
@@ -131,7 +131,7 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
                     .map(|_| ())
             })
             .await
-            .map_err(|e| fatal_error!(err = e))?
+            .map_err(|e| fatal_error!(err = ?e))?
             .is_some())
     }
 
@@ -150,7 +150,7 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
                 .map(|receiver| receiver.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload))
         })
         .await
-        .map_err(|e| fatal_error!(err = e))?
+        .map_err(|e| fatal_error!(err = ?e))?
         .ok_or_else(|| DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
     }
 }
@@ -176,7 +176,7 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
 
         self.get_leader_bearer_token(task_id)
             .await
-            .map_err(|e| fatal_error!(err = e))
+            .map_err(|e| fatal_error!(err = ?e))
     }
 
     async fn get_collector_bearer_token_for<'s>(
@@ -199,7 +199,7 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
 
         self.get_collector_bearer_token(task_id)
             .await
-            .map_err(|e| fatal_error!(err = e))
+            .map_err(|e| fatal_error!(err = ?e))
     }
 }
 
@@ -291,7 +291,7 @@ impl DapReportInitializer for DaphneWorker<'_> {
         let reports_processed_responses: Vec<ReportsProcessedResp> =
             try_join_all(reports_processed_requests)
                 .await
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| fatal_error!(err = ?e))?;
 
         // Flatten the responses from ReportsProcessed into a hash map.
         let mut initialized_reports = HashMap::new();
@@ -313,7 +313,7 @@ impl DapReportInitializer for DaphneWorker<'_> {
         }
         let agg_store_responses: Vec<bool> = try_join_all(agg_store_requests)
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         // Reject reports that have been collected.
         for (bucket, collected) in agg_store_request_bucket
@@ -496,7 +496,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 .isolate_state()
                 .tasks
                 .write()
-                .map_err(|e| fatal_error!(err = e, "failed to lock tasks for writing"))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to lock tasks for writing"))?;
             guarded_tasks.insert(task_id.clone(), task_config);
 
             if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
@@ -505,7 +505,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     .leader_bearer_tokens
                     .write()
                     .map_err(|e| {
-                        fatal_error!(err = e, "failed to lock leader_bearer_tokens for writing")
+                        fatal_error!(err = ?e, "failed to lock leader_bearer_tokens for writing")
                     })?;
                 guarded_leader_bearer_tokens.insert(task_id.clone(), leader_bearer_token.clone());
             }
@@ -513,12 +513,12 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             // Write the task config through to KV.
             self.set_task_config(task_id, &task_config)
                 .await
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| fatal_error!(err = ?e))?;
 
             if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
                 self.set_leader_bearer_token(task_id, leader_bearer_token)
                     .await
-                    .map_err(|e| fatal_error!(err = e))?;
+                    .map_err(|e| fatal_error!(err = ?e))?;
             }
         }
 
@@ -531,7 +531,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
     ) -> std::result::Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         self.get_task_config(task_id)
             .await
-            .map_err(|e| fatal_error!(err = e))
+            .map_err(|e| fatal_error!(err = ?e))
     }
 
     fn get_current_time(&self) -> u64 {
@@ -562,7 +562,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         let responses: Vec<bool> = try_join_all(requests)
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         for collected in responses {
             if collected {
@@ -593,7 +593,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 ),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         Ok(!agg_share.empty())
     }
@@ -647,7 +647,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             },
         ))
         .await
-        .map_err(|e| fatal_error!(err = e))?
+        .map_err(|e| fatal_error!(err = ?e))?
         .into_iter()
         .flatten()
         .collect::<HashSet<ReportId>>();
@@ -674,7 +674,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             },
         ))
         .await
-        .map_err(|e| fatal_error!(err = e))?;
+        .map_err(|e| fatal_error!(err = ?e))?;
 
         Ok(replayed)
     }
@@ -699,7 +699,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
         }
         let responses: Vec<DapAggregateShare> = try_join_all(requests)
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let mut agg_share = DapAggregateShare::default();
         for agg_share_delta in responses {
             agg_share.merge(agg_share_delta)?;
@@ -730,7 +730,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         try_join_all(requests)
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         Ok(())
     }
 
@@ -778,7 +778,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 &pending_report,
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         match res {
             ReportsPendingResult::Ok => Ok(()),
@@ -812,7 +812,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 &report_sel.max_agg_jobs,
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         // Drain at most `report_sel.max_reports` from each ReportsPending instance and group them
         // by task.
@@ -828,7 +828,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     &report_sel.max_reports,
                 )
                 .await
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| fatal_error!(err = ?e))?;
 
             for pending_report in reports_from_durable {
                 let report_bytes = hex::decode(&pending_report.report_hex)
@@ -855,7 +855,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
             let task_config = self
                 .get_task_config(Cow::Owned(task_id))
                 .await
-                .map_err(|e| fatal_error!(err = e))?
+                .map_err(|e| fatal_error!(err = ?e))?
                 .ok_or_else(|| fatal_error!(err = "unrecognized task"))?;
             let task_id_hex = task_config.key().to_hex();
             let reports_per_part = reports_per_task_part
@@ -875,7 +875,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                             &(task_config.as_ref().min_batch_size, num_unassigned),
                         )
                         .await
-                        .map_err(|e| fatal_error!(err = e))?;
+                        .map_err(|e| fatal_error!(err = ?e))?;
                     for batch_count in batch_assignments.into_iter() {
                         let BatchCount {
                             batch_id,
@@ -934,7 +934,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 &collect_queue_req,
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         debug!("assigned collect_id {collect_id}");
 
         let url = task_config.as_ref().leader_url.clone();
@@ -946,7 +946,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 task_id.to_base64url(),
                 collect_id.to_base64url(),
             ))
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         Ok(collect_uri)
     }
@@ -965,7 +965,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 (&task_id, &collect_id),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         Ok(res)
     }
 
@@ -980,7 +980,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 durable_name_queue(0),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         Ok(res)
     }
 
@@ -1003,7 +1003,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     batch_id.to_hex(),
                 )
                 .await
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| fatal_error!(err = ?e))?;
         }
 
         durable
@@ -1014,7 +1014,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 (task_id, collect_id, collect_resp),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         Ok(())
     }
 
@@ -1053,7 +1053,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 helper_state_hex,
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?)
+            .map_err(|e| fatal_error!(err = ?e))?)
     }
 
     async fn get_helper_state(
@@ -1073,7 +1073,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 durable_helper_state_name(&task_config.as_ref().version, task_id, agg_job_id),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         match res {
             Some(helper_state_hex) => {
