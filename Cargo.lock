@@ -649,7 +649,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
- "daphne",
+ "daphne 0.3.0",
  "prio",
  "rand",
  "reqwest",
@@ -686,6 +686,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "daphne"
+version = "0.3.0"
+source = "git+https://github.com/cloudflare/daphne?rev=91df0c4c23553194e7d913fb9d02126ccc174e13#91df0c4c23553194e7d913fb9d02126ccc174e13"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "base64 0.21.3",
+ "futures",
+ "hex",
+ "hpke-rs",
+ "hpke-rs-crypto",
+ "hpke-rs-rust-crypto",
+ "prio",
+ "prometheus",
+ "rand",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
@@ -693,7 +717,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "console_error_panic_hook",
- "daphne",
+ "daphne 0.3.0 (git+https://github.com/cloudflare/daphne?rev=91df0c4c23553194e7d913fb9d02126ccc174e13)",
  "daphne_worker",
  "hex",
  "hpke-rs",
@@ -719,7 +743,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "chrono",
- "daphne",
+ "daphne 0.3.0 (git+https://github.com/cloudflare/daphne?rev=91df0c4c23553194e7d913fb9d02126ccc174e13)",
  "futures",
  "hex",
  "matchit 0.7.2",

@@ -30,6 +30,11 @@ The [repository](https://github.com/cloudflare/daphne) contains three crates:
   changes locally. It also implements integration tests for Daphne and
   Daphne-Worker.
 
+## Daphne-Worker is unmaintained
+
+The worker implementation has hit scalability problems for some workloads and as
+such it's now unmaintained until a solution is found.
+
 ## Testing
 
 The `daphne` crate relies on unit tests. The `daphne_worker` crate relies mostly

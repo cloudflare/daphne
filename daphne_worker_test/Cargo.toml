@@ -32,7 +32,7 @@ worker.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 assert_matches.workspace = true
-daphne = { path = "../daphne" }
+daphne = { git = "https://github.com/cloudflare/daphne", rev = "91df0c4c23553194e7d913fb9d02126ccc174e13" }
 hex.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true

@@ -21,7 +21,7 @@ crate-type = ["cdylib", "rlib"]
 arc-swap = "1.6.0"
 async-trait.workspace = true
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "wasmbind"] }
-daphne = { path = "../daphne" }
+daphne = { git = "https://github.com/cloudflare/daphne", rev = "91df0c4c23553194e7d913fb9d02126ccc174e13" }
 futures.workspace = true
 hex.workspace = true
 matchit.workspace = true
