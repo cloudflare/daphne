@@ -69,7 +69,7 @@ pub(crate) fn initialize_timing_histograms(
             .collect(),
         registry,
     )
-    .map_err(|e| fatal_error!(err = e, "failed to register aggregation_request_times"))?;
+    .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_request_times"))?;
 
     let aggregation_continue_request_times = register_histogram_with_registry!(
         format!("{front}aggregation_continue_request_times"),
@@ -80,7 +80,7 @@ pub(crate) fn initialize_timing_histograms(
             .collect(),
         registry,
     )
-    .map_err(|e| fatal_error!(err = e, "failed to register aggregate_shares_request_times"))?;
+    .map_err(|e| fatal_error!(err = ?e, "failed to register aggregate_shares_request_times"))?;
 
     let aggregate_shares_request_times = register_histogram_with_registry!(
         format!("{front}aggregate_shares_request_times"),
@@ -91,7 +91,7 @@ pub(crate) fn initialize_timing_histograms(
             .collect(),
         registry,
     )
-    .map_err(|e| fatal_error!(err = e, "failed to register upload_request_times"))?;
+    .map_err(|e| fatal_error!(err = ?e, "failed to register upload_request_times"))?;
 
     REQUEST_TIME_HISTOGRAMS.store(Some(Arc::new(RequestTimeHistograms {
         aggregation_init_request_times,

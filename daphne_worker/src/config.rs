@@ -788,7 +788,7 @@ impl<'srv> DaphneWorker<'srv> {
     {
         self.get_task_config(Cow::Borrowed(task_id))
             .await
-            .map_err(|e| fatal_error!(err = e, "getting task config"))?
+            .map_err(|e| fatal_error!(err = ?e, "getting task config"))?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))
     }
 
@@ -797,17 +797,17 @@ impl<'srv> DaphneWorker<'srv> {
     /// TODO(cjpatton) Gate this to non-prod deployments. (Prod should do migration.)
     pub(crate) async fn internal_delete_all(&self) -> std::result::Result<(), DapError> {
         // Clear KV storage.
-        let kv_store = self.kv().map_err(|e| fatal_error!(err = e))?;
+        let kv_store = self.kv().map_err(|e| fatal_error!(err = ?e))?;
         let kv_task = async {
             for kv_key in kv_store
                 .list()
                 .execute()
                 .await
-                .map_err(|e| fatal_error!(err = e, "failed to list all keys from kv"))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to list all keys from kv"))?
                 .keys
             {
                 kv_store.delete(kv_key.name.as_str()).await.map_err(
-                    |e| fatal_error!(err = e, name = %kv_key.name, "failed to delete key from kv"),
+                    |e| fatal_error!(err = ?e, name = %kv_key.name, "failed to delete key from kv"),
                 )?;
                 trace!("deleted KV item {}", kv_key.name);
             }
@@ -824,7 +824,7 @@ impl<'srv> DaphneWorker<'srv> {
                 "garbage_collector".to_string(),
                 &(),
             )
-            .map_err(|e| fatal_error!(err = e));
+            .map_err(|e| fatal_error!(err = ?e));
 
         futures::try_join!(kv_task, future_delete_durable)?;
 
@@ -853,7 +853,7 @@ impl<'srv> DaphneWorker<'srv> {
                 durable_name_task(&task_config.as_ref().version, &task_id.to_hex()),
             )
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
 
         match res {
             LeaderBatchQueueResult::Ok(batch_id) => Ok(batch_id),
@@ -1192,14 +1192,14 @@ impl<'srv> DaphneWorker<'srv> {
         headers.insert(
             reqwest_wasm::header::CONTENT_TYPE,
             reqwest_wasm::header::HeaderValue::from_str(content_type)
-                .map_err(|e| fatal_error!(err = e, "failed to construct content-type header"))?,
+                .map_err(|e| fatal_error!(err = ?e, "failed to construct content-type header"))?,
         );
 
         if let Some(bearer_token) = req.sender_auth.and_then(|auth| auth.bearer_token) {
             headers.insert(
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
                 reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref()).map_err(
-                    |e| fatal_error!(err = e, "failed to construct dap-auth-token header"),
+                    |e| fatal_error!(err = ?e, "failed to construct dap-auth-token header"),
                 )?,
             );
         }
@@ -1217,7 +1217,7 @@ impl<'srv> DaphneWorker<'srv> {
         let reqwest_resp = reqwest_req
             .send()
             .await
-            .map_err(|e| fatal_error!(err = e))?;
+            .map_err(|e| fatal_error!(err = ?e))?;
         let end = Date::now().as_millis();
         info!("request to {} completed in {}ms", url, end - start);
         let status = reqwest_resp.status();
@@ -1228,13 +1228,13 @@ impl<'srv> DaphneWorker<'srv> {
                 .get(reqwest_wasm::header::CONTENT_TYPE)
                 .ok_or_else(|| fatal_error!(err = INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
-                .map_err(|e| fatal_error!(err = e))?;
+                .map_err(|e| fatal_error!(err = ?e))?;
             let media_type = DapMediaType::from_str_for_version(req.version, Some(content_type));
 
             let payload = reqwest_resp
                 .bytes()
                 .await
-                .map_err(|e| fatal_error!(err = e))?
+                .map_err(|e| fatal_error!(err = ?e))?
                 .to_vec();
 
             Ok(DapResponse {
@@ -1255,7 +1255,7 @@ impl<'srv> DaphneWorker<'srv> {
                             reqwest_resp
                                 .text()
                                 .await
-                                .map_err(|e| fatal_error!(err = e))?
+                                .map_err(|e| fatal_error!(err = ?e))?
                         );
                     }
                 }

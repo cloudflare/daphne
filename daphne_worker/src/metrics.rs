@@ -32,7 +32,7 @@ impl DaphneWorkerMetrics {
             &["host", "code"],
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to register http_status_code"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to register http_status_code"))?;
 
         let dap_abort_counter = register_int_counter_vec_with_registry!(
             format!("{front}dap_abort"),
@@ -40,7 +40,7 @@ impl DaphneWorkerMetrics {
             &["host", "reason"],
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to register dap_abort"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to register dap_abort"))?;
 
         let daphne = DaphneMetrics::register(registry, prefix)?;
 

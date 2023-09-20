@@ -86,7 +86,7 @@ impl Debug for FatalDapError {
 ///
 /// let some_id = 1;
 /// let e = Error::new(ErrorKind::Other, "the error");
-/// fatal_error!(err = e, id = %some_id, "operation failed");
+/// fatal_error!(err = ?e, id = %some_id, "operation failed");
 /// ```
 ///
 /// # Note
@@ -94,17 +94,49 @@ impl Debug for FatalDapError {
 /// macro, pass a string only when there is no error value you can use.
 #[macro_export]
 macro_rules! fatal_error {
+    (err = ?$e:expr) => {
+        $crate::__fatal_error_impl!(@@ err = ?$e)
+    };
+    (err = %$e:expr) => {
+        $crate::__fatal_error_impl!(@@ err = %$e)
+    };
     (err = $e:expr) => {
-        $crate::fatal_error!(@@@ err = $e)
+        $crate::__fatal_error_impl!(@@ err = $e)
+    };
+    (err = ?$e:expr, $($rest:tt)*) => {
+        $crate::__fatal_error_impl!(@@ err = ?$e, $($rest)*)
+    };
+    (err = %$e:expr, $($rest:tt)*) => {
+        $crate::__fatal_error_impl!(@@ err = %$e, $($rest)*)
     };
     (err = $e:expr, $($rest:tt)*) => {
-        $crate::fatal_error!(@@@ err = $e, $($rest)*)
+        $crate::__fatal_error_impl!(@@ err = $e, $($rest)*)
     };
-    (@@@ err = $e:expr $(, $($rest:tt)*)?) => {{
+
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __fatal_error_impl {
+    (@@ err = ?$e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
         ::tracing::error!(?error, $($($rest)*)*);
+        $crate::__fatal_error_impl!(@@@ error)
+    }};
+    (@@ err = %$e:expr $(, $($rest:tt)*)?) => {{
+        let error = &$e;
+        ::tracing::error!(%error, $($($rest)*)*);
+        $crate::__fatal_error_impl!(@@@ error)
+    }};
+    (@@ err = $e:expr $(, $($rest:tt)*)?) => {{
+        let error = &$e;
+        ::tracing::error!(error, $($($rest)*)*);
+        $crate::__fatal_error_impl!(@@@ error)
+    }};
+    (@@@ $error:expr) => {{
+        let error = $error;
         $crate::error::DapError::Fatal(
             $crate::error::FatalDapError::__use_the_macro(::std::format!("{error}"))
         )
-    }};
+    }}
 }

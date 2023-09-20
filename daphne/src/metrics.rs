@@ -40,7 +40,7 @@ impl DaphneMetrics {
             &["host", "type"],
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to regsiter inbound_request_counter"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to regsiter inbound_request_counter"))?;
 
         let report_counter = register_int_counter_vec_with_registry!(
             format!("{front}report_counter"),
@@ -48,7 +48,7 @@ impl DaphneMetrics {
             &["host", "status"],
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to register report_counter"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to register report_counter"))?;
 
         let aggregation_job_batch_size_histogram = register_histogram_vec_with_registry!(
             format!("{front}aggregation_job_batch_size"),
@@ -58,7 +58,7 @@ impl DaphneMetrics {
                 .expect("this shouldn't panic for these hardcoded values"), // <250, <500, ... <1500, +Inf
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to register aggregation_job_batch_size"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_batch_size"))?;
 
         let aggregation_job_counter = register_int_counter_vec_with_registry!(
             format!("{front}aggregation_job_counter"),
@@ -66,7 +66,7 @@ impl DaphneMetrics {
             &["host", "status"],
             registry
         )
-        .map_err(|e| fatal_error!(err = e, "failed to register aggregation_job_counter"))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_counter"))?;
 
         Ok(Self {
             inbound_request_counter,
