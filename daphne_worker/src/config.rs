@@ -117,9 +117,6 @@ pub(crate) struct DaphneWorkerConfig {
     /// Default DAP version to use if not specified by the API URL
     pub(crate) default_version: DapVersion,
 
-    /// Admin bearer token. If configured, it is used to authorize requests from the administrator.
-    pub(crate) admin_token: Option<BearerToken>,
-
     /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
     /// configured by the Leader.
     pub(crate) helper_state_store_garbage_collect_after_secs: Option<Duration>,
@@ -262,14 +259,6 @@ impl DaphneWorkerConfig {
             None
         };
 
-        let admin_token = match env.secret("DAP_ADMIN_BEARER_TOKEN") {
-            Ok(raw) => Some(BearerToken::from(raw.to_string())),
-            Err(err) => {
-                trace!("DAP_ADMIN_BEARER_TOKEN not configured: {err:?}");
-                None
-            }
-        };
-
         let helper_state_store_garbage_collect_after_secs = if !is_leader {
             Some(Duration::from_secs(
                 env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
@@ -333,7 +322,6 @@ impl DaphneWorkerConfig {
             is_leader,
             taskprov,
             default_version,
-            admin_token,
             helper_state_store_garbage_collect_after_secs,
             processed_alarm_safety_interval,
             metrics_push_config,
