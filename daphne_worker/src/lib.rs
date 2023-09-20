@@ -156,34 +156,24 @@
 
 mod auth;
 mod config;
-mod dap;
 mod durable;
 mod error_reporting;
 mod metrics;
+mod roles;
+mod router;
 mod tracing_utils;
 
+use crate::config::{DaphneWorkerIsolateState, DaphneWorkerRequestState};
 pub use crate::tracing_utils::initialize_tracing;
-use crate::{
-    config::{DaphneWorkerIsolateState, DaphneWorkerRequestState},
-    dap::dap_response_to_worker,
-    tracing_utils::MeasuredSpanName,
-};
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
-    auth::BearerToken,
-    constants::DapMediaType,
-    error::DapAbort,
-    hpke::HpkeReceiverConfig,
-    messages::{CollectionJobId, Duration, TaskId, Time},
-    roles::{DapAggregator, DapHelper, DapLeader},
-    DapCollectJob, DapError, DapRequest, DapResponse, DapVersion,
+    DapError, DapRequest,
 };
 pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
-use prio::codec::ParameterizedEncode;
 use serde::{Deserialize, Serialize};
 use std::str;
-use tracing::{debug, error, info_span, Instrument};
+use tracing::{debug, error};
 use worker::*;
 
 /// Parameters used by the Leader to select a set of reports for aggregation.
@@ -229,23 +219,6 @@ pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
 static ISOLATE_STATE: OnceCell<DaphneWorkerIsolateState> = OnceCell::new();
 
-macro_rules! info_span_from_dap_request {
-    ($span_name:expr, $req:expr) => {{
-        let req: &DapRequest<_> = &$req;
-        let task_id = req
-            .task_id
-            .clone()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
-
-        info_span!(
-            $span_name,
-            dap.task_id = task_id,
-            version = req.version.to_string()
-        )
-    }};
-}
-
 impl DaphneWorkerRouter<'_> {
     /// HTTP request handler for Daphne-Worker.
     ///
@@ -282,345 +255,14 @@ impl DaphneWorkerRouter<'_> {
         let state =
             DaphneWorkerRequestState::new(shared_state, &req, self.error_reporter, self.audit_log)?;
 
-        let router = Router::with_data(&state)
-            .get_async("/:version/hpke_config", |req, ctx| async move {
-                let daph = ctx.data.handler(&ctx.env);
-                let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-                let span = info_span_from_dap_request!("hpke_config", req);
-
-                match daph.handle_hpke_config_req(&req).instrument(span).await {
-                    Ok(req) => dap_response_to_worker(req),
-                    Err(e) => daph.state.dap_abort_to_worker_response(e),
-                }
-            })
-            .post_async("/task", |mut req, ctx| async move {
-                let daph = ctx.data.handler(&ctx.env);
-                let admin_token = req
-                    .headers()
-                    .get("X-Daphne-Worker-Admin-Bearer-Token")?
-                    .map(BearerToken::from);
-
-                if daph.config().admin_token.is_none() {
-                    return Response::error("admin not configured", 400);
-                }
-
-                if admin_token.is_none() || admin_token != daph.config().admin_token {
-                    return Response::error("missing or invalid bearer token for admin", 401);
-                }
-
-                let cmd: InternalTestAddTask = req.json().await?;
-                daph.internal_add_task(daph.config().default_version, cmd)
-                    .instrument(info_span!("task"))
-                    .await?;
-                Response::empty()
-            });
-
-        let router = match env.var("DAP_AGGREGATOR_ROLE")?.to_string().as_ref() {
-            "leader" => {
-                router
-                    .post_async("/v02/upload", put_report_into_task) // draft02
-                    .put_async("/:version/tasks/:task_id/reports", put_report_into_task)
-                    .post_async("/v02/collect", |req, ctx| async move {
-                        let daph = ctx.data.handler(&ctx.env);
-                        let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-                        let span = info_span_from_dap_request!("collect", req);
-
-                        match daph.handle_collect_job_req(&req).instrument(span).await {
-                            Ok(collect_uri) => {
-                                let mut headers = Headers::new();
-                                headers.set("Location", collect_uri.as_str())?;
-                                Ok(Response::empty()
-                                    .unwrap()
-                                    .with_status(303)
-                                    .with_headers(headers))
-                            }
-                            Err(e) => daph.state.dap_abort_to_worker_response(e),
-                        }
-                    }) // draft02
-                    .get_async(
-                        "/v02/collect/task/:task_id/req/:collect_id",
-                        |req, ctx| async move {
-                            let task_id =
-                                match ctx.param("task_id").and_then(TaskId::try_from_base64url) {
-                                    Some(id) => id,
-                                    None => {
-                                        return ctx.data.dap_abort_to_worker_response(
-                                            DapAbort::BadRequest(
-                                                "missing task_id parameter".to_string(),
-                                            ),
-                                        )
-                                    }
-                                };
-                            let collect_id = match ctx
-                                .param("collect_id")
-                                .and_then(CollectionJobId::try_from_base64url)
-                            {
-                                Some(id) => id,
-                                None => {
-                                    return ctx.data.dap_abort_to_worker_response(
-                                        DapAbort::BadRequest(
-                                            "missing collect_id parameter".to_string(),
-                                        ),
-                                    )
-                                }
-                            };
-                            let daph = ctx.data.handler(&ctx.env);
-                            let version = daph.extract_version_parameter(&req)?;
-                            match daph
-                                .poll_collect_job(&task_id, &collect_id)
-                                .instrument(info_span!("poll_collect_job (draft02)"))
-                                .await
-                            {
-                                Ok(DapCollectJob::Done(collect_resp)) => {
-                                    dap_response_to_worker(DapResponse {
-                                        version: DapVersion::Draft02,
-                                        media_type: DapMediaType::Collection,
-                                        payload: collect_resp.get_encoded_with_param(&version),
-                                    })
-                                }
-                                Ok(DapCollectJob::Pending) => {
-                                    Ok(Response::empty().unwrap().with_status(202))
-                                }
-                                // TODO spec: Decide whether to define this behavior.
-                                Ok(DapCollectJob::Unknown) => daph
-                                    .state
-                                    .dap_abort_to_worker_response(DapAbort::BadRequest(
-                                        "unknown collect id".into(),
-                                    )),
-                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
-                            }
-                        },
-                    ) // draft02
-                    .put_async(
-                        "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
-                        |req, ctx| async move {
-                            let daph = ctx.data.handler(&ctx.env);
-                            let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-                            let span = info_span_from_dap_request!("collect (PUT)", req);
-
-                            match daph.handle_collect_job_req(&req).instrument(span).await {
-                                Ok(_) => Ok(Response::empty().unwrap().with_status(201)),
-                                Err(e) => daph.state.dap_abort_to_worker_response(e),
-                            }
-                        },
-                    )
-                    .post_async(
-                        "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
-                        |req, ctx| async move {
-                            let daph = ctx.data.handler(&ctx.env);
-                            let req = daph.worker_request_to_dap(req, &ctx).await?;
-                            let task_id = match req.task_id() {
-                                Ok(id) => id,
-                                Err(e) => return daph.state.dap_abort_to_worker_response(e),
-                            };
-                            // We cannot check a resource here as the resource is set via
-                            // media type, and there is no media type when polling.
-                            //
-                            // We can unwrap() here as the parameter really must exist.
-                            let collect_job_id_base64url = ctx.param("collect_job_id").unwrap();
-                            let collect_job_id =
-                                match CollectionJobId::try_from_base64url(collect_job_id_base64url)
-                                {
-                                    Some(id) => id,
-                                    None => {
-                                        return daph.state.dap_abort_to_worker_response(
-                                            DapAbort::BadRequest("malformed collect id".into()),
-                                        )
-                                    }
-                                };
-
-                            let span = info_span!(
-                                "poll_collect_job",
-                                dap.task_id = %task_id,
-                                version = req.version.to_string()
-                            );
-
-                            match daph
-                                .poll_collect_job(task_id, &collect_job_id)
-                                .instrument(span)
-                                .await
-                            {
-                                Ok(DapCollectJob::Done(collect_resp)) => {
-                                    dap_response_to_worker(DapResponse {
-                                        version: req.version,
-                                        media_type: DapMediaType::Collection,
-                                        payload: collect_resp.get_encoded_with_param(&req.version),
-                                    })
-                                }
-                                Ok(DapCollectJob::Pending) => {
-                                    Ok(Response::empty().unwrap().with_status(202))
-                                }
-                                // TODO spec: Decide whether to define this behavior.
-                                Ok(DapCollectJob::Unknown) => daph
-                                    .state
-                                    .dap_abort_to_worker_response(DapAbort::BadRequest(
-                                        "unknown collect id".into(),
-                                    )),
-                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
-                            }
-                        },
-                    )
-                    .post_async("/internal/process", |mut req, ctx| async move {
-                        // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
-                        let daph = ctx.data.handler(&ctx.env);
-                        let report_sel: DaphneWorkerReportSelector = req.json().await?;
-                        match daph
-                            .process(&report_sel, &daph.state.host)
-                            .instrument(info_span!("process"))
-                            .await
-                        {
-                            Ok(telem) => {
-                                debug!("{:?}", telem);
-                                Response::from_json(&telem)
-                            }
-                            Err(e) => daph.state.dap_abort_to_worker_response(e),
-                        }
-                    })
-                    .get_async(
-                        "/internal/current_batch/task/:task_id",
-                        |_req, ctx| async move {
-                            // Return the ID of the oldest, not-yet-collecgted batch for the specified
-                            // task. The task ID and batch ID are both encoded in URL-safe base64.
-                            //
-                            // TODO(cjpatton) Only enable this if `self.enable_internal_test` is set.
-                            let daph = ctx.data.handler(&ctx.env);
-                            let task_id = match ctx
-                                .param("task_id")
-                                .and_then(TaskId::try_from_base64url)
-                            {
-                                Some(id) => id,
-                                None => {
-                                    return daph.state.dap_abort_to_worker_response(
-                                        DapAbort::BadRequest("missing or malformed task ID".into()),
-                                    )
-                                }
-                            };
-                            match daph
-                                .internal_current_batch(&task_id)
-                                .instrument(info_span!("current_batch"))
-                                .await
-                            {
-                                Ok(batch_id) => Response::from_bytes(
-                                    batch_id.to_base64url().as_bytes().to_owned(),
-                                ),
-                                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
-                            }
-                        },
-                    )
-            }
-
-            "helper" => router
-                .post_async("/:version/aggregate", handle_agg_job) // draft02
-                .post_async("/:version/aggregate_share", handle_agg_share_req) // draft02
-                .put_async(
-                    "/:version/tasks/:task_id/aggregation_jobs/:agg_job_id",
-                    handle_agg_job,
-                )
-                .post_async(
-                    "/:version/tasks/:task_id/aggregation_jobs/:agg_job_id",
-                    handle_agg_job,
-                )
-                .post_async(
-                    "/:version/tasks/:task_id/aggregate_shares",
-                    handle_agg_share_req,
-                ),
-
-            role => return Err(Error::RustError(format!("Unhandled DAP role: {role}"))),
-        };
-
-        let router = if self.enable_internal_test {
-            router
-                .post_async("/internal/delete_all", |_req, ctx| async move {
-                    let daph = ctx.data.handler(&ctx.env);
-                    match daph
-                        .internal_delete_all()
-                        .instrument(info_span!("delete_all"))
-                        .await
-                    {
-                        Ok(()) => Response::empty(),
-                        Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
-                    }
-                })
-                // Endpoints for draft-dcook-ppm-dap-interop-test-design-02
-                .post_async("/internal/test/ready", |_req, _ctx| async move {
-                    Response::from_json(&())
-                })
-                .post_async(
-                    "/internal/test/endpoint_for_task",
-                    |mut req, ctx| async move {
-                        let daph = ctx.data.handler(&ctx.env);
-                        let cmd: InternalTestEndpointForTask = req.json().await?;
-                        daph.internal_endpoint_for_task(daph.config().default_version, cmd)
-                            .instrument(info_span!("endpoint_for_task"))
-                            .await
-                    },
-                )
-                .post_async(
-                    "/:version/internal/test/endpoint_for_task",
-                    |mut req, ctx| async move {
-                        let daph = ctx.data.handler(&ctx.env);
-                        let cmd: InternalTestEndpointForTask = req.json().await?;
-                        let version = daph.extract_version_parameter(&req)?;
-                        daph.internal_endpoint_for_task(version, cmd)
-                            .instrument(info_span!("endpoint_for_task"))
-                            .await
-                    },
-                )
-                .post_async("/internal/test/add_task", |mut req, ctx| async move {
-                    let daph = ctx.data.handler(&ctx.env);
-                    let cmd: InternalTestAddTask = req.json().await?;
-                    daph.internal_add_task(daph.config().default_version, cmd)
-                        .instrument(info_span!("add_task"))
-                        .await?;
-                    Response::from_json(&serde_json::json!({
-                        "status": "success",
-                    }))
-                })
-                .post_async(
-                    "/:version/internal/test/add_task",
-                    |mut req, ctx| async move {
-                        let daph = ctx.data.handler(&ctx.env);
-                        let cmd: InternalTestAddTask = req.json().await?;
-                        let version = daph.extract_version_parameter(&req)?;
-                        daph.internal_add_task(version, cmd)
-                            .instrument(info_span!("add_task"))
-                            .await?;
-                        Response::from_json(&serde_json::json!({
-                            "status": "success",
-                        }))
-                    },
-                )
-                .post_async(
-                    "/:version/internal/test/add_hpke_config",
-                    |mut req, ctx| async move {
-                        let daph = ctx.data.handler(&ctx.env);
-                        let hpke: HpkeReceiverConfig = req.json().await?;
-                        let version = daph.extract_version_parameter(&req)?;
-                        daph.internal_add_hpke_config(version, hpke)
-                            .instrument(info_span!("add_hpke_config"))
-                            .await?;
-                        Response::from_json(&serde_json::json!({
-                            "status": "success",
-                        }))
-                    },
-                )
-        } else {
-            router
-        };
-
-        let router = if self.enable_default_response {
-            router.or_else_any_method_async("/*catchall", |_req, ctx| async move {
-                match ctx.var("DAP_DEFAULT_RESPONSE_HTML") {
-                    Ok(text) => Response::from_html(text.to_string()),
-                    Err(..) => Response::from_html(DEFAULT_RESPONSE_HTML),
-                }
-            })
-        } else {
-            router
-        };
+        let router = router::create_router(
+            &state,
+            router::RouterOptions {
+                enable_internal_test: self.enable_internal_test,
+                enable_default_response: self.enable_default_response,
+                role: env.var("DAP_AGGREGATOR_ROLE")?.to_string().parse()?,
+            },
+        )?;
 
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
@@ -648,59 +290,6 @@ impl DaphneWorkerRouter<'_> {
     }
 }
 
-async fn put_report_into_task(
-    req: Request,
-    ctx: RouteContext<&DaphneWorkerRequestState<'_>>,
-) -> Result<Response> {
-    let daph = ctx.data.handler(&ctx.env);
-    let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-    let span = info_span_from_dap_request!("upload", req);
-
-    match daph.handle_upload_req(&req).instrument(span).await {
-        Ok(()) => Response::empty(),
-        Err(e) => daph.state.dap_abort_to_worker_response(e),
-    }
-}
-
-async fn handle_agg_job(
-    req: Request,
-    ctx: RouteContext<&DaphneWorkerRequestState<'_>>,
-) -> Result<Response> {
-    let daph = ctx.data.handler(&ctx.env);
-    let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-    let span = match req.media_type {
-        DapMediaType::AggregationJobInitReq => {
-            info_span_from_dap_request!(MeasuredSpanName::AggregateInit.as_str(), req)
-        }
-        DapMediaType::AggregationJobContinueReq => {
-            info_span_from_dap_request!(MeasuredSpanName::AggregateContinue.as_str(), req)
-        }
-        _ => info_span_from_dap_request!("aggregate", req),
-    };
-
-    match daph.handle_agg_job_req(&req).instrument(span).await {
-        Ok(resp) => dap_response_to_worker(resp),
-        Err(e) => daph.state.dap_abort_to_worker_response(e),
-    }
-}
-
-async fn handle_agg_share_req(
-    req: Request,
-    ctx: RouteContext<&DaphneWorkerRequestState<'_>>,
-) -> Result<Response> {
-    let daph = ctx.data.handler(&ctx.env);
-    let req = daph.worker_request_to_dap(req, &ctx).await?;
-
-    let span = info_span_from_dap_request!(MeasuredSpanName::AggregateShares.as_str(), req);
-
-    match daph.handle_agg_share_req(&req).instrument(span).await {
-        Ok(resp) => dap_response_to_worker(resp),
-        Err(e) => daph.state.dap_abort_to_worker_response(e),
-    }
-}
-
 pub(crate) fn now() -> u64 {
     Date::now().as_millis() / 1000
 }
@@ -708,47 +297,4 @@ pub(crate) fn now() -> u64 {
 pub(crate) fn int_err<S: ToString>(s: S) -> Error {
     error!("internal error: {}", s.to_string());
     Error::RustError("internalError".to_string())
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum InternalTestRole {
-    Leader,
-    Helper,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct InternalTestEndpointForTask {
-    role: InternalTestRole,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct InternalTestVdaf {
-    #[serde(rename = "type")]
-    typ: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    bits: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    length: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct InternalTestAddTask {
-    task_id: String, // base64url
-    leader: Url,
-    helper: Url,
-    vdaf: InternalTestVdaf,
-    leader_authentication_token: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    collector_authentication_token: Option<String>,
-    role: InternalTestRole,
-    vdaf_verify_key: String, // base64url
-    query_type: u8,
-    min_batch_size: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_batch_size: Option<u64>,
-    time_precision: Duration,
-    collector_hpke_config: String, // base64url
-    task_expiration: Time,
 }

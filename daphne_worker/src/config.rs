@@ -16,7 +16,10 @@ use crate::{
     error_reporting::ErrorReporter,
     int_err,
     metrics::DaphneWorkerMetrics,
-    InternalTestAddTask, InternalTestEndpointForTask, InternalTestRole,
+    router::{
+        test_routes::{InternalTestAddTask, InternalTestEndpointForTask},
+        Role,
+    },
 };
 use daphne::{
     audit_log::AuditLog,
@@ -872,8 +875,8 @@ impl<'srv> DaphneWorker<'srv> {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response> {
-        if self.config().is_leader && !matches!(cmd.role, InternalTestRole::Leader)
-            || !self.config().is_leader && !matches!(cmd.role, InternalTestRole::Helper)
+        if self.config().is_leader && !matches!(cmd.role, Role::Leader)
+            || !self.config().is_leader && !matches!(cmd.role, Role::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -958,7 +961,7 @@ impl<'srv> DaphneWorker<'srv> {
 
         // Collector authentication token.
         match (cmd.role, cmd.collector_authentication_token) {
-            (InternalTestRole::Leader, Some(token_string)) => {
+            (Role::Leader, Some(token_string)) => {
                 let token = BearerToken::from(token_string);
                 if self
                     .kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR, &task_id, token)
@@ -971,13 +974,13 @@ impl<'srv> DaphneWorker<'srv> {
                     )));
                 }
             }
-            (InternalTestRole::Leader, None) => {
+            (Role::Leader, None) => {
                 return Err(int_err(
                     "command failed: missing collector authentication token",
                 ))
             }
-            (InternalTestRole::Helper, None) => (),
-            (InternalTestRole::Helper, Some(..)) => {
+            (Role::Helper, None) => (),
+            (Role::Helper, Some(..)) => {
                 return Err(int_err(
                     "command failed: unexpected collector authentication token",
                 ));
