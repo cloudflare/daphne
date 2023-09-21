@@ -620,6 +620,71 @@ pub struct MockAggregator {
 }
 
 impl MockAggregator {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_helper(
+        tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
+        hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
+        global_config: DapGlobalConfig,
+        leader_token: BearerToken,
+        collector_hpke_config: HpkeConfig,
+        registry: &prometheus::Registry,
+        taskprov_vdaf_verify_key_init: [u8; 32],
+        taskprov_leader_token: BearerToken,
+    ) -> Self {
+        Self {
+            global_config,
+            tasks: Arc::new(Mutex::new(tasks.into_iter().collect())),
+            hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
+            leader_token,
+            collector_token: None,
+            report_store: Default::default(),
+            leader_state_store: Default::default(),
+            helper_state_store: Default::default(),
+            agg_store: Default::default(),
+            collector_hpke_config,
+            metrics: DaphneMetrics::register(registry, Some("test_helper")).unwrap(),
+            audit_log: MockAuditLog::default(),
+            taskprov_vdaf_verify_key_init,
+            taskprov_leader_token,
+            taskprov_collector_token: None,
+            peer: None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_leader(
+        tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
+        hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
+        global_config: DapGlobalConfig,
+        leader_token: BearerToken,
+        collector_token: impl Into<Option<BearerToken>>,
+        collector_hpke_config: HpkeConfig,
+        registry: &prometheus::Registry,
+        taskprov_vdaf_verify_key_init: [u8; 32],
+        taskprov_leader_token: BearerToken,
+        taskprov_collector_token: impl Into<Option<BearerToken>>,
+        peer: impl Into<Option<Arc<Self>>>,
+    ) -> Self {
+        Self {
+            global_config,
+            tasks: Arc::new(Mutex::new(tasks.into_iter().collect())),
+            hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
+            leader_token,
+            collector_token: collector_token.into(),
+            report_store: Default::default(),
+            leader_state_store: Default::default(),
+            helper_state_store: Default::default(),
+            agg_store: Default::default(),
+            collector_hpke_config,
+            metrics: DaphneMetrics::register(registry, Some("test_leader")).unwrap(),
+            audit_log: MockAuditLog::default(),
+            taskprov_vdaf_verify_key_init,
+            taskprov_leader_token,
+            taskprov_collector_token: taskprov_collector_token.into(),
+            peer: peer.into(),
+        }
+    }
+
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
     /// 2) the report has been submitted by the client in the past.
