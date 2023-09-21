@@ -208,13 +208,9 @@ mod test {
             Extension, Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata,
             ReportShare, TaskId, Time, Transition, TransitionFailure, TransitionVar,
         },
-        metrics::DaphneMetrics,
         taskprov::TaskprovVersion,
         test_versions,
-        testing::{
-            AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector,
-            MockAuditLog,
-        },
+        testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
         DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapMeasurement,
         DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapVersion, MetaAggregationJobId,
@@ -224,13 +220,7 @@ mod test {
     use matchit::Router;
     use prio::codec::{Decode, ParameterizedEncode};
     use rand::{thread_rng, Rng};
-    use std::{
-        borrow::Cow,
-        collections::HashMap,
-        sync::{Arc, Mutex},
-        time::SystemTime,
-        vec,
-    };
+    use std::{borrow::Cow, collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
 
     macro_rules! get_reports {
@@ -245,10 +235,9 @@ mod test {
         }};
     }
 
-    struct Test {
+    pub(super) struct TestData {
         now: Time,
-        leader: Arc<MockAggregator>,
-        helper: Arc<MockAggregator>,
+        global_config: DapGlobalConfig,
         collector_token: BearerToken,
         taskprov_collector_token: BearerToken,
         time_interval_task_id: TaskId,
@@ -256,10 +245,15 @@ mod test {
         expired_task_id: TaskId,
         version: DapVersion,
         prometheus_registry: prometheus::Registry,
+        tasks: HashMap<TaskId, DapTaskConfig>,
+        leader_token: BearerToken,
+        collector_hpke_receiver_config: HpkeReceiverConfig,
+        taskprov_vdaf_verify_key_init: [u8; 32],
+        taskprov_leader_token: BearerToken,
     }
 
-    impl Test {
-        fn new(version: DapVersion) -> Self {
+    impl TestData {
+        pub fn new(version: DapVersion) -> Self {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -351,58 +345,9 @@ mod test {
 
             let prometheus_registry = prometheus::Registry::new();
 
-            let helper_hpke_receiver_config_list = global_config
-                .gen_hpke_receiver_config_list(rng.gen())
-                .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
-                .expect("failed to generate HPKE receiver config");
-            let helper = Arc::new(MockAggregator {
-                global_config: global_config.clone(),
-                tasks: Arc::new(Mutex::new(tasks.clone())),
-                leader_token: leader_token.clone(),
-                collector_token: None,
-                hpke_receiver_config_list: helper_hpke_receiver_config_list,
-                report_store: Arc::new(Mutex::new(HashMap::new())),
-                leader_state_store: Arc::new(Mutex::new(HashMap::new())),
-                helper_state_store: Arc::new(Mutex::new(HashMap::new())),
-                agg_store: Arc::new(Mutex::new(HashMap::new())),
-                collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-                taskprov_vdaf_verify_key_init,
-                taskprov_leader_token: taskprov_leader_token.clone(),
-                taskprov_collector_token: None,
-                metrics: DaphneMetrics::register(&prometheus_registry, Some("test_helper"))
-                    .unwrap(),
-                audit_log: MockAuditLog::default(),
-                peer: None,
-            });
-
-            let leader_hpke_receiver_config_list = global_config
-                .gen_hpke_receiver_config_list(rng.gen())
-                .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
-                .expect("failed to generate HPKE receiver config");
-            let leader = Arc::new(MockAggregator {
-                global_config,
-                tasks: Arc::new(Mutex::new(tasks.clone())),
-                hpke_receiver_config_list: leader_hpke_receiver_config_list,
-                leader_token,
-                collector_token: Some(collector_token.clone()),
-                report_store: Arc::new(Mutex::new(HashMap::new())),
-                leader_state_store: Arc::new(Mutex::new(HashMap::new())),
-                helper_state_store: Arc::new(Mutex::new(HashMap::new())),
-                agg_store: Arc::new(Mutex::new(HashMap::new())),
-                collector_hpke_config: collector_hpke_receiver_config.config,
-                taskprov_vdaf_verify_key_init,
-                taskprov_leader_token,
-                taskprov_collector_token: Some(taskprov_collector_token.clone()),
-                metrics: DaphneMetrics::register(&prometheus_registry, Some("test_leader"))
-                    .unwrap(),
-                audit_log: MockAuditLog::default(),
-                peer: Some(Arc::clone(&helper)),
-            });
-
             Self {
                 now,
-                leader,
-                helper,
+                global_config,
                 collector_token,
                 taskprov_collector_token,
                 time_interval_task_id,
@@ -410,7 +355,81 @@ mod test {
                 expired_task_id,
                 version,
                 prometheus_registry,
+                tasks,
+                leader_token,
+                taskprov_leader_token,
+                collector_hpke_receiver_config,
+                taskprov_vdaf_verify_key_init,
             }
+        }
+
+        pub fn new_helper(&self) -> Arc<MockAggregator> {
+            Arc::new(MockAggregator::new_helper(
+                self.tasks.clone(),
+                self.global_config
+                    .gen_hpke_receiver_config_list(thread_rng().gen())
+                    .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
+                    .expect("failed to generate HPKE receiver config"),
+                self.global_config.clone(),
+                self.leader_token.clone(),
+                self.collector_hpke_receiver_config.config.clone(),
+                &self.prometheus_registry,
+                self.taskprov_vdaf_verify_key_init,
+                self.taskprov_leader_token.clone(),
+            ))
+        }
+
+        pub fn with_leader(self, helper: Arc<MockAggregator>) -> Test {
+            let leader = Arc::new(MockAggregator::new_leader(
+                self.tasks,
+                self.global_config
+                    .gen_hpke_receiver_config_list(thread_rng().gen())
+                    .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
+                    .expect("failed to generate HPKE receiver config"),
+                self.global_config,
+                self.leader_token,
+                self.collector_token.clone(),
+                self.collector_hpke_receiver_config.config.clone(),
+                &self.prometheus_registry,
+                self.taskprov_vdaf_verify_key_init,
+                self.taskprov_leader_token,
+                self.taskprov_collector_token.clone(),
+                Arc::clone(&helper),
+            ));
+
+            Test {
+                now: self.now,
+                leader,
+                helper,
+                collector_token: self.collector_token,
+                taskprov_collector_token: self.taskprov_collector_token,
+                time_interval_task_id: self.time_interval_task_id,
+                fixed_size_task_id: self.fixed_size_task_id,
+                expired_task_id: self.expired_task_id,
+                version: self.version,
+                prometheus_registry: self.prometheus_registry,
+            }
+        }
+    }
+
+    pub(super) struct Test {
+        now: Time,
+        leader: Arc<MockAggregator>,
+        helper: Arc<MockAggregator>,
+        collector_token: BearerToken,
+        taskprov_collector_token: BearerToken,
+        time_interval_task_id: TaskId,
+        fixed_size_task_id: TaskId,
+        expired_task_id: TaskId,
+        version: DapVersion,
+        prometheus_registry: prometheus::Registry,
+    }
+
+    impl Test {
+        pub fn new(version: DapVersion) -> Self {
+            let data = TestData::new(version);
+            let helper = data.new_helper();
+            data.with_leader(helper)
         }
 
         async fn gen_test_upload_req(
