@@ -202,7 +202,7 @@ impl DaphneWorkerConfig {
             trace!("DAP deployment override applied: {deployment:?}");
         }
 
-        let taskprov = if global.allow_taskprov {
+        let taskprov = if global.taskprov_version.is_some() {
             let hpke_collector_config = serde_json::from_str(
                 env.var("DAP_TASKPROV_HPKE_COLLECTOR_CONFIG")?
                     .to_string()

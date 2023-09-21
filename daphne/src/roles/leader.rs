@@ -162,7 +162,16 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
         debug!("report id is {}", report.report_metadata.id);
 
-        resolve_taskprov(self, task_id, req, Some(&report.report_metadata)).await?;
+        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
+            resolve_taskprov(
+                self,
+                task_id,
+                req,
+                Some(&report.report_metadata),
+                taskprov_version,
+            )
+            .await?;
+        }
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
             .await?
@@ -228,7 +237,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
 
-        resolve_taskprov(self, task_id, req, None).await?;
+        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
+            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        }
 
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))

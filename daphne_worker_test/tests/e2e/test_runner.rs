@@ -119,8 +119,7 @@ impl TestRunner {
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-            allow_taskprov: true,
-            taskprov_version: TaskprovVersion::Draft02,
+            taskprov_version: Some(TaskprovVersion::Draft02),
         };
         let taskprov_vdaf_verify_key_init =
             hex::decode("b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18")

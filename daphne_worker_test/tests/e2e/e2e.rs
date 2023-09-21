@@ -394,7 +394,7 @@ async fn leader_upload_taskprov() {
         },
     };
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -420,7 +420,7 @@ async fn leader_upload_taskprov() {
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &bad_payload).unwrap();
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &bad_payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -447,7 +447,7 @@ async fn leader_upload_taskprov() {
 
     // Generate and upload a report with two copies of the taskprov extension
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
     let extensions = vec![
         Extension::Taskprov {
             payload: payload.clone(),
@@ -501,7 +501,7 @@ async fn leader_upload_taskprov() {
         },
     };
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = t
         .task_config
@@ -1384,7 +1384,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         },
     };
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload).unwrap();
+    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
     let task_config = DapTaskConfig::try_from_taskprov(
         version,
         TaskprovVersion::Draft02,
