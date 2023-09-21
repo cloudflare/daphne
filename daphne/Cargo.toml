@@ -23,6 +23,7 @@ harness = false
 
 [dependencies]
 async-trait.workspace = true
+assert_matches = { workspace = true, optional = true }
 base64.workspace = true
 futures.workspace = true
 hex.workspace = true
@@ -47,4 +48,4 @@ paste.workspace = true
 tokio.workspace = true
 
 [features]
-test-utils = []
+test-utils = ["dep:assert_matches"]

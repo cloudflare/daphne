@@ -673,16 +673,14 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
 
 #[cfg(test)]
 mod test {
-
     use super::{
         durable_name_agg_store, durable_name_queue, durable_name_report_store,
         reports_pending::PendingReport,
     };
     use daphne::{
         messages::{BatchId, Report, ReportId, ReportMetadata, TaskId},
-        test_version, test_versions, DapBatchBucket, DapVersion,
+        test_versions, DapBatchBucket, DapVersion,
     };
-    use paste::paste;
     use prio::codec::{ParameterizedDecode, ParameterizedEncode};
     use rand::prelude::*;
 

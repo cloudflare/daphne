@@ -210,7 +210,7 @@ mod test {
         },
         metrics::DaphneMetrics,
         taskprov::TaskprovVersion,
-        test_version, test_versions,
+        test_versions,
         testing::{
             AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector,
             MockAuditLog,
@@ -222,7 +222,6 @@ mod test {
     };
     use assert_matches::assert_matches;
     use matchit::Router;
-    use paste::paste;
     use prio::codec::{Decode, ParameterizedEncode};
     use rand::{thread_rng, Rng};
     use std::{

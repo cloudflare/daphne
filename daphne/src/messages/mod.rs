@@ -1171,9 +1171,8 @@ pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
 mod test {
     use super::*;
 
-    use crate::{test_version, test_versions};
+    use crate::test_versions;
     use hpke_rs::HpkePublicKey;
-    use paste::paste;
     use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
     use rand::prelude::*;
 

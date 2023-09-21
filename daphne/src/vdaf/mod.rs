@@ -1299,15 +1299,14 @@ fn produce_encrypted_agg_share(
 #[cfg(test)]
 mod test {
     use crate::{
-        assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
-        async_test_versions,
+        assert_metrics_include, async_test_versions,
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
             AggregationJobInitReq, BatchSelector, Interval, PartialBatchSelector, Report, ReportId,
             ReportShare, Transition, TransitionFailure, TransitionVar,
         },
-        test_version, test_versions,
+        test_versions,
         testing::AggregationJobTest,
         DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
         DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
@@ -1315,7 +1314,6 @@ mod test {
     };
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;
-    use paste::paste;
     use prio::{
         codec::Encode,
         field::Field64,

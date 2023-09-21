@@ -138,10 +138,9 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
 #[cfg(test)]
 mod test {
     use crate::{
-        async_test_version, async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest,
-        DapAggregateResult, DapMeasurement, DapVersion, VdafConfig,
+        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest, DapAggregateResult,
+        DapMeasurement, DapVersion, VdafConfig,
     };
-    use paste::paste;
 
     async fn roundtrip(version: DapVersion) {
         let mut t = AggregationJobTest::new(
