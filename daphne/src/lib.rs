@@ -48,6 +48,7 @@ pub mod messages;
 pub mod metrics;
 pub mod roles;
 pub mod taskprov;
+#[cfg(any(test, feature = "test-utils"))]
 pub mod testing;
 pub mod vdaf;
 

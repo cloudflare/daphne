@@ -41,4 +41,5 @@ worker.workspace = true
 bincode = "1.3.3"
 
 [dev-dependencies]
+daphne = { path = "../daphne", features = ["test-utils"] }
 paste.workspace = true
