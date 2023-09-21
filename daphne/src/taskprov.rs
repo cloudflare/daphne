@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    fatal_error,
     hpke::HpkeConfig,
     messages::{
         decode_base64url_vec,
@@ -27,9 +26,6 @@ use url::Url;
 pub enum TaskprovVersion {
     #[serde(rename = "v02")]
     Draft02,
-
-    #[serde(other)]
-    Unknown,
 }
 
 /// SHA-256 of "dap-taskprov"
@@ -48,12 +44,9 @@ fn compute_task_id_draft02(serialized: &[u8]) -> TaskId {
 }
 
 /// Compute the task id of a serialized task config.
-pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> Result<TaskId, DapError> {
+pub fn compute_task_id(version: TaskprovVersion, serialized: &[u8]) -> TaskId {
     match version {
-        TaskprovVersion::Draft02 => Ok(compute_task_id_draft02(serialized)),
-        TaskprovVersion::Unknown => Err(fatal_error!(
-            err = "attempted to resolve taskprov task with unknown version",
-        )),
+        TaskprovVersion::Draft02 => compute_task_id_draft02(serialized),
     }
 }
 
@@ -70,7 +63,6 @@ pub(crate) fn extract_prk_from_verify_key_init(
     // time, so we compute it once.
     let value = match version {
         TaskprovVersion::Draft02 => &TASK_PROV_SALT_DRAFT02,
-        _ => panic!("unimplemented taskprov version"),
     };
     Salt::new(HKDF_SHA256, value).extract(verify_key_init)
 }
@@ -202,7 +194,7 @@ fn get_taskprov_task_config<S>(
         return Ok(None);
     };
 
-    if compute_task_id(taskprov_version, taskprov_data.as_ref())? != *task_id {
+    if compute_task_id(taskprov_version, taskprov_data.as_ref()) != *task_id {
         // Return unrecognizedTask following section 5.1 of the taskprov draft.
         return Err(DapAbort::UnrecognizedTask);
     }
@@ -302,15 +294,8 @@ impl DapTaskConfig {
 impl ReportMetadata {
     /// Does this metatdata have a taskprov extension and does it match the specified id?
     pub fn is_taskprov(&self, version: TaskprovVersion, task_id: &TaskId) -> bool {
-        // Don't check for taskprov usage if we don't know the version.
-        if matches!(version, TaskprovVersion::Unknown) {
-            return false;
-        }
-
         return self.extensions.iter().any(|x| match x {
-            Extension::Taskprov { payload } => {
-                *task_id == compute_task_id(version, payload).unwrap()
-            }
+            Extension::Taskprov { payload } => *task_id == compute_task_id(version, payload),
             _ => false,
         });
     }
@@ -393,7 +378,7 @@ mod test {
         let taskprov_task_config_data =
             taskprov_task_config.get_encoded_with_param(&taskprov_version);
         let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_data);
-        let task_id = compute_task_id(taskprov_version, &taskprov_task_config_data).unwrap();
+        let task_id = compute_task_id(taskprov_version, &taskprov_task_config_data);
         let collector_hpke_config = HpkeReceiverConfig::gen(1, HpkeKemId::X25519HkdfSha256)
             .unwrap()
             .config;

@@ -158,11 +158,9 @@ pub struct DapGlobalConfig {
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
-    /// Is the taskprov extension allowed?
-    pub allow_taskprov: bool,
-
-    /// Which taskprov draft should be used?
-    pub taskprov_version: TaskprovVersion,
+    /// Is the taskprov extension allowed and which taskprov draft should be used?
+    #[serde(default)]
+    pub taskprov_version: Option<TaskprovVersion>,
 }
 
 impl DapGlobalConfig {

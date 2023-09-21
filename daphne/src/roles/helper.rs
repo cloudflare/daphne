@@ -16,8 +16,8 @@ use crate::{
     fatal_error,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
-        AggregationJobInitReq, Draft02AggregationJobId, PartialBatchSelector, ReportMetadata,
-        TaskId, TransitionFailure, TransitionVar,
+        AggregationJobInitReq, Draft02AggregationJobId, PartialBatchSelector, TaskId,
+        TransitionFailure, TransitionVar,
     },
     metrics::{ContextualizedDaphneMetrics, DaphneRequestType},
     DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
@@ -59,36 +59,34 @@ pub trait DapHelper<S>: DapAggregator<S> {
         // taskprov: Resolve the task config to use for the request. We also need to ensure
         // that all of the reports include the task config in the report extensions. (See
         // section 6 of draft-wang-ppm-dap-taskprov-02.)
-        let mut first_metadata: Option<&ReportMetadata> = None;
-        let global_config = self.get_global_config();
-        if global_config.allow_taskprov {
+        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
             let using_taskprov = agg_job_init_req
                 .report_shares
                 .iter()
-                .filter(|share| {
-                    share
-                        .report_metadata
-                        .is_taskprov(global_config.taskprov_version, task_id)
-                })
+                .filter(|share| share.report_metadata.is_taskprov(taskprov_version, task_id))
                 .count();
 
-            if using_taskprov == agg_job_init_req.report_shares.len() {
-                // All the extensions use taskprov and look ok, so compute first_metadata.
-                // Note this will always be Some().
-                first_metadata = agg_job_init_req
-                    .report_shares
-                    .first()
-                    .map(|report_share| &report_share.report_metadata);
-            } else if using_taskprov != 0 {
-                // It's not all taskprov or no taskprov, so it's an error.
-                return Err(DapAbort::UnrecognizedMessage {
-                    detail: "some reports include the taskprov extensions and some do not"
-                        .to_string(),
-                    task_id: Some(task_id.clone()),
-                });
-            }
+            let first_metadata = match using_taskprov {
+                0 => None,
+                c if c == agg_job_init_req.report_shares.len() => {
+                    // All the extensions use taskprov and look ok, so compute first_metadata.
+                    // Note this will always be Some().
+                    agg_job_init_req
+                        .report_shares
+                        .first()
+                        .map(|report_share| &report_share.report_metadata)
+                }
+                _ => {
+                    // It's not all taskprov or no taskprov, so it's an error.
+                    return Err(DapAbort::UnrecognizedMessage {
+                        detail: "some reports include the taskprov extensions and some do not"
+                            .to_string(),
+                        task_id: Some(task_id.clone()),
+                    });
+                }
+            };
+            resolve_taskprov(self, task_id, req, first_metadata, taskprov_version).await?;
         }
-        resolve_taskprov(self, task_id, req, first_metadata).await?;
 
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
@@ -173,7 +171,9 @@ pub trait DapHelper<S>: DapAggregator<S> {
         metrics: ContextualizedDaphneMetrics<'req>,
         task_id: &TaskId,
     ) -> Result<DapResponse, DapAbort> {
-        resolve_taskprov(self, task_id, req, None).await?;
+        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
+            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        }
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
             .await?
@@ -294,7 +294,9 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        resolve_taskprov(self, task_id, req, None).await?;
+        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
+            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        }
 
         let wrapped_task_config = self
             .get_task_config_for(Cow::Borrowed(req.task_id()?))
