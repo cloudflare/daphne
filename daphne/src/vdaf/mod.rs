@@ -29,9 +29,9 @@ use crate::{
             prio3_shard, prio3_unshard,
         },
     },
-    DapAggregateResult, DapAggregateShare, DapError, DapHelperState, DapHelperTransition,
-    DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapOutputShare,
-    DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
+    DapAggregateResult, DapAggregateShare, DapAggregateShareSpan, DapError, DapHelperState,
+    DapHelperTransition, DapLeaderState, DapLeaderTransition, DapLeaderUncommitted, DapMeasurement,
+    DapOutputShare, DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
@@ -43,7 +43,7 @@ use prio::{
 };
 use rand::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
-use std::{borrow::Cow, collections::HashSet, convert::TryInto};
+use std::{borrow::Cow, collections::HashSet};
 
 use self::{prio2::prio2_decode_prepare_state, prio3::prio3_decode_prepare_state};
 
@@ -741,7 +741,10 @@ impl VdafConfig {
         }
 
         Ok(DapLeaderTransition::Continue(
-            DapLeaderState { seq: states },
+            DapLeaderState {
+                seq: states,
+                part_batch_sel: part_batch_sel.clone(),
+            },
             AggregationJobInitReq {
                 draft02_task_id: task_id.for_request_payload(&task_config.version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
@@ -933,16 +936,10 @@ impl VdafConfig {
 
             match res {
                 Ok((data, message)) => {
-                    let checksum = ring::digest::digest(
-                        &ring::digest::SHA256,
-                        &leader_report_id.get_encoded(),
-                    );
-
                     states.push((
                         DapOutputShare {
                             report_id: leader_report_id.clone(),
                             time: leader_time,
-                            checksum: checksum.as_ref().try_into().unwrap(),
                             data,
                         },
                         leader_report_id.clone(),
@@ -967,7 +964,10 @@ impl VdafConfig {
         }
 
         Ok(DapLeaderTransition::Uncommitted(
-            DapLeaderUncommitted { seq: states },
+            DapLeaderUncommitted {
+                seq: states,
+                part_batch_sel: state.part_batch_sel,
+            },
             AggregationJobContinueReq {
                 draft02_task_id: task_id.for_request_payload(&version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
@@ -991,42 +991,45 @@ impl VdafConfig {
     /// * `state` is the helper's current state.
     ///
     /// * `agg_cont_req` is the aggregate request sent by the Leader.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn handle_agg_job_cont_req(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
-        state: DapHelperState,
-        agg_cont_req: &AggregationJobContinueReq,
+        task_config: &DapTaskConfig,
+        state: &DapHelperState,
+        is_replay: impl Fn(&ReportId) -> bool,
+        agg_job_id: &MetaAggregationJobId<'_>,
+        agg_job_cont_req: &AggregationJobContinueReq,
         metrics: &ContextualizedDaphneMetrics<'_>,
-    ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
-        if let Some(round) = agg_cont_req.round {
-            if round == 0 {
+    ) -> Result<(DapAggregateShareSpan, AggregationJobResp), DapAbort> {
+        match agg_job_cont_req.round {
+            Some(1) | None => {}
+            Some(0) => {
                 return Err(DapAbort::UnrecognizedMessage {
                     detail: "request shouldn't indicate round 0".into(),
                     task_id: Some(task_id.clone()),
-                });
+                })
             }
             // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
             // aggregation-round-skew-recovery.
-            if round != 1 {
+            Some(r) => {
                 return Err(DapAbort::RoundMismatch {
-                    detail: format!("The request indicates round {round}; round 1 was expected."),
+                    detail: format!("The request indicates round {r}; round 1 was expected."),
                     task_id: task_id.clone(),
                     agg_job_id_base64url: agg_job_id.to_base64url(),
-                });
+                })
             }
         }
         let mut processed = HashSet::with_capacity(state.seq.len());
-        let mut recognized = HashSet::with_capacity(state.seq.len());
-        for (_, _, report_id) in state.seq.iter() {
-            recognized.insert(report_id.clone());
-        }
-        let num_reports = state.seq.len();
-        let mut transitions = Vec::with_capacity(num_reports);
-        let mut out_shares = Vec::with_capacity(num_reports);
-        let mut leader_iter = agg_cont_req.transitions.iter();
-        let mut helper_iter = state.seq.into_iter();
-        for leader in &mut leader_iter {
+        let recognized = state
+            .seq
+            .iter()
+            .map(|(_, _, report_id)| report_id.clone())
+            .collect::<HashSet<_>>();
+        let mut transitions = Vec::with_capacity(state.seq.len());
+        let mut agg_share_span = DapAggregateShareSpan::default();
+        let mut helper_iter = state.seq.iter();
+        for leader in &agg_job_cont_req.transitions {
             // If the report ID is not recognized, then respond with a transition failure.
             //
             // TODO spec: Having to enforce this is awkward because, in order to disambiguate the
@@ -1054,48 +1057,56 @@ impl VdafConfig {
                 });
             }
 
-            for (helper_step, helper_time, helper_report_id) in &mut helper_iter {
-                processed.insert(helper_report_id.clone());
-                if helper_report_id != leader.report_id {
-                    // Presumably the leader has skipped this report.
-                    continue;
+            // Find the next helper report that matches leader.report_id.
+            let next_helper_report = helper_iter.by_ref().find(|(_, _, id)| {
+                // Presumably the report was removed from the candidate set by the Leader.
+                processed.insert(id.clone());
+                *id == leader.report_id
+            });
+
+            let Some((helper_step, helper_time, helper_report_id)) = next_helper_report else {
+                // If the Helper iterator is empty, it means the leader passed in more report ids
+                // than we know about.
+                break;
+            };
+
+            let leader_message = match &leader.var {
+                TransitionVar::Continued(message) => message,
+
+                // TODO Log the fact that the helper sent an unexpected message.
+                _ => {
+                    return Err(DapAbort::UnrecognizedMessage {
+                        detail: "helper sent unexpected message instead of `Continued`".to_string(),
+                        task_id: Some(task_id.clone()),
+                    })
                 }
+            };
 
-                let leader_message = match &leader.var {
-                    TransitionVar::Continued(message) => message,
-
-                    // TODO Log the fact that the helper sent an unexpected message.
-                    _ => {
-                        return Err(DapAbort::UnrecognizedMessage {
-                            detail: "helper sent unexpected message instead of `Continued`"
-                                .to_string(),
-                            task_id: Some(task_id.clone()),
-                        })
-                    }
-                };
-
+            let var = if is_replay(&leader.report_id) {
+                let failure = TransitionFailure::ReportReplayed;
+                metrics.report_inc_by(&format!("rejected_{failure}",), 1);
+                TransitionVar::Failed(failure)
+            } else {
                 let res = match self {
-                    Self::Prio3(prio3_config) => {
-                        prio3_helper_prepare_finish(prio3_config, helper_step, leader_message)
-                    }
+                    Self::Prio3(prio3_config) => prio3_helper_prepare_finish(
+                        prio3_config,
+                        helper_step.clone(),
+                        leader_message,
+                    ),
                     Self::Prio2 { dimension } => {
-                        prio2_helper_prepare_finish(*dimension, helper_step, leader_message)
+                        prio2_helper_prepare_finish(*dimension, helper_step.clone(), leader_message)
                     }
                 };
 
-                let var = match res {
+                match res {
                     Ok(data) => {
-                        let checksum = ring::digest::digest(
-                            &ring::digest::SHA256,
-                            &helper_report_id.get_encoded(),
-                        );
-
-                        out_shares.push(DapOutputShare {
-                            report_id: helper_report_id.clone(),
-                            time: helper_time,
-                            checksum: checksum.as_ref().try_into().unwrap(),
+                        agg_share_span.add_out_share(
+                            task_config,
+                            &state.part_batch_sel,
+                            helper_report_id.clone(),
+                            *helper_time,
                             data,
-                        });
+                        )?;
                         TransitionVar::Finished
                     }
 
@@ -1104,30 +1115,26 @@ impl VdafConfig {
                         metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                         TransitionVar::Failed(failure)
                     }
-                };
+                }
+            };
 
-                transitions.push(Transition {
-                    report_id: helper_report_id,
-                    var,
-                });
-
-                break;
-            }
+            transitions.push(Transition {
+                report_id: helper_report_id.clone(),
+                var,
+            });
         }
 
-        Ok(DapHelperTransition::Finish(
-            out_shares,
-            AggregationJobResp { transitions },
-        ))
+        Ok((agg_share_span, AggregationJobResp { transitions }))
     }
 
     /// Handle the last aggregate response from the Helper. This method is run by the Leader.
     pub fn handle_final_agg_job_resp(
         &self,
+        task_config: &DapTaskConfig,
         uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
         metrics: &ContextualizedDaphneMetrics,
-    ) -> Result<Vec<DapOutputShare>, DapAbort> {
+    ) -> Result<DapAggregateShareSpan, DapAbort> {
         if agg_job_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage {
                 detail: format!(
@@ -1139,11 +1146,9 @@ impl VdafConfig {
             });
         }
 
-        let mut out_shares = Vec::with_capacity(uncommitted.seq.len());
-        for (helper, (out_share, leader_report_id)) in agg_job_resp
-            .transitions
-            .into_iter()
-            .zip(uncommitted.seq.into_iter())
+        let mut agg_share_span = DapAggregateShareSpan::default();
+        for (helper, (out_share, leader_report_id)) in
+            agg_job_resp.transitions.into_iter().zip(uncommitted.seq)
         {
             // TODO spec: Consider removing the report ID from the AggregationJobResp.
             if helper.report_id != leader_report_id {
@@ -1171,11 +1176,17 @@ impl VdafConfig {
                     continue;
                 }
 
-                TransitionVar::Finished => out_shares.push(out_share),
+                TransitionVar::Finished => agg_share_span.add_out_share(
+                    task_config,
+                    &uncommitted.part_batch_sel,
+                    out_share.report_id.clone(),
+                    out_share.time,
+                    out_share.data,
+                )?,
             };
         }
 
-        Ok(out_shares)
+        Ok(agg_share_span)
     }
 
     /// Encrypt an aggregate share under the Collector's public key. This method is run by the
@@ -1345,8 +1356,8 @@ mod test {
         codec::Encode,
         field::Field64,
         vdaf::{
-            prio3::Prio3, Aggregatable, AggregateShare, Aggregator as VdafAggregator,
-            Collector as VdafCollector, OutputShare, PrepareTransition,
+            prio3::Prio3, AggregateShare, Aggregator as VdafAggregator, Collector as VdafCollector,
+            OutputShare, PrepareTransition,
         },
     };
     use rand::prelude::*;
@@ -1384,6 +1395,7 @@ mod test {
             }
         }
 
+        #[allow(dead_code)]
         pub(crate) fn unwrap_finish(self) -> (Vec<DapOutputShare>, M) {
             match self {
                 DapHelperTransition::Finish(out_shares, message) => (out_shares, message),
@@ -1841,39 +1853,26 @@ mod test {
             .handle_agg_job_resp(leader_state, agg_job_resp)
             .unwrap_uncommitted();
 
-        let (helper_out_shares, agg_job_resp) = t
-            .handle_agg_job_cont_req(helper_state, &agg_job_cont_req)
-            .unwrap_finish();
-        assert_eq!(helper_out_shares.len(), 5);
+        let (helper_agg_share_span, agg_job_resp) =
+            t.handle_agg_job_cont_req(&helper_state, &agg_job_cont_req);
+        assert_eq!(helper_agg_share_span.report_count(), 5);
         assert_eq!(agg_job_resp.transitions.len(), 5);
 
-        let leader_out_shares = t.handle_final_agg_job_resp(leader_uncommitted, agg_job_resp);
-        assert_eq!(leader_out_shares.len(), 5);
-        let num_measurements = leader_out_shares.len();
+        let leader_share_span = t.handle_final_agg_job_resp(leader_uncommitted, agg_job_resp);
+        assert_eq!(leader_share_span.report_count(), 5);
+        let num_measurements = leader_share_span.report_count();
 
-        let leader_agg_share = leader_out_shares
-            .into_iter()
-            .map(|out_share| match out_share.data {
-                VdafAggregateShare::Field64(data) => data,
-                _ => panic!("unexpected aggregate share varaint"),
-            })
-            .reduce(|mut left, right| {
-                left.merge(&right).unwrap();
-                left
-            })
-            .unwrap();
+        let VdafAggregateShare::Field64(leader_agg_share) =
+            leader_share_span.into_merged().data.unwrap()
+        else {
+            panic!("unexpected VdafAggregateShare variant")
+        };
 
-        let helper_agg_share = helper_out_shares
-            .into_iter()
-            .map(|out_share| match out_share.data {
-                VdafAggregateShare::Field64(data) => data,
-                _ => panic!("unexpected aggregate share varaint"),
-            })
-            .reduce(|mut left, right| {
-                left.merge(&right).unwrap();
-                left
-            })
-            .unwrap();
+        let VdafAggregateShare::Field64(helper_agg_share) =
+            helper_agg_share_span.into_merged().data.unwrap()
+        else {
+            panic!("unexpected VdafAggregateShare variant")
+        };
 
         let vdaf = Prio3::new_count(2).unwrap();
         assert_eq!(
@@ -1904,11 +1903,10 @@ mod test {
             .handle_agg_job_resp(leader_state, agg_job_resp)
             .unwrap_uncommitted();
 
-        let (helper_output_shares, agg_job_resp) = t
-            .handle_agg_job_cont_req(helper_state, &agg_job_cont_req)
-            .unwrap_finish();
+        let (helper_agg_share_span, agg_job_resp) =
+            t.handle_agg_job_cont_req(&helper_state, &agg_job_cont_req);
 
-        assert_eq!(2, helper_output_shares.len());
+        assert_eq!(2, helper_agg_share_span.report_count());
         assert_eq!(2, agg_job_resp.transitions.len());
         assert_eq!(
             agg_job_resp.transitions[0].report_id,

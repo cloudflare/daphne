@@ -3,9 +3,7 @@
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{
-        create_span_from_request, state_get, state_set_if_not_exists, BINDING_DAP_REPORTS_PROCESSED,
-    },
+    durable::{create_span_from_request, state_get, BINDING_DAP_REPORTS_PROCESSED},
     initialize_tracing, int_err,
 };
 use daphne::{
@@ -16,7 +14,10 @@ use daphne::{
     },
     DapError, VdafConfig,
 };
-use futures::future::try_join_all;
+use futures::{
+    future::{ready, try_join_all},
+    StreamExt, TryStreamExt,
+};
 use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
@@ -53,18 +54,69 @@ pub struct ReportsProcessed {
     alarmed: bool,
 }
 
-impl ReportsProcessed {
-    /// Check if the report has been processed. If not, return None; otherwise, return the ID.
-    async fn to_checked(&self, report_id: ReportId) -> Result<Option<ReportId>> {
-        let key = format!("processed/{}", report_id.to_hex());
-        let processed: bool = state_set_if_not_exists(&self.state, &key, &true)
-            .await?
-            .unwrap_or(false);
-        if processed {
-            Ok(Some(report_id))
-        } else {
-            Ok(None)
+#[derive(Debug, Clone)]
+struct ReportIdKey<'s>(&'s ReportId, String);
+
+impl<'id> From<&'id ReportId> for ReportIdKey<'id> {
+    fn from(id: &'id ReportId) -> Self {
+        ReportIdKey(id, format!("processed/{}", id.to_hex()))
+    }
+}
+
+#[derive(Debug)]
+enum CheckedReplays<'s> {
+    SomeReplayed(Vec<&'s ReportId>),
+    AllFresh(Vec<ReportIdKey<'s>>),
+}
+
+impl<'r> Default for CheckedReplays<'r> {
+    fn default() -> Self {
+        Self::AllFresh(vec![])
+    }
+}
+
+impl<'r> CheckedReplays<'r> {
+    fn add_replay(mut self, id: &'r ReportId) -> Self {
+        match &mut self {
+            Self::SomeReplayed(r) => {
+                r.push(id);
+                self
+            }
+            Self::AllFresh(_) => Self::SomeReplayed(vec![id]),
         }
+    }
+
+    fn add_fresh(mut self, id: ReportIdKey<'r>) -> Self {
+        match &mut self {
+            Self::SomeReplayed(_) => {}
+            Self::AllFresh(r) => r.push(id),
+        }
+        self
+    }
+}
+
+impl ReportsProcessed {
+    async fn check_replays<'s>(&self, report_ids: &'s [ReportId]) -> Result<CheckedReplays<'s>> {
+        futures::stream::iter(report_ids.iter().map(ReportIdKey::from))
+            .then(|id| {
+                let state = &self.state;
+                async move {
+                    state_get::<bool>(state, &id.1)
+                        .await
+                        .map(|presence| match presence {
+                            // if it's present then it's a replay
+                            Some(true) => Err(id.0),
+                            Some(false) | None => Ok(id),
+                        })
+                }
+            })
+            .try_fold(CheckedReplays::default(), |acc, id| async move {
+                Ok(match id {
+                    Ok(not_replayed) => acc.add_fresh(not_replayed),
+                    Err(replayed) => acc.add_replay(replayed),
+                })
+            })
+            .await
     }
 }
 
@@ -130,13 +182,13 @@ impl ReportsProcessed {
                         .iter()
                         .filter(|consumed_report| consumed_report.is_ready())
                         .map(|consumed_report| async {
-                            if let Some(replayed) = state_get::<bool>(
+                            if let Some(exists) = state_get::<bool>(
                                 &self.state,
                                 &format!("processed/{}", consumed_report.metadata().id.to_hex()),
                             )
                             .await?
                             {
-                                if replayed {
+                                if exists {
                                     return Result::Ok(Some(consumed_report.metadata().id.clone()));
                                 }
                             }
@@ -178,24 +230,29 @@ impl ReportsProcessed {
                 })
             }
 
-            // Mark reports as aggregated. Return the subset that were already aggregated.
+            // Mark reports as aggregated.
             //
-            // Non-idempotent
+            // If there are any replays, no reports are marked as aggregated.
+            //
+            // Idempotent
             // Input: `Vec<ReportId>`
             // Output: `Vec<ReportId>`
             (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
                 let report_ids: Vec<ReportId> = req_parse(&mut req).await?;
-                let replayed_reports = try_join_all(
-                    report_ids
-                        .into_iter()
-                        .map(|report_id| self.to_checked(report_id)),
-                )
-                .await?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<ReportId>>();
+                match self.check_replays(&report_ids).await? {
+                    CheckedReplays::SomeReplayed(report_ids) => Response::from_json(&report_ids),
+                    CheckedReplays::AllFresh(report_ids) => {
+                        let state = &self.state;
+                        futures::stream::iter(&report_ids)
+                            .then(|report_id| async move {
+                                state.storage().put(&report_id.1, &true).await
+                            })
+                            .try_for_each(|_| ready(Ok(())))
+                            .await?;
 
-                Response::from_json(&replayed_reports)
+                        Response::from_json(&[(); 0])
+                    }
+                }
             }
 
             _ => Err(int_err(format!(

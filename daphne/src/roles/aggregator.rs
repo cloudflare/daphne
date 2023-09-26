@@ -17,7 +17,7 @@ use crate::{
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapError, DapGlobalConfig, DapOutputShare, DapRequest, DapResponse,
+    DapAggregateShare, DapAggregateShareSpan, DapError, DapGlobalConfig, DapRequest, DapResponse,
     DapTaskConfig, DapVersion,
 };
 
@@ -106,17 +106,22 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for fixed-size tasks.
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError>;
 
-    /// Store a set of output shares and mark the corresponding reports as aggregated. Any reports
-    /// that were already aggregated are not committed.
+    /// Store a set of output shares and mark the corresponding reports as aggregated.
     ///
-    /// TODO spec: Ensure the spec allows rejecting due to replay at this stage.
-    async fn put_out_shares(
+    /// If any report has already been aggregated (is a replay) then the entire operation must return
+    /// without changing any state, such that this operation is idempotent.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(None)` if all went well and no reports were repeats.
+    /// - `Ok(Some(set))` if at least one report was a replay. This also means no aggregate shares where merged.
+    /// - `Err(err)` if an error occurred.
+    async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
-        out_shares: Vec<DapOutputShare>,
-    ) -> Result<HashSet<ReportId>, DapError>;
+        agg_share_span: DapAggregateShareSpan,
+    ) -> Result<Option<HashSet<ReportId>>, DapError>;
 
     /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(
