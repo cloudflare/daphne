@@ -25,6 +25,7 @@ harness = false
 async-trait.workspace = true
 assert_matches = { workspace = true, optional = true }
 base64.workspace = true
+deepsize = { version = "0.2.0", optional = true }
 futures.workspace = true
 hex.workspace = true
 hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
@@ -48,4 +49,5 @@ paste.workspace = true
 tokio.workspace = true
 
 [features]
-test-utils = ["dep:assert_matches"]
+test-utils = ["dep:assert_matches", "dep:deepsize"]
+default = []

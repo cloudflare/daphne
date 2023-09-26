@@ -84,6 +84,7 @@ use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
@@ -125,6 +126,7 @@ impl std::fmt::Display for DapVersion {
 
 /// Global DAP parameters common across tasks.
 #[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapGlobalConfig {
     /// The report storage epoch duration. This value is used to control the period of time for
     /// which an Aggregator guarantees storage of reports and/or report metadata.
@@ -186,6 +188,7 @@ impl DapGlobalConfig {
 // TODO(cjpatton) Once we implement maximum batch lifetime, put the parameter here.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapQueryConfig {
     /// The "time-interval" query type. Each report in the batch must fall into the time interval
     /// specified by the query.
@@ -282,6 +285,22 @@ pub struct DapTaskConfig {
     /// If true, then the taskprov extension was used to configure this task.
     #[serde(default)]
     pub taskprov: bool,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for DapTaskConfig {
+    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
+        self.version.deep_size_of_children(context)
+            + std::mem::size_of_val(self.leader_url.as_str())
+            + std::mem::size_of_val(self.helper_url.as_str())
+            + self.time_precision.deep_size_of_children(context)
+            + self.expiration.deep_size_of_children(context)
+            + self.min_batch_size.deep_size_of_children(context)
+            + self.query.deep_size_of_children(context)
+            + self.vdaf.deep_size_of_children(context)
+            + self.vdaf_verify_key.deep_size_of_children(context)
+            + self.collector_hpke_config.deep_size_of_children(context)
+    }
 }
 
 impl DapTaskConfig {
@@ -464,6 +483,7 @@ pub struct DapLeaderUncommitted {
 
 /// The Helper's state during the aggregation flow.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapHelperState {
     pub(crate) part_batch_sel: PartialBatchSelector,
     pub(crate) seq: Vec<(VdafPrepState, Time, ReportId)>,
@@ -504,6 +524,7 @@ impl DapHelperState {
 }
 
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 /// An ouptut share produced by an Aggregator for a single report.
 pub struct DapOutputShare {
     pub report_id: ReportId, // Value from report
@@ -514,6 +535,7 @@ pub struct DapOutputShare {
 
 /// An aggregate share computed by combining a set of output shares.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapAggregateShare {
     /// Number of reports in the batch.
     pub report_count: u64,
@@ -636,6 +658,7 @@ pub enum DapHelperTransition<M: Debug> {
 /// Specification of a concrete VDAF.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
     Prio3(Prio3Config),
     Prio2 { dimension: usize },
@@ -661,6 +684,7 @@ impl Display for VdafConfig {
 /// Supported data types for prio3.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum Prio3Config {
     /// A 64-bit counter. The aggregate is the sum of the measurements, where each measurement is
     /// equal to `0` or `1`.

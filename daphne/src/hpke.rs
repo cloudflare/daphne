@@ -66,6 +66,7 @@ fn check_suite<T: HpkeCrypto>(
 /// Codepoint for KEM schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum HpkeKemId {
     P256HkdfSha256,
     X25519HkdfSha256,
@@ -95,6 +96,7 @@ impl From<u16> for HpkeKemId {
 /// Codepoint for KDF schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum HpkeKdfId {
     HkdfSha256,
     NotImplemented(u16),
@@ -121,6 +123,7 @@ impl From<u16> for HpkeKdfId {
 /// Codepoint for AEAD schemes compatible with HPKE.
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum HpkeAeadId {
     Aes128Gcm,
     NotImplemented(u16),
@@ -153,6 +156,16 @@ pub struct HpkeConfig {
     pub aead_id: HpkeAeadId,
     #[serde(with = "HpkePublicKeySerde")]
     pub public_key: HpkePublicKey,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for HpkeConfig {
+    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
+        self.kem_id.deep_size_of_children(context)
+            + self.kdf_id.deep_size_of_children(context)
+            + self.aead_id.deep_size_of_children(context)
+            + std::mem::size_of_val(self.public_key.as_slice())
+    }
 }
 
 impl AsRef<HpkeConfig> for HpkeConfig {
@@ -225,6 +238,14 @@ pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
     #[serde(with = "HpkePrivateKeySerde")]
     private_key: HpkePrivateKey,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for HpkeReceiverConfig {
+    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
+        self.config.deep_size_of_children(context)
+            + std::mem::size_of_val(self.private_key.as_slice())
+    }
 }
 
 impl HpkeReceiverConfig {
