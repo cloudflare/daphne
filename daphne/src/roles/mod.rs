@@ -236,23 +236,25 @@ mod test {
     }
 
     pub(super) struct TestData {
-        now: Time,
+        pub now: Time,
         global_config: DapGlobalConfig,
         collector_token: BearerToken,
         taskprov_collector_token: BearerToken,
-        time_interval_task_id: TaskId,
-        fixed_size_task_id: TaskId,
-        expired_task_id: TaskId,
+        pub time_interval_task_id: TaskId,
+        pub fixed_size_task_id: TaskId,
+        pub expired_task_id: TaskId,
         version: DapVersion,
         prometheus_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
-        leader_token: BearerToken,
+        pub leader_token: BearerToken,
         collector_hpke_receiver_config: HpkeReceiverConfig,
         taskprov_vdaf_verify_key_init: [u8; 32],
         taskprov_leader_token: BearerToken,
     }
 
     impl TestData {
+        const TASK_TIME_PRECISION: u64 = 3600;
+
         pub fn new(version: DapVersion) -> Self {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -363,6 +365,34 @@ mod test {
             }
         }
 
+        pub fn insert_task(&mut self, version: DapVersion, vdaf: VdafConfig) -> TaskId {
+            let mut rng = thread_rng();
+            let task_id = TaskId(rng.gen());
+            let leader_url = Url::parse("https://leader.com/v02/").unwrap();
+            let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
+
+            self.tasks.insert(
+                task_id.clone(),
+                DapTaskConfig {
+                    version,
+                    collector_hpke_config: self.collector_hpke_receiver_config.config.clone(),
+                    leader_url,
+                    helper_url,
+                    time_precision: Self::TASK_TIME_PRECISION,
+                    expiration: self.now + Self::TASK_TIME_PRECISION,
+                    min_batch_size: 1,
+                    query: DapQueryConfig::TimeInterval,
+                    vdaf_verify_key: match vdaf {
+                        VdafConfig::Prio2 { .. } => VdafVerifyKey::Prio2(rng.gen()),
+                        VdafConfig::Prio3(_) => VdafVerifyKey::Prio3(rng.gen()),
+                    },
+                    vdaf,
+                    taskprov: false,
+                },
+            );
+            task_id
+        }
+
         pub fn new_helper(&self) -> Arc<MockAggregator> {
             Arc::new(MockAggregator::new_helper(
                 self.tasks.clone(),
@@ -432,7 +462,7 @@ mod test {
             data.with_leader(helper)
         }
 
-        async fn gen_test_upload_req(
+        pub async fn gen_test_upload_req(
             &self,
             report: Report,
             task_id: &TaskId,
@@ -451,7 +481,7 @@ mod test {
             }
         }
 
-        async fn gen_test_agg_job_init_req(
+        pub async fn gen_test_agg_job_init_req(
             &self,
             task_id: &TaskId,
             version: DapVersion,
@@ -484,7 +514,7 @@ mod test {
             .await
         }
 
-        async fn gen_test_agg_job_cont_req_with_round(
+        pub async fn gen_test_agg_job_cont_req_with_round(
             &self,
             agg_job_id: &MetaAggregationJobId<'_>,
             transitions: Vec<Transition>,
@@ -509,7 +539,7 @@ mod test {
             .await
         }
 
-        async fn gen_test_agg_job_cont_req(
+        pub async fn gen_test_agg_job_cont_req(
             &self,
             agg_job_id: &MetaAggregationJobId<'_>,
             transitions: Vec<Transition>,
@@ -524,7 +554,7 @@ mod test {
                 .await
         }
 
-        async fn gen_test_agg_share_req(
+        pub async fn gen_test_agg_share_req(
             &self,
             report_count: u64,
             checksum: [u8; 32],
@@ -555,7 +585,7 @@ mod test {
             .await
         }
 
-        async fn gen_test_report(&self, task_id: &TaskId) -> Report {
+        pub async fn gen_test_report(&self, task_id: &TaskId) -> Report {
             let version = self.leader.unchecked_get_task_config(task_id).await.version;
 
             // Construct HPKE config list.
@@ -587,7 +617,7 @@ mod test {
                 .unwrap()
         }
 
-        async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapAbort> {
+        pub async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapAbort> {
             let wrapped = self
                 .leader
                 .get_task_config_for(Cow::Owned(task_id.clone()))
@@ -612,7 +642,7 @@ mod test {
             Ok(())
         }
 
-        async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapAbort> {
+        pub async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapAbort> {
             let wrapped = self
                 .leader
                 .get_task_config_for(Cow::Owned(task_id.clone()))
@@ -654,7 +684,7 @@ mod test {
             Ok(())
         }
 
-        async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
+        pub async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
@@ -682,7 +712,7 @@ mod test {
             }
         }
 
-        async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
+        pub async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
