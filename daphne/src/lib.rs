@@ -252,7 +252,7 @@ pub enum DapBatchBucket {
 /// A set of aggregate shares partitioned by bucket and the corresponding sequence of report IDs.
 #[derive(Debug, Default)]
 pub struct DapAggregateShareSpan {
-    pub span: HashMap<DapBatchBucket, (DapAggregateShare, Vec<(ReportId, Time)>)>,
+    span: HashMap<DapBatchBucket, (DapAggregateShare, Vec<(ReportId, Time)>)>,
 }
 
 impl IntoIterator for DapAggregateShareSpan {
@@ -317,6 +317,7 @@ impl DapAggregateShareSpan {
             .unwrap_or_default()
     }
 
+    /// Return an iterator over the aggregate share span.
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (&DapBatchBucket, &(DapAggregateShare, Vec<(ReportId, Time)>))> {
@@ -402,37 +403,6 @@ impl DapTaskConfig {
     /// Return the least multiple of the time_precision which is greater than the specified time.
     pub fn quantized_time_upper_bound(&self, time: Time) -> Time {
         self.quantized_time_lower_bound(time) + self.time_precision
-    }
-
-    /// Compute the "batch span" of a set of output shares.
-    pub fn batch_span_for_out_shares(
-        &self,
-        part_batch_sel: &PartialBatchSelector,
-        out_shares: Vec<DapOutputShare>,
-    ) -> Result<HashMap<DapBatchBucket, Vec<DapOutputShare>>, DapError> {
-        if !self.query.is_valid_part_batch_sel(part_batch_sel) {
-            return Err(fatal_error!(
-                err = "partial batch selector not compatible with task",
-            ));
-        }
-
-        let mut span: HashMap<DapBatchBucket, Vec<DapOutputShare>> = HashMap::new();
-        for out_share in out_shares.into_iter() {
-            let bucket = match part_batch_sel {
-                PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                    batch_window: self.quantized_time_lower_bound(out_share.time),
-                },
-                PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                    DapBatchBucket::FixedSize {
-                        batch_id: batch_id.clone(),
-                    }
-                }
-            };
-
-            span.entry(bucket).or_default().push(out_share);
-        }
-
-        Ok(span)
     }
 
     /// Return the batch span determined by the given batch selector. The span includes every
@@ -612,7 +582,6 @@ impl DapHelperState {
 pub struct DapOutputShare {
     pub report_id: ReportId, // Value from report
     pub time: u64,           // Value from the report
-    pub(crate) checksum: [u8; 32],
     pub(crate) data: VdafAggregateShare,
 }
 
@@ -690,23 +659,6 @@ impl DapAggregateShare {
         self.max_time = 0;
         self.checksum = [0; 32];
         self.data = None;
-    }
-
-    /// Aggregate a set of output shares into an aggregate share.
-    pub fn try_from_out_shares(
-        out_shares: impl IntoIterator<Item = DapOutputShare>,
-    ) -> Result<Self, DapError> {
-        let mut agg_share = Self::default();
-        for out_share in out_shares.into_iter() {
-            agg_share.merge(DapAggregateShare {
-                report_count: 1,
-                min_time: out_share.time,
-                max_time: out_share.time,
-                checksum: out_share.checksum,
-                data: Some(out_share.data),
-            })?;
-        }
-        Ok(agg_share)
     }
 
     pub(crate) fn add_out_share(

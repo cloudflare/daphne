@@ -18,10 +18,10 @@ use crate::{
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAbort, DapAggregateResult, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError,
-    DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState, DapLeaderTransition,
-    DapLeaderUncommitted, DapMeasurement, DapOutputShare, DapQueryConfig, DapRequest, DapResponse,
-    DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
+    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateShareSpan, DapBatchBucket,
+    DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState,
+    DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapQueryConfig, DapRequest,
+    DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -285,9 +285,9 @@ impl AggregationJobTest {
     /// Panics if the Helper aborts.
     pub fn handle_agg_job_cont_req(
         &self,
-        helper_state: DapHelperState,
+        helper_state: &DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> DapHelperTransition<AggregationJobResp> {
+    ) -> (DapAggregateShareSpan, AggregationJobResp) {
         let metrics = self
             .helper_metrics
             .with_host(self.task_config.helper_url.host_str().unwrap());
@@ -295,8 +295,10 @@ impl AggregationJobTest {
             .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
-                &self.agg_job_id,
+                &self.task_config,
                 helper_state,
+                |_| false,
+                &self.agg_job_id,
                 agg_job_cont_req,
                 &metrics,
             )
@@ -316,8 +318,10 @@ impl AggregationJobTest {
             .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
+                &self.task_config,
+                &helper_state,
+                |_| false,
                 &self.agg_job_id,
-                helper_state,
                 agg_job_cont_req,
                 &metrics,
             )
@@ -331,13 +335,18 @@ impl AggregationJobTest {
         &self,
         leader_uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
-    ) -> Vec<DapOutputShare> {
+    ) -> DapAggregateShareSpan {
         let metrics = self
             .leader_metrics
             .with_host(self.task_config.leader_url.host_str().unwrap());
         self.task_config
             .vdaf
-            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, &metrics)
+            .handle_final_agg_job_resp(
+                &self.task_config,
+                leader_uncommitted,
+                agg_job_resp,
+                &metrics,
+            )
             .unwrap()
     }
 
@@ -430,23 +439,19 @@ impl AggregationJobTest {
         else {
             panic!("unexpected transition");
         };
-        let DapHelperTransition::Finish(helper_out_shares, agg_job_resp) =
-            self.handle_agg_job_cont_req(helper_state, &agg_cont)
-        else {
-            panic!("unexpected transition");
-        };
-        let leader_out_shares = self.handle_final_agg_job_resp(uncommitted, agg_job_resp);
-        let report_count = u64::try_from(leader_out_shares.len()).unwrap();
+        let (helper_share_span, transitions) =
+            self.handle_agg_job_cont_req(&helper_state, &agg_cont);
+        let leader_share_span = self.handle_final_agg_job_resp(uncommitted, transitions);
+        let report_count = u64::try_from(leader_share_span.report_count()).unwrap();
 
         // Leader: Aggregation
-        let leader_agg_share = DapAggregateShare::try_from_out_shares(leader_out_shares).unwrap();
+        let leader_agg_share = leader_share_span.into_merged();
         let leader_encrypted_agg_share =
             self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
 
         // Helper: Aggregation
-        let helper_agg_share = DapAggregateShare::try_from_out_shares(helper_out_shares).unwrap();
-        let helper_encrypted_agg_share =
-            self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
+        let helper_encrypted_agg_share = self
+            .produce_helper_encrypted_agg_share(&batch_selector, &helper_share_span.into_merged());
 
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
@@ -1060,13 +1065,12 @@ impl DapAggregator<BearerToken> for MockAggregator {
         }
     }
 
-    async fn put_out_shares(
+    async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
-        out_shares: Vec<DapOutputShare>,
-    ) -> Result<HashSet<ReportId>, DapError> {
+        _task_config: &DapTaskConfig,
+        out_shares: DapAggregateShareSpan,
+    ) -> Result<Option<HashSet<ReportId>>, DapError> {
         let mut report_store_guard = self
             .report_store
             .lock()
@@ -1075,29 +1079,43 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = agg_store_guard.entry(task_id.clone()).or_default();
 
-        let mut replayed = HashSet::new();
-        for (bucket, out_shares) in task_config
-            .batch_span_for_out_shares(part_batch_sel, out_shares)?
-            .into_iter()
-        {
-            for out_share in out_shares.into_iter() {
-                if !report_store.processed.contains(&out_share.report_id) {
-                    // Mark report processed.
-                    report_store.processed.insert(out_share.report_id.clone());
-
-                    // Add to aggregate share.
-                    agg_store
-                        .entry(bucket.clone())
-                        .or_default()
-                        .agg_share
-                        .merge(DapAggregateShare::try_from_out_shares([out_share])?)?;
-                } else {
-                    replayed.insert(out_share.report_id);
-                }
-            }
+        let mut all_ids = Vec::new();
+        let mut to_merge = Vec::new();
+        for (bucket, (out_share, report_metadatas)) in out_shares {
+            all_ids.extend(report_metadatas.iter().map(|(id, _)| id).cloned());
+            to_merge.push((bucket, out_share));
         }
 
-        Ok(replayed)
+        assert_eq!(
+            all_ids.len(),
+            {
+                all_ids.sort_unstable();
+                all_ids.dedup();
+                all_ids.len()
+            },
+            "there are duplicate report ids in the DapAggregateShare"
+        );
+
+        let replayed = all_ids
+            .iter()
+            .filter(|id| report_store.processed.contains(id))
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        if replayed.is_empty() {
+            report_store.processed.extend(all_ids);
+            for (bucket, out_share) in to_merge {
+                // Add to aggregate share.
+                agg_store
+                    .entry(bucket)
+                    .or_default()
+                    .agg_share
+                    .merge(out_share)?;
+            }
+            Ok(None)
+        } else {
+            Ok(Some(replayed))
+        }
     }
 
     async fn get_agg_share(

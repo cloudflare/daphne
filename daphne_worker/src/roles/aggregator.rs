@@ -30,13 +30,14 @@ use daphne::{
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapBatchBucket, DapError, DapGlobalConfig, DapOutputShare, DapRequest,
-    DapSender, DapTaskConfig,
+    DapAggregateShare, DapAggregateShareSpan, DapBatchBucket, DapError, DapGlobalConfig,
+    DapRequest, DapSender, DapTaskConfig,
 };
-use futures::future::try_join_all;
+use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
+    future::ready,
 };
 
 #[async_trait(?Send)]
@@ -412,42 +413,45 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
         Ok(!agg_share.empty())
     }
 
-    async fn put_out_shares(
+    async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
-        out_shares: Vec<DapOutputShare>,
-    ) -> std::result::Result<HashSet<ReportId>, DapError> {
+        agg_share_span: DapAggregateShareSpan,
+    ) -> std::result::Result<Option<HashSet<ReportId>>, DapError> {
         let task_id_hex = task_id.to_hex();
         let durable = self.durable();
-        let mut agg_store_request_data: HashMap<String, Vec<DapOutputShare>> = HashMap::new();
+        let mut agg_store_request_data: HashMap<String, DapAggregateShare> = HashMap::new();
         let mut reports_processed_request_data: HashMap<String, Vec<ReportId>> = HashMap::new();
-        for (bucket, out_shares) in task_config
-            .as_ref()
-            .batch_span_for_out_shares(part_batch_sel, out_shares)?
-        {
-            for out_share in out_shares.into_iter() {
+        for (bucket, (agg_share, report_metadatas)) in agg_share_span {
+            for (id, time) in report_metadatas {
                 let reports_processed_name = self.config().durable_name_report_store(
                     task_config.as_ref(),
                     &task_id_hex,
-                    &out_share.report_id,
-                    out_share.time,
+                    &id,
+                    time,
                 );
                 reports_processed_request_data
                     .entry(reports_processed_name)
                     .or_default()
-                    .push(out_share.report_id.clone());
+                    .push(id.clone());
+            }
+            let agg_store_name =
+                durable_name_agg_store(&task_config.version, &task_id_hex, &bucket);
 
-                let agg_store_name =
-                    durable_name_agg_store(&task_config.version, &task_id_hex, &bucket);
-                agg_store_request_data
-                    .entry(agg_store_name)
-                    .or_default()
-                    .push(out_share);
+            match agg_store_request_data.entry(agg_store_name) {
+                Entry::Occupied(mut current_agg_share) => {
+                    current_agg_share.get_mut().merge(agg_share)?;
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(agg_share);
+                }
             }
         }
 
+        // TODO(mendess) Note the bug we found here (Either all DO requests must return "no
+        // replays" or no DO requests commit "mark aggregated". We need to make sure these events
+        // are mutually exclusive.)
         let replayed = try_join_all(reports_processed_request_data.into_iter().map(
             |(durable_name, report_ids)| async {
                 durable
@@ -466,16 +470,10 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
         .flatten()
         .collect::<HashSet<ReportId>>();
 
-        try_join_all(agg_store_request_data.into_iter().map(
-            |(agg_store_name, out_shares)| async {
-                // Only aggregate the output shares that haven't been replayed.
-                let agg_share = DapAggregateShare::try_from_out_shares(
-                    out_shares
-                        .into_iter()
-                        .filter(|out_share| !replayed.contains(&out_share.report_id)),
-                )?;
-
-                std::result::Result::<_, DapError>::Ok(
+        // Only aggregate the output shares if none are replayed
+        if replayed.is_empty() {
+            futures::stream::iter(agg_store_request_data)
+                .map(|(agg_store_name, agg_share)| async {
                     durable
                         .post::<_, ()>(
                             BINDING_DAP_AGGREGATE_STORE,
@@ -483,14 +481,19 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                             agg_store_name,
                             agg_share,
                         )
-                        .await,
-                )
-            },
-        ))
-        .await
-        .map_err(|e| fatal_error!(err = ?e))?;
+                        .await
+                })
+                .buffer_unordered(usize::MAX)
+                // poll the iterator to compleation, short
+                // circuiting on error
+                .try_for_each(|()| ready(Ok(())))
+                .await
+                .map_err(|e| fatal_error!(err = ?e))?;
 
-        Ok(replayed)
+            Ok(None)
+        } else {
+            Ok(Some(replayed))
+        }
     }
 
     async fn get_agg_share(

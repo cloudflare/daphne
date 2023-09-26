@@ -424,19 +424,29 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
         // Commit the output shares.
-        let out_shares =
-            task_config
-                .vdaf
-                .handle_final_agg_job_resp(uncommited, agg_job_resp, &metrics)?;
-        let out_shares_count = out_shares.len() as u64;
+        let agg_share_span = task_config.vdaf.handle_final_agg_job_resp(
+            task_config,
+            uncommited,
+            agg_job_resp,
+            &metrics,
+        )?;
+        let out_shares_count = agg_share_span.report_count() as u64;
 
         // At this point we're committed to aggregating the reports: if we do detect a report was
         // replayed at this stage, then we may end up with a batch mismatch. However, this should
         // only happen if there are multiple aggregation jobs in-flight that include the same
         // report.
-        let _ = self
-            .put_out_shares(task_id, task_config, part_batch_sel, out_shares)
+
+        let replayed = self
+            .try_put_agg_share_span(task_id, task_config, agg_share_span)
             .await?;
+
+        if let Some(replayed) = replayed {
+            tracing::warn!(
+                replay_count = replayed.len(),
+                "tried to aggregate replayed reports"
+            );
+        }
 
         metrics.report_inc_by("aggregated", out_shares_count);
         Ok(out_shares_count)

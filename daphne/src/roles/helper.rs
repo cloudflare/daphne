@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
@@ -17,7 +17,6 @@ use crate::{
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
         AggregationJobInitReq, Draft02AggregationJobId, PartialBatchSelector, TaskId,
-        TransitionFailure, TransitionVar,
     },
     metrics::{ContextualizedDaphneMetrics, DaphneRequestType},
     DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
@@ -199,44 +198,48 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         let agg_job_id = resolve_agg_job_id(req, agg_job_cont_req.draft02_agg_job_id.as_ref())?;
 
-        let state = self.get_helper_state(task_id, &agg_job_id).await?.ok_or(
-            DapAbort::UnrecognizedAggregationJob {
+        let state = self
+            .get_helper_state(task_id, &agg_job_id)
+            .await?
+            .ok_or_else(|| DapAbort::UnrecognizedAggregationJob {
                 task_id: task_id.clone(),
                 agg_job_id_base64url: agg_job_id.to_base64url(),
-            },
-        )?;
-        let part_batch_sel = state.part_batch_sel.clone();
-        let transition = task_config.vdaf.handle_agg_job_cont_req(
-            task_id,
-            &agg_job_id,
-            state,
-            &agg_job_cont_req,
-            &metrics,
-        )?;
+            })?;
 
-        let (agg_job_resp, out_shares_count) = match transition {
-            DapHelperTransition::Continue(..) => {
-                return Err(fatal_error!(err = "unexpected transition (continued)").into());
-            }
-            DapHelperTransition::Finish(out_shares, mut agg_job_resp) => {
-                let out_shares_count = u64::try_from(out_shares.len()).unwrap();
+        // This loop is intended to run at most once on the "happy path". The intent is as follows:
+        //
+        // - try to aggregate the output shares into an `DapAggregateShareSpan`
+        // - pass it to `try_put_agg_share_span`
+        //   - if replays are found, then try again, rejecting the reports that were replayed
+        //   - else break with the finished (of failed) transitions
+        //
+        // The reason we do this is because we don't expect replays to happen but we have to guard
+        // against them, as such, even though retrying is possibly very expensive, it probably
+        // won't happen often enough that it matters.
+        let (out_shares_count, agg_job_resp) = {
+            let mut replayed_reports = HashSet::new();
+            loop {
+                let (agg_share_span, agg_job_resp) = task_config.vdaf.handle_agg_job_cont_req(
+                    task_id,
+                    task_config,
+                    &state,
+                    |id| replayed_reports.contains(id),
+                    &agg_job_id,
+                    &agg_job_cont_req,
+                    &metrics,
+                )?;
+
+                let out_shares_count = agg_share_span.report_count().try_into().unwrap();
                 let replayed = self
-                    .put_out_shares(task_id, task_config, &part_batch_sel, out_shares)
+                    .try_put_agg_share_span(task_id, task_config, agg_share_span)
                     .await?;
 
-                // If there are multiple aggregation jobs in flight that contain the
-                // same report, then we may need to reject the report at this late stage.
-                if !replayed.is_empty() {
-                    for transition in agg_job_resp.transitions.iter_mut() {
-                        if replayed.contains(&transition.report_id) {
-                            let failure = TransitionFailure::ReportReplayed;
-                            transition.var = TransitionVar::Failed(failure);
-                            metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                        }
-                    }
+                if let Some(replayed) = replayed {
+                    replayed_reports.extend(replayed);
+                    // TODO: register a metric to track the number of times this happens
+                } else {
+                    break (out_shares_count, agg_job_resp);
                 }
-
-                (agg_job_resp, out_shares_count)
             }
         };
 
