@@ -4,7 +4,7 @@
 //! End-to-end tests for daphne.
 use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 use daphne::{
-    async_test_versions,
+    async_test_version, async_test_versions,
     constants::DapMediaType,
     messages::{
         taskprov::{
@@ -17,26 +17,11 @@ use daphne::{
     DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
-use paste::paste;
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::cmp::{max, min};
-
-// Redefine async_test_version locally because we want a
-// cfg_attr as well.
-macro_rules! async_test_version {
-    ($fname:ident, $version:ident) => {
-        paste! {
-            #[tokio::test]
-            #[cfg_attr(not(feature = "test_e2e"), ignore)]
-            async fn [<$fname _ $version:lower>]() {
-                $fname (DapVersion::$version) . await;
-            }
-        }
-    };
-}
 
 #[derive(Deserialize)]
 struct InternalTestEndpointForTaskResult {
