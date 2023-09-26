@@ -25,6 +25,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
+use deepsize::DeepSizeOf;
 use prio::codec::Encode;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -521,6 +522,7 @@ macro_rules! async_test_versions {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub(crate) enum MetaAggregationJobIdOwned {
     Draft02(Draft02AggregationJobId),
     Draft05(AggregationJobId),
@@ -540,6 +542,7 @@ impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
 }
 
 #[derive(Eq, Hash, PartialEq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapBatchBucketOwned {
     FixedSize { batch_id: BatchId },
     TimeInterval { batch_window: Time },
@@ -570,9 +573,11 @@ impl<'a> DapBatchBucket<'a> {
     }
 }
 
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct MockAggregatorReportSelector(pub(crate) TaskId);
 
 #[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct MockAuditLog(AtomicU32);
 
 impl MockAuditLog {
@@ -617,6 +622,31 @@ pub struct MockAggregator {
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `MockAggregator`. Not set by the Helper.
     pub peer: Option<Arc<MockAggregator>>,
+}
+
+impl DeepSizeOf for MockAggregator {
+    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
+        self.global_config.deep_size_of_children(context)
+                + self.tasks.deep_size_of_children(context)
+                + self
+                    .hpke_receiver_config_list
+                    .deep_size_of_children(context)
+                + self.leader_token.deep_size_of_children(context)
+                + self.collector_token.deep_size_of_children(context)
+                + self.report_store.deep_size_of_children(context)
+                + self.leader_state_store.deep_size_of_children(context)
+                + self.helper_state_store.deep_size_of_children(context)
+                + self.agg_store.deep_size_of_children(context)
+                + self.collector_hpke_config.deep_size_of_children(context)
+                // + self.metrics.deep_size_of_children(context)
+                // + self.audit_log.deep_size_of_children(context)
+                + self
+                    .taskprov_vdaf_verify_key_init
+                    .deep_size_of_children(context)
+                + self.taskprov_leader_token.deep_size_of_children(context)
+                + self.taskprov_collector_token.deep_size_of_children(context)
+                + self.peer.deep_size_of_children(context)
+    }
 }
 
 impl MockAggregator {
@@ -1483,6 +1513,7 @@ impl DapLeader<BearerToken> for MockAggregator {
 
 /// Information associated to a certain helper state for a given task ID and aggregate job ID.
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct HelperStateInfo {
     task_id: TaskId,
     agg_job_id_owned: MetaAggregationJobIdOwned,
@@ -1490,12 +1521,14 @@ pub struct HelperStateInfo {
 
 /// Stores the reports received from Clients.
 #[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReportStore {
     pub(crate) pending: HashMap<DapBatchBucketOwned, VecDeque<Report>>,
     pub(crate) processed: HashSet<ReportId>,
 }
 
 /// Stores the state of the collect job.
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum CollectJobState {
     Pending(CollectionReq),
     Processed(Collection),
@@ -1505,6 +1538,7 @@ pub enum CollectJobState {
 /// * Collect IDs in their order of arrival.
 /// * The state of the collect job associated to the Collect ID.
 #[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct LeaderState {
     collect_ids: VecDeque<CollectionJobId>,
     collect_jobs: HashMap<CollectionJobId, CollectJobState>,
@@ -1515,6 +1549,7 @@ pub struct LeaderState {
 /// * Aggregate share
 /// * Whether this aggregate share has been collected
 #[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct AggStore {
     pub(crate) agg_share: DapAggregateShare,
     pub(crate) collected: bool,

@@ -23,6 +23,7 @@ use url::Url;
 
 /// DAP taskprov version.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum TaskprovVersion {
     #[serde(rename = "v02")]
     Draft02,

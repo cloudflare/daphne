@@ -67,6 +67,7 @@ pub(crate) enum VdafError {
 /// A VDAF verification key.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafVerifyKey {
     Prio3(#[serde(with = "hex")] [u8; 16]),
     Prio2(#[serde(with = "hex")] [u8; 32]),
@@ -325,6 +326,21 @@ pub enum VdafPrepState {
     Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for VdafPrepState {
+    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
+        // This method is, as documented, an estimation of the size of the children. Since it can't
+        // be known for this type due to it's encapsulation, I will count the size of it as 0.
+        //
+        // This happens to be correct for helpers but not for leaders
+        match self {
+            VdafPrepState::Prio2(_) => 0,
+            VdafPrepState::Prio3Field64(_) => 0,
+            VdafPrepState::Prio3Field128(_) => 0,
+        }
+    }
+}
+
 impl Encode for VdafPrepState {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
@@ -397,6 +413,17 @@ pub(crate) enum VdafAggregateShare {
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),
     FieldPrio2(prio::vdaf::AggregateShare<FieldPrio2>),
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for VdafAggregateShare {
+    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
+        match self {
+            VdafAggregateShare::Field64(s) => std::mem::size_of_val(s.as_ref()),
+            VdafAggregateShare::Field128(s) => std::mem::size_of_val(s.as_ref()),
+            VdafAggregateShare::FieldPrio2(s) => std::mem::size_of_val(s.as_ref()),
+        }
+    }
 }
 
 impl Encode for VdafAggregateShare {
