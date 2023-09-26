@@ -39,7 +39,7 @@ const EXTENSION_TASKPROV: u16 = 0xff00;
 macro_rules! id_struct {
     ($sname:ident, $len:expr, $doc:expr) => {
         #[doc=$doc]
-        #[derive(Clone, Debug, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
+        #[derive(Clone, Default, Deserialize, Hash, PartialEq, Eq, Serialize)]
         pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
 
         impl $sname {
@@ -82,6 +82,12 @@ macro_rules! id_struct {
         impl fmt::Display for $sname {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}", self.to_hex())
+            }
+        }
+
+        impl fmt::Debug for $sname {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}({})", ::std::stringify!($sname), self.to_hex())
             }
         }
     };
