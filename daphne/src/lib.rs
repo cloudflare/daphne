@@ -242,9 +242,10 @@ impl std::fmt::Display for DapQueryConfig {
 /// queries, the bucket to which a report is assigned is determined by truncating its timestamp by
 /// the task's `time_precision` parameter; for fixed-size queries, the span consists of a single
 /// bucket, which is the batch determined by the batch ID (i.e., the partial batch selector).
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub enum DapBatchBucket<'a> {
-    FixedSize { batch_id: &'a BatchId },
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum DapBatchBucket {
+    FixedSize { batch_id: BatchId },
     TimeInterval { batch_window: Time },
 }
 
@@ -329,25 +330,27 @@ impl DapTaskConfig {
     }
 
     /// Compute the "batch span" of a set of output shares.
-    pub fn batch_span_for_out_shares<'a>(
+    pub fn batch_span_for_out_shares(
         &self,
-        part_batch_sel: &'a PartialBatchSelector,
+        part_batch_sel: &PartialBatchSelector,
         out_shares: Vec<DapOutputShare>,
-    ) -> Result<HashMap<DapBatchBucket<'a>, Vec<DapOutputShare>>, DapError> {
+    ) -> Result<HashMap<DapBatchBucket, Vec<DapOutputShare>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
                 err = "partial batch selector not compatible with task",
             ));
         }
 
-        let mut span: HashMap<DapBatchBucket<'a>, Vec<DapOutputShare>> = HashMap::new();
+        let mut span: HashMap<DapBatchBucket, Vec<DapOutputShare>> = HashMap::new();
         for out_share in out_shares.into_iter() {
             let bucket = match part_batch_sel {
                 PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
                     batch_window: self.quantized_time_lower_bound(out_share.time),
                 },
                 PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                    DapBatchBucket::FixedSize { batch_id }
+                    DapBatchBucket::FixedSize {
+                        batch_id: batch_id.clone(),
+                    }
                 }
             };
 
@@ -359,10 +362,10 @@ impl DapTaskConfig {
 
     /// Return the batch span determined by the given batch selector. The span includes every
     /// bucket to which a report that matches the batch selector could be assigned.
-    pub fn batch_span_for_sel<'a>(
+    pub fn batch_span_for_sel(
         &self,
-        batch_sel: &'a BatchSelector,
-    ) -> Result<HashSet<DapBatchBucket<'a>>, DapError> {
+        batch_sel: &BatchSelector,
+    ) -> Result<HashSet<DapBatchBucket>, DapError> {
         if !self.query.is_valid_batch_sel(batch_sel) {
             return Err(fatal_error!(
                 err = "batch selector not compatible with task"
@@ -383,7 +386,9 @@ impl DapTaskConfig {
                 Ok(span)
             }
             BatchSelector::FixedSizeByBatchId { batch_id } => {
-                Ok(HashSet::from([DapBatchBucket::FixedSize { batch_id }]))
+                Ok(HashSet::from([DapBatchBucket::FixedSize {
+                    batch_id: batch_id.clone(),
+                }]))
             }
         }
     }
@@ -393,8 +398,7 @@ impl DapTaskConfig {
         &self,
         part_batch_sel: &'sel PartialBatchSelector,
         consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed<'rep>>,
-    ) -> Result<HashMap<DapBatchBucket<'sel>, Vec<&'rep EarlyReportStateConsumed<'rep>>>, DapError>
-    {
+    ) -> Result<HashMap<DapBatchBucket, Vec<&'rep EarlyReportStateConsumed<'rep>>>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
                 err = "partial batch selector not compatible with task",
@@ -409,7 +413,9 @@ impl DapTaskConfig {
                     batch_window: self.quantized_time_lower_bound(consumed_report.metadata().time),
                 },
                 PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                    DapBatchBucket::FixedSize { batch_id }
+                    DapBatchBucket::FixedSize {
+                        batch_id: batch_id.clone(),
+                    }
                 }
             };
 

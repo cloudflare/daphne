@@ -401,7 +401,9 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 durable_name_agg_store(
                     &task_config.as_ref().version,
                     &task_id.to_hex(),
-                    &DapBatchBucket::FixedSize { batch_id },
+                    &DapBatchBucket::FixedSize {
+                        batch_id: batch_id.clone(),
+                    },
                 ),
             )
             .await

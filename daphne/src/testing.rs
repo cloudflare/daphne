@@ -541,34 +541,11 @@ impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
     }
 }
 
-#[derive(Eq, Hash, PartialEq)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum DapBatchBucketOwned {
-    FixedSize { batch_id: BatchId },
-    TimeInterval { batch_window: Time },
-}
-
-impl From<DapBatchBucketOwned> for PartialBatchSelector {
-    fn from(bucket: DapBatchBucketOwned) -> Self {
+impl From<DapBatchBucket> for PartialBatchSelector {
+    fn from(bucket: DapBatchBucket) -> Self {
         match bucket {
-            DapBatchBucketOwned::FixedSize { batch_id } => Self::FixedSizeByBatchId { batch_id },
-            DapBatchBucketOwned::TimeInterval { .. } => Self::TimeInterval,
-        }
-    }
-}
-
-impl<'a> DapBatchBucket<'a> {
-    // TODO(cjpatton) Figure out how to use `ToOwned` properly. The lifetime parameter causes
-    // confusion for the compiler for implementing `Borrow`. The goal is to avoid cloning the
-    // bucket each time we need to check if it exists in the set.
-    pub(crate) fn to_owned_bucket(&self) -> DapBatchBucketOwned {
-        match self {
-            Self::FixedSize { batch_id } => DapBatchBucketOwned::FixedSize {
-                batch_id: (*batch_id).clone(),
-            },
-            Self::TimeInterval { batch_window } => DapBatchBucketOwned::TimeInterval {
-                batch_window: *batch_window,
-            },
+            DapBatchBucket::FixedSize { batch_id } => Self::FixedSizeByBatchId { batch_id },
+            DapBatchBucket::TimeInterval { .. } => Self::TimeInterval,
         }
     }
 }
@@ -609,7 +586,7 @@ pub struct MockAggregator {
     pub report_store: Arc<Mutex<HashMap<TaskId, ReportStore>>>,
     pub leader_state_store: Arc<Mutex<HashMap<TaskId, LeaderState>>>,
     pub helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
-    pub agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucketOwned, AggStore>>>>,
+    pub agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucket, AggStore>>>>,
     pub collector_hpke_config: HpkeConfig,
     pub metrics: DaphneMetrics,
     pub audit_log: MockAuditLog,
@@ -721,7 +698,7 @@ impl MockAggregator {
     async fn check_report_early_fail(
         &self,
         task_id: &TaskId,
-        bucket: &DapBatchBucketOwned,
+        bucket: &DapBatchBucket,
         metadata: &ReportMetadata,
     ) -> Option<TransitionFailure> {
         // Check AggStateStore to see whether the report is part of a batch that has already
@@ -758,7 +735,7 @@ impl MockAggregator {
         &self,
         report: &Report,
         task_id: &TaskId,
-    ) -> Option<DapBatchBucketOwned> {
+    ) -> Option<DapBatchBucket> {
         let mut rng = thread_rng();
         let task_config = self
             .get_task_config_for(Cow::Borrowed(task_id))
@@ -779,7 +756,7 @@ impl MockAggregator {
                 for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
                     if *report_count < task_config.min_batch_size {
                         *report_count += 1;
-                        return Some(DapBatchBucketOwned::FixedSize {
+                        return Some(DapBatchBucket::FixedSize {
                             batch_id: batch_id.clone(),
                         });
                     }
@@ -790,12 +767,12 @@ impl MockAggregator {
                 leader_state_store
                     .batch_queue
                     .push_back((batch_id.clone(), 1));
-                Some(DapBatchBucketOwned::FixedSize { batch_id })
+                Some(DapBatchBucket::FixedSize { batch_id })
             }
 
             // For time-interval queries, the bucket is the batch window computed by truncating the
             // report timestamp.
-            DapQueryConfig::TimeInterval => Some(DapBatchBucketOwned::TimeInterval {
+            DapQueryConfig::TimeInterval => Some(DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
             }),
         }
@@ -952,7 +929,7 @@ impl DapReportInitializer for MockAggregator {
             {
                 // Check whether Report has been collected or replayed.
                 if let Some(transition_failure) = self
-                    .check_report_early_fail(task_id, &bucket.to_owned_bucket(), metadata)
+                    .check_report_early_fail(task_id, bucket, metadata)
                     .await
                 {
                     early_fails.insert(metadata.id.clone(), transition_failure);
@@ -1060,7 +1037,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         };
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get(&bucket.to_owned_bucket()) {
+            if let Some(inner_agg_store) = agg_store.get(&bucket) {
                 if inner_agg_store.collected {
                     return Ok(true);
                 }
@@ -1074,7 +1051,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let guard = self.agg_store.lock().expect("agg_store: failed to lock");
         if let Some(agg_store) = guard.get(task_id) {
             Ok(agg_store
-                .get(&DapBatchBucketOwned::FixedSize {
+                .get(&DapBatchBucket::FixedSize {
                     batch_id: batch_id.clone(),
                 })
                 .is_some())
@@ -1110,7 +1087,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
                     // Add to aggregate share.
                     agg_store
-                        .entry(bucket.to_owned_bucket())
+                        .entry(bucket.clone())
                         .or_default()
                         .agg_share
                         .merge(DapAggregateShare::try_from_out_shares([out_share])?)?;
@@ -1139,7 +1116,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get(&bucket.to_owned_bucket()) {
+            if let Some(inner_agg_store) = agg_store.get(&bucket) {
                 if inner_agg_store.collected {
                     return Err(DapError::Abort(DapAbort::batch_overlap(task_id, batch_sel)));
                 } else {
@@ -1161,7 +1138,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let agg_store = guard.entry(task_id.clone()).or_default();
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get_mut(&bucket.to_owned_bucket()) {
+            if let Some(inner_agg_store) = agg_store.get_mut(&bucket) {
                 inner_agg_store.collected = true;
             }
         }
@@ -1314,7 +1291,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 // Drain the batch that is being filled.
 
                 let bucket = if let Some(batch_id) = self.current_batch_id(task_id, &task_config) {
-                    DapBatchBucketOwned::FixedSize { batch_id }
+                    DapBatchBucket::FixedSize { batch_id }
                 } else {
                     return Ok(HashMap::default());
                 };
@@ -1523,7 +1500,7 @@ pub struct HelperStateInfo {
 #[derive(Default)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReportStore {
-    pub(crate) pending: HashMap<DapBatchBucketOwned, VecDeque<Report>>,
+    pub(crate) pending: HashMap<DapBatchBucket, VecDeque<Report>>,
     pub(crate) processed: HashSet<ReportId>,
 }
 
