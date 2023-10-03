@@ -249,6 +249,81 @@ pub enum DapBatchBucket {
     TimeInterval { batch_window: Time },
 }
 
+/// A set of aggregate shares partitioned by bucket and the corresponding sequence of report IDs.
+#[derive(Debug, Default)]
+pub struct DapAggregateShareSpan {
+    pub span: HashMap<DapBatchBucket, (DapAggregateShare, Vec<(ReportId, Time)>)>,
+}
+
+impl IntoIterator for DapAggregateShareSpan {
+    type IntoIter = <HashMap<
+        DapBatchBucket,
+        (DapAggregateShare, Vec<(ReportId, Time)>
+    )> as IntoIterator>::IntoIter;
+
+    type Item = <Self::IntoIter as Iterator>::Item;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.span.into_iter()
+    }
+}
+
+impl DapAggregateShareSpan {
+    pub(crate) fn add_out_share(
+        &mut self,
+        task_config: &DapTaskConfig,
+        part_batch_sel: &PartialBatchSelector,
+        report_id: ReportId,
+        time: Time,
+        data: VdafAggregateShare,
+    ) -> Result<(), DapError> {
+        if !task_config.query.is_valid_part_batch_sel(part_batch_sel) {
+            return Err(fatal_error!(
+                err = "partial batch selector not compatible with task",
+            ));
+        }
+
+        let bucket = match part_batch_sel {
+            PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
+                batch_window: task_config.quantized_time_lower_bound(time),
+            },
+            PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
+                batch_id: batch_id.clone(),
+            },
+        };
+
+        let (agg_share, reports) = self.span.entry(bucket).or_default();
+        agg_share.add_out_share(&report_id, time, data)?;
+        reports.push((report_id, time));
+        Ok(())
+    }
+
+    pub(crate) fn report_count(&self) -> usize {
+        self.span
+            .iter()
+            .map(|(_bucket, (_agg_share, report_ids))| report_ids.len())
+            .sum()
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn into_merged(self) -> DapAggregateShare {
+        self.span
+            .into_iter()
+            .map(|(_bucket, (agg_share_for_bucket, _report_ids))| agg_share_for_bucket)
+            .reduce(|mut agg_share, agg_share_for_bucket| {
+                agg_share.merge(agg_share_for_bucket).unwrap();
+                agg_share
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&DapBatchBucket, &(DapAggregateShare, Vec<(ReportId, Time)>))> {
+        self.span.iter()
+    }
+}
+
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DapTaskConfig {
@@ -479,12 +554,14 @@ pub enum DapAggregateResult {
 #[derive(Debug)]
 pub struct DapLeaderState {
     pub(crate) seq: Vec<(VdafPrepState, VdafPrepMessage, Time, ReportId)>,
+    part_batch_sel: PartialBatchSelector,
 }
 
 /// The Leader's state after sending an AggregateContReq.
 #[derive(Debug)]
 pub struct DapLeaderUncommitted {
     pub(crate) seq: Vec<(DapOutputShare, ReportId)>,
+    part_batch_sel: PartialBatchSelector,
 }
 
 /// The Helper's state during the aggregation flow.
@@ -630,6 +707,23 @@ impl DapAggregateShare {
             })?;
         }
         Ok(agg_share)
+    }
+
+    pub(crate) fn add_out_share(
+        &mut self,
+        report_id: &ReportId,
+        time: Time,
+        data: VdafAggregateShare,
+    ) -> Result<(), DapError> {
+        let checksum = ring::digest::digest(&ring::digest::SHA256, report_id.as_ref());
+        self.merge(DapAggregateShare {
+            report_count: 1,
+            min_time: time,
+            max_time: time,
+            checksum: checksum.as_ref().try_into().unwrap(),
+            data: Some(data),
+        })?;
+        Ok(())
     }
 }
 
