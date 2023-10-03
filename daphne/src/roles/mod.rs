@@ -210,11 +210,11 @@ mod test {
         },
         taskprov::TaskprovVersion,
         test_versions,
-        testing::{AggStore, DapBatchBucketOwned, MockAggregator, MockAggregatorReportSelector},
+        testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
-        DapAbort, DapAggregateShare, DapCollectJob, DapGlobalConfig, DapMeasurement,
-        DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapVersion, MetaAggregationJobId,
-        Prio3Config, VdafConfig,
+        DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapGlobalConfig,
+        DapMeasurement, DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapVersion,
+        MetaAggregationJobId, Prio3Config, VdafConfig,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -1252,7 +1252,7 @@ mod test {
             let agg_store = guard.entry(task_id.clone()).or_default();
 
             agg_store.insert(
-                DapBatchBucketOwned::TimeInterval {
+                DapBatchBucket::TimeInterval {
                     batch_window: task_config.quantized_time_lower_bound(t.now),
                 },
                 AggStore {

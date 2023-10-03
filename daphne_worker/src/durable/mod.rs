@@ -411,7 +411,7 @@ pub(crate) fn durable_name_report_store(
 pub(crate) fn durable_name_agg_store(
     version: &DapVersion,
     task_id_hex: &str,
-    bucket: &DapBatchBucket<'_>,
+    bucket: &DapBatchBucket,
 ) -> String {
     format!(
         "{}/{}",
@@ -424,7 +424,7 @@ pub(crate) fn durable_name_task(version: &DapVersion, task_id_hex: &str) -> Stri
     format!("{}/task/{}", version.as_ref(), task_id_hex)
 }
 
-fn durable_name_bucket(bucket: &DapBatchBucket<'_>) -> String {
+fn durable_name_bucket(bucket: &DapBatchBucket) -> String {
     match bucket {
         DapBatchBucket::TimeInterval { batch_window } => {
             format!("window/{batch_window}")
@@ -699,7 +699,7 @@ mod test {
     );
 
         assert_eq!(
-        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: &id2 }),
+        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: id2 }),
         "v02/task/1111111111111111111111111111111111111111111111111111111111111111/batch/2222222222222222222222222222222222222222222222222222222222222222",
     );
 
