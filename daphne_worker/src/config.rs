@@ -605,6 +605,19 @@ impl<'srv> DaphneWorker<'srv> {
 
         tracing::debug!(%kv_key, "looking up key in kv");
         let kv_store = self.kv()?;
+
+        tracing::debug!(
+            "KV KEYS ARE: {:?}",
+            kv_store
+                .list()
+                .execute()
+                .await
+                .unwrap()
+                .keys
+                .into_iter()
+                .map(|k| k.name)
+                .collect::<Vec<_>>()
+        );
         let builder = kv_store.get(&kv_key);
         if let Some(kv_value) = builder.json::<V>().await? {
             // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE

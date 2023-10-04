@@ -1328,7 +1328,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
 }
 
 async fn fixed_size_no_current(version: DapVersion) {
-    fixed_size(version, true).await;
+    fixed_size(version, false).await;
 }
 
 async_test_versions! { fixed_size_no_current }
