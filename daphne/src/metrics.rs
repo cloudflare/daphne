@@ -54,8 +54,9 @@ impl DaphneMetrics {
             format!("{front}aggregation_job_batch_size"),
             "Number of records in an incoming AggregationJobInitReq.",
             &["host"],
-            exponential_buckets(5.0, 3.0, 6)
-                .expect("this shouldn't panic for these hardcoded values"), // <250, <500, ... <1500, +Inf
+            // <1, <2, <4, <8, ... <256, +Inf
+            exponential_buckets(1.0, 2.0, 8)
+                .expect("this shouldn't panic for these hardcoded values"),
             registry
         )
         .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_batch_size"))?;
