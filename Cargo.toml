@@ -21,6 +21,7 @@ anyhow = "1.0.75"
 assert_matches = "1.5.0"
 async-trait = "0.1.73"
 base64 = "0.21.3"
+cap = "0.1.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 futures = "0.3.28"
 getrandom = { version = "0.2.10", features = ["js"] } # Required for prio
