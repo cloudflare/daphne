@@ -1234,13 +1234,7 @@ impl DapHelper<BearerToken> for MockAggregator {
 
         // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
         // For VDAFs with more rounds, the helper state blob will need to be updated here.
-        if helper_state_store.contains_key(&helper_state_info) {
-            let helper_state = helper_state_store.remove(&helper_state_info);
-
-            return Ok(helper_state);
-        }
-
-        Ok(None)
+        Ok(helper_state_store.get(&helper_state_info).cloned())
     }
 }
 

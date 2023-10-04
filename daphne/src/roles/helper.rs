@@ -439,3 +439,158 @@ fn resolve_agg_job_id<'id, S>(
         _ => unreachable!("unhandled resource {:?}", req.resource),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+    use std::sync::Arc;
+
+    use assert_matches::assert_matches;
+    use futures::StreamExt;
+    use prio::codec::ParameterizedDecode;
+
+    use crate::messages::{
+        AggregationJobInitReq, AggregationJobResp, ReportShare, Transition, TransitionVar,
+    };
+    use crate::roles::DapHelper;
+    use crate::MetaAggregationJobId;
+    use crate::{roles::test::TestData, DapVersion};
+
+    #[tokio::test]
+    async fn replay_reports_when_continuing_aggregation() {
+        let mut data = TestData::new(DapVersion::Draft02);
+        let task_id = data.insert_task(
+            DapVersion::Draft02,
+            crate::VdafConfig::Prio2 { dimension: 100_000 },
+        );
+        let helper = data.new_helper();
+        let test = data.with_leader(Arc::clone(&helper));
+
+        let report_shares = futures::stream::iter(0..3)
+            .then(|_| async {
+                let mut report = test.gen_test_report(&task_id).await;
+                ReportShare {
+                    report_metadata: report.report_metadata,
+                    public_share: report.public_share,
+                    encrypted_input_share: report.encrypted_input_shares.remove(1),
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        let report_ids = report_shares
+            .iter()
+            .map(|r| r.report_metadata.id.clone())
+            .collect::<Vec<_>>();
+
+        let req = test
+            .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, report_shares)
+            .await;
+
+        let meta_agg_job_id = MetaAggregationJobId::Draft02(Cow::Owned(
+            AggregationJobInitReq::get_decoded_with_param(&DapVersion::Draft02, &req.payload)
+                .unwrap()
+                .draft02_agg_job_id
+                .unwrap(),
+        ));
+
+        helper
+            .handle_agg_job_init_req(&req, helper.metrics.with_host("test"), &task_id)
+            .await
+            .unwrap();
+
+        {
+            let req = test
+                .gen_test_agg_job_cont_req(
+                    &meta_agg_job_id,
+                    report_ids[0..2]
+                        .iter()
+                        .map(|id| Transition {
+                            report_id: id.clone(),
+                            var: TransitionVar::Continued(vec![]),
+                        })
+                        .collect(),
+                    DapVersion::Draft02,
+                )
+                .await;
+
+            let resp = helper
+                .handle_agg_job_cont_req(&req, helper.metrics.with_host("test"), &task_id)
+                .await
+                .unwrap();
+
+            let a_job_resp =
+                AggregationJobResp::get_decoded_with_param(&DapVersion::Draft02, &resp.payload)
+                    .unwrap();
+            assert_eq!(a_job_resp.transitions.len(), 2);
+            assert!(a_job_resp
+                .transitions
+                .iter()
+                .all(|t| matches!(t.var, TransitionVar::Finished)));
+        }
+        {
+            let req = test
+                .gen_test_agg_job_cont_req(
+                    &meta_agg_job_id,
+                    report_ids[1..3]
+                        .iter()
+                        .map(|id| Transition {
+                            report_id: id.clone(),
+                            var: TransitionVar::Continued(vec![]),
+                        })
+                        .collect(),
+                    DapVersion::Draft02,
+                )
+                .await;
+
+            let resp = helper
+                .handle_agg_job_cont_req(&req, helper.metrics.with_host("test"), &task_id)
+                .await
+                .unwrap();
+
+            let a_job_resp =
+                AggregationJobResp::get_decoded_with_param(&DapVersion::Draft02, &resp.payload)
+                    .unwrap();
+            assert_eq!(a_job_resp.transitions.len(), 2);
+            assert_matches!(
+                a_job_resp.transitions[0].var,
+                TransitionVar::Failed(crate::messages::TransitionFailure::ReportReplayed)
+            );
+            assert_matches!(a_job_resp.transitions[1].var, TransitionVar::Finished);
+        };
+
+        let Some(metric) = test
+            .prometheus_registry
+            .gather()
+            .into_iter()
+            .find(|metric| metric.get_name().ends_with("report_counter"))
+            .map(|mut m| m.take_metric())
+        else {
+            panic!("report_counter metric no found");
+        };
+
+        let Some(aggregated_counter) = metric
+            .iter()
+            .find(|m| m.get_label().iter().any(|l| l.get_value() == "aggregated"))
+            .map(|m| m.get_counter())
+        else {
+            panic!("`aggregated` metric was not registered");
+        };
+
+        assert_eq!(aggregated_counter.get_value(), 3.0);
+
+        let Some(rejected_counter) = metric
+            .iter()
+            .find(|m| {
+                m.get_label()
+                    .iter()
+                    .any(|l| l.get_value() == "rejected_report_replayed")
+            })
+            .map(|m| m.get_counter())
+        else {
+            panic!("`rejected_report_replayed` metric was not registered");
+        };
+
+        assert_eq!(rejected_counter.get_value(), 1.0);
+    }
+}

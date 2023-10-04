@@ -278,7 +278,6 @@ mod test {
             let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
             let leader_url = Url::parse("https://leader.com/v02/").unwrap();
             let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
-            let time_precision = 3600;
             let collector_hpke_receiver_config =
                 HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
 
@@ -294,8 +293,8 @@ mod test {
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
                     leader_url: leader_url.clone(),
                     helper_url: helper_url.clone(),
-                    time_precision,
-                    expiration: now + 3600,
+                    time_precision: Self::TASK_TIME_PRECISION,
+                    expiration: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config.clone(),
@@ -310,8 +309,8 @@ mod test {
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
                     leader_url: leader_url.clone(),
                     helper_url: helper_url.clone(),
-                    time_precision,
-                    expiration: now + 3600,
+                    time_precision: Self::TASK_TIME_PRECISION,
+                    expiration: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::FixedSize { max_batch_size: 2 },
                     vdaf: vdaf_config.clone(),
@@ -326,7 +325,7 @@ mod test {
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
                     leader_url,
                     helper_url,
-                    time_precision,
+                    time_precision: Self::TASK_TIME_PRECISION,
                     expiration: now, // Expires this second
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
@@ -452,7 +451,7 @@ mod test {
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
         version: DapVersion,
-        prometheus_registry: prometheus::Registry,
+        pub prometheus_registry: prometheus::Registry,
     }
 
     impl Test {
