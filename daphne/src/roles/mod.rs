@@ -837,7 +837,7 @@ mod test {
         let req = t
             .gen_test_agg_job_cont_req_with_round(
                 &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
-                Vec::default(),
+                agg_job_resp.transitions,
                 Some(2),
             )
             .await;
@@ -885,7 +885,7 @@ mod test {
         let req = t
             .gen_test_agg_job_cont_req_with_round(
                 &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
-                Vec::default(),
+                agg_job_resp.transitions,
                 Some(0),
             )
             .await;
