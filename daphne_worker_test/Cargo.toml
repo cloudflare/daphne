@@ -19,6 +19,7 @@ test_e2e = []
 test_acceptance = []
 
 [dependencies]
+cap.workspace = true
 cfg-if = "1.0.0"
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
