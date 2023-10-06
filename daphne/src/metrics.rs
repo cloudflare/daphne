@@ -22,6 +22,9 @@ pub struct DaphneMetrics {
 
     /// Helper: Number of records in an incoming AggregationJobInitReq.
     aggregation_job_batch_size_histogram: HistogramVec,
+
+    /// Helper: Number of times replays caused the aggregation to be retried.
+    aggregation_job_continue_repeats_due_to_replays: IntCounterVec,
 }
 
 impl DaphneMetrics {
@@ -69,11 +72,21 @@ impl DaphneMetrics {
         )
         .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_counter"))?;
 
+        let aggregation_job_continue_repeats_due_to_replays =
+            register_int_counter_vec_with_registry!(
+                format!("{front}aggregation_continuation_repeats_due_to_replays"),
+                "Total number of times the aggregation continuation was restarted due to replayed reports",
+                &["host"],
+                registry
+            )
+            .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_continuation_repeats_due_to_replays"))?;
+
         Ok(Self {
             inbound_request_counter,
             report_counter,
             aggregation_job_counter,
             aggregation_job_batch_size_histogram,
+            aggregation_job_continue_repeats_due_to_replays,
         })
     }
 
@@ -130,6 +143,13 @@ impl ContextualizedDaphneMetrics<'_> {
         self.metrics
             .aggregation_job_counter
             .with_label_values(&[self.host, "completed"])
+            .inc();
+    }
+
+    pub fn agg_job_cont_restarted_inc(&self) {
+        self.metrics
+            .aggregation_job_continue_repeats_due_to_replays
+            .with_label_values(&[self.host])
             .inc();
     }
 }
