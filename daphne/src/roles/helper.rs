@@ -236,7 +236,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
                 if let Some(replayed) = replayed {
                     replayed_reports.extend(replayed);
-                    // TODO: register a metric to track the number of times this happens
+                    metrics.agg_job_cont_restarted_inc();
                 } else {
                     break (out_shares_count, agg_job_resp);
                 }
