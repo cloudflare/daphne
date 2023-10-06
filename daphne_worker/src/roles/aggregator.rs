@@ -142,11 +142,10 @@ impl DapReportInitializer for DaphneWorker<'_> {
                 if let Some(initialized_report) = initialized_reports.get_mut(&metadata.id) {
                     let processed = match initialized_report {
                         EarlyReportStateInitialized::Ready { .. } => false,
-                        EarlyReportStateInitialized::Rejected { failure, .. }
-                            if matches!(failure, TransitionFailure::ReportReplayed) =>
-                        {
-                            true
-                        }
+                        EarlyReportStateInitialized::Rejected {
+                            failure: TransitionFailure::ReportReplayed,
+                            ..
+                        } => true,
                         EarlyReportStateInitialized::Rejected { .. } => {
                             continue;
                         }
