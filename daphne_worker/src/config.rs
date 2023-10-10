@@ -900,23 +900,28 @@ impl<'srv> DaphneWorker<'srv> {
             .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
 
         // VDAF config.
-        let vdaf = match (cmd.vdaf.typ.as_ref(), cmd.vdaf.bits, cmd.vdaf.length) {
-            ("Prio3Count", None, None) => VdafConfig::Prio3(Prio3Config::Count),
-            ("Prio3Sum", Some(bits), None) => {
-                let bits = bits.parse().map_err(int_err)?;
-                VdafConfig::Prio3(Prio3Config::Sum { bits })
+        let vdaf = match (
+            cmd.vdaf.typ.as_ref(),
+            cmd.vdaf.bits,
+            cmd.vdaf.length,
+            cmd.vdaf.chunk_length,
+        ) {
+            ("Prio3Count", None, None, None) => VdafConfig::Prio3(Prio3Config::Count),
+            ("Prio3Sum", Some(bits), None, None) => VdafConfig::Prio3(Prio3Config::Sum {
+                bits: bits.parse().map_err(int_err)?,
+            }),
+            ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)) => {
+                VdafConfig::Prio3(Prio3Config::SumVec {
+                    bits: bits.parse().map_err(int_err)?,
+                    length: length.parse().map_err(int_err)?,
+                    chunk_length: chunk_length.parse().map_err(int_err)?,
+                })
             }
-            ("Prio3SumVec", Some(bits), Some(length)) => {
-                let bits = bits.parse().map_err(int_err)?;
-                let len = length.parse().map_err(int_err)?;
-                VdafConfig::Prio3(Prio3Config::SumVec { bits, len })
-            }
-            // NOTE: the VDAF-06 format is not supported yet
-            // https://datatracker.ietf.org/doc/html/draft-dcook-ppm-dap-interop-test-design-04#name-internal-test-add_task
-            // Issue tracked here: https://github.com/divergentdave/draft-dcook-ppm-dap-interop-test-design/issues/40
-            ("Prio3Histogram", Some(len), None) => {
-                let len = len.parse().map_err(int_err)?;
-                VdafConfig::Prio3(Prio3Config::Histogram { len })
+            ("Prio3Histogram", None, Some(length), Some(chunk_length)) => {
+                VdafConfig::Prio3(Prio3Config::Histogram {
+                    length: length.parse().map_err(int_err)?,
+                    chunk_length: chunk_length.parse().map_err(int_err)?,
+                })
             }
             _ => return Err(int_err("command failed: unrecognized VDAF")),
         };

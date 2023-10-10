@@ -21,7 +21,8 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
         (
             VdafConfig::Prio3(Prio3Config::SumVec {
                 bits: 1,
-                len: dimension,
+                length: dimension,
+                chunk_length: 1,
             }),
             DapMeasurement::U128Vec(vec![1; dimension]),
         ),

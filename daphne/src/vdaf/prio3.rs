@@ -33,8 +33,14 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_count(2)?;
             shard(vdaf, &measurement, nonce)
         }
-        (Prio3Config::Histogram { len }, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+        (
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            },
+            DapMeasurement::U64(measurement),
+        ) => {
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let m: usize = measurement.try_into().unwrap();
             shard(vdaf, &m, nonce)
         }
@@ -42,8 +48,15 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_sum(2, *bits)?;
             shard(vdaf, &(measurement as u128), nonce)
         }
-        (Prio3Config::SumVec { bits, len }, DapMeasurement::U128Vec(measurement)) => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+        (
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            },
+            DapMeasurement::U128Vec(measurement),
+        ) => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             shard(vdaf, &measurement, nonce)
         }
         _ => panic!("prio3_shard: unexpected VDAF config {config:?}"),
@@ -56,7 +69,7 @@ pub(crate) fn prio3_shard(
     ) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError>
     where
         T: prio::flp::Type,
-        P: prio::vdaf::prg::Prg<SEED_SIZE>,
+        P: prio::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Split measurement into input shares.
         let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
@@ -96,8 +109,11 @@ pub(crate) fn prio3_prepare_init(
                 VdafPrepMessage::Prio3ShareField64(share),
             ))
         }
-        Prio3Config::Histogram { len } => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+        Prio3Config::Histogram {
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -126,8 +142,12 @@ pub(crate) fn prio3_prepare_init(
                 VdafPrepMessage::Prio3ShareField128(share),
             ))
         }
-        Prio3Config::SumVec { bits, len } => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+        Prio3Config::SumVec {
+            bits,
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -158,7 +178,7 @@ pub(crate) fn prio3_prepare_init(
     ) -> Result<Prio3Prepared<T, SEED_SIZE>, VdafError>
     where
         T: prio::flp::Type,
-        P: prio::vdaf::prg::Prg<SEED_SIZE>,
+        P: prio::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Parse the public share.
         let public_share = Prio3PublicShare::get_decoded_with_param(&vdaf, public_share_data)?;
@@ -191,11 +211,14 @@ pub(crate) fn prio3_leader_prepare_finish(
             (agg_share, outbound)
         }
         (
-            Prio3Config::Histogram { len },
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            },
             VdafPrepState::Prio3Field128(state),
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -211,11 +234,15 @@ pub(crate) fn prio3_leader_prepare_finish(
             (agg_share, outbound)
         }
         (
-            Prio3Config::SumVec { bits, len },
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            },
             VdafPrepState::Prio3Field128(state),
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
@@ -233,18 +260,18 @@ pub(crate) fn prio3_leader_prepare_finish(
     ) -> Result<(OutputShare<T::Field>, Vec<u8>), VdafError>
     where
         T: prio::flp::Type,
-        P: prio::vdaf::prg::Prg<SEED_SIZE>,
+        P: prio::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Decode the Helper's inbound message.
         let helper_share =
             Prio3PrepareShare::get_decoded_with_param(&leader_state, helper_share_data)?;
 
         // Preprocess the inbound messages.
-        let message = vdaf.prepare_preprocess([leader_share, helper_share])?;
+        let message = vdaf.prepare_shares_to_prepare_message(&(), [leader_share, helper_share])?;
         let message_data = message.get_encoded();
 
         // Compute the leader's output share.
-        match vdaf.prepare_step(leader_state, message)? {
+        match vdaf.prepare_next(leader_state, message)? {
             PrepareTransition::Continue(..) => {
                 panic!("prio3_leader_prepare_finish: {ERR_EXPECT_FINISH}")
             }
@@ -265,8 +292,14 @@ pub(crate) fn prio3_helper_prepare_finish(
             let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::Histogram { len }, VdafPrepState::Prio3Field128(state)) => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+        (
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            },
+            VdafPrepState::Prio3Field128(state),
+        ) => {
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -275,8 +308,15 @@ pub(crate) fn prio3_helper_prepare_finish(
             let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        (Prio3Config::SumVec { bits, len }, VdafPrepState::Prio3Field128(state)) => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+        (
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            },
+            VdafPrepState::Prio3Field128(state),
+        ) => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -292,7 +332,7 @@ pub(crate) fn prio3_helper_prepare_finish(
     ) -> Result<OutputShare<T::Field>, VdafError>
     where
         T: prio::flp::Type,
-        P: prio::vdaf::prg::Prg<SEED_SIZE>,
+        P: prio::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Decode the inbound message from the Leader, which contains the preprocessed prepare
         // message.
@@ -300,7 +340,7 @@ pub(crate) fn prio3_helper_prepare_finish(
             Prio3PrepareMessage::get_decoded_with_param(&helper_state, leader_message_data)?;
 
         // Compute the Helper's output share.
-        match vdaf.prepare_step(helper_state, leader_message)? {
+        match vdaf.prepare_next(helper_state, leader_message)? {
             PrepareTransition::Continue(..) => {
                 panic!("prio3_helper_prepare_finish: {ERR_EXPECT_FINISH}")
             }
@@ -322,8 +362,11 @@ pub(crate) fn prio3_decode_prepare_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
-        Prio3Config::Histogram { len } => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+        Prio3Config::Histogram {
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -334,8 +377,12 @@ pub(crate) fn prio3_decode_prepare_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
-        Prio3Config::SumVec { bits, len } => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+        Prio3Config::SumVec {
+            bits,
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -355,8 +402,11 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64(agg_res))
         }
-        Prio3Config::Histogram { len } => {
-            let vdaf = Prio3::new_histogram(2, *len)?;
+        Prio3Config::Histogram {
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
@@ -365,8 +415,12 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128(agg_res))
         }
-        Prio3Config::SumVec { bits, len } => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *len)?;
+        Prio3Config::SumVec {
+            bits,
+            length,
+            chunk_length,
+        } => {
+            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
@@ -379,7 +433,7 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
     ) -> Result<T::AggregateResult, VdafError>
     where
         T: prio::flp::Type,
-        P: prio::vdaf::prg::Prg<SEED_SIZE>,
+        P: prio::vdaf::xof::Xof<SEED_SIZE>,
         M: IntoIterator<Item = Vec<u8>>,
     {
         let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
@@ -429,7 +483,10 @@ mod test {
     #[test]
     fn prepare_histogram() {
         test_prepare(
-            &Prio3Config::Histogram { len: 3 },
+            &Prio3Config::Histogram {
+                length: 3,
+                chunk_length: 1,
+            },
             DapMeasurement::U64(2),
             DapAggregateResult::U128Vec(vec![0, 0, 1]),
         )
@@ -439,14 +496,22 @@ mod test {
     #[test]
     fn prepare_sum_vec() {
         test_prepare(
-            &Prio3Config::SumVec { bits: 23, len: 1 },
+            &Prio3Config::SumVec {
+                bits: 23,
+                length: 1,
+                chunk_length: 1,
+            },
             DapMeasurement::U128Vec(vec![(1 << 23) - 1]),
             DapAggregateResult::U128Vec(vec![(1 << 23) - 1]),
         )
         .unwrap();
 
         test_prepare(
-            &Prio3Config::SumVec { bits: 23, len: 3 },
+            &Prio3Config::SumVec {
+                bits: 23,
+                length: 3,
+                chunk_length: 1,
+            },
             DapMeasurement::U128Vec(vec![1, 0, 42]),
             DapAggregateResult::U128Vec(vec![1, 0, 42]),
         )

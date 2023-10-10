@@ -237,17 +237,15 @@ impl From<VdafTypeVar> for VdafConfig {
     fn from(var: VdafTypeVar) -> Self {
         match var {
             VdafTypeVar::Prio3Aes128Count => VdafConfig::Prio3(Prio3Config::Count),
-            VdafTypeVar::Prio3Aes128Histogram { len } => {
-                VdafConfig::Prio3(Prio3Config::Histogram {
-                    len: len.try_into().unwrap(),
-                })
-            }
             VdafTypeVar::Prio3Aes128Sum { bit_length } => VdafConfig::Prio3(Prio3Config::Sum {
                 bits: bit_length.into(),
             }),
             VdafTypeVar::Poplar1Aes128 { .. } | VdafTypeVar::NotImplemented(..) => {
                 unreachable!("VDAF not implemented")
             }
+            // TODO(cjpatton) taskprov-02 is incompatible with VDAF-07 because Prio3Histgram now
+            // has an additional parameter. See https://github.com/cloudflare/daphne/issues/386.
+            VdafTypeVar::Prio3Aes128Histogram { .. } => panic!("issue #386"),
         }
     }
 }
@@ -372,7 +370,7 @@ mod test {
             task_expiration: 0x6352f9a5,
             vdaf_config: VdafConfig {
                 dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio3Aes128Histogram { len: 3 },
+                var: VdafTypeVar::Prio3Aes128Count,
             },
         };
 

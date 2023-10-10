@@ -1484,17 +1484,17 @@ mod test {
             ) => {
                 let vdaf = Prio3::new_count(2).unwrap();
                 let message = vdaf
-                    .prepare_preprocess([leader_share, helper_share])
+                    .prepare_shares_to_prepare_message(&(), [leader_share, helper_share])
                     .unwrap();
 
                 let leader_out_share = assert_matches!(
-                    vdaf.prepare_step(leader_step, message.clone()).unwrap(),
+                    vdaf.prepare_next(leader_step, message.clone()).unwrap(),
                     PrepareTransition::Finish(out_share) => out_share
                 );
                 let leader_agg_share = vdaf.aggregate(&(), [leader_out_share]).unwrap();
 
                 let helper_out_share = assert_matches!(
-                    vdaf.prepare_step(helper_step, message).unwrap(),
+                    vdaf.prepare_next(helper_step, message).unwrap(),
                     PrepareTransition::Finish(out_share) => out_share
                 );
                 let helper_agg_share = vdaf.aggregate(&(), [helper_out_share]).unwrap();

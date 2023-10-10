@@ -71,8 +71,8 @@ pub(crate) fn prio2_leader_prepare_finish(
         (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
             let helper_share =
                 Prio2PrepareShare::get_decoded_with_param(&state, helper_share_data)?;
-            vdaf.prepare_preprocess([share, helper_share])?;
-            match vdaf.prepare_step(state, ())? {
+            vdaf.prepare_shares_to_prepare_message(&(), [share, helper_share])?;
+            match vdaf.prepare_next(state, ())? {
                 PrepareTransition::Continue(..) => {
                     panic!("prio2_leader_prepare_finish: unexpected transition (continued)")
                 }
@@ -94,7 +94,7 @@ pub(crate) fn prio2_helper_prepare_finish(
     let vdaf = Prio2::new(dimension)?;
     <()>::get_decoded(leader_message_data)?;
     let out_share = match helper_state {
-        VdafPrepState::Prio2(state) => match vdaf.prepare_step(state, ())? {
+        VdafPrepState::Prio2(state) => match vdaf.prepare_next(state, ())? {
             PrepareTransition::Continue(..) => {
                 panic!("prio2_helper_prepare_finish: unexpected transition (continued)")
             }
