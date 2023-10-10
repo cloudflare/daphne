@@ -742,26 +742,37 @@ pub enum Prio3Config {
     /// equal to `0` or `1`.
     Count,
 
-    /// A histogram for estimating the distribution of 64-bit, unsigned integers where each
-    /// measurement is a bucket index in range `[0, len)`.
-    Histogram { len: usize },
-
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
     /// 2^bits)`.
     Sum { bits: usize },
 
+    /// A histogram for estimating the distribution of 64-bit, unsigned integers where each
+    /// measurement is a bucket index in range `[0, len)`.
+    Histogram { length: usize, chunk_length: usize },
+
     /// The element-wise sum of vectors. Each vector has `len` elements.
     /// Each element is a 64-bit unsigned integer in range `[0,2^bits)`.
-    SumVec { bits: usize, len: usize },
+    SumVec {
+        bits: usize,
+        length: usize,
+        chunk_length: usize,
+    },
 }
 
 impl Display for Prio3Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Prio3Config::Count => write!(f, "Count"),
-            Prio3Config::Histogram { len } => write!(f, "Histogram({len})"),
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            } => write!(f, "Histogram({length},{chunk_length})"),
             Prio3Config::Sum { bits } => write!(f, "Sum({bits})"),
-            Prio3Config::SumVec { bits, len } => write!(f, "SumVec({bits},{len})"),
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            } => write!(f, "SumVec({bits},{length},{chunk_length})"),
         }
     }
 }
