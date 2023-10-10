@@ -218,7 +218,16 @@ pub trait DapHelper<S>: DapAggregator<S> {
         // won't happen often enough that it matters.
         let (out_shares_count, agg_job_resp) = {
             let mut replayed_reports = HashSet::new();
+            let mut retry_count = 3;
             loop {
+                if retry_count < 1 {
+                    // we need to prevent an attacker from keeping this loop running for too long,
+                    // potentialy enabling an DOS attack.
+                    return Err(DapAbort::BadRequest(
+                        "AggregationJobContinueReq contained too many replays".into(),
+                    ));
+                }
+                retry_count -= 1;
                 let (agg_share_span, agg_job_resp) = task_config.vdaf.handle_agg_job_cont_req(
                     task_id,
                     task_config,
