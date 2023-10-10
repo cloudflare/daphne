@@ -18,10 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 // VDAF type codes.
-const VDAF_TYPE_PRIO3_AES128_COUNT: u32 = 0x00000000;
-const VDAF_TYPE_PRIO3_AES128_SUM: u32 = 0x00000001;
-const VDAF_TYPE_PRIO3_AES128_HISTOGRAM: u32 = 0x00000002;
-const VDAF_TYPE_POPLAR1_AES128: u32 = 0x00001000; // The gap from the previous constant is intentional
+const VDAF_TYPE_PRIO2: u32 = 0xFFFF0000;
 
 // Differential privacy mechanism types.
 const DP_MECHANISM_NONE: u8 = 0x01;
@@ -30,20 +27,14 @@ const DP_MECHANISM_NONE: u8 = 0x01;
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VdafType {
-    Prio3Aes128Count,
-    Prio3Aes128Sum,
-    Prio3Aes128Histogram,
-    Poplar1Aes128,
+    Prio2,
     NotImplemented(u32),
 }
 
 impl KeyType for VdafType {
     fn len(&self) -> usize {
         match self {
-            VdafType::Prio3Aes128Count => 16,
-            VdafType::Prio3Aes128Sum => 16,
-            VdafType::Prio3Aes128Histogram => 16,
-            VdafType::Poplar1Aes128 => 16,
+            VdafType::Prio2 => 32,
             _ => panic!("tried to get key length for undefined VDAF"),
         }
     }
@@ -52,30 +43,16 @@ impl KeyType for VdafType {
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub enum VdafTypeVar {
-    Prio3Aes128Count,
-    Prio3Aes128Sum { bit_length: u8 },
-    // NOTE: this doesn't comply with the TaskProv spec, which doesn't match the VDAF-06 spec.
-    // Tracking the issue here: https://github.com/wangshan/draft-wang-ppm-dap-taskprov/issues/33.
-    Prio3Aes128Histogram { len: u32 },
-    Poplar1Aes128 { bit_length: u16 },
+    Prio2 { dimension: u32 },
     NotImplemented(u32),
 }
 
 impl Encode for VdafTypeVar {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match &self {
-            VdafTypeVar::Prio3Aes128Count => VDAF_TYPE_PRIO3_AES128_COUNT.encode(bytes),
-            VdafTypeVar::Prio3Aes128Sum { bit_length } => {
-                VDAF_TYPE_PRIO3_AES128_SUM.encode(bytes);
-                bit_length.encode(bytes);
-            }
-            VdafTypeVar::Prio3Aes128Histogram { len } => {
-                VDAF_TYPE_PRIO3_AES128_HISTOGRAM.encode(bytes);
-                len.encode(bytes);
-            }
-            VdafTypeVar::Poplar1Aes128 { bit_length } => {
-                VDAF_TYPE_POPLAR1_AES128.encode(bytes);
-                bit_length.encode(bytes);
+            VdafTypeVar::Prio2 { dimension } => {
+                VDAF_TYPE_PRIO2.encode(bytes);
+                dimension.encode(bytes);
             }
             VdafTypeVar::NotImplemented(x) => {
                 x.encode(bytes);
@@ -88,15 +65,8 @@ impl Decode for VdafTypeVar {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         let x = u32::decode(bytes)?;
         match x {
-            VDAF_TYPE_PRIO3_AES128_COUNT => Ok(Self::Prio3Aes128Count),
-            VDAF_TYPE_PRIO3_AES128_SUM => Ok(Self::Prio3Aes128Sum {
-                bit_length: u8::decode(bytes)?,
-            }),
-            VDAF_TYPE_PRIO3_AES128_HISTOGRAM => Ok(Self::Prio3Aes128Histogram {
-                len: u32::decode(bytes)?,
-            }),
-            VDAF_TYPE_POPLAR1_AES128 => Ok(Self::Poplar1Aes128 {
-                bit_length: u16::decode(bytes)?,
+            VDAF_TYPE_PRIO2 => Ok(Self::Prio2 {
+                dimension: u32::decode(bytes)?,
             }),
             _ => Err(CodecError::UnexpectedValue),
         }
@@ -106,10 +76,7 @@ impl Decode for VdafTypeVar {
 impl From<VdafTypeVar> for VdafType {
     fn from(var: VdafTypeVar) -> Self {
         match var {
-            VdafTypeVar::Prio3Aes128Count => VdafType::Prio3Aes128Count,
-            VdafTypeVar::Prio3Aes128Histogram { .. } => VdafType::Prio3Aes128Histogram,
-            VdafTypeVar::Prio3Aes128Sum { .. } => VdafType::Prio3Aes128Sum,
-            VdafTypeVar::Poplar1Aes128 { .. } => VdafType::Poplar1Aes128,
+            VdafTypeVar::Prio2 { .. } => VdafType::Prio2,
             VdafTypeVar::NotImplemented(x) => VdafType::NotImplemented(x),
         }
     }

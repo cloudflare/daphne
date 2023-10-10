@@ -8,9 +8,8 @@ use crate::{
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
         Extension, ReportMetadata, TaskId,
     },
-    vdaf::VdafVerifyKey,
-    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, Prio3Config,
-    VdafConfig,
+    vdaf::{VdafVerifyKey, VDAF_VERIFY_KEY_SIZE_PRIO2},
+    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, VdafConfig,
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -79,10 +78,10 @@ pub(crate) fn expand_prk_into_verify_key(
     // and it won't be, so we unwrap().
     let okm = prk.expand(&info, vdaf_type).unwrap();
     match &vdaf_type {
-        VdafType::Prio3Aes128Count | VdafType::Prio3Aes128Sum | VdafType::Prio3Aes128Histogram => {
-            let mut bytes = [0u8; 16];
+        VdafType::Prio2 => {
+            let mut bytes = [0u8; VDAF_VERIFY_KEY_SIZE_PRIO2];
             okm.fill(&mut bytes[..]).unwrap();
-            VdafVerifyKey::Prio3(bytes)
+            VdafVerifyKey::Prio2(bytes)
         }
         _ => panic!("Unknown VDAF type"),
     }
@@ -236,16 +235,13 @@ impl From<QueryConfigVar> for DapQueryConfig {
 impl From<VdafTypeVar> for VdafConfig {
     fn from(var: VdafTypeVar) -> Self {
         match var {
-            VdafTypeVar::Prio3Aes128Count => VdafConfig::Prio3(Prio3Config::Count),
-            VdafTypeVar::Prio3Aes128Sum { bit_length } => VdafConfig::Prio3(Prio3Config::Sum {
-                bits: bit_length.into(),
-            }),
-            VdafTypeVar::Poplar1Aes128 { .. } | VdafTypeVar::NotImplemented(..) => {
+            VdafTypeVar::Prio2 { dimension } => VdafConfig::Prio2 {
+                dimension: dimension.try_into().expect("u32 does not fit into usize"),
+            },
+            // TODO(cjpatton) Don't panic (opt-out instead).
+            VdafTypeVar::NotImplemented(..) => {
                 unreachable!("VDAF not implemented")
             }
-            // TODO(cjpatton) taskprov-02 is incompatible with VDAF-07 because Prio3Histgram now
-            // has an additional parameter. See https://github.com/cloudflare/daphne/issues/386.
-            VdafTypeVar::Prio3Aes128Histogram { .. } => panic!("issue #386"),
         }
     }
 }
@@ -332,14 +328,14 @@ mod test {
             TaskprovVersion::Draft02,
             &verify_key_init,
             &task_id,
-            VdafType::Prio3Aes128Count,
+            VdafType::Prio2,
         );
-        let expected: [u8; 16] = [
-            0xfb, 0xd1, 0x7d, 0xb5, 0x39, 0x0f, 0x94, 0x9e, 0xe3, 0x2d, 0x26, 0x34, 0xdc, 0x49,
-            0x9f, 0x5b,
+        let expected: [u8; 32] = [
+            251, 209, 125, 181, 57, 15, 148, 158, 227, 45, 38, 52, 220, 73, 159, 91, 145, 40, 123,
+            204, 49, 124, 7, 97, 221, 4, 232, 53, 194, 171, 19, 51,
         ];
         match &vk {
-            VdafVerifyKey::Prio3(bytes) => assert_eq!(*bytes, expected),
+            VdafVerifyKey::Prio2(bytes) => assert_eq!(*bytes, expected),
             _ => unreachable!(),
         }
     }
@@ -370,7 +366,7 @@ mod test {
             task_expiration: 0x6352f9a5,
             vdaf_config: VdafConfig {
                 dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio3Aes128Count,
+                var: VdafTypeVar::Prio2 { dimension: 10 },
             },
         };
 

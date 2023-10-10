@@ -56,6 +56,9 @@ const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
 const CTX_ROLE_HELPER: u8 = 3;
 
+pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO3: usize = 16;
+pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO2: usize = 32;
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
     #[error("{0}")]
@@ -69,8 +72,8 @@ pub(crate) enum VdafError {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafVerifyKey {
-    Prio3(#[serde(with = "hex")] [u8; 16]),
-    Prio2(#[serde(with = "hex")] [u8; 32]),
+    Prio3(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO3]),
+    Prio2(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO2]),
 }
 
 impl AsRef<[u8]> for VdafVerifyKey {
