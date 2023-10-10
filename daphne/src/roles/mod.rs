@@ -1896,7 +1896,7 @@ mod test {
 
     async fn e2e_taskprov(version: DapVersion) {
         let t = Test::new(version);
-        let vdaf = VdafConfig::Prio3(Prio3Config::Count);
+        let vdaf = VdafConfig::Prio2 { dimension: 10 };
 
         // Create the upload extension.
         let taskprov_ext_payload = taskprov::TaskConfig {
@@ -1918,11 +1918,11 @@ mod test {
             task_expiration: t.now + 86400 * 14,
             vdaf_config: taskprov::VdafConfig {
                 dp_config: taskprov::DpConfig::None,
-                var: taskprov::VdafTypeVar::Prio3Aes128Count,
+                var: taskprov::VdafTypeVar::Prio2 { dimension: 10 },
             },
         }
         .get_encoded_with_param(&t.helper.global_config.taskprov_version.unwrap());
-        let taskprov_id = crate::taskprov::compute_task_id(
+        let taskprov_id = super::taskprov::compute_task_id(
             t.helper.global_config.taskprov_version.unwrap(),
             &taskprov_ext_payload,
         );
@@ -1947,7 +1947,7 @@ mod test {
                 &hpke_config_list,
                 t.now,
                 &taskprov_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 vec![Extension::Taskprov {
                     payload: taskprov_ext_payload,
                 }],

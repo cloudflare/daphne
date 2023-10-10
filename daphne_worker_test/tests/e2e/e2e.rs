@@ -350,46 +350,63 @@ async fn leader_upload_taskprov() {
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = "upload";
 
+    let taskprov_vdaf_config = VdafConfig {
+        dp_config: DpConfig::None,
+        var: VdafTypeVar::Prio2 { dimension: 10 },
+    };
+
     // Generate and upload a report with taskprov.
     //
     // We have to make this by hand as if we cut and paste a pre-serialized one it
     // will have an expiring task.
-    let taskprov_task_config = TaskConfig {
-        task_info: "Hi".as_bytes().to_vec(),
-        aggregator_endpoints: vec![
-            UrlBytes {
-                bytes: "https://test1".as_bytes().to_vec(),
+    let (task_config, task_id, taskprov_task_config) = {
+        let taskprov_task_config = TaskConfig {
+            task_info: "Hi".as_bytes().to_vec(),
+            aggregator_endpoints: vec![
+                UrlBytes {
+                    bytes: "https://test1".as_bytes().to_vec(),
+                },
+                UrlBytes {
+                    bytes: "https://test2".as_bytes().to_vec(),
+                },
+            ],
+            query_config: QueryConfig {
+                time_precision: 0x01,
+                max_batch_query_count: 128,
+                min_batch_size: 1024,
+                var: QueryConfigVar::FixedSize {
+                    max_batch_size: 2048,
+                },
             },
-            UrlBytes {
-                bytes: "https://test2".as_bytes().to_vec(),
-            },
-        ],
-        query_config: QueryConfig {
-            time_precision: 0x01,
-            max_batch_query_count: 128,
-            min_batch_size: 1024,
-            var: QueryConfigVar::FixedSize {
-                max_batch_size: 2048,
-            },
-        },
-        task_expiration: t.now + 86400,
-        vdaf_config: VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Count,
-        },
+            task_expiration: t.now + 86400,
+            vdaf_config: taskprov_vdaf_config.clone(),
+        };
+        let task_id = compute_task_id(
+            TaskprovVersion::Draft02,
+            &taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
+        );
+        let task_config = DapTaskConfig::try_from_taskprov(
+            version,
+            TaskprovVersion::Draft02,
+            &task_id,
+            taskprov_task_config.clone(),
+            &t.taskprov_vdaf_verify_key_init,
+            &t.taskprov_collector_hpke_receiver.config,
+        )
+        .unwrap();
+        (task_config, task_id, taskprov_task_config)
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
-    let extensions = vec![Extension::Taskprov { payload }];
-    let report = t
-        .task_config
+
+    let report = task_config
         .vdaf
         .produce_report_with_extensions(
             &hpke_config_list,
             t.now,
             &task_id,
-            DapMeasurement::U64(23),
-            extensions,
+            DapMeasurement::U32Vec(vec![1; 10]),
+            vec![Extension::Taskprov {
+                payload: taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
+            }],
             version,
         )
         .unwrap();
@@ -407,14 +424,13 @@ async fn leader_upload_taskprov() {
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
     let task_id = compute_task_id(TaskprovVersion::Draft02, &bad_payload);
     let extensions = vec![Extension::Taskprov { payload }];
-    let report = t
-        .task_config
+    let report = task_config
         .vdaf
         .produce_report_with_extensions(
             &hpke_config_list,
             t.now,
             &task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![1; 10]),
             extensions,
             version,
         )
@@ -439,14 +455,13 @@ async fn leader_upload_taskprov() {
         },
         Extension::Taskprov { payload },
     ];
-    let report = t
-        .task_config
+    let report = task_config
         .vdaf
         .produce_report_with_extensions(
             &hpke_config_list,
             t.now,
             &task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![1; 10]),
             extensions,
             version,
         )
@@ -480,22 +495,18 @@ async fn leader_upload_taskprov() {
             },
         },
         task_expiration: t.now + 86400,
-        vdaf_config: VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Count,
-        },
+        vdaf_config: taskprov_vdaf_config,
     };
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
     let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
     let extensions = vec![Extension::Taskprov { payload }];
-    let report = t
-        .task_config
+    let report = task_config
         .vdaf
         .produce_report_with_extensions(
             &hpke_config_list,
             t.now,
             &task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![1; 10]),
             extensions,
             version,
         )
@@ -1365,7 +1376,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         task_expiration: t.now + 86400 * 14,
         vdaf_config: VdafConfig {
             dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3Aes128Sum { bit_length: 10 },
+            var: VdafTypeVar::Prio2 { dimension: 10 },
         },
     };
     let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
@@ -1398,7 +1409,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     extensions,
                     version,
                 )
@@ -1474,7 +1485,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(task_config.min_batch_size as u128)
+        DapAggregateResult::U32Vec(vec![10, 10, 10, 10, 10, 10, 10, 10, 10, 10]),
     );
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
