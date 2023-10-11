@@ -1265,7 +1265,68 @@ mod test {
     }
 
     #[test]
-    fn read_agg_job_init_req() {
+    fn read_agg_job_init_req_draft02() {
+        const TEST_DATA: &[u8] = &[
+            23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
+            23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 32, 116, 104, 105, 115, 32, 105,
+            115, 32, 97, 110, 32, 97, 103, 103, 114, 101, 103, 97, 116, 105, 111, 110, 32, 112, 97,
+            114, 97, 109, 101, 116, 101, 114, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 134, 99, 99, 99, 99, 99, 99, 99,
+            99, 99, 99, 99, 99, 99, 99, 99, 99, 0, 0, 0, 0, 97, 152, 38, 185, 0, 0, 0, 0, 0, 12,
+            112, 117, 98, 108, 105, 99, 32, 115, 104, 97, 114, 101, 23, 0, 16, 101, 110, 99, 97,
+            112, 115, 117, 108, 97, 116, 101, 100, 32, 107, 101, 121, 0, 0, 0, 10, 99, 105, 112,
+            104, 101, 114, 116, 101, 120, 116, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
+            17, 17, 17, 0, 0, 0, 0, 9, 194, 107, 103, 0, 0, 0, 0, 0, 12, 112, 117, 98, 108, 105,
+            99, 32, 115, 104, 97, 114, 101, 0, 0, 0, 0, 0, 0, 10, 99, 105, 112, 104, 101, 114, 116,
+            101, 120, 116,
+        ];
+
+        let got =
+            AggregationJobInitReq::get_decoded_with_param(&DapVersion::Draft02, TEST_DATA).unwrap();
+        assert_eq!(
+            got,
+            AggregationJobInitReq {
+                draft02_task_id: Some(TaskId([23; 32])),
+                draft02_agg_job_id: Some(Draft02AggregationJobId([1; 32])),
+                agg_param: b"this is an aggregation parameter".to_vec(),
+                part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+                    batch_id: BatchId([0; 32]),
+                },
+                report_shares: vec![
+                    ReportShare {
+                        report_metadata: ReportMetadata {
+                            id: ReportId([99; 16]),
+                            time: 1637361337,
+                            extensions: Vec::default(),
+                        },
+                        public_share: b"public share".to_vec(),
+                        encrypted_input_share: HpkeCiphertext {
+                            config_id: 23,
+                            enc: b"encapsulated key".to_vec(),
+                            payload: b"ciphertext".to_vec(),
+                        },
+                    },
+                    ReportShare {
+                        report_metadata: ReportMetadata {
+                            id: ReportId([17; 16]),
+                            time: 163736423,
+                            extensions: Vec::default(),
+                        },
+                        public_share: b"public share".to_vec(),
+                        encrypted_input_share: HpkeCiphertext {
+                            config_id: 0,
+                            enc: vec![],
+                            payload: b"ciphertext".to_vec(),
+                        },
+                    },
+                ],
+            },
+        );
+    }
+
+    #[test]
+    fn roundtrip_agg_job_init_req() {
         let want = AggregationJobInitReq {
             draft02_task_id: Some(TaskId([23; 32])),
             draft02_agg_job_id: Some(Draft02AggregationJobId([1; 32])),
@@ -1356,7 +1417,7 @@ mod test {
     }
 
     #[test]
-    fn read_agg_job_cont_req() {
+    fn roundtrip_agg_job_cont_req() {
         let want = AggregationJobContinueReq {
             draft02_task_id: Some(TaskId([23; 32])),
             draft02_agg_job_id: Some(Draft02AggregationJobId([1; 32])),
@@ -1371,6 +1432,14 @@ mod test {
                     var: TransitionVar::Continued(
                         b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                     ),
+                },
+                Transition {
+                    report_id: ReportId([2; 16]),
+                    var: TransitionVar::Finished,
+                },
+                Transition {
+                    report_id: ReportId([3; 16]),
+                    var: TransitionVar::Failed(TransitionFailure::ReportReplayed),
                 },
             ],
         };
@@ -1387,6 +1456,10 @@ mod test {
             draft02_agg_job_id: None,
             round: Some(1),
             transitions: vec![
+                Transition {
+                    report_id: ReportId([99; 16]),
+                    var: TransitionVar::Failed(TransitionFailure::BatchCollected),
+                },
                 Transition {
                     report_id: ReportId([0; 16]),
                     var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
@@ -1406,6 +1479,43 @@ mod test {
         )
         .unwrap();
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn read_agg_job_resp_draft02() {
+        const TEST_DATA: &[u8] = &[
+            0, 0, 0, 147, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 0, 0, 0,
+            0, 31, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 86, 68, 65, 70, 45, 115, 112, 101,
+            99, 105, 102, 105, 99, 32, 109, 101, 115, 115, 97, 103, 101, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 56, 98, 101, 108,
+            105, 101, 118, 101, 32, 105, 116, 32, 111, 114, 32, 110, 111, 116, 32, 116, 104, 105,
+            115, 32, 105, 115, 32, 42, 97, 108, 115, 111, 42, 32, 97, 32, 86, 68, 65, 70, 45, 115,
+            112, 101, 99, 105, 102, 105, 99, 32, 109, 101, 115, 115, 97, 103, 101, 17, 17, 17, 17,
+            17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 2, 7,
+        ];
+
+        let got = AggregationJobResp::get_decoded(TEST_DATA).unwrap();
+        assert_eq!(
+            got,
+            AggregationJobResp {
+                transitions: vec![
+                    Transition {
+                        report_id: ReportId([22; 16]),
+                        var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
+                    },
+                    Transition {
+                        report_id: ReportId([255; 16]),
+                        var: TransitionVar::Continued(
+                            b"believe it or not this is *also* a VDAF-specific message".to_vec(),
+                        ),
+                    },
+                    Transition {
+                        report_id: ReportId([17; 16]),
+                        var: TransitionVar::Failed(TransitionFailure::TaskExpired),
+                    },
+                ],
+            },
+        );
     }
 
     #[test]
