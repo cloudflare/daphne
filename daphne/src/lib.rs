@@ -9,9 +9,9 @@
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
 //! [VDAFs](https://github.com/cfrg/draft-irtf-cfrg-vdaf).
 //!
-//! Daphne implements draft-ietf-ppm-dap-02 and draft-ietf-ppm-dap-05.
+//! Daphne implements draft-ietf-ppm-dap-02 and draft-ietf-ppm-dap-07.
 //!
-//! **WARNING:** draft 05 is a work-in-progress. We are not yet compatible.
+//! **WARNING:** draft07 is a work-in-progress. We are not yet compatible.
 //!
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
@@ -89,8 +89,8 @@ pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
 
-    #[serde(rename = "v05")]
-    Draft05,
+    #[serde(rename = "v07")]
+    Draft07,
 
     #[serde(other)]
     #[serde(rename = "unknown_version")]
@@ -102,7 +102,7 @@ impl From<&str> for DapVersion {
     fn from(version: &str) -> Self {
         match version {
             "v02" => DapVersion::Draft02,
-            "v05" => DapVersion::Draft05,
+            "v07" => DapVersion::Draft07,
             _ => DapVersion::Unknown,
         }
     }
@@ -112,7 +112,7 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft02 => "v02",
-            DapVersion::Draft05 => "v05",
+            DapVersion::Draft07 => "v07",
             _ => unreachable!("tried to construct string from unknown DAP version"),
         }
     }
@@ -948,13 +948,13 @@ pub struct DapLeaderProcessTelemetry {
 }
 
 /// draft02 compatibility: A logical aggregation job ID. In the latest draft, this is a 32-byte
-/// string included in the HTTP request payload; in draft05, this is a 16-byte string included in
+/// string included in the HTTP request payload; in draft07, this is a 16-byte string included in
 /// the HTTP request path. This type unifies these into one type so that any protocol logic that
 /// is agnostic to these details can use the same object.
 #[derive(Clone, Debug)]
 pub enum MetaAggregationJobId<'a> {
     Draft02(Cow<'a, Draft02AggregationJobId>),
-    Draft05(Cow<'a, AggregationJobId>),
+    Draft07(Cow<'a, AggregationJobId>),
 }
 
 impl MetaAggregationJobId<'_> {
@@ -963,7 +963,7 @@ impl MetaAggregationJobId<'_> {
         let mut rng = thread_rng();
         match version {
             DapVersion::Draft02 => Self::Draft02(Cow::Owned(Draft02AggregationJobId(rng.gen()))),
-            DapVersion::Draft05 => Self::Draft05(Cow::Owned(AggregationJobId(rng.gen()))),
+            DapVersion::Draft07 => Self::Draft07(Cow::Owned(AggregationJobId(rng.gen()))),
             DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         }
     }
@@ -973,7 +973,7 @@ impl MetaAggregationJobId<'_> {
     pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
         match self {
             Self::Draft02(agg_job_id) => Some(agg_job_id.clone().into_owned()),
-            Self::Draft05(..) => None,
+            Self::Draft07(..) => None,
         }
     }
 
@@ -983,7 +983,7 @@ impl MetaAggregationJobId<'_> {
         match self {
             // In draft02, the aggregation job ID is not determined until the payload is parsed.
             Self::Draft02(..) => DapResource::Undefined,
-            Self::Draft05(agg_job_id) => {
+            Self::Draft07(agg_job_id) => {
                 DapResource::AggregationJob(agg_job_id.clone().into_owned())
             }
         }
@@ -993,7 +993,7 @@ impl MetaAggregationJobId<'_> {
     pub fn to_hex(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_hex(),
-            Self::Draft05(agg_job_id) => agg_job_id.to_hex(),
+            Self::Draft07(agg_job_id) => agg_job_id.to_hex(),
         }
     }
 
@@ -1001,7 +1001,7 @@ impl MetaAggregationJobId<'_> {
     pub fn to_base64url(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_base64url(),
-            Self::Draft05(agg_job_id) => agg_job_id.to_base64url(),
+            Self::Draft07(agg_job_id) => agg_job_id.to_base64url(),
         }
     }
 }

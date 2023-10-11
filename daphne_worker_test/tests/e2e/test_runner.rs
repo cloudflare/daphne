@@ -79,7 +79,7 @@ impl TestRunner {
         // aggregator URL with 127.0.0.1.
         let version_path = match version {
             DapVersion::Draft02 => "v02",
-            DapVersion::Draft05 => "v05",
+            DapVersion::Draft07 => "v07",
             _ => panic!("unimplemented DapVersion"),
         };
         let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
@@ -589,7 +589,7 @@ impl TestRunner {
         client: &reqwest::Client,
         report_sel: &DaphneWorkerReportSelector,
     ) -> DapLeaderProcessTelemetry {
-        // Replace path "/v05" with "/internal/process".
+        // Replace path "/v07" with "/internal/process".
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
 
@@ -620,7 +620,7 @@ impl TestRunner {
         } else {
             self.helper_url.clone()
         };
-        url.set_path(path); // Overwrites the version path (i.e., "/v05")
+        url.set_path(path); // Overwrites the version path (i.e., "/v07")
         let resp = client
             .post(url.clone())
             .json(data)
@@ -679,7 +679,7 @@ impl TestRunner {
     pub fn upload_path_for_task(&self, id: &TaskId) -> String {
         match self.version {
             DapVersion::Draft02 => "upload".to_string(),
-            DapVersion::Draft05 => format!("tasks/{}/reports", id.to_base64url()),
+            DapVersion::Draft07 => format!("tasks/{}/reports", id.to_base64url()),
             _ => unreachable!("unknown version"),
         }
     }
@@ -778,7 +778,7 @@ async fn post_internal_delete_all(
     base_url: &Url,
     batch_interval: &Interval,
 ) {
-    // Replace path "/v05" with "/internal/delete_all".
+    // Replace path "/v07" with "/internal/delete_all".
     let mut url = base_url.clone();
     url.set_path("internal/delete_all");
 

@@ -865,7 +865,7 @@ mod test {
         // Test wrong round
         let req = t
             .gen_test_agg_job_cont_req_with_round(
-                &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
+                &MetaAggregationJobId::Draft07(Cow::Borrowed(&agg_job_id)),
                 agg_job_resp.transitions,
                 Some(2),
             )
@@ -913,7 +913,7 @@ mod test {
         // Test wrong round
         let req = t
             .gen_test_agg_job_cont_req_with_round(
-                &MetaAggregationJobId::Draft05(Cow::Borrowed(&agg_job_id)),
+                &MetaAggregationJobId::Draft07(Cow::Borrowed(&agg_job_id)),
                 agg_job_resp.transitions,
                 Some(0),
             )

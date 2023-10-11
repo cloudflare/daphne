@@ -53,7 +53,7 @@ DAP_TASKPROV_LEADER_AUTH = """{
 DAP_TASKPROV_COLLECTOR_AUTH = """{
   "bearer_token": "I am the collector!"
 }""" # SECRET
-DAP_DEFAULT_VERSION = "v05"
+DAP_DEFAULT_VERSION = "v07"
 DAP_TRACING = "debug"
 
 [env.leader.durable_objects]
@@ -129,7 +129,7 @@ DAP_TASKPROV_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d
 DAP_TASKPROV_LEADER_AUTH = """{
   "bearer_token": "I am the leader!"
 }""" # SECRET
-DAP_DEFAULT_VERSION = "v05"
+DAP_DEFAULT_VERSION = "v07"
 DAP_TRACING = "debug"
 
 [env.helper.durable_objects]

@@ -48,7 +48,7 @@ impl PendingReport {
     pub(crate) fn report_id_hex(&self) -> Option<&str> {
         match self.version {
             DapVersion::Draft02 if self.report_hex.len() >= 96 => Some(&self.report_hex[64..96]),
-            DapVersion::Draft05 if self.report_hex.len() >= 32 => Some(&self.report_hex[..32]),
+            DapVersion::Draft07 if self.report_hex.len() >= 32 => Some(&self.report_hex[..32]),
             DapVersion::Unknown => unreachable!("unhandled version {:?}", self.version),
             _ => None,
         }

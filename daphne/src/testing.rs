@@ -476,7 +476,7 @@ impl AggregationJobTest {
 //
 // and
 //
-//     something_draft05
+//     something_draft07
 //
 // that called something(version) with the appropriate version.
 //
@@ -499,7 +499,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::test_version! { $fname, Draft02 }
-            $crate::test_version! { $fname, Draft05 }
+            $crate::test_version! { $fname, Draft07 }
         )*
     };
 }
@@ -521,7 +521,7 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::async_test_version! { $fname, Draft02 }
-            $crate::async_test_version! { $fname, Draft05 }
+            $crate::async_test_version! { $fname, Draft07 }
         )*
     };
 }
@@ -530,7 +530,7 @@ macro_rules! async_test_versions {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub(crate) enum MetaAggregationJobIdOwned {
     Draft02(Draft02AggregationJobId),
-    Draft05(AggregationJobId),
+    Draft07(AggregationJobId),
 }
 
 impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
@@ -539,8 +539,8 @@ impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
             MetaAggregationJobId::Draft02(agg_job_id) => {
                 Self::Draft02(agg_job_id.clone().into_owned())
             }
-            MetaAggregationJobId::Draft05(agg_job_id) => {
-                Self::Draft05(agg_job_id.clone().into_owned())
+            MetaAggregationJobId::Draft07(agg_job_id) => {
+                Self::Draft07(agg_job_id.clone().into_owned())
             }
         }
     }
