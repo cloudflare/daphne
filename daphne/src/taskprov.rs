@@ -238,7 +238,7 @@ impl From<VdafTypeVar> for VdafConfig {
             VdafTypeVar::Prio2 { dimension } => VdafConfig::Prio2 {
                 dimension: dimension.try_into().expect("u32 does not fit into usize"),
             },
-            // TODO(cjpatton) Don't panic (opt-out instead).
+            #[cfg(test)]
             VdafTypeVar::NotImplemented(..) => {
                 unreachable!("VDAF not implemented")
             }
@@ -299,17 +299,25 @@ impl ReportMetadata {
 #[cfg(test)]
 mod test {
     use prio::codec::ParameterizedEncode;
+    use url::Url;
 
     use super::{
         compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config, TaskprovVersion,
     };
     use crate::{
         auth::BearerToken,
+        constants::DapMediaType,
+        error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
         messages::taskprov::VdafType,
-        messages::{encode_base64url, taskprov::*, Extension, ReportId, ReportMetadata, TaskId},
+        messages::{
+            encode_base64url,
+            taskprov::{self, *},
+            Extension, ReportId, ReportMetadata, TaskId,
+        },
+        test_versions,
         vdaf::VdafVerifyKey,
-        DapRequest,
+        DapError, DapRequest, DapResource, DapVersion,
     };
 
     #[test]
@@ -445,4 +453,70 @@ mod test {
             from_report_metadata.collector_hpke_config
         );
     }
+
+    fn resolve_advertised_task_config_expect_abort_unrecognized_vdaf(version: DapVersion) {
+        // Create a request for a taskprov task with an unrecognized VDAF.
+        let (req, task_id) = {
+            let taskprov_task_config_bytes = TaskConfig {
+                task_info: "cool task".as_bytes().to_vec(),
+                aggregator_endpoints: vec![
+                    UrlBytes {
+                        bytes: b"https://leader.com/".to_vec(),
+                    },
+                    UrlBytes {
+                        bytes: b"http://helper.org:8788/".to_vec(),
+                    },
+                ],
+                query_config: taskprov::QueryConfig {
+                    time_precision: 3600,
+                    max_batch_query_count: 1,
+                    min_batch_size: 1,
+                    var: taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                },
+                task_expiration: 0,
+                vdaf_config: taskprov::VdafConfig {
+                    dp_config: taskprov::DpConfig::None,
+                    // unrecognized VDAF
+                    var: taskprov::VdafTypeVar::NotImplemented(1337),
+                },
+            }
+            .get_encoded_with_param(&TaskprovVersion::Draft02);
+            let task_id = compute_task_id(TaskprovVersion::Draft02, &taskprov_task_config_bytes);
+            let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
+
+            let req = DapRequest::<()> {
+                version,
+                media_type: DapMediaType::Missing, // ignored by test
+                task_id: Some(task_id.clone()),
+                resource: DapResource::Undefined, // ignored by test
+                payload: Vec::default(),          // ignored by test
+                url: Url::parse("https://example.com/").unwrap(), // ignored by test
+                sender_auth: None,                // ignored by test
+                taskprov: Some(taskprov_task_config_base64url),
+            };
+
+            (req, task_id)
+        };
+
+        let collector_hpke_config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256)
+            .unwrap()
+            .config;
+
+        match resolve_advertised_task_config(
+            &req,
+            TaskprovVersion::Draft02,
+            &[0; 32],
+            &collector_hpke_config,
+            &task_id,
+            None,
+        ) {
+            Err(DapError::Abort(DapAbort::UnrecognizedMessage { detail, .. })) => {
+                assert_eq!(detail, "codec error: unexpected value")
+            }
+            Err(e) => panic!("unexpected error: {e}"),
+            Ok(..) => panic!("expected error"),
+        }
+    }
+
+    test_versions! { resolve_advertised_task_config_expect_abort_unrecognized_vdaf }
 }
