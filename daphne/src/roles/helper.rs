@@ -4,7 +4,6 @@
 use std::{borrow::Cow, collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use prio::codec::{Encode, ParameterizedDecode};
 use tracing::error;
 
@@ -17,12 +16,13 @@ use crate::{
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
         AggregationJobInitReq, AggregationJobResp, Draft02AggregationJobId, PartialBatchSelector,
-        TaskId, TransitionFailure, TransitionVar,
+        ReportId, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     vdaf::ReportProcessedStatus,
-    DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
-    DapTaskConfig, DapVersion, MetaAggregationJobId,
+    DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapError,
+    DapHelperAggregationJobTransition, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapVersion, MetaAggregationJobId,
 };
 
 /// DAP Helper functionality.
@@ -34,7 +34,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-        helper_state: &DapHelperState,
+        helper_state: &DapAggregationJobState,
     ) -> Result<bool, DapError>;
 
     /// Fetch the Helper's aggregation-flow state. `None` is returned if the Helper has no state
@@ -43,7 +43,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-    ) -> Result<Option<DapHelperState>, DapError>;
+    ) -> Result<Option<DapAggregationJobState>, DapError>;
 
     async fn handle_agg_job_init_req<'req>(
         &self,
@@ -55,27 +55,32 @@ pub trait DapHelper<S>: DapAggregator<S> {
             AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
                 .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
-        metrics.agg_job_observe_batch_size(agg_job_init_req.report_shares.len());
+        metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
 
         // taskprov: Resolve the task config to use for the request. We also need to ensure
         // that all of the reports include the task config in the report extensions. (See
         // section 6 of draft-wang-ppm-dap-taskprov-02.)
         if let Some(taskprov_version) = self.get_global_config().taskprov_version {
             let using_taskprov = agg_job_init_req
-                .report_shares
+                .prep_inits
                 .iter()
-                .filter(|share| share.report_metadata.is_taskprov(taskprov_version, task_id))
+                .filter(|prep_init| {
+                    prep_init
+                        .report_share
+                        .report_metadata
+                        .is_taskprov(taskprov_version, task_id)
+                })
                 .count();
 
             let first_metadata = match using_taskprov {
                 0 => None,
-                c if c == agg_job_init_req.report_shares.len() => {
+                c if c == agg_job_init_req.prep_inits.len() => {
                     // All the extensions use taskprov and look ok, so compute first_metadata.
                     // Note this will always be Some().
                     agg_job_init_req
-                        .report_shares
+                        .prep_inits
                         .first()
-                        .map(|report_share| &report_share.report_metadata)
+                        .map(|prep_init| &prep_init.report_share.report_metadata)
                 }
                 _ => {
                     // It's not all taskprov or no taskprov, so it's an error.
@@ -118,14 +123,26 @@ pub trait DapHelper<S>: DapAggregator<S> {
             &agg_job_init_req.agg_param,
         )?;
 
-        let transition = task_config
+        let initialized_reports = task_config
             .vdaf
-            .handle_agg_job_init_req(self, self, task_id, task_config, &agg_job_init_req, metrics)
-            .map_err(DapError::Abort)
+            .helper_initialize_reports(self, self, task_id, task_config, &agg_job_init_req)
             .await?;
 
-        let agg_job_resp = match transition {
-            DapHelperTransition::Continue(state, agg_job_resp) => {
+        let agg_job_resp = match task_config.version {
+            DapVersion::Draft02 => {
+                let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) =
+                    task_config.vdaf.handle_agg_job_init_req(
+                        task_id,
+                        task_config,
+                        &HashMap::default(), // no reports have been processed yet
+                        &initialized_reports,
+                        &agg_job_init_req,
+                        metrics,
+                    )?
+                else {
+                    return Err(DapAbort::from(fatal_error!(err = "unexpected transition")));
+                };
+
                 if !self
                     .put_helper_state_if_not_exists(task_id, &agg_job_id, &state)
                     .await?
@@ -135,22 +152,51 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         "unexpected message for aggregation job (already exists)".into(),
                     ));
                 }
+                metrics.agg_job_started_inc();
                 agg_job_resp
             }
-            DapHelperTransition::Finish(..) => {
-                return Err(fatal_error!(err = "unexpected transition (finished)").into());
+
+            DapVersion::Draft07 => {
+                let agg_job_resp = finish_agg_job_and_aggregate(
+                    self,
+                    task_id,
+                    task_config,
+                    metrics,
+                    |report_status| {
+                        let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
+                            task_config.vdaf.handle_agg_job_init_req(
+                                task_id,
+                                task_config,
+                                report_status,
+                                &initialized_reports,
+                                &agg_job_init_req,
+                                metrics,
+                            )?
+                        else {
+                            return Err(DapAbort::from(fatal_error!(
+                                err = "unexpected transition"
+                            )));
+                        };
+                        Ok((agg_span, agg_job_resp))
+                    },
+                )
+                .await?;
+
+                metrics.agg_job_started_inc();
+                metrics.agg_job_completed_inc();
+                agg_job_resp
             }
+            v => unreachable!("unhandled version {v:?}"),
         };
 
         self.audit_log().on_aggregation_job(
             req.host(),
             task_id,
             task_config,
-            agg_job_init_req.report_shares.len() as u64,
+            agg_job_init_req.prep_inits.len() as u64,
             AggregationJobAuditAction::Init,
         );
 
-        metrics.agg_job_started_inc();
         metrics.inbound_req_inc(DaphneRequestType::Aggregate);
         Ok(DapResponse {
             version: req.version,
@@ -201,16 +247,24 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 agg_job_id_base64url: agg_job_id.to_base64url(),
             })?;
 
-        let agg_job_resp = run_vdaf_cont_round_and_aggregate(
-            self,
-            task_id,
-            task_config,
-            &state,
-            &agg_job_id,
-            &agg_job_cont_req,
-            metrics,
-        )
-        .await?;
+        let agg_job_resp =
+            finish_agg_job_and_aggregate(self, task_id, task_config, metrics, |report_status| {
+                task_config.vdaf.handle_agg_job_cont_req(
+                    task_id,
+                    task_config,
+                    &state,
+                    report_status,
+                    &agg_job_id,
+                    &agg_job_cont_req,
+                )
+            })
+            .await?;
+
+        for transition in agg_job_resp.transitions.iter() {
+            if let TransitionVar::Failed(failure) = &transition.var {
+                metrics.report_inc_by(&format!("rejected_{failure}"), 1)
+            }
+        }
 
         let out_shares_count = agg_job_resp
             .transitions
@@ -227,7 +281,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
             AggregationJobAuditAction::Continue,
         );
 
-        metrics.report_inc_by("aggregated", out_shares_count);
         metrics.agg_job_completed_inc();
         metrics.inbound_req_inc(DaphneRequestType::Aggregate);
         Ok(DapResponse {
@@ -416,14 +469,17 @@ fn resolve_agg_job_id<'id, S>(
     }
 }
 
-async fn run_vdaf_cont_round_and_aggregate<S>(
+async fn finish_agg_job_and_aggregate<S>(
     helper: &impl DapHelper<S>,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
-    state: &DapHelperState,
-    agg_job_id: &MetaAggregationJobId<'_>,
-    agg_job_cont_req: &AggregationJobContinueReq,
     metrics: &DaphneMetrics,
+    finish_agg_job: impl Fn(
+        &HashMap<ReportId, ReportProcessedStatus>,
+    ) -> Result<
+        (DapAggregateSpan<DapAggregateShare>, AggregationJobResp),
+        DapAbort,
+    >,
 ) -> Result<AggregationJobResp, DapAbort> {
     // This loop is intended to run at most once on the "happy path". The intent is as follows:
     //
@@ -438,17 +494,10 @@ async fn run_vdaf_cont_round_and_aggregate<S>(
     const RETRY_COUNT: u32 = 3;
     let mut report_status = HashMap::new();
     for _ in 0..RETRY_COUNT {
-        let (agg_share_span, agg_job_resp) = task_config.vdaf.handle_agg_job_cont_req(
-            task_id,
-            task_config,
-            state,
-            &report_status,
-            agg_job_id,
-            agg_job_cont_req,
-        )?;
+        let (agg_span, agg_job_resp) = finish_agg_job(&report_status)?;
 
         let put_shares_result = helper
-            .try_put_agg_share_span(task_id, task_config, agg_share_span)
+            .try_put_agg_share_span(task_id, task_config, agg_span)
             .await;
 
         let inc_restart_metric = Once::new();
@@ -487,11 +536,15 @@ async fn run_vdaf_cont_round_and_aggregate<S>(
             }
         }
         if !inc_restart_metric.is_completed() {
-            for transition in agg_job_resp.transitions.iter() {
-                if let TransitionVar::Failed(failure) = &transition.var {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1)
-                }
-            }
+            let out_shares_count = agg_job_resp
+                .transitions
+                .iter()
+                .filter(|t| !matches!(t.var, TransitionVar::Failed(..)))
+                .count()
+                .try_into()
+                .expect("usize to fit in u64");
+            metrics.report_inc_by("aggregated", out_shares_count);
+
             return Ok(agg_job_resp);
         }
     }
@@ -512,42 +565,33 @@ mod tests {
     use futures::StreamExt;
     use prio::codec::ParameterizedDecode;
 
-    use crate::messages::{
-        AggregationJobInitReq, AggregationJobResp, ReportShare, Transition, TransitionVar,
-    };
+    use crate::messages::{AggregationJobInitReq, AggregationJobResp, Transition, TransitionVar};
     use crate::roles::DapHelper;
     use crate::{assert_metrics_include, MetaAggregationJobId};
     use crate::{roles::test::TestData, DapVersion};
 
     #[tokio::test]
-    async fn replay_reports_when_continuing_aggregation() {
+    async fn replay_reports_when_continuing_aggregation_draft02() {
         let mut data = TestData::new(DapVersion::Draft02);
         let task_id = data.insert_task(
             DapVersion::Draft02,
-            crate::VdafConfig::Prio2 { dimension: 10 },
+            crate::VdafConfig::Prio3(crate::Prio3Config::Count),
         );
         let helper = data.new_helper();
         let test = data.with_leader(Arc::clone(&helper));
 
-        let report_shares = futures::stream::iter(0..3)
-            .then(|_| async {
-                let mut report = test.gen_test_report(&task_id).await;
-                ReportShare {
-                    report_metadata: report.report_metadata,
-                    public_share: report.public_share,
-                    encrypted_input_share: report.encrypted_input_shares.remove(1),
-                }
-            })
+        let reports = futures::stream::iter(0..3)
+            .then(|_| async { test.gen_test_report(&task_id).await })
             .collect::<Vec<_>>()
             .await;
 
-        let report_ids = report_shares
+        let report_ids = reports
             .iter()
             .map(|r| r.report_metadata.id.clone())
             .collect::<Vec<_>>();
 
         let req = test
-            .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, report_shares)
+            .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, reports)
             .await;
 
         let meta_agg_job_id = MetaAggregationJobId::Draft02(Cow::Owned(

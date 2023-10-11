@@ -18,10 +18,11 @@ use crate::{
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapBatchBucket,
-    DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState,
-    DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapQueryConfig, DapRequest,
-    DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
+    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
+    DapAggregationJobUncommitted, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
+    DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition, DapMeasurement,
+    DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId,
+    VdafConfig,
 };
 use assert_matches::assert_matches;
 use async_trait::async_trait;
@@ -206,8 +207,7 @@ impl AggregationJobTest {
     pub async fn produce_agg_job_init_req(
         &self,
         reports: Vec<Report>,
-    ) -> DapLeaderTransition<AggregationJobInitReq> {
-        let metrics = &self.leader_metrics;
+    ) -> DapLeaderAggregationJobTransition<AggregationJobInitReq> {
         self.task_config
             .vdaf
             .produce_agg_job_init_req(
@@ -218,7 +218,7 @@ impl AggregationJobTest {
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
-                metrics,
+                &self.leader_metrics,
             )
             .await
             .unwrap()
@@ -230,19 +230,28 @@ impl AggregationJobTest {
     pub async fn handle_agg_job_init_req(
         &self,
         agg_job_init_req: &AggregationJobInitReq,
-    ) -> DapHelperTransition<AggregationJobResp> {
-        let metrics = &self.helper_metrics;
+    ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         self.task_config
             .vdaf
             .handle_agg_job_init_req(
-                &self.helper_hpke_receiver_config,
-                self,
                 &self.task_id,
                 &self.task_config,
+                &HashMap::default(),
+                &self
+                    .task_config
+                    .vdaf
+                    .helper_initialize_reports(
+                        &self.helper_hpke_receiver_config,
+                        self,
+                        &self.task_id,
+                        &self.task_config,
+                        agg_job_init_req,
+                    )
+                    .await
+                    .unwrap(),
                 agg_job_init_req,
-                metrics,
+                &self.helper_metrics,
             )
-            .await
             .unwrap()
     }
 
@@ -251,19 +260,18 @@ impl AggregationJobTest {
     /// Panics if the Leader aborts.
     pub fn handle_agg_job_resp(
         &self,
-        leader_state: DapLeaderState,
+        leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-    ) -> DapLeaderTransition<AggregationJobContinueReq> {
-        let metrics = &self.leader_metrics;
+    ) -> DapLeaderAggregationJobTransition<AggregationJobContinueReq> {
         self.task_config
             .vdaf
             .handle_agg_job_resp(
                 &self.task_id,
+                &self.task_config,
                 &self.agg_job_id,
                 leader_state,
                 agg_job_resp,
-                self.task_config.version,
-                metrics,
+                &self.leader_metrics,
             )
             .unwrap()
     }
@@ -271,7 +279,7 @@ impl AggregationJobTest {
     /// Like [`handle_agg_job_resp`] but expect the Leader to abort.
     pub fn handle_agg_job_resp_expect_err(
         &self,
-        leader_state: DapLeaderState,
+        leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
     ) -> DapAbort {
         let metrics = &self.leader_metrics;
@@ -279,10 +287,10 @@ impl AggregationJobTest {
             .vdaf
             .handle_agg_job_resp(
                 &self.task_id,
+                &self.task_config,
                 &self.agg_job_id,
                 leader_state,
                 agg_job_resp,
-                self.task_config.version,
                 metrics,
             )
             .expect_err("handle_agg_job_resp() succeeded; expected failure")
@@ -293,7 +301,7 @@ impl AggregationJobTest {
     /// Panics if the Helper aborts.
     pub fn handle_agg_job_cont_req(
         &self,
-        helper_state: &DapHelperState,
+        helper_state: &DapAggregationJobState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
@@ -306,13 +314,13 @@ impl AggregationJobTest {
                 &self.agg_job_id,
                 agg_job_cont_req,
             )
-            .unwrap()
+            .expect("error while handling request")
     }
 
     /// Like [`handle_agg_job_cont_req`] but expect the Helper to abort.
     pub fn handle_agg_job_cont_req_expect_err(
         &self,
-        helper_state: DapHelperState,
+        helper_state: DapAggregationJobState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapAbort {
         self.task_config
@@ -333,7 +341,7 @@ impl AggregationJobTest {
     /// Panics if the Leader aborts.
     pub fn handle_final_agg_job_resp(
         &self,
-        leader_uncommitted: DapLeaderUncommitted,
+        leader_uncommitted: DapAggregationJobUncommitted,
         agg_job_resp: AggregationJobResp,
     ) -> DapAggregateSpan<DapAggregateShare> {
         let metrics = &self.leader_metrics;
@@ -413,38 +421,52 @@ impl AggregationJobTest {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let DapLeaderTransition::Continue(leader_state, agg_job_init_req) =
+        let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
             self.produce_agg_job_init_req(reports).await
         else {
             panic!("unexpected transition");
         };
-        let DapHelperTransition::Continue(helper_state, agg_job_resp) =
-            self.handle_agg_job_init_req(&agg_job_init_req).await
-        else {
-            panic!("unexpected transition");
-        };
-        let got = DapHelperState::get_decoded(&self.task_config.vdaf, &helper_state.get_encoded())
-            .expect("failed to decode helper state");
-        assert_eq!(got, helper_state);
 
-        let DapLeaderTransition::Uncommitted(uncommitted, agg_cont) =
-            self.handle_agg_job_resp(leader_state, agg_job_resp)
-        else {
-            panic!("unexpected transition");
-        };
-        let (helper_share_span, transitions) =
-            self.handle_agg_job_cont_req(&helper_state, &agg_cont);
-        let leader_share_span = self.handle_final_agg_job_resp(uncommitted, transitions);
-        let report_count = u64::try_from(leader_share_span.report_count()).unwrap();
+        let (leader_agg_span, helper_agg_span) =
+            match self.handle_agg_job_init_req(&agg_job_init_req).await {
+                DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
+                    let got = DapAggregationJobState::get_decoded(
+                        &self.task_config.vdaf,
+                        &helper_state.get_encoded(),
+                    )
+                    .expect("failed to decode helper state");
+                    assert_eq!(got.get_encoded(), helper_state.get_encoded());
+
+                    let DapLeaderAggregationJobTransition::Uncommitted(uncommitted, agg_cont) =
+                        self.handle_agg_job_resp(leader_state, agg_job_resp)
+                    else {
+                        panic!("unexpected transition");
+                    };
+                    let (helper_agg_span, transitions) =
+                        self.handle_agg_job_cont_req(&helper_state, &agg_cont);
+                    let leader_agg_span = self.handle_final_agg_job_resp(uncommitted, transitions);
+                    (leader_agg_span, helper_agg_span)
+                }
+                DapHelperAggregationJobTransition::Finished(helper_agg_span, agg_job_resp) => {
+                    let DapLeaderAggregationJobTransition::Finished(leader_agg_span) =
+                        self.handle_agg_job_resp(leader_state, agg_job_resp)
+                    else {
+                        panic!("unexpected transition");
+                    };
+                    (leader_agg_span, helper_agg_span)
+                }
+            };
+
+        let report_count = u64::try_from(leader_agg_span.report_count()).unwrap();
 
         // Leader: Aggregation
-        let leader_agg_share = leader_share_span.collapsed();
+        let leader_agg_share = leader_agg_span.collapsed();
         let leader_encrypted_agg_share =
             self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
 
         // Helper: Aggregation
-        let helper_encrypted_agg_share = self
-            .produce_helper_encrypted_agg_share(&batch_selector, &helper_share_span.collapsed());
+        let helper_encrypted_agg_share =
+            self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_span.collapsed());
 
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
@@ -583,7 +605,7 @@ pub struct MockAggregator {
     pub collector_token: Option<BearerToken>, // Not set by Helper
     pub report_store: Arc<Mutex<HashMap<TaskId, ReportStore>>>,
     pub leader_state_store: Arc<Mutex<HashMap<TaskId, LeaderState>>>,
-    pub helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapHelperState>>>,
+    pub helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
     pub agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucket, AggStore>>>>,
     pub collector_hpke_config: HpkeConfig,
     pub metrics: DaphneMetrics,
@@ -1062,7 +1084,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         &self,
         task_id: &TaskId,
         _task_config: &DapTaskConfig,
-        agg_share_span: DapAggregateSpan<DapAggregateShare>,
+        agg_agg_span: DapAggregateSpan<DapAggregateShare>,
     ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>> {
         let mut report_store_guard = self
             .report_store
@@ -1072,7 +1094,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = agg_store_guard.entry(task_id.clone()).or_default();
 
-        agg_share_span
+        agg_agg_span
             .into_iter()
             .map(|(bucket, (agg_share, report_metadatas))| {
                 let replayed = report_metadatas
@@ -1173,7 +1195,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-        helper_state: &DapHelperState,
+        helper_state: &DapAggregationJobState,
     ) -> Result<bool, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: task_id.clone(),
@@ -1202,7 +1224,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-    ) -> Result<Option<DapHelperState>, DapError> {
+    ) -> Result<Option<DapAggregationJobState>, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: task_id.clone(),
             agg_job_id_owned: agg_job_id.into(),

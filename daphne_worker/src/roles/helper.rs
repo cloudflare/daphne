@@ -16,8 +16,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use daphne::{
-    error::DapAbort, fatal_error, messages::TaskId, roles::DapHelper, DapError, DapHelperState,
-    MetaAggregationJobId,
+    error::DapAbort, fatal_error, messages::TaskId, roles::DapHelper, DapAggregationJobState,
+    DapError, MetaAggregationJobId,
 };
 use prio::codec::Encode;
 
@@ -27,7 +27,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-        helper_state: &DapHelperState,
+        helper_state: &DapAggregationJobState,
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         let helper_state_hex = hex::encode(helper_state.get_encoded());
@@ -48,7 +48,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
         &self,
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
-    ) -> std::result::Result<Option<DapHelperState>, DapError> {
+    ) -> std::result::Result<Option<DapAggregationJobState>, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
         // TODO(cjpatton) Figure out if retry is safe, since the request is not actually
         // idempotent. (It removes the helper's state from storage if it exists.)
@@ -67,7 +67,8 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
             Some(helper_state_hex) => {
                 let data = hex::decode(helper_state_hex)
                     .map_err(|e| DapAbort::from_hex_error(e, task_id.clone()))?;
-                let helper_state = DapHelperState::get_decoded(&task_config.as_ref().vdaf, &data)?;
+                let helper_state =
+                    DapAggregationJobState::get_decoded(&task_config.as_ref().vdaf, &data)?;
                 Ok(Some(helper_state))
             }
             None => Ok(None),

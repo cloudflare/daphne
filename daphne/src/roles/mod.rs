@@ -205,15 +205,15 @@ mod test {
             taskprov, AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
             Extension, Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata,
-            ReportShare, TaskId, Time, Transition, TransitionFailure, TransitionVar,
+            TaskId, Time, Transition, TransitionFailure, TransitionVar,
         },
         taskprov::TaskprovVersion,
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
         DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapGlobalConfig,
-        DapMeasurement, DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapVersion,
-        MetaAggregationJobId, Prio3Config, VdafConfig,
+        DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
+        DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config, VdafConfig,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -502,7 +502,7 @@ mod test {
             &self,
             task_id: &TaskId,
             version: DapVersion,
-            report_shares: Vec<ReportShare>,
+            reports: Vec<Report>,
         ) -> DapRequest<BearerToken> {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
@@ -514,18 +514,32 @@ mod test {
             };
 
             let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+
+            let DapLeaderAggregationJobTransition::Continued(_leader_state, agg_job_init_req) =
+                task_config
+                    .vdaf
+                    .produce_agg_job_init_req(
+                        self.leader.as_ref(),
+                        self.leader.as_ref(),
+                        task_id,
+                        &task_config,
+                        &agg_job_id,
+                        &part_batch_sel,
+                        reports,
+                        &self.leader.metrics,
+                    )
+                    .await
+                    .unwrap()
+            else {
+                panic!("unexpected transition");
+            };
+
             self.leader_authorized_req(
                 task_id,
                 &task_config,
                 Some(&agg_job_id),
                 DapMediaType::AggregationJobInitReq,
-                AggregationJobInitReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    draft02_agg_job_id: agg_job_id.for_request_payload(),
-                    agg_param: Vec::default(),
-                    part_batch_sel,
-                    report_shares,
-                },
+                agg_job_init_req,
                 task_config.helper_url.join("aggregate").unwrap(),
             )
             .await
@@ -772,7 +786,7 @@ mod test {
                     part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                         batch_id: BatchId(rng.gen()),
                     },
-                    report_shares: Vec::default(),
+                    prep_inits: Vec::default(),
                 },
                 task_config.helper_url.join("aggregate").unwrap(),
             )
@@ -787,10 +801,41 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_invalid_batch_sel }
 
-    async fn handle_agg_job_req_init_unauthorized_request(version: DapVersion) {
+    // TODO(cjpatton) Re-enable this test. We need to refactor so that we can produce the
+    // AggregationJobInitReq without invoking `produce_agg_job_init_req()`, which filters reports
+    // passed the expiration date.
+    //
+    //    async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
+    //        let t = Test::new(version);
+    //
+    //        let report = t.gen_test_report(&t.expired_task_id).await;
+    //        let report_share = ReportShare {
+    //            report_metadata: report.report_metadata,
+    //            public_share: report.public_share,
+    //            encrypted_input_share: report.encrypted_input_shares[1].clone(),
+    //        };
+    //        let req = t
+    //            .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_share])
+    //            .await;
+    //
+    //        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
+    //        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
+    //        assert_eq!(agg_job_resp.transitions.len(), 1);
+    //        assert_matches!(
+    //            agg_job_resp.transitions[0].var,
+    //            TransitionVar::Failed(TransitionFailure::TaskExpired)
+    //        );
+    //
+    //        assert_eq!(t.helper.audit_log.invocations(), 1);
+    //    }
+    //
+    //    async_test_versions! { handle_agg_job_req_init_expired_task }
+
+    async fn handle_agg_job_init_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
+        let report = t.gen_test_report(&t.time_interval_task_id).await;
         let mut req = t
-            .gen_test_agg_job_init_req(&t.time_interval_task_id, version, Vec::default())
+            .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report])
             .await;
         req.sender_auth = None;
 
@@ -810,130 +855,7 @@ mod test {
         assert_eq!(t.helper.audit_log.invocations(), 0);
     }
 
-    async_test_versions! { handle_agg_job_req_init_unauthorized_request }
-
-    // Test that the Helper rejects reports past the expiration date.
-    async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
-        let t = Test::new(version);
-
-        let report = t.gen_test_report(&t.expired_task_id).await;
-        let report_share = ReportShare {
-            report_metadata: report.report_metadata,
-            public_share: report.public_share,
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        };
-        let req = t
-            .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_share])
-            .await;
-
-        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::TaskExpired)
-        );
-
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-    }
-
-    async_test_versions! { handle_agg_job_req_init_expired_task }
-
-    // Test that the Helper rejects reports with a bad round number.
-    async fn handle_agg_job_req_bad_round(version: DapVersion) {
-        let t = Test::new(version);
-        if version == DapVersion::Draft02 {
-            // Nothing to test.
-            return;
-        }
-
-        let report = t.gen_test_report(&t.time_interval_task_id).await;
-        let report_share = ReportShare {
-            report_metadata: report.report_metadata,
-            public_share: report.public_share,
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        };
-        let req = t
-            .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report_share])
-            .await;
-        let agg_job_id = match &req.resource {
-            DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
-            _ => panic!("agg_job_id resource missing!"),
-        };
-        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
-
-        // AggregationJobInitReq succeeds
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
-        // Test wrong round
-        let req = t
-            .gen_test_agg_job_cont_req_with_round(
-                &MetaAggregationJobId::Draft07(Cow::Borrowed(&agg_job_id)),
-                agg_job_resp.transitions,
-                Some(2),
-            )
-            .await;
-        assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::RoundMismatch { .. })
-        );
-
-        // AggregationJobContinueReq fails
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-    }
-
-    async_test_versions! { handle_agg_job_req_bad_round }
-
-    // Test that the Helper rejects reports with a bad round id
-    async fn handle_agg_job_req_zero_round(version: DapVersion) {
-        let t = Test::new(version);
-        if version == DapVersion::Draft02 {
-            // Nothing to test.
-            return;
-        }
-
-        let report = t.gen_test_report(&t.time_interval_task_id).await;
-        let report_share = ReportShare {
-            report_metadata: report.report_metadata,
-            public_share: report.public_share,
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        };
-        let req = t
-            .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report_share])
-            .await;
-        let agg_job_id = match &req.resource {
-            DapResource::AggregationJob(agg_job_id) => agg_job_id.clone(),
-            _ => panic!("agg_job_id resource missing!"),
-        };
-        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
-
-        // AggregationJobInitReq succeeds
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(agg_job_resp.transitions[0].var, TransitionVar::Continued(_));
-        // Test wrong round
-        let req = t
-            .gen_test_agg_job_cont_req_with_round(
-                &MetaAggregationJobId::Draft07(Cow::Borrowed(&agg_job_id)),
-                agg_job_resp.transitions,
-                Some(0),
-            )
-            .await;
-        assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::UnrecognizedMessage { .. })
-        );
-
-        // AggregationJobContinueReq fails
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-    }
-
-    async_test_versions! { handle_agg_job_req_zero_round }
+    async_test_versions! { handle_agg_job_init_req_unauthorized_request }
 
     async fn handle_hpke_config_req_unrecognized_task(version: DapVersion) {
         let t = Test::new(version);
@@ -984,7 +906,7 @@ mod test {
 
     async_test_versions! { handle_hpke_config_req_missing_task_id }
 
-    async fn handle_agg_job_req_cont_unauthorized_request(version: DapVersion) {
+    async fn handle_agg_job_cont_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
         let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
         let mut req = t
@@ -1008,7 +930,7 @@ mod test {
         assert_eq!(t.helper.audit_log.invocations(), 0);
     }
 
-    async_test_versions! { handle_agg_job_req_cont_unauthorized_request }
+    async_test_versions! { handle_agg_job_cont_req_unauthorized_request }
 
     async fn handle_agg_share_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
@@ -1149,20 +1071,10 @@ mod test {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
 
-        let report = t.gen_test_report(task_id).await;
-        let (report_metadata, public_share, mut encrypted_input_share) = (
-            report.report_metadata,
-            report.public_share,
-            report.encrypted_input_shares[1].clone(),
-        );
-        encrypted_input_share.payload[0] ^= 0xff; // Cause decryption to fail
-        let report_shares = vec![ReportShare {
-            report_metadata,
-            public_share,
-            encrypted_input_share,
-        }];
+        let mut report = t.gen_test_report(task_id).await;
+        report.encrypted_input_shares[1].payload[0] ^= 0xff; // Cause decryption to fail
         let req = t
-            .gen_test_agg_job_init_req(task_id, version, report_shares)
+            .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1186,14 +1098,8 @@ mod test {
         let task_id = &t.time_interval_task_id;
 
         let report = t.gen_test_report(task_id).await;
-        let report_shares = vec![ReportShare {
-            report_metadata: report.report_metadata.clone(),
-            public_share: report.public_share,
-            // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        }];
         let req = t
-            .gen_test_agg_job_init_req(task_id, version, report_shares)
+            .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1214,14 +1120,8 @@ mod test {
         let task_id = &t.time_interval_task_id;
 
         let report = t.gen_test_report(task_id).await;
-        let report_shares = vec![ReportShare {
-            report_metadata: report.report_metadata.clone(),
-            public_share: report.public_share,
-            // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        }];
         let req = t
-            .gen_test_agg_job_init_req(task_id, version, report_shares)
+            .gen_test_agg_job_init_req(task_id, version, vec![report.clone()])
             .await;
 
         // Add dummy data to report store backend. This is done in a new scope so that the lock on the
@@ -1266,14 +1166,8 @@ mod test {
         let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
         let report = t.gen_test_report(task_id).await;
-        let report_shares = vec![ReportShare {
-            report_metadata: report.report_metadata.clone(),
-            public_share: report.public_share,
-            // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        }];
         let req = t
-            .gen_test_agg_job_init_req(task_id, version, report_shares)
+            .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
         // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
@@ -1321,19 +1215,14 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_failure_batch_collected }
 
-    async fn handle_agg_job_req_abort_helper_state_overwritten(version: DapVersion) {
-        let t = Test::new(version);
+    #[tokio::test]
+    async fn handle_agg_job_req_abort_helper_state_overwritten_draft02() {
+        let t = Test::new(DapVersion::Draft02);
         let task_id = &t.time_interval_task_id;
 
         let report = t.gen_test_report(task_id).await;
-        let report_shares = vec![ReportShare {
-            report_metadata: report.report_metadata.clone(),
-            public_share: report.public_share,
-            // 1st share is for Leader and the rest is for Helpers (note that there is only 1 helper).
-            encrypted_input_share: report.encrypted_input_shares[1].clone(),
-        }];
         let req = t
-            .gen_test_agg_job_init_req(task_id, version, report_shares)
+            .gen_test_agg_job_init_req(task_id, DapVersion::Draft02, vec![report])
             .await;
 
         // Send aggregate request.
@@ -1351,8 +1240,6 @@ mod test {
             assert_eq!(e, "unexpected message for aggregation job (already exists)")
         );
     }
-
-    async_test_versions! { handle_agg_job_req_abort_helper_state_overwritten }
 
     async fn handle_agg_job_req_fail_send_cont_req(version: DapVersion) {
         let t = Test::new(version);
@@ -1852,8 +1739,14 @@ mod test {
         let query = task_config.query_for_current_batch_window(t.now);
         t.run_col_job(task_id, &query).await.unwrap();
 
+        let agg_job_req_count = match version {
+            DapVersion::Draft02 => 2,
+            DapVersion::Draft07 => 1,
+            _ => panic!("unhandled version {version:?}"),
+        };
+
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1888,8 +1781,14 @@ mod test {
         };
         t.run_col_job(task_id, &query).await.unwrap();
 
+        let agg_job_req_count = match version {
+            DapVersion::Draft02 => 2,
+            DapVersion::Draft07 => 1,
+            _ => panic!("unhandled version {version:?}"),
+        };
+
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,

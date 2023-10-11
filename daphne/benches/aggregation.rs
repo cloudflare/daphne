@@ -3,8 +3,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use daphne::{
-    hpke::HpkeKemId, testing::AggregationJobTest, DapLeaderTransition, DapMeasurement, DapVersion,
-    Prio3Config, VdafConfig,
+    hpke::HpkeKemId, testing::AggregationJobTest, DapLeaderAggregationJobTransition,
+    DapMeasurement, DapVersion, Prio3Config, VdafConfig,
 };
 
 fn handle_agg_job_init_req(c: &mut Criterion) {
@@ -38,7 +38,7 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
 
         let agg_job_init_req = rt.block_on(async {
             let reports = agg_job_test.produce_reports(vec![measurement; batch_size]);
-            let DapLeaderTransition::Continue(_leader_state, agg_job_init_req) =
+            let DapLeaderAggregationJobTransition::Continued(_leader_state, agg_job_init_req) =
                 agg_job_test.produce_agg_job_init_req(reports).await
             else {
                 panic!("unexpected transition");
@@ -46,7 +46,7 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
             agg_job_init_req
         });
 
-        c.bench_function(&format!("handle_agg_job_init_req {vdaf:?}"), |b| {
+        c.bench_function(&format!("handle_agg_job_init_req {vdaf}"), |b| {
             b.to_async(&rt).iter(|| async {
                 black_box(agg_job_test.handle_agg_job_init_req(&agg_job_init_req)).await
             })
