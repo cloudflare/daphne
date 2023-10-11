@@ -305,8 +305,13 @@ impl DapAggregateShareSpan {
             .sum()
     }
 
+    /// Merge each aggregate share in the span into one aggregate share.
+    ///
+    /// # Panics
+    ///
+    /// Panics if two aggregates shares in the span have incompatible types.
     #[cfg(any(test, feature = "test-utils"))]
-    pub(crate) fn into_merged(self) -> DapAggregateShare {
+    pub fn collapsed(self) -> DapAggregateShare {
         self.span
             .into_iter()
             .map(|(_bucket, (agg_share_for_bucket, _reports))| agg_share_for_bucket)

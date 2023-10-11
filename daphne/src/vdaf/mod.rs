@@ -1866,13 +1866,13 @@ mod test {
         let num_measurements = leader_share_span.report_count();
 
         let VdafAggregateShare::Field64(leader_agg_share) =
-            leader_share_span.into_merged().data.unwrap()
+            leader_share_span.collapsed().data.unwrap()
         else {
             panic!("unexpected VdafAggregateShare variant")
         };
 
         let VdafAggregateShare::Field64(helper_agg_share) =
-            helper_agg_share_span.into_merged().data.unwrap()
+            helper_agg_share_span.collapsed().data.unwrap()
         else {
             panic!("unexpected VdafAggregateShare variant")
         };

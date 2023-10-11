@@ -445,13 +445,13 @@ impl AggregationJobTest {
         let report_count = u64::try_from(leader_share_span.report_count()).unwrap();
 
         // Leader: Aggregation
-        let leader_agg_share = leader_share_span.into_merged();
+        let leader_agg_share = leader_share_span.collapsed();
         let leader_encrypted_agg_share =
             self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
 
         // Helper: Aggregation
         let helper_encrypted_agg_share = self
-            .produce_helper_encrypted_agg_share(&batch_selector, &helper_share_span.into_merged());
+            .produce_helper_encrypted_agg_share(&batch_selector, &helper_share_span.collapsed());
 
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
