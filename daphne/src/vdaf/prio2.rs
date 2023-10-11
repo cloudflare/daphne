@@ -39,8 +39,8 @@ pub(crate) fn prio2_shard(
     ))
 }
 
-/// Consume an input share and return the corresponding VDAF step and message.
-pub(crate) fn prio2_prepare_init(
+/// Consume an input share and return the corresponding prep state and share.
+pub(crate) fn prio2_prep_init(
     dimension: usize,
     verify_key: &[u8; 32],
     agg_id: usize,
@@ -59,55 +59,54 @@ pub(crate) fn prio2_prepare_init(
     ))
 }
 
-/// Consume the verifier shares and return the output share and serialized outbound message.
-pub(crate) fn prio2_leader_prepare_finish(
+/// Consume the prep shares and return our output share.
+pub(crate) fn prio2_prep_finish_from_shares(
     dimension: usize,
-    leader_state: VdafPrepState,
-    leader_share: VdafPrepMessage,
-    helper_share_data: &[u8],
+    host_state: VdafPrepState,
+    host_share: VdafPrepMessage,
+    peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     let vdaf = Prio2::new(dimension)?;
-    let (out_share, outbound) = match (leader_state, leader_share) {
+    let (out_share, outbound) = match (host_state, host_share) {
         (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
-            let helper_share =
-                Prio2PrepareShare::get_decoded_with_param(&state, helper_share_data)?;
-            vdaf.prepare_shares_to_prepare_message(&(), [share, helper_share])?;
+            let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
+            vdaf.prepare_shares_to_prepare_message(&(), [share, peer_share])?;
             match vdaf.prepare_next(state, ())? {
                 PrepareTransition::Continue(..) => {
-                    panic!("prio2_leader_prepare_finish: unexpected transition (continued)")
+                    panic!("prio2_prep_finish_from_shares: unexpected transition (continued)")
                 }
                 PrepareTransition::Finish(out_share) => (out_share, Vec::new()),
             }
         }
-        _ => panic!("prio2_leader_preapre_finish: leader state does not match share"),
+        _ => panic!("prio2_prep_finish_from_shares: host state does not match share"),
     };
     let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
 }
 
-/// Consume the peer's prepare message and return an output share.
-pub(crate) fn prio2_helper_prepare_finish(
+/// Consume the prep message and return our output share.
+pub(crate) fn prio2_prep_finish(
     dimension: usize,
-    helper_state: VdafPrepState,
-    leader_message_data: &[u8],
+    host_state: VdafPrepState,
+    peer_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
     let vdaf = Prio2::new(dimension)?;
-    <()>::get_decoded(leader_message_data)?;
-    let out_share = match helper_state {
+    <()>::get_decoded(peer_message_data)?;
+    let out_share = match host_state {
         VdafPrepState::Prio2(state) => match vdaf.prepare_next(state, ())? {
             PrepareTransition::Continue(..) => {
-                panic!("prio2_helper_prepare_finish: unexpected transition (continued)")
+                panic!("prio2_prep_finish: unexpected transition (continued)")
             }
             PrepareTransition::Finish(out_share) => out_share,
         },
-        _ => panic!("prio2_helper_prepare_finish: unexpected helper state type"),
+        _ => panic!("prio2_prep_finish: unexpected state type"),
     };
     let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
 }
 
-/// Parse a prio2 prepare message from the front of `reader` whose type is compatible with `param`.
-pub(crate) fn prio2_decode_prepare_state(
+/// Parse our prep state.
+pub(crate) fn prio2_decode_prep_state(
     dimension: usize,
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,

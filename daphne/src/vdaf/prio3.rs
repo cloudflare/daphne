@@ -85,7 +85,7 @@ pub(crate) fn prio3_shard(
 }
 
 /// Consume an input share and return the corresponding VDAF step and message.
-pub(crate) fn prio3_prepare_init(
+pub(crate) fn prio3_prep_init(
     config: &Prio3Config,
     verify_key: &[u8; 16],
     agg_id: usize,
@@ -192,21 +192,23 @@ pub(crate) fn prio3_prepare_init(
     }
 }
 
-/// Consume the verifier shares and return the output share and serialized outbound message.
-pub(crate) fn prio3_leader_prepare_finish(
+/// Consume the prep shares and return our output share and the prep message.
+pub(crate) fn prio3_prep_finish_from_shares(
     config: &Prio3Config,
-    leader_state: VdafPrepState,
-    leader_share: VdafPrepMessage,
-    helper_share_data: &[u8],
+    agg_id: usize,
+    host_state: VdafPrepState,
+    host_share: VdafPrepMessage,
+    peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-    let (agg_share, outbound) = match (&config, leader_state, leader_share) {
+    let (agg_share, outbound) = match (&config, host_state, host_share) {
         (
             Prio3Config::Count,
             VdafPrepState::Prio3Field64(state),
             VdafPrepMessage::Prio3ShareField64(share),
         ) => {
             let vdaf = Prio3::new_count(2)?;
-            let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
+            let (out_share, outbound) =
+                prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -219,7 +221,8 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
-            let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
+            let (out_share, outbound) =
+                prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -229,7 +232,8 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
-            let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
+            let (out_share, outbound) =
+                prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
@@ -243,53 +247,61 @@ pub(crate) fn prio3_leader_prepare_finish(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
-            let (out_share, outbound) = leader_prep_fin(&vdaf, state, share, helper_share_data)?;
+            let (out_share, outbound) =
+                prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
-        _ => panic!("prio3_leader_prepare_finish: {ERR_FIELD_TYPE}"),
+        _ => panic!("prio3_prep_finish_from_shares: {ERR_FIELD_TYPE}"),
     };
 
     return Ok((agg_share, outbound));
 
-    fn leader_prep_fin<T, P, const SEED_SIZE: usize>(
+    fn prep_finish_from_shares<T, P, const SEED_SIZE: usize>(
         vdaf: &Prio3<T, P, SEED_SIZE>,
-        leader_state: Prio3PrepareState<T::Field, SEED_SIZE>,
-        leader_share: Prio3PrepareShare<T::Field, SEED_SIZE>,
-        helper_share_data: &[u8],
+        agg_id: usize,
+        host_state: Prio3PrepareState<T::Field, SEED_SIZE>,
+        host_share: Prio3PrepareShare<T::Field, SEED_SIZE>,
+        peer_share_data: &[u8],
     ) -> Result<(OutputShare<T::Field>, Vec<u8>), VdafError>
     where
         T: prio::flp::Type,
         P: prio::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Decode the Helper's inbound message.
-        let helper_share =
-            Prio3PrepareShare::get_decoded_with_param(&leader_state, helper_share_data)?;
+        let peer_share = Prio3PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
 
         // Preprocess the inbound messages.
-        let message = vdaf.prepare_shares_to_prepare_message(&(), [leader_share, helper_share])?;
+        let message = vdaf.prepare_shares_to_prepare_message(
+            &(),
+            if agg_id == 0 {
+                [host_share, peer_share]
+            } else {
+                [peer_share, host_share]
+            },
+        )?;
         let message_data = message.get_encoded();
 
-        // Compute the leader's output share.
-        match vdaf.prepare_next(leader_state, message)? {
+        // Compute the host's output share.
+        match vdaf.prepare_next(host_state, message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_leader_prepare_finish: {ERR_EXPECT_FINISH}")
+                panic!("prio3_prep_finish_from_shares: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => Ok((out_share, message_data)),
         }
     }
 }
 
-/// Consume the peer's prepare message and return an output share.
-pub(crate) fn prio3_helper_prepare_finish(
+/// Consume the prep message and output our output share.
+pub(crate) fn prio3_prep_finish(
     config: &Prio3Config,
-    state: VdafPrepState,
+    host_state: VdafPrepState,
     peer_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
-    let agg_share = match (&config, state) {
+    let agg_share = match (&config, host_state) {
         (Prio3Config::Count, VdafPrepState::Prio3Field64(state)) => {
             let vdaf = Prio3::new_count(2)?;
-            let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
+            let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
         (
@@ -300,12 +312,12 @@ pub(crate) fn prio3_helper_prepare_finish(
             VdafPrepState::Prio3Field128(state),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
-            let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
+            let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
         (Prio3Config::Sum { bits }, VdafPrepState::Prio3Field128(state)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
-            let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
+            let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
         (
@@ -317,15 +329,15 @@ pub(crate) fn prio3_helper_prepare_finish(
             VdafPrepState::Prio3Field128(state),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
-            let out_share = helper_prep_fin(&vdaf, state, peer_message_data)?;
+            let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
-        _ => panic!("prio3_helper_prepare_finish: {ERR_FIELD_TYPE}"),
+        _ => panic!("prio3_prep_finish: {ERR_FIELD_TYPE}"),
     };
 
     return Ok(agg_share);
 
-    fn helper_prep_fin<T, P, const SEED_SIZE: usize>(
+    fn prep_finish<T, P, const SEED_SIZE: usize>(
         vdaf: &Prio3<T, P, SEED_SIZE>,
         helper_state: Prio3PrepareState<T::Field, SEED_SIZE>,
         leader_message_data: &[u8],
@@ -342,15 +354,15 @@ pub(crate) fn prio3_helper_prepare_finish(
         // Compute the Helper's output share.
         match vdaf.prepare_next(helper_state, leader_message)? {
             PrepareTransition::Continue(..) => {
-                panic!("prio3_helper_prepare_finish: {ERR_EXPECT_FINISH}")
+                panic!("prio3_prep_finish: {ERR_EXPECT_FINISH}")
             }
             PrepareTransition::Finish(out_share) => Ok(out_share),
         }
     }
 }
 
-/// Parse a prio3 prepare message from the front of `reader` whose type is compatible with `param`.
-pub(crate) fn prio3_decode_prepare_state(
+/// Parse our prep state.
+pub(crate) fn prio3_decode_prep_state(
     config: &Prio3Config,
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,
@@ -450,8 +462,8 @@ mod test {
     use crate::{
         vdaf::{
             prio3::{
-                prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_prepare_init,
-                prio3_shard, prio3_unshard,
+                prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init, prio3_shard,
+                prio3_unshard,
             },
             VdafError,
         },
@@ -461,8 +473,8 @@ mod test {
     use rand::prelude::*;
 
     #[test]
-    fn prepare_count() {
-        test_prepare(
+    fn prep_count() {
+        test_prep(
             &Prio3Config::Count,
             DapMeasurement::U64(0),
             DapAggregateResult::U64(0),
@@ -471,8 +483,8 @@ mod test {
     }
 
     #[test]
-    fn prepare_sum() {
-        test_prepare(
+    fn prep_sum() {
+        test_prep(
             &Prio3Config::Sum { bits: 23 },
             DapMeasurement::U64(1337),
             DapAggregateResult::U128(1337),
@@ -481,8 +493,8 @@ mod test {
     }
 
     #[test]
-    fn prepare_histogram() {
-        test_prepare(
+    fn prep_histogram() {
+        test_prep(
             &Prio3Config::Histogram {
                 length: 3,
                 chunk_length: 1,
@@ -494,8 +506,8 @@ mod test {
     }
 
     #[test]
-    fn prepare_sum_vec() {
-        test_prepare(
+    fn prep_sum_vec() {
+        test_prep(
             &Prio3Config::SumVec {
                 bits: 23,
                 length: 1,
@@ -506,7 +518,7 @@ mod test {
         )
         .unwrap();
 
-        test_prepare(
+        test_prep(
             &Prio3Config::SumVec {
                 bits: 23,
                 length: 3,
@@ -518,7 +530,7 @@ mod test {
         .unwrap();
     }
 
-    fn test_prepare(
+    fn test_prep(
         config: &Prio3Config,
         measurement: DapMeasurement,
         expected_result: DapAggregateResult,
@@ -533,7 +545,7 @@ mod test {
         assert_eq!(encoded_input_shares.len(), 2);
 
         // Prepare
-        let (leader_state, leader_share) = prio3_prepare_init(
+        let (leader_state, leader_share) = prio3_prep_init(
             config,
             &verify_key,
             0,
@@ -542,7 +554,7 @@ mod test {
             &encoded_input_shares[0],
         )?;
 
-        let (helper_state, helper_share) = prio3_prepare_init(
+        let (helper_state, helper_share) = prio3_prep_init(
             config,
             &verify_key,
             1,
@@ -551,15 +563,28 @@ mod test {
             &encoded_input_shares[1],
         )?;
 
-        let (leader_out_share, leader_message_data) = prio3_leader_prepare_finish(
+        let (leader_out_share, message_data) = prio3_prep_finish_from_shares(
             config,
+            0,
             leader_state,
-            leader_share,
+            leader_share.clone(),
             &helper_share.get_encoded(),
         )?;
 
-        let helper_out_share =
-            prio3_helper_prepare_finish(config, helper_state, &leader_message_data)?;
+        // If the Helper completes preparation, then the it should compute the same message.
+        {
+            let (_helper_out_share, other_message_data) = prio3_prep_finish_from_shares(
+                config,
+                1,
+                helper_state.clone(),
+                helper_share,
+                &leader_share.get_encoded(),
+            )?;
+
+            assert_eq!(message_data, other_message_data);
+        }
+
+        let helper_out_share = prio3_prep_finish(config, helper_state, &message_data)?;
 
         // Unshard
         let agg_res = prio3_unshard(
