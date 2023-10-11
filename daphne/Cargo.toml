@@ -26,7 +26,6 @@ async-trait.workspace = true
 assert_matches = { workspace = true, optional = true }
 base64.workspace = true
 deepsize = { version = "0.2.0", optional = true }
-futures.workspace = true
 hex.workspace = true
 hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
 hpke-rs-crypto.workspace = true
@@ -44,6 +43,7 @@ url.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 criterion.workspace = true
+futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
 regex = "1.10.0"

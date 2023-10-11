@@ -18,8 +18,8 @@ use crate::{
         CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::DaphneRequestType,
-    DapCollectJob, DapError, DapLeaderProcessTelemetry, DapLeaderTransition, DapRequest,
-    DapResource, DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId,
+    DapCollectJob, DapError, DapLeaderAggregationJobTransition, DapLeaderProcessTelemetry,
+    DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
 
 struct LeaderHttpRequestOptions<'p> {
@@ -346,9 +346,16 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             )
             .await?;
         let (state, agg_job_init_req) = match transition {
-            DapLeaderTransition::Continue(state, agg_job_init_req) => (state, agg_job_init_req),
-            DapLeaderTransition::Skip => return Ok(0),
-            DapLeaderTransition::Uncommitted(..) => {
+            DapLeaderAggregationJobTransition::Continued(state, agg_job_init_req) => {
+                (state, agg_job_init_req)
+            }
+            DapLeaderAggregationJobTransition::Finished(agg_span)
+                if agg_span.report_count() == 0 =>
+            {
+                return Ok(0)
+            }
+            DapLeaderAggregationJobTransition::Finished(..)
+            | DapLeaderAggregationJobTransition::Uncommitted(..) => {
                 return Err(fatal_error!(err = "unexpected state transition (uncommitted)").into())
             }
         };
@@ -385,65 +392,71 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
 
-        // Prepare AggreagteContinueReq.
+        // Handle AggregationJobResp.
         let transition = task_config.vdaf.handle_agg_job_resp(
             task_id,
+            task_config,
             &agg_job_id,
             state,
             agg_job_resp,
-            task_config.version,
             metrics,
         )?;
-        let (uncommited, agg_job_cont_req) = match transition {
-            DapLeaderTransition::Uncommitted(uncommited, agg_job_cont_req) => {
-                (uncommited, agg_job_cont_req)
+        let agg_span = match transition {
+            DapLeaderAggregationJobTransition::Uncommitted(uncommited, agg_job_cont_req) => {
+                // Send AggregationJobContinueReq and receive AggregationJobResp.
+                let resp = leader_send_http_request(
+                    self,
+                    task_id,
+                    task_config,
+                    LeaderHttpRequestOptions {
+                        path: &url_path,
+                        req_media_type: DapMediaType::AggregationJobContinueReq,
+                        resp_media_type: DapMediaType::agg_job_cont_resp_for_version(
+                            task_config.version,
+                        ),
+                        resource: agg_job_id.for_request_path(),
+                        req_data: agg_job_cont_req.get_encoded_with_param(&task_config.version),
+                        method: LeaderHttpRequestMethod::Post,
+                    },
+                )
+                .await?;
+                let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
+                    .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+
+                // Handle AggregationJobResp.
+                task_config.vdaf.handle_final_agg_job_resp(
+                    task_config,
+                    uncommited,
+                    agg_job_resp,
+                    metrics,
+                )?
             }
-            DapLeaderTransition::Skip => return Ok(0),
-            DapLeaderTransition::Continue(..) => {
+            DapLeaderAggregationJobTransition::Finished(agg_span) => {
+                if agg_span.report_count() > 0 {
+                    agg_span
+                } else {
+                    return Ok(0);
+                }
+            }
+            DapLeaderAggregationJobTransition::Continued(..) => {
                 return Err(fatal_error!(err = "unexpected state transition (continue)").into())
             }
         };
 
-        // Send AggregationJobContinueReq and receive AggregationJobResp.
-        let resp = leader_send_http_request(
-            self,
-            task_id,
-            task_config,
-            LeaderHttpRequestOptions {
-                path: &url_path,
-                req_media_type: DapMediaType::AggregationJobContinueReq,
-                resp_media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
-                resource: agg_job_id.for_request_path(),
-                req_data: agg_job_cont_req.get_encoded_with_param(&task_config.version),
-                method: LeaderHttpRequestMethod::Post,
-            },
-        )
-        .await?;
-        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
-
-        // Commit the output shares.
-        let agg_share_span = task_config.vdaf.handle_final_agg_job_resp(
-            task_config,
-            uncommited,
-            agg_job_resp,
-            metrics,
-        )?;
-        let out_shares_count = agg_share_span.report_count() as u64;
+        let out_shares_count = agg_span.report_count() as u64;
 
         // At this point we're committed to aggregating the reports: if we do detect a report was
         // replayed at this stage, then we may end up with a batch mismatch. However, this should
         // only happen if there are multiple aggregation jobs in-flight that include the same
         // report.
-
-        let put_agg_share_result = self
-            .try_put_agg_share_span(task_id, task_config, agg_share_span)
-            .await;
-
-        let replayed: usize = put_agg_share_result
+        let replayed = self
+            .try_put_agg_share_span(task_id, task_config, agg_span)
+            .await
             .into_iter()
-            .map(|(_, (r, _))| r.map(|replayed| replayed.len()).unwrap_or_default())
-            .sum();
+            .map(|(_bucket, (result, _report_metadata))| {
+                result.map(|replayed_reports| replayed_reports.len())
+            })
+            .sum::<Result<usize, _>>()?;
 
         if replayed > 0 {
             tracing::warn!(

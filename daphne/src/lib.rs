@@ -561,40 +561,53 @@ pub enum DapAggregateResult {
     U128Vec(Vec<u128>),
 }
 
-/// The Leader's state after sending an AggregateInitReq.
-#[derive(Debug)]
-pub struct DapLeaderState {
-    pub(crate) seq: Vec<(VdafPrepState, VdafPrepMessage, Time, ReportId)>,
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug, deepsize::DeepSizeOf))]
+pub(crate) struct AggregationJobReportState {
+    // draft02 compatibility: The Leader does not transmit its prep share.
+    draft02_prep_share: Option<VdafPrepMessage>,
+    prep_state: VdafPrepState,
+    time: Time,
+    report_id: ReportId,
+}
+
+/// Aggregator state during an aggregation job.
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug, deepsize::DeepSizeOf))]
+pub struct DapAggregationJobState {
+    pub(crate) seq: Vec<AggregationJobReportState>,
     part_batch_sel: PartialBatchSelector,
 }
 
-/// The Leader's state after sending an AggregateContReq.
+/// Leader state during an aggregation job in which it has computed the output shares but is
+/// waiting for the Helper's response before it commits them.
 #[derive(Debug)]
-pub struct DapLeaderUncommitted {
-    pub(crate) seq: Vec<(DapOutputShare, ReportId)>,
+pub struct DapAggregationJobUncommitted {
+    pub(crate) seq: Vec<DapOutputShare>,
     part_batch_sel: PartialBatchSelector,
 }
 
-/// The Helper's state during the aggregation flow.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct DapHelperState {
-    pub(crate) part_batch_sel: PartialBatchSelector,
-    pub(crate) seq: Vec<(VdafPrepState, Time, ReportId)>,
-}
-
-impl Encode for DapHelperState {
+impl Encode for DapAggregationJobState {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.part_batch_sel.encode(bytes);
-        for (state, time, report_id) in self.seq.iter() {
-            state.encode(bytes);
-            time.encode(bytes);
-            report_id.encode(bytes);
+        for report_state in self.seq.iter() {
+            if report_state.draft02_prep_share.is_some() {
+                // draft02 compatibility: The prep share is kept in this data structure for
+                // backwards compatibility. It's only used by the Leader, so we don't ever expect
+                // to encode it.
+                unreachable!("Tried to encode DapAggregationJobState with leader prep share");
+            }
+            report_state.prep_state.encode(bytes);
+            report_state.time.encode(bytes);
+            report_state.report_id.encode(bytes);
         }
     }
 }
 
-impl DapHelperState {
+// TODO(cjpatton) Consider replacing this with an implementation of
+// `ParameterizedDecode<VdafConfig>`. This requires changing the wire format to make the sequence
+// of report states length-prefixed.
+impl DapAggregationJobState {
     /// Decode the Helper state from a byte string.
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut r = std::io::Cursor::new(data);
@@ -602,15 +615,20 @@ impl DapHelperState {
             .map_err(|e| DapAbort::from_codec_error(e, None))?;
         let mut seq = vec![];
         while (r.position() as usize) < data.len() {
-            let state = VdafPrepState::decode_with_param(&(vdaf_config, false), &mut r)
+            let prep_state = VdafPrepState::decode_with_param(&(vdaf_config, false), &mut r)
                 .map_err(|e| DapAbort::from_codec_error(e, None))?;
             let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             let report_id =
                 ReportId::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
-            seq.push((state, time, report_id))
+            seq.push(AggregationJobReportState {
+                draft02_prep_share: None,
+                prep_state,
+                time,
+                report_id,
+            });
         }
 
-        Ok(DapHelperState {
+        Ok(Self {
             part_batch_sel,
             seq,
         })
@@ -721,31 +739,26 @@ impl DapAggregateShare {
 }
 
 /// Leader state transition during the aggregation flow.
-#[derive(Debug)]
-pub enum DapLeaderTransition<M: Debug> {
-    /// The Leader has produced the next outbound message and its state has been updated.
-    Continue(DapLeaderState, M),
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
+pub enum DapLeaderAggregationJobTransition<M: Debug> {
+    /// Waiting for a response from the Helper.
+    Continued(DapAggregationJobState, M),
 
-    /// The leader has computed output shares, but is waiting on an AggregateResp from the hepler
-    /// before committing them.
-    Uncommitted(DapLeaderUncommitted, M),
+    /// Output shares computed, but waiting for a response from the Helper before committing.
+    Uncommitted(DapAggregationJobUncommitted, M),
 
-    /// The Leader has completed the aggregation flow without computing an aggregate share.
-    Skip,
+    /// Committed to the output shares.
+    Finished(DapAggregateSpan<DapAggregateShare>),
 }
 
-/// Helper state transition during the aggregation flow.
-#[derive(Debug)]
-pub enum DapHelperTransition<M: Debug> {
-    /// The Helper has produced the next outbound message and its state has been updated.
-    Continue(DapHelperState, M),
+/// Helper state transitions during the aggregation flow.
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
+pub enum DapHelperAggregationJobTransition<M: Debug> {
+    /// Waiting for a response from the Leader.
+    Continued(DapAggregationJobState, M),
 
-    /// The Helper has produced the last outbound message and has computed a sequence of output
-    /// shares.
-    //
-    // TODO Instead of merging all output shares into a single aggregate share, return a collection
-    // of aggregat shares, each corresponding to a different batch interval.
-    Finish(Vec<DapOutputShare>, M),
+    /// Committed to the output shares.
+    Finished(DapAggregateSpan<DapAggregateShare>, M),
 }
 
 /// Specification of a concrete VDAF.
