@@ -470,7 +470,7 @@ mod tests {
         let mut data = TestData::new(DapVersion::Draft02);
         let task_id = data.insert_task(
             DapVersion::Draft02,
-            crate::VdafConfig::Prio2 { dimension: 100_000 },
+            crate::VdafConfig::Prio2 { dimension: 10 },
         );
         let helper = data.new_helper();
         let test = data.with_leader(Arc::clone(&helper));
