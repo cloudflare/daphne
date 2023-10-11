@@ -21,12 +21,12 @@ use crate::{
     roles::DapReportInitializer,
     vdaf::{
         prio2::{
-            prio2_helper_prepare_finish, prio2_leader_prepare_finish, prio2_prepare_init,
-            prio2_shard, prio2_unshard,
+            prio2_decode_prep_state, prio2_prep_finish, prio2_prep_finish_from_shares,
+            prio2_prep_init, prio2_shard, prio2_unshard,
         },
         prio3::{
-            prio3_helper_prepare_finish, prio3_leader_prepare_finish, prio3_prepare_init,
-            prio3_shard, prio3_unshard,
+            prio3_decode_prep_state, prio3_prep_finish, prio3_prep_finish_from_shares,
+            prio3_prep_init, prio3_shard, prio3_unshard,
         },
     },
     DapAggregateResult, DapAggregateShare, DapAggregateShareSpan, DapError, DapHelperState,
@@ -44,8 +44,6 @@ use prio::{
 use rand::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{borrow::Cow, collections::HashSet};
-
-use self::{prio2::prio2_decode_prepare_state, prio3::prio3_decode_prepare_state};
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
 const CTX_INPUT_SHARE_DRAFT05: &[u8] = b"dap-05 input share";
@@ -270,7 +268,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
         let agg_id = usize::from(!is_leader);
         let res = match (vdaf_config, vdaf_verify_key) {
             (VdafConfig::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
-                prio3_prepare_init(
+                prio3_prep_init(
                     prio3_config,
                     verify_key,
                     agg_id,
@@ -280,7 +278,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
                 )
             }
             (VdafConfig::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
-                prio2_prepare_init(
+                prio2_prep_init(
                     *dimension,
                     verify_key,
                     agg_id,
@@ -362,11 +360,11 @@ impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPre
         let agg_id = usize::from(!is_leader);
         match vdaf_config {
             VdafConfig::Prio3(ref prio3_config) => {
-                Ok(prio3_decode_prepare_state(prio3_config, agg_id, bytes)
+                Ok(prio3_decode_prep_state(prio3_config, agg_id, bytes)
                     .map_err(|e| CodecError::Other(Box::new(e)))?)
             }
             VdafConfig::Prio2 { dimension } => {
-                Ok(prio2_decode_prepare_state(*dimension, agg_id, bytes)
+                Ok(prio2_decode_prep_state(*dimension, agg_id, bytes)
                     .map_err(|e| CodecError::Other(Box::new(e)))?)
             }
         }
@@ -923,13 +921,14 @@ impl VdafConfig {
             };
 
             let res = match self {
-                Self::Prio3(prio3_config) => prio3_leader_prepare_finish(
+                Self::Prio3(prio3_config) => prio3_prep_finish_from_shares(
                     prio3_config,
+                    0,
                     leader_step,
                     leader_message,
                     helper_message,
                 ),
-                Self::Prio2 { dimension } => prio2_leader_prepare_finish(
+                Self::Prio2 { dimension } => prio2_prep_finish_from_shares(
                     *dimension,
                     leader_step,
                     leader_message,
@@ -1091,13 +1090,11 @@ impl VdafConfig {
                 TransitionVar::Failed(failure)
             } else {
                 let res = match self {
-                    Self::Prio3(prio3_config) => prio3_helper_prepare_finish(
-                        prio3_config,
-                        helper_step.clone(),
-                        leader_message,
-                    ),
+                    Self::Prio3(prio3_config) => {
+                        prio3_prep_finish(prio3_config, helper_step.clone(), leader_message)
+                    }
                     Self::Prio2 { dimension } => {
-                        prio2_helper_prepare_finish(*dimension, helper_step.clone(), leader_message)
+                        prio2_prep_finish(*dimension, helper_step.clone(), leader_message)
                     }
                 };
 
