@@ -301,7 +301,7 @@ impl DapAggregateShareSpan {
     pub(crate) fn report_count(&self) -> usize {
         self.span
             .iter()
-            .map(|(_bucket, (_agg_share, report_ids))| report_ids.len())
+            .map(|(_bucket, (_agg_share, reports))| reports.len())
             .sum()
     }
 
@@ -309,7 +309,7 @@ impl DapAggregateShareSpan {
     pub(crate) fn into_merged(self) -> DapAggregateShare {
         self.span
             .into_iter()
-            .map(|(_bucket, (agg_share_for_bucket, _report_ids))| agg_share_for_bucket)
+            .map(|(_bucket, (agg_share_for_bucket, _reports))| agg_share_for_bucket)
             .reduce(|mut agg_share, agg_share_for_bucket| {
                 agg_share.merge(agg_share_for_bucket).unwrap();
                 agg_share
