@@ -297,10 +297,10 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // from the request path.
         let collect_job_id = match (req.version, &req.resource) {
             (DapVersion::Draft02, DapResource::Undefined) => None,
-            (DapVersion::Draft05, DapResource::CollectionJob(ref collect_job_id)) => {
+            (DapVersion::Draft07, DapResource::CollectionJob(ref collect_job_id)) => {
                 Some(collect_job_id.clone())
             }
-            (DapVersion::Draft05, DapResource::Undefined) => {
+            (DapVersion::Draft07, DapResource::Undefined) => {
                 return Err(DapAbort::BadRequest("undefined resource".into()));
             }
             _ => unreachable!("unhandled resource {:?}", req.resource),
@@ -519,11 +519,11 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         .await?;
         let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
-        // For draft05 and later, the Collection message includes the smallest quantized time
+        // For draft07 and later, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
         let interval = match task_config.version {
             DapVersion::Draft02 => None,
-            DapVersion::Draft05 => {
+            DapVersion::Draft07 => {
                 let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
                 let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
                 Some(Interval {

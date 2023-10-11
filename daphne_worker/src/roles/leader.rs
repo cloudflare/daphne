@@ -258,7 +258,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         let url = task_config.as_ref().leader_url.clone();
 
-        // Note that we always return the draft02 URI, but draft05 and later ignore it.
+        // Note that we always return the draft02 URI, but the latest draft ignores it.
         let collect_uri = url
             .join(&format!(
                 "collect/task/{}/req/{}",

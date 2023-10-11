@@ -439,10 +439,10 @@ fn resolve_agg_job_id<'id, S>(
         (DapVersion::Draft02, DapResource::Undefined, Some(agg_job_id)) => {
             Ok(MetaAggregationJobId::Draft02(Cow::Borrowed(agg_job_id)))
         }
-        (DapVersion::Draft05, DapResource::AggregationJob(ref agg_job_id), None) => {
-            Ok(MetaAggregationJobId::Draft05(Cow::Borrowed(agg_job_id)))
+        (DapVersion::Draft07, DapResource::AggregationJob(ref agg_job_id), None) => {
+            Ok(MetaAggregationJobId::Draft07(Cow::Borrowed(agg_job_id)))
         }
-        (DapVersion::Draft05, DapResource::Undefined, None) => {
+        (DapVersion::Draft07, DapResource::Undefined, None) => {
             Err(DapAbort::BadRequest("undefined resource".into()))
         }
         _ => unreachable!("unhandled resource {:?}", req.resource),

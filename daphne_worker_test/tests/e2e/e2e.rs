@@ -72,7 +72,7 @@ async fn leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v05/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v07/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -113,7 +113,7 @@ async fn helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v05/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v07/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -299,7 +299,7 @@ async fn leader_upload(version: DapVersion) {
     );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::Draft05 => client.put(url.as_str()),
+        DapVersion::Draft07 => client.put(url.as_str()),
         _ => unreachable!("unhandled version {}", t.version),
     };
     let resp = builder
@@ -1145,10 +1145,9 @@ async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
 async fn fixed_size(version: DapVersion, use_current: bool) {
     if version == DapVersion::Draft02 && use_current {
-        // The "current batch" isn't a feature in Draft02, but we allow it
-        // and immediately return for testing flexibility, as this allows us
-        // to not have a test coverage regression if we add a Draft05 in
-        // the future.
+        // draft02 compatibility: The "current batch" isn't a feature in draft02, but we allow it
+        // and immediately return for testing flexibility, as this allows us to not have a test
+        // coverage regression if we add a draft07 in the future.
         return;
     }
     let t = TestRunner::fixed_size(version).await;
