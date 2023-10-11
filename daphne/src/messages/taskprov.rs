@@ -9,6 +9,7 @@ use crate::messages::{
     QUERY_TYPE_TIME_INTERVAL,
 };
 use crate::taskprov::TaskprovVersion;
+use crate::vdaf::VDAF_VERIFY_KEY_SIZE_PRIO2;
 use prio::codec::{
     decode_u16_items, decode_u8_items, encode_u16_items, encode_u8_items, CodecError, Decode,
     Encode, ParameterizedDecode, ParameterizedEncode,
@@ -34,7 +35,7 @@ pub(crate) enum VdafType {
 impl KeyType for VdafType {
     fn len(&self) -> usize {
         match self {
-            VdafType::Prio2 => 32,
+            VdafType::Prio2 => VDAF_VERIFY_KEY_SIZE_PRIO2,
             _ => panic!("tried to get key length for undefined VDAF"),
         }
     }
@@ -43,7 +44,10 @@ impl KeyType for VdafType {
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub enum VdafTypeVar {
-    Prio2 { dimension: u32 },
+    Prio2 {
+        dimension: u32,
+    },
+    #[cfg(test)]
     NotImplemented(u32),
 }
 
@@ -54,6 +58,7 @@ impl Encode for VdafTypeVar {
                 VDAF_TYPE_PRIO2.encode(bytes);
                 dimension.encode(bytes);
             }
+            #[cfg(test)]
             VdafTypeVar::NotImplemented(x) => {
                 x.encode(bytes);
             }
@@ -68,6 +73,8 @@ impl Decode for VdafTypeVar {
             VDAF_TYPE_PRIO2 => Ok(Self::Prio2 {
                 dimension: u32::decode(bytes)?,
             }),
+            // We don't recognize the VDAF type, which means there may be parameters that follow
+            // and we don't know how many bytes to parse.
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -77,6 +84,7 @@ impl From<VdafTypeVar> for VdafType {
     fn from(var: VdafTypeVar) -> Self {
         match var {
             VdafTypeVar::Prio2 { .. } => VdafType::Prio2,
+            #[cfg(test)]
             VdafTypeVar::NotImplemented(x) => VdafType::NotImplemented(x),
         }
     }
