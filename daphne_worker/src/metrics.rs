@@ -19,30 +19,24 @@ pub struct DaphneWorkerMetrics {
 }
 
 impl DaphneWorkerMetrics {
-    pub(crate) fn register(registry: &Registry, prefix: Option<&str>) -> Result<Self, DapError> {
-        let front = if let Some(prefix) = prefix {
-            format!("{prefix}_")
-        } else {
-            "".into()
-        };
-
+    pub(crate) fn register(registry: &Registry) -> Result<Self, DapError> {
         let http_status_code_counter = register_int_counter_vec_with_registry!(
-            format!("{front}http_status_code"),
+            "http_status_code",
             "HTTP response status code.",
-            &["host", "code"],
+            &["code"],
             registry
         )
         .map_err(|e| fatal_error!(err = ?e, "failed to register http_status_code"))?;
 
         let dap_abort_counter = register_int_counter_vec_with_registry!(
-            format!("{front}dap_abort"),
+            "dap_abort",
             "DAP aborts.",
-            &["host", "reason"],
+            &["reason"],
             registry
         )
         .map_err(|e| fatal_error!(err = ?e, "failed to register dap_abort"))?;
 
-        let daphne = DaphneMetrics::register(registry, prefix)?;
+        let daphne = DaphneMetrics::register(registry)?;
 
         Ok(Self {
             daphne,

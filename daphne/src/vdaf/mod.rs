@@ -17,7 +17,7 @@ use crate::{
         Report, ReportId, ReportMetadata, ReportShare, TaskId, Time, Transition, TransitionFailure,
         TransitionVar,
     },
-    metrics::ContextualizedDaphneMetrics,
+    metrics::DaphneMetrics,
     roles::DapReportInitializer,
     vdaf::{
         prio2::{
@@ -668,7 +668,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId<'_>,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-        metrics: &ContextualizedDaphneMetrics<'_>,
+        metrics: &DaphneMetrics,
     ) -> Result<DapLeaderTransition<AggregationJobInitReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -784,7 +784,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_init_req: &AggregationJobInitReq,
-        metrics: &ContextualizedDaphneMetrics<'_>,
+        metrics: &DaphneMetrics,
     ) -> Result<DapHelperTransition<AggregationJobResp>, DapAbort> {
         let num_reports = agg_job_init_req.report_shares.len();
         let mut processed = HashSet::with_capacity(num_reports);
@@ -871,7 +871,7 @@ impl VdafConfig {
         state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
         version: DapVersion,
-        metrics: &ContextualizedDaphneMetrics<'_>,
+        metrics: &DaphneMetrics,
     ) -> Result<DapLeaderTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::UnrecognizedMessage {
@@ -1002,7 +1002,7 @@ impl VdafConfig {
         is_replay: impl Fn(&ReportId) -> bool,
         agg_job_id: &MetaAggregationJobId<'_>,
         agg_job_cont_req: &AggregationJobContinueReq,
-        metrics: &ContextualizedDaphneMetrics<'_>,
+        metrics: &DaphneMetrics,
     ) -> Result<(DapAggregateShareSpan, AggregationJobResp), DapAbort> {
         match agg_job_cont_req.round {
             Some(1) | None => {}
@@ -1133,7 +1133,7 @@ impl VdafConfig {
         task_config: &DapTaskConfig,
         uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
-        metrics: &ContextualizedDaphneMetrics,
+        metrics: &DaphneMetrics,
     ) -> Result<DapAggregateShareSpan, DapAbort> {
         if agg_job_resp.transitions.len() != uncommitted.seq.len() {
             return Err(DapAbort::UnrecognizedMessage {
@@ -1591,8 +1591,8 @@ mod test {
             DapLeaderTransition::Skip
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_leader_report_counter{host="leader.com",status="rejected_hpke_decrypt_error"}"#: 1,
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_hpke_decrypt_error"}"#: 1,
         });
     }
 
@@ -1610,8 +1610,8 @@ mod test {
             DapLeaderTransition::Skip
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_leader_report_counter{host="leader.com",status="rejected_hpke_unknown_config_id"}"#: 1,
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_hpke_unknown_config_id"}"#: 1,
         });
     }
 
@@ -1629,8 +1629,8 @@ mod test {
             DapLeaderTransition::Skip
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_leader_report_counter{host="leader.com",status="rejected_vdaf_prep_error"}"#: 2,
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_vdaf_prep_error"}"#: 2,
         });
     }
 
@@ -1658,8 +1658,8 @@ mod test {
             TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_report_counter{host="helper.org",status="rejected_hpke_decrypt_error"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_hpke_decrypt_error"}"#: 1,
         });
     }
 
@@ -1687,8 +1687,8 @@ mod test {
             TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_report_counter{host="helper.org",status="rejected_hpke_unknown_config_id"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_hpke_unknown_config_id"}"#: 1,
         });
     }
 
@@ -1735,8 +1735,8 @@ mod test {
             TransitionVar::Failed(TransitionFailure::VdafPrepError)
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_report_counter{host="helper.org",status="rejected_vdaf_prep_error"}"#: 2,
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_vdaf_prep_error"}"#: 2,
         });
     }
 
@@ -1917,8 +1917,8 @@ mod test {
             agg_job_init_req.report_shares[2].report_metadata.id
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_leader_report_counter{host="leader.com",status="rejected_vdaf_prep_error"}"#: 1,
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_vdaf_prep_error"}"#: 1,
         });
     }
 

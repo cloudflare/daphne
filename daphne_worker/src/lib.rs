@@ -273,10 +273,10 @@ impl DaphneWorkerRouter<'_> {
         state
             .metrics
             .http_status_code_counter
-            .with_label_values(&[
-                &state.host,
-                &format!("{}", result.as_ref().map_or(500, |resp| resp.status_code())),
-            ])
+            .with_label_values(&[&format!(
+                "{}",
+                result.as_ref().map_or(500, |resp| resp.status_code())
+            )])
             .inc();
 
         // Push metrics to Prometheus metrics server, if configured.

@@ -144,7 +144,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
             return Err(DapAbort::version_unknown());
         }
 
-        let metrics = self.metrics().with_host(req.host());
+        let metrics = self.metrics();
 
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;

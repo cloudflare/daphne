@@ -20,6 +20,7 @@ fallthrough = false
 # production. In particular, they will not be passed as environment variables
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+ENV="test_leader"
 DAP_AGGREGATOR_ROLE = "leader"
 DAP_BASE_URL = "http://127.0.0.1:8787/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
@@ -93,11 +94,13 @@ preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
 #
 
 
+
 [env.helper.vars]
 # NOTE: Variables marked as SECRET need to be provisioned securely in
 # production. In particular, they will not be passed as environment variables
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+ENV="test_helper"
 DAP_AGGREGATOR_ROLE = "helper"
 DAP_BASE_URL = "http://127.0.0.1:8788/"
 DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"

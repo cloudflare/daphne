@@ -60,7 +60,9 @@ pub struct AggregationJobTest {
 
     // operational parameters
     #[allow(dead_code)]
-    pub(crate) prometheus_registry: prometheus::Registry,
+    pub(crate) leader_registry: prometheus::Registry,
+    #[allow(dead_code)]
+    pub(crate) helper_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphneMetrics,
     pub(crate) helper_metrics: DaphneMetrics,
     pub(crate) leader_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
@@ -126,11 +128,24 @@ impl AggregationJobTest {
         let leader_hpke_config = leader_hpke_receiver_config.clone().config;
         let helper_hpke_config = helper_hpke_receiver_config.clone().config;
         let collector_hpke_config = collector_hpke_receiver_config.clone().config;
-        let prometheus_registry = prometheus::Registry::new();
-        let leader_metrics =
-            DaphneMetrics::register(&prometheus_registry, Some("test_leader")).unwrap();
-        let helper_metrics =
-            DaphneMetrics::register(&prometheus_registry, Some("test_helper")).unwrap();
+        let leader_registry = prometheus::Registry::new_custom(
+            Option::None,
+            Option::Some(HashMap::from([
+                ("env".to_string(), "test_leader".to_string()),
+                ("host".to_string(), "leader.com".to_string()),
+            ])),
+        )
+        .unwrap();
+        let helper_registry = prometheus::Registry::new_custom(
+            Option::None,
+            Option::Some(HashMap::from([
+                ("env".to_string(), "test_helper".to_string()),
+                ("host".to_string(), "helper.org".to_string()),
+            ])),
+        )
+        .unwrap();
+        let leader_metrics = DaphneMetrics::register(&leader_registry).unwrap();
+        let helper_metrics = DaphneMetrics::register(&helper_registry).unwrap();
 
         Self {
             now,
@@ -153,7 +168,8 @@ impl AggregationJobTest {
                 collector_hpke_config,
                 taskprov: false,
             },
-            prometheus_registry,
+            leader_registry,
+            helper_registry,
             leader_metrics,
             helper_metrics,
             leader_reports_processed: Default::default(),
@@ -191,9 +207,7 @@ impl AggregationJobTest {
         &self,
         reports: Vec<Report>,
     ) -> DapLeaderTransition<AggregationJobInitReq> {
-        let metrics = self
-            .leader_metrics
-            .with_host(self.task_config.leader_url.host_str().unwrap());
+        let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
             .produce_agg_job_init_req(
@@ -204,7 +218,7 @@ impl AggregationJobTest {
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
-                &metrics,
+                metrics,
             )
             .await
             .unwrap()
@@ -217,9 +231,7 @@ impl AggregationJobTest {
         &self,
         agg_job_init_req: &AggregationJobInitReq,
     ) -> DapHelperTransition<AggregationJobResp> {
-        let metrics = self
-            .helper_metrics
-            .with_host(self.task_config.helper_url.host_str().unwrap());
+        let metrics = &self.helper_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_init_req(
@@ -228,7 +240,7 @@ impl AggregationJobTest {
                 &self.task_id,
                 &self.task_config,
                 agg_job_init_req,
-                &metrics,
+                metrics,
             )
             .await
             .unwrap()
@@ -242,9 +254,7 @@ impl AggregationJobTest {
         leader_state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
     ) -> DapLeaderTransition<AggregationJobContinueReq> {
-        let metrics = self
-            .leader_metrics
-            .with_host(self.task_config.leader_url.host_str().unwrap());
+        let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_resp(
@@ -253,7 +263,7 @@ impl AggregationJobTest {
                 leader_state,
                 agg_job_resp,
                 self.task_config.version,
-                &metrics,
+                metrics,
             )
             .unwrap()
     }
@@ -264,9 +274,7 @@ impl AggregationJobTest {
         leader_state: DapLeaderState,
         agg_job_resp: AggregationJobResp,
     ) -> DapAbort {
-        let metrics = self
-            .leader_metrics
-            .with_host(self.task_config.leader_url.host_str().unwrap());
+        let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_resp(
@@ -275,7 +283,7 @@ impl AggregationJobTest {
                 leader_state,
                 agg_job_resp,
                 self.task_config.version,
-                &metrics,
+                metrics,
             )
             .expect_err("handle_agg_job_resp() succeeded; expected failure")
     }
@@ -288,9 +296,7 @@ impl AggregationJobTest {
         helper_state: &DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> (DapAggregateShareSpan, AggregationJobResp) {
-        let metrics = self
-            .helper_metrics
-            .with_host(self.task_config.helper_url.host_str().unwrap());
+        let metrics = &self.helper_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
@@ -300,7 +306,7 @@ impl AggregationJobTest {
                 |_| false,
                 &self.agg_job_id,
                 agg_job_cont_req,
-                &metrics,
+                metrics,
             )
             .unwrap()
     }
@@ -311,9 +317,7 @@ impl AggregationJobTest {
         helper_state: DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapAbort {
-        let metrics = self
-            .helper_metrics
-            .with_host(self.task_config.helper_url.host_str().unwrap());
+        let metrics = &self.helper_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
@@ -323,7 +327,7 @@ impl AggregationJobTest {
                 |_| false,
                 &self.agg_job_id,
                 agg_job_cont_req,
-                &metrics,
+                metrics,
             )
             .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
@@ -336,17 +340,10 @@ impl AggregationJobTest {
         leader_uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
     ) -> DapAggregateShareSpan {
-        let metrics = self
-            .leader_metrics
-            .with_host(self.task_config.leader_url.host_str().unwrap());
+        let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
-            .handle_final_agg_job_resp(
-                &self.task_config,
-                leader_uncommitted,
-                agg_job_resp,
-                &metrics,
-            )
+            .handle_final_agg_job_resp(&self.task_config, leader_uncommitted, agg_job_resp, metrics)
             .unwrap()
     }
 
@@ -654,7 +651,7 @@ impl MockAggregator {
             helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
-            metrics: DaphneMetrics::register(registry, Some("test_helper")).unwrap(),
+            metrics: DaphneMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             taskprov_leader_token,
@@ -688,7 +685,7 @@ impl MockAggregator {
             helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
-            metrics: DaphneMetrics::register(registry, Some("test_leader")).unwrap(),
+            metrics: DaphneMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             taskprov_leader_token,
@@ -1575,6 +1572,7 @@ macro_rules! assert_metrics_include {
     ($registry:expr, {$($ks:tt: $vs:expr),+,}) => {{
         use prometheus::{Encoder, TextEncoder};
         use std::collections::HashSet;
+        use regex::{Captures,Regex};
 
         let mut want: HashSet<String> = HashSet::new();
         $crate::assert_metrics_include_auxiliary_function!(&mut want, $($ks: $vs),+,);
@@ -1585,14 +1583,26 @@ macro_rules! assert_metrics_include {
         let encoder = TextEncoder::new();
         encoder.encode(&$registry.gather(), &mut got_buf).unwrap();
         let got_str = String::from_utf8(got_buf).unwrap();
-        for line in got_str.split('\n') {
+        let lines = got_str.split('\n');
+
+        // sort all terms to ensure deterministic comparisons
+        let pat = Regex::new(r"\{([^]]*)}").unwrap();
+        let lines = lines.map(|line| {
+            pat.replace(line, |c:&Captures| {
+                let mut terms: Vec<_> = c[1].split(",").collect();
+                terms.sort();
+                format!("{{{}}}", terms.join(","))
+            }).to_string()
+        }).collect::<Vec<String>>();
+
+        for line in &lines {
             want.remove(line);
         }
 
         // The metrics contain the expected lines if the the set is now empty.
         if !want.is_empty() {
             panic!("unexpected metrics: got:\n{}\nmust contain:\n{}\n",
-                   got_str, want.into_iter().collect::<Vec<String>>().join("\n"));
+                   lines.join("\n"), want.into_iter().collect::<Vec<String>>().join("\n"));
         }
     }}
 }
