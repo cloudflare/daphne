@@ -606,11 +606,11 @@ pub struct DapOutputShare {
 pub struct DapAggregateShare {
     /// Number of reports in the batch.
     pub report_count: u64,
-    pub(crate) min_time: Time,
-    pub(crate) max_time: Time,
+    pub min_time: Time,
+    pub max_time: Time,
     /// Batch checkusm.
     pub checksum: [u8; 32],
-    pub(crate) data: Option<VdafAggregateShare>,
+    pub data: Option<VdafAggregateShare>,
 }
 
 impl DapAggregateShare {

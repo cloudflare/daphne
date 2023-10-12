@@ -410,7 +410,7 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum VdafAggregateShare {
+pub enum VdafAggregateShare {
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),
     FieldPrio2(prio::vdaf::AggregateShare<FieldPrio2>),
