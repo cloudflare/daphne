@@ -244,12 +244,13 @@ mod test {
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
         version: DapVersion,
-        prometheus_registry: prometheus::Registry,
+        helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
         pub leader_token: BearerToken,
         collector_hpke_receiver_config: HpkeReceiverConfig,
         taskprov_vdaf_verify_key_init: [u8; 32],
         taskprov_leader_token: BearerToken,
+        leader_registry: prometheus::Registry,
     }
 
     impl TestData {
@@ -344,7 +345,22 @@ mod test {
             let taskprov_leader_token = BearerToken::from("taskprov_leader_token");
             let taskprov_collector_token = BearerToken::from("taskprov_collector_token");
 
-            let prometheus_registry = prometheus::Registry::new();
+            let helper_registry = prometheus::Registry::new_custom(
+                Option::None,
+                Option::Some(HashMap::from([
+                    ("env".to_string(), "test_helper".to_owned()),
+                    ("host".to_string(), "helper.org".to_owned()),
+                ])),
+            )
+            .unwrap();
+            let leader_registry = prometheus::Registry::new_custom(
+                Option::None,
+                Option::Some(HashMap::from([
+                    ("env".to_string(), "test_leader".to_owned()),
+                    ("host".to_string(), "leader.com".to_owned()),
+                ])),
+            )
+            .unwrap();
 
             Self {
                 now,
@@ -355,12 +371,13 @@ mod test {
                 fixed_size_task_id,
                 expired_task_id,
                 version,
-                prometheus_registry,
+                helper_registry,
                 tasks,
                 leader_token,
                 taskprov_leader_token,
                 collector_hpke_receiver_config,
                 taskprov_vdaf_verify_key_init,
+                leader_registry,
             }
         }
 
@@ -402,7 +419,7 @@ mod test {
                 self.global_config.clone(),
                 self.leader_token.clone(),
                 self.collector_hpke_receiver_config.config.clone(),
-                &self.prometheus_registry,
+                &self.helper_registry,
                 self.taskprov_vdaf_verify_key_init,
                 self.taskprov_leader_token.clone(),
             ))
@@ -419,7 +436,7 @@ mod test {
                 self.leader_token,
                 self.collector_token.clone(),
                 self.collector_hpke_receiver_config.config.clone(),
-                &self.prometheus_registry,
+                &self.leader_registry,
                 self.taskprov_vdaf_verify_key_init,
                 self.taskprov_leader_token,
                 self.taskprov_collector_token.clone(),
@@ -436,7 +453,8 @@ mod test {
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
                 version: self.version,
-                prometheus_registry: self.prometheus_registry,
+                helper_registry: self.helper_registry,
+                leader_registry: self.leader_registry,
             }
         }
     }
@@ -451,7 +469,8 @@ mod test {
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
         version: DapVersion,
-        pub prometheus_registry: prometheus::Registry,
+        pub helper_registry: prometheus::Registry,
+        pub leader_registry: prometheus::Registry,
     }
 
     impl Test {
@@ -630,13 +649,7 @@ mod test {
             // Leader->Helper: Run aggregation job.
             let _reports_aggregated = self
                 .leader
-                .run_agg_job(
-                    &task_id,
-                    task_config,
-                    &part_batch_sel,
-                    reports,
-                    task_config.leader_url.host_str().unwrap(),
-                )
+                .run_agg_job(&task_id, task_config, &part_batch_sel, reports)
                 .await?;
             Ok(())
         }
@@ -672,13 +685,7 @@ mod test {
             // Leader->Helper: Complete collection job.
             let _reports_collected = self
                 .leader
-                .run_collect_job(
-                    task_id,
-                    collect_id,
-                    task_config,
-                    collect_req,
-                    task_config.leader_url.host_str().unwrap(),
-                )
+                .run_collect_job(task_id, collect_id, task_config, collect_req)
                 .await?;
             Ok(())
         }
@@ -1245,10 +1252,10 @@ mod test {
             TransitionVar::Failed(TransitionFailure::ReportReplayed)
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_report_counter{host="helper.org",status="rejected_report_replayed"}"#: 1,
-            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
 
@@ -1306,10 +1313,10 @@ mod test {
             TransitionVar::Failed(TransitionFailure::BatchCollected)
         );
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_report_counter{host="helper.org",status="rejected_batch_collected"}"#: 1,
-            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_batch_collected"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
 
@@ -1846,15 +1853,17 @@ mod test {
         let query = task_config.query_for_current_batch_window(t.now);
         t.run_col_job(task_id, &query).await.unwrap();
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
-            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 1,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 1,
         });
     }
 
@@ -1880,15 +1889,17 @@ mod test {
         };
         t.run_col_job(task_id, &query).await.unwrap();
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
-            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 1,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 1,
         });
     }
 
@@ -1981,15 +1992,17 @@ mod test {
         };
         t.run_col_job(&taskprov_id, &query).await.unwrap();
 
-        assert_metrics_include!(t.prometheus_registry, {
-            r#"test_helper_inbound_request_counter{host="helper.org",type="aggregate"}"#: 2,
-            r#"test_helper_inbound_request_counter{host="helper.org",type="collect"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="aggregated"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="aggregated"}"#: 1,
-            r#"test_leader_report_counter{host="leader.com",status="collected"}"#: 1,
-            r#"test_helper_report_counter{host="helper.org",status="collected"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="started"}"#: 1,
-            r#"test_helper_aggregation_job_counter{host="helper.org",status="completed"}"#: 1,
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 1,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 1,
         });
     }
 

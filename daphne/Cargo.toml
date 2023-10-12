@@ -46,6 +46,7 @@ assert_matches.workspace = true
 criterion.workspace = true
 matchit.workspace = true
 paste.workspace = true
+regex = "1.10.0"
 tokio.workspace = true
 
 [features]

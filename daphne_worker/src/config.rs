@@ -87,6 +87,8 @@ struct MetricsPushConfig {
 
 /// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
 pub(crate) struct DaphneWorkerConfig {
+    pub(crate) env: String,
+
     /// Indicates if DaphneWorker is used as the Leader.
     pub(crate) is_leader: bool,
 
@@ -131,6 +133,8 @@ pub(crate) struct DaphneWorkerConfig {
 
 impl DaphneWorkerConfig {
     pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let env_label = env.var("ENV")?.to_string();
+
         let load_key = |name| {
             let key = env
                 .secret(name)
@@ -313,6 +317,7 @@ impl DaphneWorkerConfig {
         };
 
         Ok(Self {
+            env: env_label,
             global,
             deployment,
             collection_job_id_key,
@@ -436,17 +441,25 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         error_reporter: &'srv dyn ErrorReporter,
         audit_log: &'srv dyn AuditLog,
     ) -> Result<Self> {
-        let prometheus_registry = Registry::new();
-        let metrics = DaphneWorkerMetrics::register(&prometheus_registry, None)
-            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
-
-        crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
-            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
         let host = req
             .url()?
             .host_str()
             .unwrap_or("unspecified-daphne-worker-host")
             .to_string();
+
+        let prometheus_registry = Registry::new_custom(
+            Option::None,
+            Option::Some(HashMap::from([
+                ("env".to_string(), isolate_state.config.env.clone()),
+                ("host".to_string(), host.clone()),
+            ])),
+        )
+        .unwrap();
+        let metrics = DaphneWorkerMetrics::register(&prometheus_registry)
+            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
+
+        crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
+            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
 
         Ok(Self {
             isolate_state,
@@ -515,7 +528,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             .dap_abort_counter
             // this to string is bounded by the
             // number of variants in the enum
-            .with_label_values(&[&self.host, &e.to_string()])
+            .with_label_values(&[&e.to_string()])
             .inc();
         error!(error = ?e, "request aborted");
         let problem_details = e.into_problem_details();

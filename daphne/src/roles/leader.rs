@@ -147,7 +147,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
     /// Handle a report from a Client.
     async fn handle_upload_req(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
-        let metrics = self.metrics().with_host(req.host());
+        let metrics = self.metrics();
         let task_id = req.task_id()?;
         debug!("upload for task {task_id}");
 
@@ -226,7 +226,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// poll later on to get the collection.
     async fn handle_collect_job_req(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
         let now = self.get_current_time();
-        let metrics = self.metrics().with_host(req.host());
+        let metrics = self.metrics();
         let task_id = req.task_id()?;
         debug!("collect for task {task_id}");
 
@@ -327,9 +327,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-        host: &str,
     ) -> Result<u64, DapAbort> {
-        let metrics = self.metrics().with_host(host);
+        let metrics = self.metrics();
 
         // Prepare AggregationJobInitReq.
         let agg_job_id = MetaAggregationJobId::gen_for_version(&task_config.version);
@@ -343,7 +342,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 &agg_job_id,
                 part_batch_sel,
                 reports,
-                &metrics,
+                metrics,
             )
             .await?;
         let (state, agg_job_init_req) = match transition {
@@ -393,7 +392,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             state,
             agg_job_resp,
             task_config.version,
-            &metrics,
+            metrics,
         )?;
         let (uncommited, agg_job_cont_req) = match transition {
             DapLeaderTransition::Uncommitted(uncommited, agg_job_cont_req) => {
@@ -428,7 +427,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             task_config,
             uncommited,
             agg_job_resp,
-            &metrics,
+            metrics,
         )?;
         let out_shares_count = agg_share_span.report_count() as u64;
 
@@ -461,9 +460,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         collect_id: &CollectionJobId,
         task_config: &DapTaskConfig,
         collect_req: &CollectionReq,
-        host: &str,
     ) -> Result<u64, DapAbort> {
-        let metrics = self.metrics().with_host(host);
+        let metrics = self.metrics();
 
         debug!("collecting id {collect_id}");
         let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
@@ -594,13 +592,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                         "RUNNING run_agg_job FOR TID {task_id} AND {part_batch_sel:?} AND {host}"
                     );
                     telem.reports_aggregated += self
-                        .run_agg_job(
-                            &task_id,
-                            task_config.as_ref(),
-                            &part_batch_sel,
-                            reports,
-                            host,
-                        )
+                        .run_agg_job(&task_id, task_config.as_ref(), &part_batch_sel, reports)
                         .await?;
                 }
             }
@@ -619,13 +611,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
             tracing::debug!("RUNNING run_collect_job FOR TID {task_id} AND {collect_id} AND {collect_req:?} AND {host}");
             telem.reports_collected += self
-                .run_collect_job(
-                    &task_id,
-                    &collect_id,
-                    task_config.as_ref(),
-                    &collect_req,
-                    host,
-                )
+                .run_collect_job(&task_id, &collect_id, task_config.as_ref(), &collect_req)
                 .await?;
         }
 

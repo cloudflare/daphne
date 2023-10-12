@@ -18,7 +18,7 @@ use crate::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
         AggregationJobInitReq, Draft02AggregationJobId, PartialBatchSelector, TaskId,
     },
-    metrics::{ContextualizedDaphneMetrics, DaphneRequestType},
+    metrics::{DaphneMetrics, DaphneRequestType},
     DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
     DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
@@ -46,7 +46,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
     async fn handle_agg_job_init_req<'req>(
         &self,
         req: &'req DapRequest<S>,
-        metrics: ContextualizedDaphneMetrics<'req>,
+        metrics: &DaphneMetrics,
         task_id: &TaskId,
     ) -> Result<DapResponse, DapAbort> {
         let agg_job_init_req =
@@ -118,14 +118,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         let transition = task_config
             .vdaf
-            .handle_agg_job_init_req(
-                self,
-                self,
-                task_id,
-                task_config,
-                &agg_job_init_req,
-                &metrics,
-            )
+            .handle_agg_job_init_req(self, self, task_id, task_config, &agg_job_init_req, metrics)
             .map_err(DapError::Abort)
             .await?;
 
@@ -167,7 +160,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
     async fn handle_agg_job_cont_req<'req>(
         &self,
         req: &'req DapRequest<S>,
-        metrics: ContextualizedDaphneMetrics<'req>,
+        metrics: &DaphneMetrics,
         task_id: &TaskId,
     ) -> Result<DapResponse, DapAbort> {
         if let Some(taskprov_version) = self.get_global_config().taskprov_version {
@@ -235,7 +228,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     |id| replayed_reports.contains(id),
                     &agg_job_id,
                     &agg_job_cont_req,
-                    &metrics,
+                    metrics,
                 )?;
 
                 let out_shares_count = agg_share_span.report_count().try_into().unwrap();
@@ -272,7 +265,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
     /// Handle a request pertaining to an aggregation job.
     async fn handle_agg_job_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
-        let metrics = self.metrics().with_host(req.host());
+        let metrics = self.metrics();
         let task_id = req.task_id()?;
 
         // Check whether the DAP version indicated by the sender is supported.
@@ -296,7 +289,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
     /// collection job.
     async fn handle_agg_share_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
         let now = self.get_current_time();
-        let metrics = self.metrics().with_host(req.host());
+        let metrics = self.metrics();
         let task_id = req.task_id()?;
 
         // Check whether the DAP version indicated by the sender is supported.
@@ -504,7 +497,7 @@ mod tests {
         ));
 
         helper
-            .handle_agg_job_init_req(&req, helper.metrics.with_host("test"), &task_id)
+            .handle_agg_job_init_req(&req, &helper.metrics, &task_id)
             .await
             .unwrap();
 
@@ -524,7 +517,7 @@ mod tests {
                 .await;
 
             let resp = helper
-                .handle_agg_job_cont_req(&req, helper.metrics.with_host("test"), &task_id)
+                .handle_agg_job_cont_req(&req, &helper.metrics, &task_id)
                 .await
                 .unwrap();
 
@@ -553,7 +546,7 @@ mod tests {
                 .await;
 
             let resp = helper
-                .handle_agg_job_cont_req(&req, helper.metrics.with_host("test"), &task_id)
+                .handle_agg_job_cont_req(&req, &helper.metrics, &task_id)
                 .await
                 .unwrap();
 
@@ -569,7 +562,7 @@ mod tests {
         };
 
         let Some(metric) = test
-            .prometheus_registry
+            .helper_registry
             .gather()
             .into_iter()
             .find(|metric| metric.get_name().ends_with("report_counter"))

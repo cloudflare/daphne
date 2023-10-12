@@ -661,6 +661,7 @@ dependencies = [
  "prio",
  "prometheus",
  "rand",
+ "regex",
  "ring",
  "serde",
  "serde_json",
