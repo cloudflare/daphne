@@ -197,8 +197,7 @@ async fn resolve_taskprov<S>(
 mod test {
     use super::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader};
     use crate::{
-        assert_metrics_include, assert_metrics_include_auxiliary_function, async_test_version,
-        async_test_versions,
+        assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
         constants::DapMediaType,
         hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},

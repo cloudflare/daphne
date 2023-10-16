@@ -8,13 +8,13 @@ use crate::{
     config::{DapTaskConfigKvPair, DaphneWorker},
     durable::{
         aggregate_store::{
-            DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, DURABLE_AGGREGATE_STORE_GET,
-            DURABLE_AGGREGATE_STORE_MARK_COLLECTED, DURABLE_AGGREGATE_STORE_MERGE,
+            AggregateStoreMergeReq, DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
+            DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
+            DURABLE_AGGREGATE_STORE_MERGE,
         },
         durable_name_agg_store,
         reports_processed::{
             ReportsProcessedReq, ReportsProcessedResp, DURABLE_REPORTS_PROCESSED_INITIALIZE,
-            DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
         },
         BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_REPORTS_PROCESSED,
     },
@@ -30,14 +30,13 @@ use daphne::{
     metrics::DaphneMetrics,
     roles::{early_metadata_check, DapAggregator, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapAggregateShareSpan, DapBatchBucket, DapError, DapGlobalConfig,
-    DapRequest, DapSender, DapTaskConfig,
+    DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapRequest,
+    DapSender, DapTaskConfig,
 };
-use futures::{future::try_join_all, StreamExt, TryStreamExt};
+use futures::{future::try_join_all, StreamExt};
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap, HashSet},
-    future::ready,
+    collections::{HashMap, HashSet},
 };
 
 #[async_trait(?Send)]
@@ -417,83 +416,36 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        agg_share_span: DapAggregateShareSpan,
-    ) -> std::result::Result<Option<HashSet<ReportId>>, DapError> {
+        agg_share_span: DapAggregateSpan<DapAggregateShare>,
+    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>> {
         let task_id_hex = task_id.to_hex();
-        let durable = self.durable();
-        let mut agg_store_request_data: HashMap<String, DapAggregateShare> = HashMap::new();
-        let mut reports_processed_request_data: HashMap<String, Vec<ReportId>> = HashMap::new();
-        for (bucket, (agg_share, report_metadatas)) in agg_share_span {
-            for (id, time) in report_metadatas {
-                let reports_processed_name = self.config().durable_name_report_store(
-                    task_config.as_ref(),
-                    &task_id_hex,
-                    &id,
-                    time,
-                );
-                reports_processed_request_data
-                    .entry(reports_processed_name)
-                    .or_default()
-                    .push(id.clone());
-            }
-            let agg_store_name =
-                durable_name_agg_store(&task_config.version, &task_id_hex, &bucket);
+        let durable = self.durable().with_retry();
 
-            match agg_store_request_data.entry(agg_store_name) {
-                Entry::Occupied(mut current_agg_share) => {
-                    current_agg_share.get_mut().merge(agg_share)?;
-                }
-                Entry::Vacant(slot) => {
-                    slot.insert(agg_share);
-                }
-            }
-        }
-
-        // TODO(mendess) Note the bug we found here (Either all DO requests must return "no
-        // replays" or no DO requests commit "mark aggregated". We need to make sure these events
-        // are mutually exclusive.)
-        let replayed = try_join_all(reports_processed_request_data.into_iter().map(
-            |(durable_name, report_ids)| async {
-                durable
-                    .post::<_, Vec<ReportId>>(
-                        BINDING_DAP_REPORTS_PROCESSED,
-                        DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED,
-                        durable_name,
-                        report_ids,
+        futures::stream::iter(agg_share_span)
+            .map(|(bucket, (agg_share, report_metadatas))| async {
+                let agg_store_name =
+                    durable_name_agg_store(&task_config.version, &task_id_hex, &bucket);
+                let result = durable
+                    .post::<_, HashSet<ReportId>>(
+                        BINDING_DAP_AGGREGATE_STORE,
+                        DURABLE_AGGREGATE_STORE_MERGE,
+                        agg_store_name,
+                        AggregateStoreMergeReq {
+                            contained_reports: report_metadatas
+                                .iter()
+                                .map(|(id, _)| id)
+                                .cloned()
+                                .collect(),
+                            agg_share_delta: agg_share,
+                        },
                     )
                     .await
-            },
-        ))
-        .await
-        .map_err(|e| fatal_error!(err = ?e))?
-        .into_iter()
-        .flatten()
-        .collect::<HashSet<ReportId>>();
-
-        // Only aggregate the output shares if none are replayed
-        if replayed.is_empty() {
-            futures::stream::iter(agg_store_request_data)
-                .map(|(agg_store_name, agg_share)| async {
-                    durable
-                        .post::<_, ()>(
-                            BINDING_DAP_AGGREGATE_STORE,
-                            DURABLE_AGGREGATE_STORE_MERGE,
-                            agg_store_name,
-                            agg_share,
-                        )
-                        .await
-                })
-                .buffer_unordered(usize::MAX)
-                // poll the iterator to compleation, short
-                // circuiting on error
-                .try_for_each(|()| ready(Ok(())))
-                .await
-                .map_err(|e| fatal_error!(err = ?e))?;
-
-            Ok(None)
-        } else {
-            Ok(Some(replayed))
-        }
+                    .map_err(|e| fatal_error!(err = ?e));
+                (bucket, (result, report_metadatas))
+            })
+            .buffer_unordered(usize::MAX)
+            .collect()
+            .await
     }
 
     async fn get_agg_share(

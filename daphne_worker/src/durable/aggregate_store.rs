@@ -1,16 +1,20 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::ControlFlow;
+use std::{collections::HashSet, mem::size_of, ops::ControlFlow};
 
 use crate::{
     config::DaphneWorkerConfig,
     durable::{create_span_from_request, state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
     initialize_tracing, int_err,
 };
-use daphne::{messages::Time, vdaf::VdafAggregateShare, DapAggregateShare};
+use daphne::{
+    messages::{ReportId, Time},
+    vdaf::VdafAggregateShare,
+    DapAggregateShare,
+};
 use prio::{
-    codec::Encode,
+    codec::{Decode, Encode},
     field::FieldElement,
     vdaf::{AggregateShare, OutputShare},
 };
@@ -20,6 +24,8 @@ use worker::{wasm_bindgen::JsValue, *};
 
 use super::{req_parse, DapDurableObject, GarbageCollectable};
 
+pub(crate) const DURABLE_AGGREGATE_STORE_GET_MERGED: &str =
+    "/internal/do/aggregate_store/get_merged";
 pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
 pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
 pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
@@ -57,7 +63,10 @@ pub struct AggregateStore {
 }
 
 /// Minimum number of chunks needed to store 512K of aggregate share data.
-const MAX_CHUNK_KEY_COUNT: usize = 4;
+const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 4;
+
+/// Minimum number of chunks needed to store 10_000 report ids.
+const MAX_REPORT_ID_CHUNK_KEY_COUNT: usize = 2;
 
 /// The maximum chunk size as documented in:
 /// https://developers.cloudflare.com/durable-objects/platform/limits/
@@ -133,8 +142,14 @@ fn js_map_to_chunks<T: DeserializeOwned>(keys: &[String], map: js_sys::Map) -> V
 
 impl AggregateStore {
     fn agg_share_shard_keys(&self) -> Vec<String> {
-        (0..MAX_CHUNK_KEY_COUNT)
+        (0..MAX_AGG_SHARE_CHUNK_KEY_COUNT)
             .map(|n| format!("chunk_v2_{n:03}"))
+            .collect()
+    }
+
+    fn aggregated_reports_keys(&self) -> Vec<String> {
+        (0..MAX_REPORT_ID_CHUNK_KEY_COUNT)
+            .map(|n| format!("aggregated_report_ids_{n:03}"))
             .collect()
     }
 
@@ -185,6 +200,65 @@ impl AggregateStore {
             meta.into_agg_share_with_data(data)
         })
     }
+
+    async fn load_aggregated_report_ids(&self) -> Result<HashSet<ReportId>> {
+        let chunks_map = self
+            .state
+            .storage()
+            .get_multiple(self.aggregated_reports_keys())
+            .await?;
+
+        let bytes = js_map_to_chunks::<u8>(&self.aggregated_reports_keys(), chunks_map);
+
+        assert_eq!(bytes.len() % std::mem::size_of::<ReportId>(), 0);
+        let mut ids = HashSet::with_capacity(bytes.len() / size_of::<ReportId>());
+        for chunk in bytes.chunks_exact(size_of::<ReportId>()) {
+            ids.insert(ReportId::get_decoded(chunk).map_err(|_| Error::BadEncoding)?);
+        }
+        Ok(ids)
+    }
+}
+
+fn shard_bytes_to_object(
+    keys: &[String],
+    bytes: Vec<u8>,
+    object_to_fill: &js_sys::Object,
+) -> Result<()> {
+    // stolen from
+    // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
+    // because it's nightly only
+    fn div_ceil(lhs: usize, rhs: usize) -> usize {
+        let d = lhs / rhs;
+        let r = lhs % rhs;
+        if r > 0 && rhs > 0 {
+            d + 1
+        } else {
+            d
+        }
+    }
+
+    let num_chunks = div_ceil(bytes.len(), MAX_CHUNK_SIZE);
+    if num_chunks > keys.len() {
+        return Err(format!("too many chunks {num_chunks}. max is {}", keys.len()).into());
+    }
+
+    let mut base_idx = 0;
+    for key in &keys[..num_chunks] {
+        let end = usize::min(base_idx + MAX_CHUNK_SIZE + 1, bytes.len());
+        let chunk = &bytes[base_idx..end];
+
+        let value = js_sys::Uint8Array::new_with_length(chunk.len() as _);
+        value.copy_from(chunk);
+
+        js_sys::Reflect::set(
+            object_to_fill,
+            &JsValue::from_str(key.as_str()),
+            &value.into(),
+        )?;
+
+        base_idx = end;
+    }
+    Ok(())
 }
 
 #[durable_object]
@@ -220,13 +294,40 @@ impl AggregateStore {
         };
 
         match (req.path().as_ref(), req.method()) {
+            (DURABLE_AGGREGATE_STORE_GET_MERGED, Method::Get) => {
+                Response::from_json(&self.load_aggregated_report_ids().await?)
+            }
             // Merge an aggregate share into the stored aggregate.
             //
             // Non-idempotent (do not retry)
             // Input: `agg_share_dellta: DapAggregateShare`
             // Output: `()`
             (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
-                let agg_share_delta = req_parse(&mut req).await?;
+                let AggregateStoreMergeReq {
+                    contained_reports,
+                    agg_share_delta,
+                } = req_parse(&mut req).await?;
+
+                let chunks_map = js_sys::Object::default();
+
+                {
+                    // check for replays
+                    let mut merged_report_ids = self.load_aggregated_report_ids().await?;
+                    let repeat_ids = contained_reports
+                        .iter()
+                        .filter(|id| merged_report_ids.contains(id))
+                        .collect::<Vec<_>>();
+                    if !repeat_ids.is_empty() {
+                        return Response::from_json(&repeat_ids);
+                    }
+                    merged_report_ids.extend(contained_reports);
+                    let mut as_bytes =
+                        Vec::with_capacity(merged_report_ids.len() * size_of::<ReportId>());
+                    merged_report_ids
+                        .into_iter()
+                        .for_each(|id| id.encode(&mut as_bytes));
+                    shard_bytes_to_object(&self.aggregated_reports_keys(), as_bytes, &chunks_map)?;
+                };
 
                 let keys = self.agg_share_shard_keys();
                 let mut agg_share = self.get_agg_share(&keys).await?;
@@ -234,61 +335,9 @@ impl AggregateStore {
 
                 let (meta, data) = DapAggregateShareMetadata::from_agg_share(agg_share);
 
-                // the data needs to be chunked in order to fit inside the limits of durable
-                // objects.
-                let chunks_map = data
-                    .map(|data| {
-                        // stolen from
-                        // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
-                        // because it's nightly only
-                        fn div_ceil(lhs: usize, rhs: usize) -> usize {
-                            let d = lhs / rhs;
-                            let r = lhs % rhs;
-                            if r > 0 && rhs > 0 {
-                                d + 1
-                            } else {
-                                d
-                            }
-                        }
-
-                        let data = data.get_encoded();
-                        let num_chunks = div_ceil(data.len(), MAX_CHUNK_SIZE);
-                        assert!(
-                            num_chunks <= keys.len(),
-                            "too many chunks {num_chunks}. max is {}",
-                            keys.len()
-                        );
-
-                        // This is effectively a map of "chunk_v2_XX" to a byte slice
-                        let chunks_map = js_sys::Object::new();
-
-                        let mut base_idx = 0;
-                        for key in &keys[..num_chunks] {
-                            let end = usize::min(base_idx + MAX_CHUNK_SIZE + 1, data.len());
-                            let chunk = &data[base_idx..end];
-
-                            let value = js_sys::Uint8Array::new_with_length(chunk.len() as _);
-                            value.copy_from(chunk);
-
-                            js_sys::Reflect::set(
-                                &chunks_map,
-                                &JsValue::from_str(key.as_str()),
-                                &value.into(),
-                            )?;
-
-                            base_idx = end;
-                        }
-                        assert_eq!(
-                            base_idx,
-                            data.len(),
-                            "len: {} chunk_size: {} rem: {}",
-                            data.len(),
-                            MAX_CHUNK_SIZE,
-                            data.len() % keys.len(),
-                        );
-                        Result::Ok(chunks_map)
-                    })
-                    .transpose()?
+                data.as_ref()
+                    .map(|data| shard_bytes_to_object(&keys, data.get_encoded(), &chunks_map))
+                    .transpose()? // Option<Result> -> Result<Option> -> Option
                     .unwrap_or_default();
 
                 js_sys::Reflect::set(
@@ -299,7 +348,7 @@ impl AggregateStore {
 
                 self.state.storage().put_multiple_raw(chunks_map).await?;
 
-                Response::from_json(&())
+                Response::from_json::<[ReportId; 0]>(&[])
             }
 
             // Get the current aggregate share.
@@ -368,4 +417,10 @@ impl GarbageCollectable for AggregateStore {
     fn env(&self) -> &Env {
         &self.env
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AggregateStoreMergeReq {
+    pub contained_reports: Vec<ReportId>,
+    pub agg_share_delta: DapAggregateShare,
 }
