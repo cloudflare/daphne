@@ -472,7 +472,7 @@ async fn run_vdaf_cont_round_and_aggregate<S>(
                             ReportProcessedStatus::Rejected(TransitionFailure::ReportReplayed),
                         )
                     }));
-                    inc_restart_metric.call_once(|| metrics.agg_job_cont_restarted_inc());
+                    inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }
                 // If this happens, the leader and helper can possibly have inconsistent state.
                 // The leader will still think all of the reports in this job have yet to be
