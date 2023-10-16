@@ -436,13 +436,18 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // only happen if there are multiple aggregation jobs in-flight that include the same
         // report.
 
-        let replayed = self
+        let put_agg_share_result = self
             .try_put_agg_share_span(task_id, task_config, agg_share_span)
-            .await?;
+            .await;
 
-        if let Some(replayed) = replayed {
+        let replayed: usize = put_agg_share_result
+            .into_iter()
+            .map(|(_, (r, _))| r.map(|replayed| replayed.len()).unwrap_or_default())
+            .sum();
+
+        if replayed > 0 {
             tracing::warn!(
-                replay_count = replayed.len(),
+                replay_count = replayed,
                 "tried to aggregate replayed reports"
             );
         }

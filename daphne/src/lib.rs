@@ -249,17 +249,23 @@ pub enum DapBatchBucket {
     TimeInterval { batch_window: Time },
 }
 
-/// A set of aggregate shares partitioned by bucket and the corresponding sequence of report IDs.
-#[derive(Debug, Default)]
-pub struct DapAggregateShareSpan {
-    span: HashMap<DapBatchBucket, (DapAggregateShare, Vec<(ReportId, Time)>)>,
+/// A set of values related to reports in the same bucket.
+#[derive(Debug)]
+pub struct DapAggregateSpan<T> {
+    span: HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)>,
 }
 
-impl IntoIterator for DapAggregateShareSpan {
-    type IntoIter = <HashMap<
-        DapBatchBucket,
-        (DapAggregateShare, Vec<(ReportId, Time)>
-    )> as IntoIterator>::IntoIter;
+// We can't derive default because it will require T to be Default, which we don't need.
+impl<T> Default for DapAggregateSpan<T> {
+    fn default() -> Self {
+        Self {
+            span: Default::default(),
+        }
+    }
+}
+
+impl<T> IntoIterator for DapAggregateSpan<T> {
+    type IntoIter = <HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)> as IntoIterator>::IntoIter;
 
     type Item = <Self::IntoIter as Iterator>::Item;
 
@@ -268,7 +274,7 @@ impl IntoIterator for DapAggregateShareSpan {
     }
 }
 
-impl DapAggregateShareSpan {
+impl DapAggregateSpan<DapAggregateShare> {
     pub(crate) fn add_out_share(
         &mut self,
         task_config: &DapTaskConfig,
@@ -298,13 +304,6 @@ impl DapAggregateShareSpan {
         Ok(())
     }
 
-    pub(crate) fn report_count(&self) -> usize {
-        self.span
-            .iter()
-            .map(|(_bucket, (_agg_share, reports))| reports.len())
-            .sum()
-    }
-
     /// Merge each aggregate share in the span into one aggregate share.
     ///
     /// # Panics
@@ -322,13 +321,6 @@ impl DapAggregateShareSpan {
             .unwrap_or_default()
     }
 
-    /// Return an iterator over the aggregate share span.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (&DapBatchBucket, &(DapAggregateShare, Vec<(ReportId, Time)>))> {
-        self.span.iter()
-    }
-
     /// Merge the span with another.
     pub fn merge(&mut self, other: Self) -> Result<(), DapError> {
         for (bucket, (other_agg_share, mut other_reports)) in other.into_iter() {
@@ -337,6 +329,40 @@ impl DapAggregateShareSpan {
             reports.append(&mut other_reports);
         }
         Ok(())
+    }
+}
+
+impl<T> DapAggregateSpan<T> {
+    pub(crate) fn report_count(&self) -> usize {
+        self.span
+            .iter()
+            .map(|(_bucket, (_agg_share, report_ids))| report_ids.len())
+            .sum()
+    }
+
+    /// Return an iterator over the aggregate span.
+    pub fn iter(&self) -> impl Iterator<Item = (&DapBatchBucket, &(T, Vec<(ReportId, Time)>))> {
+        self.span.iter()
+    }
+}
+
+impl<T> FromIterator<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpan<T> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (DapBatchBucket, (T, Vec<(ReportId, Time)>))>,
+    {
+        Self {
+            span: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl<T> Extend<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpan<T> {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (DapBatchBucket, (T, Vec<(ReportId, Time)>))>,
+    {
+        self.span.extend(iter)
     }
 }
 

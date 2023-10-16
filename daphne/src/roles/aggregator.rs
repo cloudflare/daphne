@@ -17,7 +17,7 @@ use crate::{
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapAggregateShareSpan, DapError, DapGlobalConfig, DapRequest, DapResponse,
+    DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapRequest, DapResponse,
     DapTaskConfig, DapVersion,
 };
 
@@ -108,20 +108,22 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
     /// Store a set of output shares and mark the corresponding reports as aggregated.
     ///
-    /// If any report has already been aggregated (is a replay) then the entire operation must return
-    /// without changing any state, such that this operation is idempotent.
+    /// If any report within a bucket has already been aggregated (is a replay) then that entire
+    /// bucket must be skipped without changing any state, such that this operation is idempotent.
     ///
     /// # Returns
     ///
-    /// - `Ok(None)` if all went well and no reports were repeats.
+    /// A span with the same buckets as the input `agg_share_span` where the value is one of 3
+    /// possible sets of values:
+    /// - `Ok(None)` if all went well and no reports were replays.
     /// - `Ok(Some(set))` if at least one report was a replay. This also means no aggregate shares where merged.
     /// - `Err(err)` if an error occurred.
     async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        agg_share_span: DapAggregateShareSpan,
-    ) -> Result<Option<HashSet<ReportId>>, DapError>;
+        agg_share_span: DapAggregateSpan<DapAggregateShare>,
+    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>>;
 
     /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(

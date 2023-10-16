@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, collections::HashSet};
+use std::{borrow::Cow, collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
@@ -16,9 +16,11 @@ use crate::{
     fatal_error,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobContinueReq,
-        AggregationJobInitReq, Draft02AggregationJobId, PartialBatchSelector, TaskId,
+        AggregationJobInitReq, AggregationJobResp, Draft02AggregationJobId, PartialBatchSelector,
+        TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
+    vdaf::ReportProcessedStatus,
     DapError, DapHelperState, DapHelperTransition, DapRequest, DapResource, DapResponse,
     DapTaskConfig, DapVersion, MetaAggregationJobId,
 };
@@ -199,52 +201,24 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 agg_job_id_base64url: agg_job_id.to_base64url(),
             })?;
 
-        // This loop is intended to run at most once on the "happy path". The intent is as follows:
-        //
-        // - try to aggregate the output shares into an `DapAggregateShareSpan`
-        // - pass it to `try_put_agg_share_span`
-        //   - if replays are found, then try again, rejecting the reports that were replayed
-        //   - else break with the finished (of failed) transitions
-        //
-        // The reason we do this is because we don't expect replays to happen but we have to guard
-        // against them, as such, even though retrying is possibly very expensive, it probably
-        // won't happen often enough that it matters.
-        let (out_shares_count, agg_job_resp) = {
-            let mut replayed_reports = HashSet::new();
-            let mut retry_count = 3;
-            loop {
-                if retry_count < 1 {
-                    // we need to prevent an attacker from keeping this loop running for too long,
-                    // potentialy enabling an DOS attack.
-                    return Err(DapAbort::BadRequest(
-                        "AggregationJobContinueReq contained too many replays".into(),
-                    ));
-                }
-                retry_count -= 1;
-                let (agg_share_span, agg_job_resp) = task_config.vdaf.handle_agg_job_cont_req(
-                    task_id,
-                    task_config,
-                    &state,
-                    |id| replayed_reports.contains(id),
-                    &agg_job_id,
-                    &agg_job_cont_req,
-                    metrics,
-                )?;
+        let agg_job_resp = run_vdaf_cont_round_and_aggregate(
+            self,
+            task_id,
+            task_config,
+            &state,
+            &agg_job_id,
+            &agg_job_cont_req,
+            metrics,
+        )
+        .await?;
 
-                let out_shares_count = agg_share_span.report_count().try_into().unwrap();
-                let replayed = self
-                    .try_put_agg_share_span(task_id, task_config, agg_share_span)
-                    .await?;
-
-                if let Some(replayed) = replayed {
-                    replayed_reports.extend(replayed);
-                    metrics.agg_job_cont_restarted_inc();
-                } else {
-                    break (out_shares_count, agg_job_resp);
-                }
-            }
-        };
-
+        let out_shares_count = agg_job_resp
+            .transitions
+            .iter()
+            .filter(|t| matches!(t.var, TransitionVar::Finished))
+            .count()
+            .try_into()
+            .expect("usize to fit in u64");
         self.audit_log().on_aggregation_job(
             req.host(),
             task_id,
@@ -442,6 +416,93 @@ fn resolve_agg_job_id<'id, S>(
     }
 }
 
+async fn run_vdaf_cont_round_and_aggregate<S>(
+    helper: &impl DapHelper<S>,
+    task_id: &TaskId,
+    task_config: &DapTaskConfig,
+    state: &DapHelperState,
+    agg_job_id: &MetaAggregationJobId<'_>,
+    agg_job_cont_req: &AggregationJobContinueReq,
+    metrics: &DaphneMetrics,
+) -> Result<AggregationJobResp, DapAbort> {
+    // This loop is intended to run at most once on the "happy path". The intent is as follows:
+    //
+    // - try to aggregate the output shares into an `DapAggregateShareSpan`
+    // - pass it to `try_put_agg_share_span`
+    //   - if replays are found, then try again, rejecting the reports that were replayed
+    //   - else break with the finished (of failed) transitions
+    //
+    // The reason we do this is because we don't expect replays to happen but we have to guard
+    // against them, as such, even though retrying is possibly very expensive, it probably
+    // won't happen often enough that it matters.
+    const RETRY_COUNT: u32 = 3;
+    let mut report_status = HashMap::new();
+    for _ in 0..RETRY_COUNT {
+        let (agg_share_span, agg_job_resp) = task_config.vdaf.handle_agg_job_cont_req(
+            task_id,
+            task_config,
+            state,
+            &report_status,
+            agg_job_id,
+            agg_job_cont_req,
+        )?;
+
+        let put_shares_result = helper
+            .try_put_agg_share_span(task_id, task_config, agg_share_span)
+            .await;
+
+        let inc_restart_metric = Once::new();
+        for (_bucket, result) in put_shares_result {
+            match result {
+                // This bucket had no replays.
+                (Ok(replays), reports) if replays.is_empty() => {
+                    // Every report in the bucket has been committed to aggregate storage.
+                    report_status.extend(
+                        reports.into_iter().map(|(report_id, _time)| {
+                            (report_id, ReportProcessedStatus::Aggregated)
+                        }),
+                    );
+                }
+                // This bucket had replays.
+                (Ok(replays), _reports) => {
+                    // At least one report was replayed (no change to aggregate storage).
+                    report_status.extend(replays.into_iter().map(|report_id| {
+                        (
+                            report_id,
+                            ReportProcessedStatus::Rejected(TransitionFailure::ReportReplayed),
+                        )
+                    }));
+                    inc_restart_metric.call_once(|| metrics.agg_job_cont_restarted_inc());
+                }
+                // If this happens, the leader and helper can possibly have inconsistent state.
+                // The leader will still think all of the reports in this job have yet to be
+                // aggregated. But we could have aggregated some and not others due to the
+                // batched nature of storage requests.
+                //
+                // This is considered an okay compromise because the leader can retry the job
+                // and if this error doesn't manifest itself all reports will be successfully
+                // aggregated. Which means that no reports will be lost in a such a state that
+                // they can never be aggregated.
+                (Err(e), _) => return Err(e.into()),
+            }
+        }
+        if !inc_restart_metric.is_completed() {
+            for transition in agg_job_resp.transitions.iter() {
+                if let TransitionVar::Failed(failure) = &transition.var {
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1)
+                }
+            }
+            return Ok(agg_job_resp);
+        }
+    }
+
+    // We need to prevent an attacker from keeping this loop running for too long, potentially
+    // enabling an DOS attack.
+    Err(DapAbort::BadRequest(
+        "AggregationJobContinueReq contained too many replays".into(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
@@ -455,7 +516,7 @@ mod tests {
         AggregationJobInitReq, AggregationJobResp, ReportShare, Transition, TransitionVar,
     };
     use crate::roles::DapHelper;
-    use crate::MetaAggregationJobId;
+    use crate::{assert_metrics_include, MetaAggregationJobId};
     use crate::{roles::test::TestData, DapVersion};
 
     #[tokio::test]
@@ -561,38 +622,9 @@ mod tests {
             assert_matches!(a_job_resp.transitions[1].var, TransitionVar::Finished);
         };
 
-        let Some(metric) = test
-            .helper_registry
-            .gather()
-            .into_iter()
-            .find(|metric| metric.get_name().ends_with("report_counter"))
-            .map(|mut m| m.take_metric())
-        else {
-            panic!("report_counter metric no found");
-        };
-
-        let Some(aggregated_counter) = metric
-            .iter()
-            .find(|m| m.get_label().iter().any(|l| l.get_value() == "aggregated"))
-            .map(|m| m.get_counter())
-        else {
-            panic!("`aggregated` metric was not registered");
-        };
-
-        assert_eq!(aggregated_counter.get_value(), 3.0);
-
-        let Some(rejected_counter) = metric
-            .iter()
-            .find(|m| {
-                m.get_label()
-                    .iter()
-                    .any(|l| l.get_value() == "rejected_report_replayed")
-            })
-            .map(|m| m.get_counter())
-        else {
-            panic!("`rejected_report_replayed` metric was not registered");
-        };
-
-        assert_eq!(rejected_counter.get_value(), 1.0);
+        assert_metrics_include!(test.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 3,
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
+        });
     }
 }

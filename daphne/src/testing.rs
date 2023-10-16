@@ -18,7 +18,7 @@ use crate::{
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateShareSpan, DapBatchBucket,
+    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapBatchBucket,
     DapCollectJob, DapError, DapGlobalConfig, DapHelperState, DapHelperTransition, DapLeaderState,
     DapLeaderTransition, DapLeaderUncommitted, DapMeasurement, DapQueryConfig, DapRequest,
     DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
@@ -295,18 +295,16 @@ impl AggregationJobTest {
         &self,
         helper_state: &DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> (DapAggregateShareSpan, AggregationJobResp) {
-        let metrics = &self.helper_metrics;
+    ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
                 &self.task_config,
                 helper_state,
-                |_| false,
+                &HashMap::default(),
                 &self.agg_job_id,
                 agg_job_cont_req,
-                metrics,
             )
             .unwrap()
     }
@@ -317,17 +315,15 @@ impl AggregationJobTest {
         helper_state: DapHelperState,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapAbort {
-        let metrics = &self.helper_metrics;
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
                 &self.task_config,
                 &helper_state,
-                |_| false,
+                &HashMap::default(),
                 &self.agg_job_id,
                 agg_job_cont_req,
-                metrics,
             )
             .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
@@ -339,7 +335,7 @@ impl AggregationJobTest {
         &self,
         leader_uncommitted: DapLeaderUncommitted,
         agg_job_resp: AggregationJobResp,
-    ) -> DapAggregateShareSpan {
+    ) -> DapAggregateSpan<DapAggregateShare> {
         let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
@@ -1066,8 +1062,8 @@ impl DapAggregator<BearerToken> for MockAggregator {
         &self,
         task_id: &TaskId,
         _task_config: &DapTaskConfig,
-        out_shares: DapAggregateShareSpan,
-    ) -> Result<Option<HashSet<ReportId>>, DapError> {
+        agg_share_span: DapAggregateSpan<DapAggregateShare>,
+    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>> {
         let mut report_store_guard = self
             .report_store
             .lock()
@@ -1076,43 +1072,33 @@ impl DapAggregator<BearerToken> for MockAggregator {
         let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
         let agg_store = agg_store_guard.entry(task_id.clone()).or_default();
 
-        let mut all_ids = Vec::new();
-        let mut to_merge = Vec::new();
-        for (bucket, (out_share, report_metadatas)) in out_shares {
-            all_ids.extend(report_metadatas.iter().map(|(id, _)| id).cloned());
-            to_merge.push((bucket, out_share));
-        }
+        agg_share_span
+            .into_iter()
+            .map(|(bucket, (agg_share, report_metadatas))| {
+                let replayed = report_metadatas
+                    .iter()
+                    .map(|(id, _)| id)
+                    .filter(|id| report_store.processed.contains(id))
+                    .cloned()
+                    .collect::<HashSet<_>>();
 
-        assert_eq!(
-            all_ids.len(),
-            {
-                all_ids.sort_unstable();
-                all_ids.dedup();
-                all_ids.len()
-            },
-            "there are duplicate report ids in the DapAggregateShare"
-        );
-
-        let replayed = all_ids
-            .iter()
-            .filter(|id| report_store.processed.contains(id))
-            .cloned()
-            .collect::<HashSet<_>>();
-
-        if replayed.is_empty() {
-            report_store.processed.extend(all_ids);
-            for (bucket, out_share) in to_merge {
-                // Add to aggregate share.
-                agg_store
-                    .entry(bucket)
-                    .or_default()
-                    .agg_share
-                    .merge(out_share)?;
-            }
-            Ok(None)
-        } else {
-            Ok(Some(replayed))
-        }
+                let result = if replayed.is_empty() {
+                    report_store
+                        .processed
+                        .extend(report_metadatas.iter().map(|(id, _)| id.clone()));
+                    // Add to aggregate share.
+                    agg_store
+                        .entry(bucket.clone())
+                        .or_default()
+                        .agg_share
+                        .merge(agg_share.clone())
+                        .map(|_| HashSet::new())
+                } else {
+                    Ok(replayed)
+                };
+                (bucket, (result, report_metadatas))
+            })
+            .collect()
     }
 
     async fn get_agg_share(
@@ -1552,7 +1538,7 @@ macro_rules! assert_metrics_include_auxiliary_function {
     ($set:expr, $k:tt: $v:expr, $($ks:tt: $vs:expr),+,) => {{
         let line = format!("{} {}", $k, $v);
         $set.insert(line);
-        assert_metrics_include_auxiliary_function!($set, $($ks: $vs),+,)
+        $crate::assert_metrics_include_auxiliary_function!($set, $($ks: $vs),+,)
     }}
 }
 
@@ -1571,10 +1557,9 @@ macro_rules! assert_metrics_include_auxiliary_function {
 macro_rules! assert_metrics_include {
     ($registry:expr, {$($ks:tt: $vs:expr),+,}) => {{
         use prometheus::{Encoder, TextEncoder};
-        use std::collections::HashSet;
         use regex::{Captures,Regex};
 
-        let mut want: HashSet<String> = HashSet::new();
+        let mut want = std::collections::HashSet::<String>::new();
         $crate::assert_metrics_include_auxiliary_function!(&mut want, $($ks: $vs),+,);
 
         // Encode the metrics and iterate over each line. For each line, if the line appears in the
