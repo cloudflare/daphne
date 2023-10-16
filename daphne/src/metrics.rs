@@ -24,7 +24,7 @@ pub struct DaphneMetrics {
     aggregation_job_batch_size_histogram: Histogram,
 
     /// Helper: Number of times replays caused the aggregation to be retried.
-    aggregation_job_continue_repeats_due_to_replays: IntCounter,
+    aggregation_job_put_span_retry_counter: IntCounter,
 }
 
 impl DaphneMetrics {
@@ -65,20 +65,20 @@ impl DaphneMetrics {
         )
         .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_counter"))?;
 
-        let aggregation_job_continue_repeats_due_to_replays =
+        let aggregation_job_put_span_retry_counter =
             register_int_counter_with_registry!(
-                "aggregation_continuation_repeats_due_to_replays",
+                format!("aggregation_job_put_span_retry_counter"),
                 "Total number of times the aggregation continuation was restarted due to replayed reports",
                 registry
             )
-            .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_continuation_repeats_due_to_replays"))?;
+            .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_put_span_retry_counter"))?;
 
         Ok(Self {
             inbound_request_counter,
             report_counter,
             aggregation_job_counter,
             aggregation_job_batch_size_histogram,
-            aggregation_job_continue_repeats_due_to_replays,
+            aggregation_job_put_span_retry_counter,
         })
     }
 
@@ -116,8 +116,8 @@ impl DaphneMetrics {
             .inc();
     }
 
-    pub fn agg_job_cont_restarted_inc(&self) {
-        self.aggregation_job_continue_repeats_due_to_replays.inc();
+    pub fn agg_job_put_span_retry_inc(&self) {
+        self.aggregation_job_put_span_retry_counter.inc();
     }
 }
 
