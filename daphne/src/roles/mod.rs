@@ -9,7 +9,7 @@ mod leader;
 
 use crate::{
     constants::DapMediaType,
-    messages::{BatchSelector, ReportMetadata, TaskId, Time, TransitionFailure},
+    messages::{BatchSelector, ReportMetadata, TaskId, Time},
     taskprov::{self, TaskprovVersion},
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
@@ -103,34 +103,6 @@ async fn check_batch<S>(
     Ok(())
 }
 
-/// Check for transition failures due to:
-///
-/// * the report having already been processed
-/// * the report having already been collected
-/// * the report not being within time bounds
-///
-/// Returns `Some(TransitionFailure)` if there is a problem,
-/// or `None` if no transition failure occurred.
-pub fn early_metadata_check(
-    metadata: &ReportMetadata,
-    processed: bool,
-    collected: bool,
-    min_time: u64,
-    max_time: u64,
-) -> Option<TransitionFailure> {
-    if processed {
-        Some(TransitionFailure::ReportReplayed)
-    } else if collected {
-        Some(TransitionFailure::BatchCollected)
-    } else if metadata.time < min_time {
-        Some(TransitionFailure::ReportDropped)
-    } else if metadata.time > max_time {
-        Some(TransitionFailure::ReportTooEarly)
-    } else {
-        None
-    }
-}
-
 fn check_request_content_type<S>(
     req: &DapRequest<S>,
     expected: DapMediaType,
@@ -195,7 +167,7 @@ async fn resolve_taskprov<S>(
 
 #[cfg(test)]
 mod test {
-    use super::{early_metadata_check, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader};
+    use super::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader};
     use crate::{
         assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
@@ -232,6 +204,34 @@ mod test {
             let (part_batch_sel, reports) = reports_per_part_batch_sel.into_iter().next().unwrap();
             (task_id, part_batch_sel, reports)
         }};
+    }
+
+    /// Check for transition failures due to:
+    ///
+    /// * the report having already been processed
+    /// * the report having already been collected
+    /// * the report not being within time bounds
+    ///
+    /// Returns `Some(TransitionFailure)` if there is a problem,
+    /// or `None` if no transition failure occurred.
+    pub fn early_metadata_check(
+        metadata: &ReportMetadata,
+        processed: bool,
+        collected: bool,
+        min_time: u64,
+        max_time: u64,
+    ) -> Option<TransitionFailure> {
+        if processed {
+            Some(TransitionFailure::ReportReplayed)
+        } else if collected {
+            Some(TransitionFailure::BatchCollected)
+        } else if metadata.time < min_time {
+            Some(TransitionFailure::ReportDropped)
+        } else if metadata.time > max_time {
+            Some(TransitionFailure::ReportTooEarly)
+        } else {
+            None
+        }
     }
 
     pub(super) struct TestData {

@@ -13,9 +13,7 @@ use crate::{
             DURABLE_AGGREGATE_STORE_MERGE,
         },
         durable_name_agg_store,
-        reports_processed::{
-            ReportsProcessedReq, ReportsProcessedResp, DURABLE_REPORTS_PROCESSED_INITIALIZE,
-        },
+        reports_processed::DURABLE_REPORTS_PROCESSED_INITIALIZED,
         BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_REPORTS_PROCESSED,
     },
     now,
@@ -28,12 +26,12 @@ use daphne::{
     hpke::HpkeConfig,
     messages::{BatchId, BatchSelector, PartialBatchSelector, ReportId, TaskId, TransitionFailure},
     metrics::DaphneMetrics,
-    roles::{early_metadata_check, DapAggregator, DapReportInitializer},
+    roles::{DapAggregator, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapRequest,
     DapSender, DapTaskConfig,
 };
-use futures::{future::try_join_all, StreamExt};
+use futures::{future::try_join_all, StreamExt, TryFutureExt, TryStreamExt};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -48,133 +46,112 @@ impl DapReportInitializer for DaphneWorker<'_> {
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-    ) -> std::result::Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
-        let current_time = self.get_current_time();
-        let min_time = self.least_valid_report_time(current_time);
-        let max_time = self.greatest_valid_report_time(current_time);
-        let durable = self.durable().with_retry();
-        let task_id_hex = task_id.to_hex();
+    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        let durable = self.durable();
         let span = task_config
             .as_ref()
             .batch_span_for_meta(part_batch_sel, consumed_reports.iter())?;
+        let mut reports_processed_request_data = HashMap::new();
+        let collected_reports = {
+            let task_id_hex = task_id.to_hex();
 
-        // Coalesce reports pertaining to the same ReportsProcessed or AggregateStore instance.
-        let mut reports_processed_request_data: HashMap<String, ReportsProcessedReq> =
-            HashMap::new();
-        let mut agg_store_request_name = Vec::new();
-        let mut agg_store_request_bucket = Vec::new();
-        for (bucket, consumed_reports_per_bucket) in span.iter() {
-            agg_store_request_name.push(durable_name_agg_store(
-                &task_config.version,
-                &task_id_hex,
-                bucket,
-            ));
-            agg_store_request_bucket.push(bucket);
-            for consumed_report in consumed_reports_per_bucket.iter() {
-                let durable_name = self.config().durable_name_report_store(
-                    task_config.as_ref(),
-                    &task_id_hex,
-                    &consumed_report.metadata().id,
-                    consumed_report.metadata().time,
-                );
+            let mut agg_store_request_names = Vec::new();
+            for (bucket, ((), report_ids_and_time)) in span.iter() {
+                for (id, time) in report_ids_and_time {
+                    let durable_name = self.config().durable_name_report_store(
+                        task_config.as_ref(),
+                        &task_id_hex,
+                        id,
+                        *time,
+                    );
 
-                reports_processed_request_data
-                    .entry(durable_name)
-                    .or_insert(ReportsProcessedReq {
-                        is_leader,
-                        vdaf_verify_key: task_config.vdaf_verify_key.clone(),
-                        vdaf_config: task_config.vdaf.clone(),
-                        consumed_reports: Vec::default(),
-                    })
-                    .consumed_reports
-                    .push((*consumed_report).clone());
-            }
-        }
-
-        // Send ReportsProcessed requests.
-        let mut reports_processed_requests = Vec::new();
-        for (durable_name, consumed_reports) in reports_processed_request_data.into_iter() {
-            reports_processed_requests.push(durable.post(
-                BINDING_DAP_REPORTS_PROCESSED,
-                DURABLE_REPORTS_PROCESSED_INITIALIZE,
-                durable_name,
-                consumed_reports,
-            ));
-        }
-        let reports_processed_responses: Vec<ReportsProcessedResp> =
-            try_join_all(reports_processed_requests)
-                .await
-                .map_err(|e| fatal_error!(err = ?e))?;
-
-        // Flatten the responses from ReportsProcessed into a hash map.
-        let mut initialized_reports = HashMap::new();
-        for reports_processed_response in reports_processed_responses.into_iter() {
-            for initialized_report in reports_processed_response.initialized_reports.into_iter() {
-                initialized_reports
-                    .insert(initialized_report.metadata().id.clone(), initialized_report);
-            }
-        }
-
-        // Send AggregateStore requests.
-        let mut agg_store_requests = Vec::new();
-        for durable_name in agg_store_request_name {
-            agg_store_requests.push(durable.get(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
-                durable_name,
-            ));
-        }
-        let agg_store_responses: Vec<bool> = try_join_all(agg_store_requests)
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        // Reject reports that have been collected.
-        for (bucket, collected) in agg_store_request_bucket
-            .iter()
-            .zip(agg_store_responses.into_iter())
-        {
-            for metadata in span
-                .get(bucket)
-                .unwrap()
-                .iter()
-                .map(|report| report.metadata())
-            {
-                if let Some(initialized_report) = initialized_reports.get_mut(&metadata.id) {
-                    let processed = match initialized_report {
-                        EarlyReportStateInitialized::Ready { .. } => false,
-                        EarlyReportStateInitialized::Rejected {
-                            failure: TransitionFailure::ReportReplayed,
-                            ..
-                        } => true,
-                        EarlyReportStateInitialized::Rejected { .. } => {
-                            continue;
-                        }
-                    };
-
-                    if let Some(failure) =
-                        early_metadata_check(metadata, processed, collected, min_time, max_time)
-                    {
-                        *initialized_report = EarlyReportStateInitialized::Rejected {
-                            metadata: Cow::Owned(metadata.clone()),
-                            failure,
-                        };
-                    }
+                    reports_processed_request_data
+                        .entry(durable_name)
+                        .or_insert_with(Vec::new)
+                        .push(id)
                 }
+                agg_store_request_names.push((
+                    bucket,
+                    durable_name_agg_store(&task_config.version, &task_id_hex, bucket),
+                ));
+            }
+
+            // Send AggregateStore requests.
+            futures::stream::iter(agg_store_request_names)
+                .map(|(bucket, durable_name)| {
+                    durable
+                        .get(
+                            BINDING_DAP_AGGREGATE_STORE,
+                            DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
+                            durable_name,
+                        )
+                        .map_ok(move |collected| (bucket, collected))
+                })
+                .buffer_unordered(usize::MAX)
+                .try_collect::<HashMap<&DapBatchBucket, bool>>()
+                .map_err(|e| fatal_error!(err = ?e, "failed to check collected"))
+                .await?
+        };
+
+        let min_time = self.least_valid_report_time(self.get_current_time());
+        let max_time = self.greatest_valid_report_time(self.get_current_time());
+
+        let mut initialized_reports = consumed_reports
+            .into_iter()
+            .map(|consumed_report| {
+                let metadata = consumed_report.metadata();
+
+                let initialized = if metadata.time < min_time {
+                    consumed_report
+                        .into_initialized_rejected_due_to(TransitionFailure::ReportDropped)
+                } else if metadata.time > max_time {
+                    consumed_report
+                        .into_initialized_rejected_due_to(TransitionFailure::ReportTooEarly)
+                } else if collected_reports
+                    [&task_config.bucket_for(part_batch_sel, &consumed_report)]
+                {
+                    consumed_report
+                        .into_initialized_rejected_due_to(TransitionFailure::BatchCollected)
+                } else {
+                    EarlyReportStateInitialized::initialize(
+                        is_leader,
+                        &task_config.vdaf_verify_key,
+                        &task_config.vdaf,
+                        consumed_report,
+                    )?
+                };
+
+                Ok(initialized)
+            })
+            .collect::<Result<Vec<_>, DapError>>()
+            .map_err(|e| fatal_error!(err = ?e, "failed to initialize a report"))?;
+
+        let replayed_reports_check = futures::stream::iter(reports_processed_request_data)
+            .map(|(durable_name, reports)| async {
+                durable
+                    .post::<_, HashSet<ReportId>>(
+                        BINDING_DAP_REPORTS_PROCESSED,
+                        DURABLE_REPORTS_PROCESSED_INITIALIZED,
+                        durable_name,
+                        reports,
+                    )
+                    .await
+            })
+            .buffer_unordered(usize::MAX)
+            .try_fold(HashSet::new(), |mut acc, replays| async {
+                acc.extend(replays);
+                Ok(acc)
+            })
+            .await
+            .map_err(|e| fatal_error!(err = ?e, "checking for replayed reports"))?;
+
+        for rep in &mut initialized_reports {
+            if replayed_reports_check.contains(&rep.metadata().id) {
+                rep.reject_due_to(TransitionFailure::ReportReplayed);
             }
         }
 
-        Ok(consumed_reports
-            .iter()
-            .map(|report| {
-                initialized_reports
-                    .remove(&report.metadata().id)
-                    .ok_or_else(|| {
-                        fatal_error!(
-                            err = "Response from ReportsProcessed does not match the request"
-                        )
-                    })
-            })
-            .collect::<std::result::Result<Vec<_>, DapError>>()?)
+        Ok(initialized_reports)
     }
 }
 

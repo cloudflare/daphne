@@ -14,22 +14,19 @@ use daphne::{
     },
     DapError, VdafConfig,
 };
-use futures::{
-    future::{ready, try_join_all},
-    StreamExt, TryStreamExt,
-};
+use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashSet, ops::ControlFlow, time::Duration};
+use std::{borrow::Cow, collections::HashSet, future::ready, ops::ControlFlow, time::Duration};
 use tracing::Instrument;
 use worker::*;
 
-use super::{req_parse, Alarmed, DapDurableObject, GarbageCollectable};
+use super::{req_parse, state_set_if_not_exists, Alarmed, DapDurableObject, GarbageCollectable};
 
 pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZE: &str =
     "/internal/do/reports_processed/initialize";
-pub(crate) const DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED: &str =
-    "/internal/do/reports_processed/mark_aggregated";
+pub(crate) const DURABLE_REPORTS_PROCESSED_INITIALIZED: &str =
+    "/internal/do/reports_processed/initialized";
 
 /// Durable Object (DO) for tracking which reports have been processed.
 ///
@@ -60,63 +57,6 @@ struct ReportIdKey<'s>(&'s ReportId, String);
 impl<'id> From<&'id ReportId> for ReportIdKey<'id> {
     fn from(id: &'id ReportId) -> Self {
         ReportIdKey(id, format!("processed/{}", id.to_hex()))
-    }
-}
-
-#[derive(Debug)]
-enum CheckedReplays<'s> {
-    SomeReplayed(Vec<&'s ReportId>),
-    AllFresh(Vec<ReportIdKey<'s>>),
-}
-
-impl<'r> Default for CheckedReplays<'r> {
-    fn default() -> Self {
-        Self::AllFresh(vec![])
-    }
-}
-
-impl<'r> CheckedReplays<'r> {
-    fn add_replay(mut self, id: &'r ReportId) -> Self {
-        match &mut self {
-            Self::SomeReplayed(r) => {
-                r.push(id);
-                self
-            }
-            Self::AllFresh(_) => Self::SomeReplayed(vec![id]),
-        }
-    }
-
-    fn add_fresh(mut self, id: ReportIdKey<'r>) -> Self {
-        match &mut self {
-            Self::SomeReplayed(_) => {}
-            Self::AllFresh(r) => r.push(id),
-        }
-        self
-    }
-}
-
-impl ReportsProcessed {
-    async fn check_replays<'s>(&self, report_ids: &'s [ReportId]) -> Result<CheckedReplays<'s>> {
-        futures::stream::iter(report_ids.iter().map(ReportIdKey::from))
-            .then(|id| {
-                let state = &self.state;
-                async move {
-                    state_get::<bool>(state, &id.1)
-                        .await
-                        .map(|presence| match presence {
-                            // if it's present then it's a replay
-                            Some(true) => Err(id.0),
-                            Some(false) | None => Ok(id),
-                        })
-                }
-            })
-            .try_fold(CheckedReplays::default(), |acc, id| async move {
-                Ok(match id {
-                    Ok(not_replayed) => acc.add_fresh(not_replayed),
-                    Err(replayed) => acc.add_replay(replayed),
-                })
-            })
-            .await
     }
 }
 
@@ -166,6 +106,22 @@ impl ReportsProcessed {
         .await?;
 
         match (req.path().as_ref(), req.method()) {
+            (DURABLE_REPORTS_PROCESSED_INITIALIZED, Method::Post) => {
+                let to_mark = req_parse::<Vec<ReportId>>(&mut req).await?;
+                let state = &self.state;
+                let replays = futures::stream::iter(&to_mark)
+                    .map(|id| async move {
+                        state_set_if_not_exists(state, &format!("processed/{id}"), &true)
+                            .await
+                            .map(|o| o.is_some().then_some(id))
+                    })
+                    .buffer_unordered(usize::MAX)
+                    .try_filter_map(|replay| ready(Ok(replay)))
+                    .try_collect::<Vec<_>>()
+                    .await?;
+
+                Response::from_json(&replays)
+            }
             // Initialize a report:
             //  * Ensure the report wasn't replayed
             //  * Ensure the report won't be included in a batch that was already collected
@@ -228,31 +184,6 @@ impl ReportsProcessed {
                     vdaf_config: reports_processed_request.vdaf_config,
                     initialized_reports,
                 })
-            }
-
-            // Mark reports as aggregated.
-            //
-            // If there are any replays, no reports are marked as aggregated.
-            //
-            // Idempotent
-            // Input: `Vec<ReportId>`
-            // Output: `Vec<ReportId>`
-            (DURABLE_REPORTS_PROCESSED_MARK_AGGREGATED, Method::Post) => {
-                let report_ids: Vec<ReportId> = req_parse(&mut req).await?;
-                match self.check_replays(&report_ids).await? {
-                    CheckedReplays::SomeReplayed(report_ids) => Response::from_json(&report_ids),
-                    CheckedReplays::AllFresh(report_ids) => {
-                        let state = &self.state;
-                        futures::stream::iter(&report_ids)
-                            .then(|report_id| async move {
-                                state.storage().put(&report_id.1, &true).await
-                            })
-                            .try_for_each(|_| ready(Ok(())))
-                            .await?;
-
-                        Response::from_json(&[(); 0])
-                    }
-                }
             }
 
             _ => Err(int_err(format!(
