@@ -45,6 +45,7 @@ use prio::{
     },
 };
 use rand::prelude::*;
+use replace_with::replace_with_or_abort;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
     borrow::Cow,
@@ -188,6 +189,17 @@ impl<'req> EarlyReportStateConsumed<'req> {
             input_share: input_share.payload,
         })
     }
+
+    pub fn into_initialized_rejected_due_to(
+        self,
+        failure: TransitionFailure,
+    ) -> EarlyReportStateInitialized<'req> {
+        let metadata = match self {
+            Self::Ready { metadata, .. } => metadata,
+            Self::Rejected { metadata, .. } => metadata,
+        };
+        EarlyReportStateInitialized::Rejected { metadata, failure }
+    }
 }
 
 impl EarlyReportState for EarlyReportStateConsumed<'_> {
@@ -309,6 +321,18 @@ impl<'req> EarlyReportStateInitialized<'req> {
             },
         };
         Ok(early_report_state_initialized)
+    }
+
+    /// Turn this report into a rejected report using `failure` as the reason for it's rejection.
+    pub fn reject_due_to(&mut self, failure: TransitionFailure) {
+        // this never aborts because the closure never panics
+        replace_with_or_abort(self, |self_| {
+            let metadata = match self_ {
+                Self::Rejected { metadata, .. } => metadata,
+                Self::Ready { metadata, .. } => metadata,
+            };
+            Self::Rejected { metadata, failure }
+        })
     }
 }
 
