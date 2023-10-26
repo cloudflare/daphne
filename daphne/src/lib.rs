@@ -366,6 +366,32 @@ impl<T> Extend<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpa
     }
 }
 
+impl FromIterator<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (DapBatchBucket, (ReportId, Time))>,
+    {
+        let mut this = Self::default();
+        this.extend(iter);
+        this
+    }
+}
+
+impl Extend<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (DapBatchBucket, (ReportId, Time))>,
+    {
+        for (k, v) in iter {
+            self.span
+                .entry(k)
+                .or_insert_with(|| ((), Vec::new()))
+                .1
+                .push(v);
+        }
+    }
+}
+
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DapTaskConfig {
@@ -484,32 +510,35 @@ impl DapTaskConfig {
         &self,
         part_batch_sel: &'sel PartialBatchSelector,
         consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed<'rep>>,
-    ) -> Result<HashMap<DapBatchBucket, Vec<&'rep EarlyReportStateConsumed<'rep>>>, DapError> {
+    ) -> Result<DapAggregateSpan<()>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
                 err = "partial batch selector not compatible with task",
             ));
         }
+        Ok(consumed_reports
+            .filter(|consumed_report| consumed_report.is_ready())
+            .map(|consumed_report| {
+                let bucket = self.bucket_for(part_batch_sel, consumed_report);
+                let metadata = consumed_report.metadata();
+                (bucket, (metadata.id.clone(), metadata.time))
+            })
+            .collect())
+    }
 
-        let mut span: HashMap<_, Vec<_>> = HashMap::new();
-        for consumed_report in consumed_reports.filter(|consumed_report| consumed_report.is_ready())
-        {
-            let bucket = match part_batch_sel {
-                PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                    batch_window: self.quantized_time_lower_bound(consumed_report.metadata().time),
-                },
-                PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                    DapBatchBucket::FixedSize {
-                        batch_id: batch_id.clone(),
-                    }
-                }
-            };
-
-            let consumed_reports_per_bucket = span.entry(bucket).or_default();
-            consumed_reports_per_bucket.push(consumed_report);
+    pub fn bucket_for(
+        &self,
+        part_batch_sel: &PartialBatchSelector,
+        consumed_report: &EarlyReportStateConsumed<'_>,
+    ) -> DapBatchBucket {
+        match part_batch_sel {
+            PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
+                batch_window: self.quantized_time_lower_bound(consumed_report.metadata().time),
+            },
+            PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
+                batch_id: batch_id.clone(),
+            },
         }
-
-        Ok(span)
     }
 
     /// Check if the batch size is too small. Returns an error if the report count is too large.

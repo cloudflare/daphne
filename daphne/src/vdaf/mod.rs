@@ -187,6 +187,9 @@ impl<'req> EarlyReportStateConsumed<'req> {
         })
     }
 
+    /// Convert this EarlyReportStateConsumed into a rejected [EarlyReportStateInitialized] using
+    /// `failure` as the reason. If this is already a rejected report, the passed in `failure`
+    /// value overwrites the previous one.
     pub fn into_initialized_rejected_due_to(
         self,
         failure: TransitionFailure,

@@ -13,7 +13,7 @@ use crate::{
         AggregationJobContinueReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
         Draft02AggregationJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report, ReportId,
-        ReportMetadata, TaskId, Time, TransitionFailure,
+        TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
@@ -697,7 +697,7 @@ impl MockAggregator {
         &self,
         task_id: &TaskId,
         bucket: &DapBatchBucket,
-        metadata: &ReportMetadata,
+        id: &ReportId,
     ) -> Option<TransitionFailure> {
         // Check AggStateStore to see whether the report is part of a batch that has already
         // been collected.
@@ -713,7 +713,7 @@ impl MockAggregator {
             .lock()
             .expect("report_store: failed to lock");
         let report_store = guard.entry(task_id.clone()).or_default();
-        if report_store.processed.contains(&metadata.id) {
+        if report_store.processed.contains(id) {
             return Some(TransitionFailure::ReportReplayed);
         }
 
@@ -920,17 +920,13 @@ impl DapReportInitializer for MockAggregator {
         )?;
 
         let mut early_fails = HashMap::new();
-        for (bucket, reports_consumed_per_bucket) in span.iter() {
-            for metadata in reports_consumed_per_bucket
-                .iter()
-                .map(|report| report.metadata())
-            {
+        for (bucket, ((), report_ids_and_time)) in span.iter() {
+            for (id, _) in report_ids_and_time {
                 // Check whether Report has been collected or replayed.
-                if let Some(transition_failure) = self
-                    .check_report_early_fail(task_id, bucket, metadata)
-                    .await
+                if let Some(transition_failure) =
+                    self.check_report_early_fail(task_id, bucket, id).await
                 {
-                    early_fails.insert(metadata.id.clone(), transition_failure);
+                    early_fails.insert(id.clone(), transition_failure);
                 };
             }
         }
@@ -1233,7 +1229,7 @@ impl DapLeader<BearerToken> for MockAggregator {
 
         // Check whether Report has been collected or replayed.
         if let Some(transition_failure) = self
-            .check_report_early_fail(task_id, &bucket, &report.report_metadata)
+            .check_report_early_fail(task_id, &bucket, &report.report_metadata.id)
             .await
         {
             return Err(DapError::Transition(transition_failure));
