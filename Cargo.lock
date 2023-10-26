@@ -662,6 +662,7 @@ dependencies = [
  "prometheus",
  "rand",
  "regex",
+ "replace_with",
  "ring",
  "serde",
  "serde_json",
@@ -1918,6 +1919,12 @@ name = "regex-syntax"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3cbb081b9784b07cceb8824c8583f86db4814d172ab043f3c23f7dc600bf83d"
+
+[[package]]
+name = "replace_with"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
 
 [[package]]
 name = "reqwest"
