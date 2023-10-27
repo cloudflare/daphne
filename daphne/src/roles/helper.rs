@@ -186,7 +186,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 metrics.agg_job_completed_inc();
                 agg_job_resp
             }
-            v => unreachable!("unhandled version {v:?}"),
         };
 
         self.audit_log().on_aggregation_job(
@@ -295,11 +294,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
         let metrics = self.metrics();
         let task_id = req.task_id()?;
 
-        // Check whether the DAP version indicated by the sender is supported.
-        if req.version == DapVersion::Unknown {
-            return Err(DapAbort::version_unknown());
-        }
-
         match req.media_type {
             DapMediaType::AggregationJobInitReq => {
                 self.handle_agg_job_init_req(req, metrics, task_id).await
@@ -318,11 +312,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
         let now = self.get_current_time();
         let metrics = self.metrics();
         let task_id = req.task_id()?;
-
-        // Check whether the DAP version indicated by the sender is supported.
-        if req.version == DapVersion::Unknown {
-            return Err(DapAbort::version_unknown());
-        }
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 

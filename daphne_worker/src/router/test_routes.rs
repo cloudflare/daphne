@@ -11,7 +11,7 @@ use serde::Deserialize;
 use tracing::{debug, info_span, Instrument};
 use worker::{Response, Url};
 
-use crate::DaphneWorkerReportSelector;
+use crate::{config::DaphneWorker, DaphneWorkerReportSelector};
 
 use super::{DapRouter, Role};
 
@@ -94,7 +94,8 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
             |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let cmd: InternalTestEndpointForTask = req.json().await?;
-                let version = daph.extract_version_parameter(&req)?;
+                let version = DaphneWorker::parse_version_param(&ctx)
+                    .map_err(|e| worker::Error::RustError(e.to_string()))?;
                 daph.internal_endpoint_for_task(version, cmd)
                     .instrument(info_span!("endpoint_for_task"))
                     .await
@@ -115,7 +116,8 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
             |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let cmd: InternalTestAddTask = req.json().await?;
-                let version = daph.extract_version_parameter(&req)?;
+                let version = DaphneWorker::parse_version_param(&ctx)
+                    .map_err(|e| worker::Error::RustError(e.to_string()))?;
                 daph.internal_add_task(version, cmd)
                     .instrument(info_span!("add_task"))
                     .await?;
@@ -129,7 +131,8 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
             |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let hpke: HpkeReceiverConfig = req.json().await?;
-                let version = daph.extract_version_parameter(&req)?;
+                let version = DaphneWorker::parse_version_param(&ctx)
+                    .map_err(|e| worker::Error::RustError(e.to_string()))?;
                 daph.internal_add_hpke_config(version, hpke)
                     .instrument(info_span!("add_hpke_config"))
                     .await?;

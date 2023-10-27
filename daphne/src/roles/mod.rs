@@ -1688,24 +1688,6 @@ mod test {
 
     async_test_versions! { handle_collect_job_req_invalid_query }
 
-    // Test HTTP POST requests with a wrong DAP version.
-    async fn http_post_fail_unknown_version(version: DapVersion) {
-        let t = Test::new(version);
-        let task_id = &t.time_interval_task_id;
-        let task_config = t.leader.unchecked_get_task_config(task_id).await;
-
-        // Send a request with the wrong DAP version.
-        let report = t.gen_test_report(task_id).await;
-        let mut req = t.gen_test_upload_req(report, task_id).await;
-        req.version = DapVersion::Unknown;
-        req.url = task_config.leader_url.join("upload").unwrap();
-
-        let err = t.leader.handle_upload_req(&req).await.unwrap_err();
-        assert_matches!(err, DapAbort::BadRequest(details) => assert_eq!(details, "DAP version of request is not recognized"));
-    }
-
-    async_test_versions! { http_post_fail_unknown_version }
-
     async fn handle_upload_req(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
@@ -1742,7 +1724,6 @@ mod test {
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
             DapVersion::Draft07 => 1,
-            _ => panic!("unhandled version {version:?}"),
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -1784,7 +1765,6 @@ mod test {
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
             DapVersion::Draft07 => 1,
-            _ => panic!("unhandled version {version:?}"),
         };
 
         assert_metrics_include!(t.helper_registry, {

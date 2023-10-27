@@ -135,7 +135,6 @@ impl<'req> EarlyReportStateConsumed<'req> {
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
             DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
-            _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::new();
@@ -180,7 +179,6 @@ impl<'req> EarlyReportStateConsumed<'req> {
                     })
                 }
             },
-            _ => return Err(unimplemented_version()),
         };
 
         Ok(Self::Ready {
@@ -497,14 +495,6 @@ impl Encode for VdafAggregateShare {
     }
 }
 
-fn unimplemented_version_abort() -> DapAbort {
-    DapAbort::BadRequest("unimplemented version".to_string())
-}
-
-fn unimplemented_version() -> DapError {
-    DapError::Abort(unimplemented_version_abort())
-}
-
 impl VdafConfig {
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
@@ -624,7 +614,6 @@ impl VdafConfig {
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
             DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
-            _ => return Err(unimplemented_version()),
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::new();
@@ -789,7 +778,6 @@ impl VdafConfig {
                             None,
                             Some(message.get_encoded_with_param(&task_config.version)),
                         ),
-                        v => unreachable!("unhandled version {v:?}"),
                     };
 
                     states.push(AggregationJobReportState {
@@ -914,7 +902,6 @@ impl VdafConfig {
                 agg_job_init_req,
                 metrics,
             ),
-            v => unreachable!("unhandled version {v:?}"),
         }
     }
 
@@ -1091,7 +1078,6 @@ impl VdafConfig {
             DapVersion::Draft07 => {
                 self.draft07_handle_agg_job_resp(task_id, task_config, state, agg_job_resp, metrics)
             }
-            v => unreachable!("unhandled version {v:?}"),
         }
     }
 
@@ -1552,7 +1538,6 @@ impl VdafConfig {
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
             DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
-            _ => return Err(unimplemented_version()),
         };
         let n: usize = agg_share_text.len();
         let mut info = Vec::new();
@@ -1614,7 +1599,6 @@ fn produce_encrypted_agg_share(
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
         DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
-        _ => return Err(unimplemented_version_abort()),
     };
     let n: usize = agg_share_text.len();
     let mut info = Vec::new();

@@ -33,7 +33,10 @@ async fn handle_agg_job(
     ctx: RouteContext<&DaphneWorkerRequestState<'_>>,
 ) -> Result<Response> {
     let daph = ctx.data.handler(&ctx.env);
-    let req = daph.worker_request_to_dap(req, &ctx).await?;
+    let req = match daph.worker_request_to_dap(req, &ctx).await {
+        Ok(req) => req,
+        Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+    };
 
     let span = match req.media_type {
         DapMediaType::AggregationJobInitReq => {
@@ -56,7 +59,10 @@ async fn handle_agg_share_req(
     ctx: RouteContext<&DaphneWorkerRequestState<'_>>,
 ) -> Result<Response> {
     let daph = ctx.data.handler(&ctx.env);
-    let req = daph.worker_request_to_dap(req, &ctx).await?;
+    let req = match daph.worker_request_to_dap(req, &ctx).await {
+        Ok(req) => req,
+        Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+    };
 
     let span = info_span_from_dap_request!(MeasuredSpanName::AggregateShares.as_str(), req);
 

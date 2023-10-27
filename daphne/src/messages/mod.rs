@@ -109,7 +109,6 @@ impl TaskId {
         match version {
             DapVersion::Draft02 => Some(self.clone()),
             DapVersion::Draft07 => None,
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         }
     }
 }
@@ -441,7 +440,6 @@ impl ParameterizedDecode<DapVersion> for PrepareInit {
         let draft07_payload = match version {
             DapVersion::Draft02 => None,
             DapVersion::Draft07 => Some(decode_u32_bytes(bytes)?),
-            _ => unreachable!("unhandled version {version:?}"),
         };
 
         Ok(Self {
@@ -476,7 +474,6 @@ impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
                 encode_u16_bytes(bytes, &self.agg_param);
             }
             DapVersion::Draft07 => encode_u32_bytes(bytes, &self.agg_param),
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         self.part_batch_sel.encode(bytes);
         encode_u32_items(bytes, version, &self.prep_inits);
@@ -495,7 +492,6 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
                 decode_u16_bytes(bytes)?,
             ),
             DapVersion::Draft07 => (None, None, decode_u32_bytes(bytes)?),
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
 
         Ok(Self {
@@ -536,7 +532,6 @@ impl ParameterizedEncode<DapVersion> for AggregationJobContinueReq {
                     .expect("draft07: missing round")
                     .encode(bytes);
             }
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         encode_u32_items(bytes, &(), &self.transitions);
     }
@@ -554,7 +549,6 @@ impl ParameterizedDecode<DapVersion> for AggregationJobContinueReq {
                 None,
             ),
             DapVersion::Draft07 => (None, None, Some(u16::decode(bytes)?)),
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         Ok(Self {
             draft02_task_id,
@@ -842,13 +836,11 @@ impl ParameterizedEncode<DapVersion> for CollectionReq {
                     .encode(bytes);
             }
             DapVersion::Draft07 => {}
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         }
         self.query.encode_with_param(version, bytes);
         match version {
             DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
             DapVersion::Draft07 => encode_u32_bytes(bytes, &self.agg_param),
-            _ => panic!("unimplemented DapVersion"),
         };
     }
 }
@@ -861,7 +853,6 @@ impl ParameterizedDecode<DapVersion> for CollectionReq {
         let draft02_task_id = match version {
             DapVersion::Draft02 => Some(TaskId::decode(bytes)?),
             DapVersion::Draft07 => None,
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         Ok(Self {
             draft02_task_id,
@@ -869,7 +860,6 @@ impl ParameterizedDecode<DapVersion> for CollectionReq {
             agg_param: match version {
                 DapVersion::Draft02 => decode_u16_bytes(bytes)?,
                 DapVersion::Draft07 => decode_u32_bytes(bytes)?,
-                _ => panic!("unimplemented DapVersion"),
             },
         })
     }
@@ -899,7 +889,6 @@ impl ParameterizedEncode<DapVersion> for Collection {
                     .expect("draft07: missing interval")
                     .encode(bytes);
             }
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         encode_u32_items(bytes, &(), &self.encrypted_agg_shares);
     }
@@ -916,7 +905,6 @@ impl ParameterizedDecode<DapVersion> for Collection {
             interval: match version {
                 DapVersion::Draft02 => None,
                 DapVersion::Draft07 => Some(Interval::decode(bytes)?),
-                _ => panic!("unimplemented DapVersion"),
             },
             encrypted_agg_shares: decode_u32_items(&(), bytes)?,
         })
@@ -950,7 +938,6 @@ impl ParameterizedEncode<DapVersion> for AggregateShareReq {
                 self.batch_sel.encode_with_param(version, bytes);
                 encode_u32_bytes(bytes, &self.agg_param);
             }
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         self.report_count.encode(bytes);
         bytes.extend_from_slice(&self.checksum);
@@ -973,7 +960,6 @@ impl ParameterizedDecode<DapVersion> for AggregateShareReq {
                 BatchSelector::decode_with_param(version, bytes)?,
                 decode_u32_bytes(bytes)?,
             ),
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
         Ok(Self {
             draft02_task_id,
