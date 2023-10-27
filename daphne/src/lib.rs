@@ -78,12 +78,13 @@ use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
+    str::FromStr,
 };
 use url::Url;
 use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
 /// DAP version used for a task.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapVersion {
     #[serde(rename = "v02")]
@@ -91,19 +92,15 @@ pub enum DapVersion {
 
     #[serde(rename = "v07")]
     Draft07,
-
-    #[serde(other)]
-    #[serde(rename = "unknown_version")]
-    #[default]
-    Unknown,
 }
 
-impl From<&str> for DapVersion {
-    fn from(version: &str) -> Self {
+impl FromStr for DapVersion {
+    type Err = DapAbort;
+    fn from_str(version: &str) -> Result<Self, Self::Err> {
         match version {
-            "v02" => DapVersion::Draft02,
-            "v07" => DapVersion::Draft07,
-            _ => DapVersion::Unknown,
+            "v02" => Ok(DapVersion::Draft02),
+            "v07" => Ok(DapVersion::Draft07),
+            _ => Err(DapAbort::version_unknown()),
         }
     }
 }
@@ -113,7 +110,6 @@ impl AsRef<str> for DapVersion {
         match self {
             DapVersion::Draft02 => "v02",
             DapVersion::Draft07 => "v07",
-            _ => unreachable!("tried to construct string from unknown DAP version"),
         }
     }
 }
@@ -928,7 +924,7 @@ pub struct DapRequest<S> {
 impl<S> Default for DapRequest<S> {
     fn default() -> Self {
         Self {
-            version: Default::default(),
+            version: DapVersion::Draft07,
             media_type: Default::default(),
             task_id: Default::default(),
             resource: Default::default(),
@@ -1032,7 +1028,6 @@ impl MetaAggregationJobId<'_> {
         match version {
             DapVersion::Draft02 => Self::Draft02(Cow::Owned(Draft02AggregationJobId(rng.gen()))),
             DapVersion::Draft07 => Self::Draft07(Cow::Owned(AggregationJobId(rng.gen()))),
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         }
     }
 

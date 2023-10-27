@@ -151,11 +151,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let task_id = req.task_id()?;
         debug!("upload for task {task_id}");
 
-        // Check whether the DAP version indicated by the sender is supported.
-        if req.version == DapVersion::Unknown {
-            return Err(DapAbort::version_unknown());
-        }
-
         check_request_content_type(req, DapMediaType::Report)?;
 
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())
@@ -229,11 +224,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let metrics = self.metrics();
         let task_id = req.task_id()?;
         debug!("collect for task {task_id}");
-
-        // Check whether the DAP version indicated by the sender is supported.
-        if req.version == DapVersion::Unknown {
-            return Err(DapAbort::version_unknown());
-        }
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
 
@@ -552,7 +542,6 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                     },
                 })
             }
-            _ => unreachable!("unhandled version {}", task_config.version),
         };
 
         // Complete the collect job.

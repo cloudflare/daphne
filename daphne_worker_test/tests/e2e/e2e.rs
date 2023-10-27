@@ -300,7 +300,6 @@ async fn leader_upload(version: DapVersion) {
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
         DapVersion::Draft07 => client.put(url.as_str()),
-        _ => unreachable!("unhandled version {}", t.version),
     };
     let resp = builder
         .body(

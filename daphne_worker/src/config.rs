@@ -35,7 +35,6 @@ use daphne::{
     DapVersion, Prio3Config, VdafConfig,
 };
 use futures::TryFutureExt;
-use matchit::Router;
 use prio::codec::Decode;
 use prometheus::{Encoder, Registry};
 use serde::{Deserialize, Serialize};
@@ -48,7 +47,7 @@ use std::{
     time::Duration,
 };
 use tracing::{error, info, trace};
-use worker::{kv::KvStore, *};
+use worker::{kv::KvStore, Date, Env, Headers, Request, Response, RouteContext, Url};
 
 const KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET: &str = "hpke_receiver_config_set";
 pub(crate) const KV_KEY_PREFIX_BEARER_TOKEN_LEADER: &str = "bearer_token/leader/task";
@@ -132,7 +131,7 @@ pub(crate) struct DaphneWorkerConfig {
 }
 
 impl DaphneWorkerConfig {
-    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self, worker::Error> {
         let env_label = env.var("ENV")?.to_string();
 
         let load_key = |name| {
@@ -150,24 +149,29 @@ impl DaphneWorkerConfig {
             "leader" => true,
             "helper" => false,
             other => {
-                return Err(Error::RustError(format!(
+                return Err(worker::Error::RustError(format!(
                     "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
                 )))
             }
         };
 
-        let global: DapGlobalConfig =
-            serde_json::from_str(env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref())
-                .map_err(|e| Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {e}")))?;
+        let global: DapGlobalConfig = serde_json::from_str(
+            env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
+        )
+        .map_err(|e| worker::Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {e}")))?;
 
-        let default_version =
-            DapVersion::from(env.var("DAP_DEFAULT_VERSION")?.to_string().as_ref());
+        let default_version: DapVersion = env
+            .var("DAP_DEFAULT_VERSION")?
+            .to_string()
+            .parse()
+            .map_err(|_| {
+                worker::Error::RustError("Invalid value for DAP_DEFAULT_VERSION".into())
+            })?;
 
         let base_url = if let Ok(base_url) = env.var(DAP_BASE_URL) {
-            let base_url: Url = base_url
-                .to_string()
-                .parse()
-                .map_err(|e| Error::RustError(format!("failed to parse {DAP_BASE_URL}: {e}")))?;
+            let base_url: Url = base_url.to_string().parse().map_err(|e| {
+                worker::Error::RustError(format!("failed to parse {DAP_BASE_URL}: {e}"))
+            })?;
             Some(base_url)
         } else {
             None
@@ -186,7 +190,7 @@ impl DaphneWorkerConfig {
             .to_string()
             .parse()
             .map_err(|err| {
-                Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {err}"))
+                worker::Error::RustError(format!("Failed to parse DAP_REPORT_SHARD_COUNT: {err}"))
             })?;
 
         let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
@@ -194,7 +198,7 @@ impl DaphneWorkerConfig {
                 "prod" => DaphneWorkerDeployment::Prod,
                 "dev" => DaphneWorkerDeployment::Dev,
                 s => {
-                    return Err(Error::RustError(format!(
+                    return Err(worker::Error::RustError(format!(
                         "Invalid value for DAP_DEPLOYMENT: {s}",
                     )))
                 }
@@ -217,13 +221,13 @@ impl DaphneWorkerConfig {
             let vdaf_verify_key_init =
                 hex::decode(env.secret(DAP_TASKPROV_VDAF_VERIFY_KEY_INIT)?.to_string())
                     .map_err(|e| {
-                        Error::RustError(format!(
+                        worker::Error::RustError(format!(
                             "{DAP_TASKPROV_VDAF_VERIFY_KEY_INIT}: Failed to decode hex: {e}"
                         ))
                     })?
                     .try_into()
                     .map_err(|_| {
-                        Error::RustError(format!(
+                        worker::Error::RustError(format!(
                             "{DAP_TASKPROV_VDAF_VERIFY_KEY_INIT}: Incorrect length"
                         ))
                     })?;
@@ -269,7 +273,7 @@ impl DaphneWorkerConfig {
                     .to_string()
                     .parse()
                     .map_err(|err| {
-                        Error::RustError(format!(
+                        worker::Error::RustError(format!(
                             "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
                         ))
                     })?,
@@ -283,7 +287,7 @@ impl DaphneWorkerConfig {
                 .to_string()
                 .parse()
                 .map_err(|err| {
-                    Error::RustError(format!(
+                    worker::Error::RustError(format!(
                         "Failed to parse DAP_PROCESSED_ALARM_SAFETY_INTERVAL: {err}"
                     ))
                 })?,
@@ -297,7 +301,7 @@ impl DaphneWorkerConfig {
         ) {
             (Ok(server_str), Ok(bearer_token_str)) => Some(MetricsPushConfig {
                 server: server_str.to_string().parse().map_err(|err| {
-                    Error::RustError(format!(
+                    worker::Error::RustError(format!(
                         "Failed to parse {DAP_METRICS_PUSH_SERVER_URL}: {err:?}"
                     ))
                 })?,
@@ -305,12 +309,12 @@ impl DaphneWorkerConfig {
             }),
             (Err(..), Err(..)) => None,
             (Ok(..), Err(..)) => {
-                return Err(Error::RustError(
+                return Err(worker::Error::RustError(
                     "failed to configure metrics push: missing bearer token".into(),
                 ))
             }
             (Err(..), Ok(..)) => {
-                return Err(Error::RustError(
+                return Err(worker::Error::RustError(
                     "failed to configure metrics push: missing server URL".into(),
                 ))
             }
@@ -378,7 +382,7 @@ pub(crate) struct DaphneWorkerIsolateState {
 }
 
 impl DaphneWorkerIsolateState {
-    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self, worker::Error> {
         let config = DaphneWorkerConfig::from_worker_env(env)?;
 
         // TODO Configure this client to use HTTPS only, except if running in a test environment.
@@ -440,7 +444,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         req: &Request,
         error_reporter: &'srv dyn ErrorReporter,
         audit_log: &'srv dyn AuditLog,
-    ) -> Result<Self> {
+    ) -> Result<Self, worker::Error> {
         let host = req
             .url()?
             .host_str()
@@ -456,10 +460,10 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         )
         .unwrap();
         let metrics = DaphneWorkerMetrics::register(&prometheus_registry)
-            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
+            .map_err(|e| worker::Error::RustError(format!("failed to register metrics: {e}")))?;
 
         crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
-            .map_err(|e| Error::RustError(format!("failed to register metrics: {e}")))?;
+            .map_err(|e| worker::Error::RustError(format!("failed to register metrics: {e}")))?;
 
         Ok(Self {
             isolate_state,
@@ -476,7 +480,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
     }
 
     /// If configured, gather metrics and push to Prometheus server.
-    pub(crate) async fn maybe_push_metrics(&self) -> Result<()> {
+    pub(crate) async fn maybe_push_metrics(&self) -> Result<(), worker::Error> {
         // Prepare text exposition of metrics.
         let mut buf = Vec::new();
         let encoder = prometheus::TextEncoder::new();
@@ -506,7 +510,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
                 .send()
                 .await
                 .map_err(|err| {
-                    Error::RustError(format!("request to metrics server failed: {err:?}"))
+                    worker::Error::RustError(format!("request to metrics server failed: {err:?}"))
                 })?;
 
             let status = reqwest_resp.status();
@@ -517,7 +521,10 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         Ok(())
     }
 
-    pub(crate) fn dap_abort_to_worker_response(&self, e: DapAbort) -> Result<Response> {
+    pub(crate) fn dap_abort_to_worker_response(
+        &self,
+        e: DapAbort,
+    ) -> Result<Response, worker::Error> {
         let status = if matches!(e, DapAbort::Internal(..)) {
             self.error_reporter.report_abort(&e);
             500
@@ -551,7 +558,7 @@ impl<'srv> DaphneWorker<'srv> {
         DurableConnector::new(self.env)
     }
 
-    pub(crate) fn kv(&self) -> Result<KvStore> {
+    pub(crate) fn kv(&self) -> Result<KvStore, worker::Error> {
         self.env.kv(KV_BINDING_DAP_CONFIG)
     }
 
@@ -570,7 +577,7 @@ impl<'srv> DaphneWorker<'srv> {
         kv_key_prefix: &str,
         kv_key_suffix: &K,
         kv_value: V,
-    ) -> Result<Option<V>>
+    ) -> Result<Option<V>, worker::Error>
     where
         K: ToString,
         V: for<'de> Deserialize<'de> + Serialize,
@@ -593,16 +600,16 @@ impl<'srv> DaphneWorker<'srv> {
         kv_key_prefix: &str,
         kv_key_suffix: Cow<'req, K>,
         mapper: impl FnOnce(KvPair<'req, K, &V>) -> R,
-    ) -> Result<Option<R>>
+    ) -> Result<Option<R>, worker::Error>
     where
         K: Clone + Eq + std::hash::Hash + Display,
         V: for<'de> Deserialize<'de>,
     {
         // If the value is cached, then return immediately.
         {
-            let guarded_map = map
-                .read()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
+            let guarded_map = map.read().map_err(|e| {
+                worker::Error::RustError(format!("Failed to lock map for reading: {e}"))
+            })?;
 
             if let Some(value) = guarded_map.get(&kv_key_suffix) {
                 tracing::debug!(%kv_key_suffix, "found kv value in cache");
@@ -623,15 +630,15 @@ impl<'srv> DaphneWorker<'srv> {
             // TODO(cjpatton) Consider indicating whether the value is known to not exist. For HPKE
             // configs, this would avoid hitting KV multiple times when the same expired config is
             // used for multiple reports.
-            let mut guarded_map = map
-                .write()
-                .map_err(|e| Error::RustError(format!("Failed to lock map for writing: {e}")))?;
+            let mut guarded_map = map.write().map_err(|e| {
+                worker::Error::RustError(format!("Failed to lock map for writing: {e}"))
+            })?;
             guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
         }
 
-        let guarded_map = map
-            .read()
-            .map_err(|e| Error::RustError(format!("Failed to lock map for reading: {e}")))?;
+        let guarded_map = map.read().map_err(|e| {
+            worker::Error::RustError(format!("Failed to lock map for reading: {e}"))
+        })?;
 
         if let Some(value) = guarded_map.get(kv_key_suffix.as_ref()) {
             tracing::debug!(%kv_key, "found key in kv");
@@ -673,7 +680,7 @@ impl<'srv> DaphneWorker<'srv> {
         map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
         kv_key_suffix: Cow<'req, K>,
-    ) -> Result<Option<KvPair<'req, K, V>>>
+    ) -> Result<Option<KvPair<'req, K, V>>, worker::Error>
     where
         K: Clone + Eq + std::hash::Hash + Display,
         V: Clone + for<'de> Deserialize<'de>,
@@ -697,7 +704,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         version: DapVersion,
         mut mapper: F,
-    ) -> Result<Option<R>>
+    ) -> Result<Option<R>, worker::Error>
     where
         F: FnMut(&HpkeRecieverConfigList) -> Option<R>,
     {
@@ -726,7 +733,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_leader_bearer_token<'a>(
         &'a self,
         task_id: &'a TaskId,
-    ) -> Result<Option<BearerTokenKvPair<'a>>> {
+    ) -> Result<Option<BearerTokenKvPair<'a>>, worker::Error> {
         self.kv_get_cached(
             &self.isolate_state().leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
@@ -740,7 +747,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         task_id: &TaskId,
         token: &BearerToken,
-    ) -> Result<Option<BearerToken>> {
+    ) -> Result<Option<BearerToken>, worker::Error> {
         self.kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_LEADER, task_id, token.clone())
             .await
     }
@@ -749,7 +756,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_collector_bearer_token<'a>(
         &'a self,
         task_id: &'a TaskId,
-    ) -> Result<Option<BearerTokenKvPair>> {
+    ) -> Result<Option<BearerTokenKvPair>, worker::Error> {
         self.kv_get_cached(
             &self.isolate_state().collector_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
@@ -762,7 +769,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn get_task_config<'req>(
         &self,
         task_id: Cow<'req, TaskId>,
-    ) -> Result<Option<DapTaskConfigKvPair<'req>>> {
+    ) -> Result<Option<DapTaskConfigKvPair<'req>>, worker::Error> {
         self.kv_get_cached(
             &self.isolate_state().tasks,
             KV_KEY_PREFIX_TASK_CONFIG,
@@ -776,7 +783,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-    ) -> Result<Option<DapTaskConfig>> {
+    ) -> Result<Option<DapTaskConfig>, worker::Error> {
         self.kv_set_if_not_exists(KV_KEY_PREFIX_TASK_CONFIG, task_id, task_config.clone())
             .await
     }
@@ -786,7 +793,7 @@ impl<'srv> DaphneWorker<'srv> {
     pub(crate) async fn try_get_task_config<'req>(
         &'srv self,
         task_id: &'req TaskId,
-    ) -> std::result::Result<DapTaskConfigKvPair<'req>, DapError>
+    ) -> Result<DapTaskConfigKvPair<'req>, DapError>
     where
         'srv: 'req,
     {
@@ -875,7 +882,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
-    ) -> Result<Response> {
+    ) -> Result<Response, worker::Error> {
         if self.config().is_leader && !matches!(cmd.role, Role::Leader)
             || !self.config().is_leader && !matches!(cmd.role, Role::Helper)
         {
@@ -890,7 +897,7 @@ impl<'srv> DaphneWorker<'srv> {
             .base_url
             .as_ref()
             .ok_or_else(|| {
-                Error::RustError(format!(
+                worker::Error::RustError(format!(
                     "Environment variable {DAP_BASE_URL} not configured"
                 ))
             })?
@@ -907,7 +914,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         version: DapVersion,
         cmd: InternalTestAddTask,
-    ) -> Result<()> {
+    ) -> Result<(), worker::Error> {
         // Task ID.
         let task_id = TaskId::try_from_base64url(&cmd.task_id)
             .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
@@ -1036,7 +1043,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         version: DapVersion,
         new_receiver: HpkeReceiverConfig,
-    ) -> Result<()> {
+    ) -> Result<(), worker::Error> {
         let mut config_list = self
             .get_hpke_receiver_config(version, |config_list| Some(config_list.clone()))
             .await?
@@ -1070,29 +1077,26 @@ impl<'srv> DaphneWorker<'srv> {
         Ok(())
     }
 
-    pub(crate) fn extract_version_parameter(&self, req: &Request) -> Result<DapVersion> {
-        let url = req.url()?;
-        let path = url.path();
-        let mut router: Router<bool> = Router::new();
-        router.insert("/:version/*remaining", true).unwrap();
-        let url_match = router.at(path).unwrap();
-        let version = url_match
-            .params
-            .get("version")
-            .ok_or_else(|| Error::RustError(format!("Failed to parse path: {path}")))?;
-        Ok(DapVersion::from(version))
+    pub(crate) fn parse_version_param<D>(ctx: &RouteContext<D>) -> Result<DapVersion, DapAbort> {
+        ctx.param("version")
+            .ok_or_else(|| DapAbort::BadRequest("protocol version not specified".into()))?
+            .parse()
     }
 
     pub(crate) async fn worker_request_to_dap<D>(
         &self,
         mut req: Request,
         ctx: &RouteContext<D>,
-    ) -> Result<DapRequest<DaphneWorkerAuth>> {
-        let version = self.extract_version_parameter(&req)?;
+    ) -> Result<DapRequest<DaphneWorkerAuth>, DapError> {
+        let version: DapVersion = DaphneWorker::parse_version_param(ctx)?;
 
         // Determine the authorization method used by the sender.
         let sender_auth = Some(DaphneWorkerAuth {
-            bearer_token: req.headers().get("DAP-Auth-Token")?.map(BearerToken::from),
+            bearer_token: req
+                .headers()
+                .get("DAP-Auth-Token")
+                .map_err(|e| fatal_error!(err = ?e))?
+                .map(BearerToken::from),
 
             // The runtime gives us a cf_tls_client_auth whether the communication was secured by
             // it or not, so if a certificate wasn't presented, treat it as if it weren't there.
@@ -1103,10 +1107,13 @@ impl<'srv> DaphneWorker<'srv> {
                 .filter(|auth| auth.cert_presented() == "1"),
         });
 
-        let content_type = req.headers().get("Content-Type")?;
+        let content_type = req
+            .headers()
+            .get("Content-Type")
+            .map_err(|e| fatal_error!(err = ?e))?;
         let media_type = DapMediaType::from_str_for_version(version, content_type.as_deref());
 
-        let payload = req.bytes().await?;
+        let payload = req.bytes().await.map_err(|e| fatal_error!(err = ?e))?;
 
         let (task_id, resource) = match version {
             DapVersion::Draft02 => {
@@ -1154,7 +1161,6 @@ impl<'srv> DaphneWorker<'srv> {
 
                 (task_id, resource)
             }
-            DapVersion::Unknown => unreachable!("unhandled version {version:?}"),
         };
 
         Ok(DapRequest {
@@ -1162,10 +1168,13 @@ impl<'srv> DaphneWorker<'srv> {
             task_id,
             resource,
             payload,
-            url: req.url()?,
+            url: req.url().map_err(|e| fatal_error!(err = ?e))?,
             media_type,
             sender_auth,
-            taskprov: req.headers().get("dap-taskprov")?,
+            taskprov: req
+                .headers()
+                .get("dap-taskprov")
+                .map_err(|e| fatal_error!(err = ?e))?,
         })
     }
 

@@ -134,7 +134,6 @@ impl DapMediaType {
             }
             (_, Self::Invalid(ref content_type)) => Some(content_type),
             (_, Self::Missing) => None,
-            (DapVersion::Unknown, _) => unreachable!("unhandled version {version:?}"),
         }
     }
 
@@ -144,7 +143,6 @@ impl DapMediaType {
         match version {
             DapVersion::Draft02 => Self::Draft02AggregateContinueResp,
             DapVersion::Draft07 => Self::AggregationJobResp,
-            _ => unreachable!("unhandled version {version:?}"),
         }
     }
 }

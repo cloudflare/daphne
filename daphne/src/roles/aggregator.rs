@@ -141,11 +141,6 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
     /// Handle request for the Aggregator's HPKE configuration.
     async fn handle_hpke_config_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
-        // Check whether the DAP version indicated by the sender is supported.
-        if req.version == DapVersion::Unknown {
-            return Err(DapAbort::version_unknown());
-        }
-
         let metrics = self.metrics();
 
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
@@ -187,9 +182,6 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
                 };
                 hpke_config_list.get_encoded()
             }
-            // This is just to keep the compiler happy as we excluded DapVersion::Unknown by
-            // aborting at the top of the function.
-            _ => unreachable!("unhandled version {:?}", req.version),
         };
 
         metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);

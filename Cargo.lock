@@ -710,7 +710,6 @@ dependencies = [
  "daphne",
  "futures",
  "hex",
- "matchit 0.7.3",
  "once_cell",
  "paste",
  "prio",

@@ -80,7 +80,6 @@ impl TestRunner {
         let version_path = match version {
             DapVersion::Draft02 => "v02",
             DapVersion::Draft07 => "v07",
-            _ => panic!("unimplemented DapVersion"),
         };
         let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
         let mut helper_url = Url::parse(&format!("http://helper:8788/{}/", version_path)).unwrap();
@@ -680,7 +679,6 @@ impl TestRunner {
         match self.version {
             DapVersion::Draft02 => "upload".to_string(),
             DapVersion::Draft07 => format!("tasks/{}/reports", id.to_base64url()),
-            _ => unreachable!("unknown version"),
         }
     }
 
