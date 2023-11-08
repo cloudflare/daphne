@@ -522,14 +522,14 @@ impl DapTaskConfig {
             .collect())
     }
 
-    pub fn bucket_for(
+    pub fn bucket_for<E: EarlyReportState>(
         &self,
         part_batch_sel: &PartialBatchSelector,
-        consumed_report: &EarlyReportStateConsumed<'_>,
+        report: &E,
     ) -> DapBatchBucket {
         match part_batch_sel {
             PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                batch_window: self.quantized_time_lower_bound(consumed_report.metadata().time),
+                batch_window: self.quantized_time_lower_bound(report.metadata().time),
             },
             PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
                 batch_id: batch_id.clone(),
