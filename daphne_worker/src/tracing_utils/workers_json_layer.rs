@@ -74,12 +74,15 @@ where
 
         // If there is no `message`, repurpose the error meessage is there is one or the
         // `current_span` as the `message`. This helps normalize the `WasmTimingLayer` events.
-        if !fields.contains_key("message") {
+        const MSG_KEY: &str = "message";
+        if !fields.contains_key(MSG_KEY) {
             if let Some(error) = fields.get("error") {
-                fields.insert("message".into(), error.clone());
+                fields.insert(MSG_KEY.into(), error.clone());
             } else {
-                fields.insert("message".to_owned(), "(no message)".into());
+                fields.insert(MSG_KEY.to_owned(), "(no message)".into());
             }
+        } else if matches!(fields.get(MSG_KEY).unwrap().as_str(), Some(m) if m.trim().is_empty()) {
+            fields.insert(MSG_KEY.to_owned(), "(no message)".into());
         }
 
         let log_line = LogLine {

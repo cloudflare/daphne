@@ -1,7 +1,7 @@
 # Daphne-Worker Tests
 
 This directory defines a deployment of Daphne-Worker for testing changes
-locally. It also implements integration tests between Daphne and and
+locally. It also implements integration tests between Daphne and
 Daphne-Worker.
 
 [Wrangler](https://github.com/cloudflare/wrangler2) (>=2.6.2) is used to mock
