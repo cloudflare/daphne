@@ -156,7 +156,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
                 "failed to parse query parameter as URL-safe Base64".into(),
             ))?;
 
-            id = Some(TaskId(bytes))
+            id = Some(TaskId(bytes));
         }
 
         let hpke_config = self.get_hpke_config_for(req.version, id.as_ref()).await?;

@@ -49,7 +49,7 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
         c.bench_function(&format!("handle_agg_job_init_req {vdaf}"), |b| {
             b.to_async(&rt).iter(|| async {
                 black_box(agg_job_test.handle_agg_job_init_req(&agg_job_init_req)).await
-            })
+            });
         });
     }
 }

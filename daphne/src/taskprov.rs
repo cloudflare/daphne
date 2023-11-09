@@ -511,7 +511,7 @@ mod test {
             None,
         ) {
             Err(DapError::Abort(DapAbort::UnrecognizedMessage { detail, .. })) => {
-                assert_eq!(detail, "codec error: unexpected value")
+                assert_eq!(detail, "codec error: unexpected value");
             }
             Err(e) => panic!("unexpected error: {e}"),
             Ok(..) => panic!("expected error"),

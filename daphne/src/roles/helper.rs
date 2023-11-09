@@ -261,7 +261,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         for transition in agg_job_resp.transitions.iter() {
             if let TransitionVar::Failed(failure) = &transition.var {
-                metrics.report_inc_by(&format!("rejected_{failure}"), 1)
+                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
             }
         }
 

@@ -272,7 +272,7 @@ trait Alarmed: DapDurableObject {
                         self.deployment(),
                         crate::config::DaphneWorkerDeployment::Dev
                     ) {
-                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}")
+                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}");
                     } else {
                         // We only return an error if not in the "dev" deployment as
                         // the experimental-local dev environment doesn't have
@@ -338,7 +338,7 @@ trait GarbageCollectable: DapDurableObject {
                             .await?;
                     }
                 }
-                *self.touched() = true
+                *self.touched() = true;
             }
             _ => {}
         }
