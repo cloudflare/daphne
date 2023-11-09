@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 // VDAF type codes.
-const VDAF_TYPE_PRIO2: u32 = 0xFFFF0000;
+const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
 
 // Differential privacy mechanism types.
 const DP_MECHANISM_NONE: u8 = 0x01;

@@ -1232,7 +1232,7 @@ mod test {
             draft02_task_id: task_id_for_version(version),
             report_metadata: ReportMetadata {
                 id: ReportId([23; 16]),
-                time: 1637364244,
+                time: 1_637_364_244,
                 extensions: vec![],
             },
             public_share: b"public share".to_vec(),
@@ -1264,7 +1264,7 @@ mod test {
             draft02_task_id: task_id_for_version(DapVersion::Draft02),
             report_metadata: ReportMetadata {
                 id: ReportId([23; 16]),
-                time: 1637364244,
+                time: 1_637_364_244,
                 extensions: vec![Extension::Unhandled {
                     typ: 0xfff,
                     payload: b"some extension".to_vec(),
@@ -1325,7 +1325,7 @@ mod test {
                         report_share: ReportShare {
                             report_metadata: ReportMetadata {
                                 id: ReportId([99; 16]),
-                                time: 1637361337,
+                                time: 1_637_361_337,
                                 extensions: Vec::default(),
                             },
                             public_share: b"public share".to_vec(),
@@ -1341,7 +1341,7 @@ mod test {
                         report_share: ReportShare {
                             report_metadata: ReportMetadata {
                                 id: ReportId([17; 16]),
-                                time: 163736423,
+                                time: 163_736_423,
                                 extensions: Vec::default(),
                             },
                             public_share: b"public share".to_vec(),
@@ -1372,7 +1372,7 @@ mod test {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
-                            time: 1637361337,
+                            time: 1_637_361_337,
                             extensions: Vec::default(),
                         },
                         public_share: b"public share".to_vec(),
@@ -1388,7 +1388,7 @@ mod test {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
-                            time: 163736423,
+                            time: 163_736_423,
                             extensions: Vec::default(),
                         },
                         public_share: b"public share".to_vec(),
@@ -1422,7 +1422,7 @@ mod test {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
-                            time: 1637361337,
+                            time: 1_637_361_337,
                             extensions: Vec::default(),
                         },
                         public_share: b"public share".to_vec(),
@@ -1438,7 +1438,7 @@ mod test {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
-                            time: 163736423,
+                            time: 163_736_423,
                             extensions: Vec::default(),
                         },
                         public_share: b"public share".to_vec(),
