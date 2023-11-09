@@ -159,10 +159,9 @@ impl ReportsProcessed {
                     .into_iter()
                     .map(|consumed_report| {
                         if replayed_reports.contains(&consumed_report.metadata().id) {
-                            Ok(EarlyReportStateInitialized::Rejected {
-                                metadata: Cow::Owned(consumed_report.metadata().clone()),
-                                failure: TransitionFailure::ReportReplayed,
-                            })
+                            Ok(consumed_report.into_initialized_rejected_due_to(
+                                TransitionFailure::ReportReplayed,
+                            ))
                         } else {
                             EarlyReportStateInitialized::initialize(
                                 reports_processed_request.is_leader,
