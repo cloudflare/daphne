@@ -86,12 +86,13 @@ impl DapMediaType {
             | (DapVersion::Draft07, Some(MEDIA_TYPE_COLLECTION)) => Self::Collection,
             (DapVersion::Draft02, Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG))
             | (DapVersion::Draft07, Some(MEDIA_TYPE_HPKE_CONFIG_LIST)) => Self::HpkeConfigList,
-            (DapVersion::Draft02, Some(MEDIA_TYPE_AGG_SHARE_REQ))
-            | (DapVersion::Draft07, Some(MEDIA_TYPE_AGG_SHARE_REQ)) => Self::AggregateShareReq,
-            (DapVersion::Draft02, Some(MEDIA_TYPE_COLLECT_REQ))
-            | (DapVersion::Draft07, Some(MEDIA_TYPE_COLLECT_REQ)) => Self::CollectReq,
-            (DapVersion::Draft02, Some(MEDIA_TYPE_REPORT))
-            | (DapVersion::Draft07, Some(MEDIA_TYPE_REPORT)) => Self::Report,
+            (DapVersion::Draft02 | DapVersion::Draft07, Some(MEDIA_TYPE_AGG_SHARE_REQ)) => {
+                Self::AggregateShareReq
+            }
+            (DapVersion::Draft02 | DapVersion::Draft07, Some(MEDIA_TYPE_COLLECT_REQ)) => {
+                Self::CollectReq
+            }
+            (DapVersion::Draft02 | DapVersion::Draft07, Some(MEDIA_TYPE_REPORT)) => Self::Report,
             (_, Some(content_type)) => Self::Invalid(content_type.to_string()),
             (_, None) => Self::Missing,
         }
@@ -118,20 +119,19 @@ impl DapMediaType {
                 Some(DRAFT02_MEDIA_TYPE_AGG_CONT_RESP)
             }
             (_, Self::Draft02AggregateContinueResp) => None,
-            (DapVersion::Draft02, Self::AggregateShareReq)
-            | (DapVersion::Draft07, Self::AggregateShareReq) => Some(MEDIA_TYPE_AGG_SHARE_REQ),
+            (DapVersion::Draft02 | DapVersion::Draft07, Self::AggregateShareReq) => {
+                Some(MEDIA_TYPE_AGG_SHARE_REQ)
+            }
             (DapVersion::Draft02, Self::AggregateShare) => Some(DRAFT02_MEDIA_TYPE_AGG_SHARE_RESP),
             (DapVersion::Draft07, Self::AggregateShare) => Some(MEDIA_TYPE_AGG_SHARE),
-            (DapVersion::Draft02, Self::CollectReq) | (DapVersion::Draft07, Self::CollectReq) => {
+            (DapVersion::Draft02 | DapVersion::Draft07, Self::CollectReq) => {
                 Some(MEDIA_TYPE_COLLECT_REQ)
             }
             (DapVersion::Draft02, Self::Collection) => Some(DRAFT02_MEDIA_TYPE_COLLECT_RESP),
             (DapVersion::Draft07, Self::Collection) => Some(MEDIA_TYPE_COLLECTION),
             (DapVersion::Draft02, Self::HpkeConfigList) => Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
             (DapVersion::Draft07, Self::HpkeConfigList) => Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
-            (DapVersion::Draft02, Self::Report) | (DapVersion::Draft07, Self::Report) => {
-                Some(MEDIA_TYPE_REPORT)
-            }
+            (DapVersion::Draft02 | DapVersion::Draft07, Self::Report) => Some(MEDIA_TYPE_REPORT),
             (_, Self::Invalid(ref content_type)) => Some(content_type),
             (_, Self::Missing) => None,
         }
