@@ -330,7 +330,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
                 Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
             };
             Self::Rejected { metadata, failure }
-        })
+        });
     }
 }
 
@@ -2439,7 +2439,7 @@ mod test {
         let got = DapAggregationJobState::get_decoded(TEST_VDAF, &want.get_encoded()).unwrap();
         assert_eq!(got.get_encoded(), want.get_encoded());
 
-        assert!(DapAggregationJobState::get_decoded(TEST_VDAF, b"invalid helper state").is_err())
+        assert!(DapAggregationJobState::get_decoded(TEST_VDAF, b"invalid helper state").is_err());
     }
 
     impl AggregationJobTest {

@@ -128,7 +128,7 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
     let mut agg_shares = Vec::with_capacity(vdaf.num_aggregators());
     for encoded in encoded_agg_shares.into_iter() {
         let agg_share = AggregateShare::get_decoded_with_param(&(&vdaf, &()), encoded.as_ref())?;
-        agg_shares.push(agg_share)
+        agg_shares.push(agg_share);
     }
     let agg_res = vdaf.unshard(&(), agg_shares, num_measurements)?;
     Ok(DapAggregateResult::U32Vec(agg_res))

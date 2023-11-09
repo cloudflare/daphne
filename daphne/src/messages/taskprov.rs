@@ -146,7 +146,7 @@ pub struct UrlBytes {
 
 impl Encode for UrlBytes {
     fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_u16_bytes(bytes, &self.bytes)
+        encode_u16_bytes(bytes, &self.bytes);
     }
 }
 

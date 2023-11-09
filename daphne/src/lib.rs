@@ -357,7 +357,7 @@ impl<T> Extend<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpa
     where
         I: IntoIterator<Item = (DapBatchBucket, (T, Vec<(ReportId, Time)>))>,
     {
-        self.span.extend(iter)
+        self.span.extend(iter);
     }
 }
 

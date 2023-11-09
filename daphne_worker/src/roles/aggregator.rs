@@ -65,7 +65,7 @@ impl DapReportInitializer for DaphneWorker<'_> {
                     reports_processed_request_data
                         .entry(durable_name)
                         .or_insert_with(Vec::new)
-                        .push(id)
+                        .push(id);
                 }
                 agg_store_request_names.push((
                     bucket,

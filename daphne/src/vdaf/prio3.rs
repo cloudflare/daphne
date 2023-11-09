@@ -451,7 +451,7 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
         let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
         for data in agg_shares.into_iter() {
             let agg_share = AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
-            agg_shares_vec.push(agg_share)
+            agg_shares_vec.push(agg_share);
         }
         Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
     }
