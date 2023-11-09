@@ -200,7 +200,7 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
             time: Time::decode(bytes)?,
             extensions: match version {
                 DapVersion::Draft02 => decode_u16_items(&(), bytes)?,
-                _ => Vec::new(),
+                DapVersion::Draft07 => Vec::new(),
             },
         };
         // Check for duplicate extensions and unknown extensions.

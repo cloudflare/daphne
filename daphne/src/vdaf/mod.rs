@@ -583,7 +583,7 @@ impl VdafConfig {
     ) -> Result<Report, DapError> {
         let report_extensions = match version {
             DapVersion::Draft02 => extensions.clone(),
-            _ => vec![],
+            DapVersion::Draft07 => vec![],
         };
         let metadata = ReportMetadata {
             id: *report_id,
@@ -1235,7 +1235,7 @@ impl VdafConfig {
                     continue;
                 }
 
-                _ => {
+                TransitionVar::Finished => {
                     return Err(DapAbort::UnrecognizedMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
                         task_id: Some(*task_id),
@@ -1656,40 +1656,40 @@ mod test {
 
     impl<M: Debug> DapLeaderAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
-            match self {
-                Self::Continued(state, message) => (state, message),
-                _ => panic!("unexpected transition"),
-            }
+            let Self::Continued(state, message) = self else {
+                panic!("unexpected transition")
+            };
+            (state, message)
         }
 
         fn unwrap_finished(self) -> DapAggregateSpan<DapAggregateShare> {
-            match self {
-                Self::Finished(agg_span) => agg_span,
-                _ => panic!("unexpected transition"),
-            }
+            let Self::Finished(agg_span) = self else {
+                panic!("unexpected transition")
+            };
+            agg_span
         }
 
         pub(crate) fn unwrap_uncommitted(self) -> (DapAggregationJobUncommitted, M) {
-            match self {
-                Self::Uncommitted(uncommitted, message) => (uncommitted, message),
-                _ => panic!("unexpected transition"),
-            }
+            let Self::Uncommitted(uncommitted, message) = self else {
+                panic!("unexpected transition")
+            };
+            (uncommitted, message)
         }
     }
 
     impl<M: Debug> DapHelperAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
-            match self {
-                Self::Continued(state, message) => (state, message),
-                _ => panic!("unexpected transition"),
-            }
+            let Self::Continued(state, message) = self else {
+                panic!("unexpected transition")
+            };
+            (state, message)
         }
 
         fn unwrap_finished(self) -> (DapAggregateSpan<DapAggregateShare>, M) {
-            match self {
-                Self::Finished(agg_span, msg) => (agg_span, msg),
-                _ => panic!("unexpected transition"),
-            }
+            let Self::Finished(agg_span, msg) = self else {
+                panic!("unexpected transition")
+            };
+            (agg_span, msg)
         }
 
         fn unwrap_msg(self) -> M {
