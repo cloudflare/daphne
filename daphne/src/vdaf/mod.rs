@@ -593,7 +593,7 @@ impl VdafConfig {
 
         if version != DapVersion::Draft02 {
             let mut encoded: Vec<Vec<u8>> = Vec::new();
-            for share in input_shares.into_iter() {
+            for share in input_shares {
                 let input_share = PlaintextInputShare {
                     extensions: extensions.clone(),
                     payload: share,
@@ -720,7 +720,7 @@ impl VdafConfig {
         let mut seq = Vec::with_capacity(reports.len());
         let mut consumed_reports = Vec::with_capacity(reports.len());
         let mut helper_shares = Vec::with_capacity(reports.len());
-        for report in reports.into_iter() {
+        for report in reports {
             if processed.contains(&report.report_metadata.id) {
                 return Err(fatal_error!(
                     err = "tried to process report sequence with non-unique report IDs",

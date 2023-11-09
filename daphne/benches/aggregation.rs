@@ -30,9 +30,7 @@ fn handle_agg_job_init_req(c: &mut Criterion) {
             VdafConfig::Prio2 { dimension },
             DapMeasurement::U32Vec(vec![1; dimension]),
         ),
-    ]
-    .into_iter()
-    {
+    ] {
         let agg_job_test =
             AggregationJobTest::new(&vdaf, HpkeKemId::X25519HkdfSha256, DapVersion::Draft02);
 

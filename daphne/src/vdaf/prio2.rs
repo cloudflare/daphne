@@ -126,7 +126,7 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
 ) -> Result<DapAggregateResult, VdafError> {
     let vdaf = Prio2::new(dimension)?;
     let mut agg_shares = Vec::with_capacity(vdaf.num_aggregators());
-    for encoded in encoded_agg_shares.into_iter() {
+    for encoded in encoded_agg_shares {
         let agg_share = AggregateShare::get_decoded_with_param(&(&vdaf, &()), encoded.as_ref())?;
         agg_shares.push(agg_share);
     }

@@ -183,7 +183,7 @@ impl AggregationJobTest {
     pub fn produce_reports(&self, measurements: Vec<DapMeasurement>) -> Vec<Report> {
         let mut reports = Vec::with_capacity(measurements.len());
 
-        for measurement in measurements.into_iter() {
+        for measurement in measurements {
             reports.push(
                 self.task_config
                     .vdaf
