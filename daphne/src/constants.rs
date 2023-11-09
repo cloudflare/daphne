@@ -118,7 +118,6 @@ impl DapMediaType {
             (DapVersion::Draft02, Self::Draft02AggregateContinueResp) => {
                 Some(DRAFT02_MEDIA_TYPE_AGG_CONT_RESP)
             }
-            (_, Self::Draft02AggregateContinueResp) => None,
             (DapVersion::Draft02 | DapVersion::Draft07, Self::AggregateShareReq) => {
                 Some(MEDIA_TYPE_AGG_SHARE_REQ)
             }
@@ -132,8 +131,8 @@ impl DapMediaType {
             (DapVersion::Draft02, Self::HpkeConfigList) => Some(DRAFT02_MEDIA_TYPE_HPKE_CONFIG),
             (DapVersion::Draft07, Self::HpkeConfigList) => Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
             (DapVersion::Draft02 | DapVersion::Draft07, Self::Report) => Some(MEDIA_TYPE_REPORT),
+            (_, Self::Draft02AggregateContinueResp | Self::Missing) => None,
             (_, Self::Invalid(ref content_type)) => Some(content_type),
-            (_, Self::Missing) => None,
         }
     }
 
