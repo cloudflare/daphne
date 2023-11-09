@@ -832,7 +832,7 @@ impl VdafConfig {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut consumed_reports = Vec::with_capacity(num_reports);
-        for prep_init in agg_job_init_req.prep_inits.iter() {
+        for prep_init in &agg_job_init_req.prep_inits {
             if processed.contains(&prep_init.report_share.report_metadata.id) {
                 return Err(DapAbort::UnrecognizedMessage {
                     detail: format!(

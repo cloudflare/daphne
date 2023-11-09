@@ -214,7 +214,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
             };
         }
 
-        for (task_id, reports) in reports_per_task_part.iter() {
+        for (task_id, reports) in &reports_per_task_part {
             let mut report_count = 0;
             for reports in reports.values() {
                 report_count += reports.len();
