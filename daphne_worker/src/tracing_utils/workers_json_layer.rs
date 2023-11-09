@@ -52,7 +52,7 @@ where
                         .entry("current_span".to_owned())
                         .or_insert(serde_json::json!(span.name()));
 
-                    for f in span.fields().iter() {
+                    for f in span.fields() {
                         if let Some(value) = data.and_then(|d| d.get(f.name())) {
                             // As we are going from current span to root, prioritize existing values.
                             fields.entry(f.name().to_owned()).or_insert(value.clone());

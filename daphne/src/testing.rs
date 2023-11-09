@@ -768,7 +768,7 @@ impl MockAggregator {
                 let leader_state_store = guard.entry(*task_id).or_default();
 
                 // Assign the report to the first unsaturated batch.
-                for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
+                for (batch_id, report_count) in &mut leader_state_store.batch_queue {
                     if *report_count < task_config.min_batch_size {
                         *report_count += 1;
                         return Some(DapBatchBucket::FixedSize {
@@ -1278,7 +1278,7 @@ impl DapLeader<BearerToken> for MockAggregator {
             DapQueryConfig::TimeInterval { .. } => {
                 // Aggregate reports in any order.
                 let mut reports = Vec::new();
-                for (_bucket, queue) in report_store.pending.iter_mut() {
+                for queue in report_store.pending.values_mut() {
                     if !queue.is_empty() {
                         reports.append(&mut queue.drain(..1).collect());
                         break;
@@ -1390,9 +1390,9 @@ impl DapLeader<BearerToken> for MockAggregator {
         let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let mut res = Vec::new();
-        for (task_id, leader_state) in leader_state_store.iter() {
+        for (task_id, leader_state) in &*leader_state_store {
             // Iterate over collect IDs and copy them and their associated requests to the response.
-            for collect_id in leader_state.collect_ids.iter() {
+            for collect_id in &leader_state.collect_ids {
                 if let CollectJobState::Pending(collect_req) =
                     leader_state.collect_jobs.get(collect_id).unwrap()
                 {

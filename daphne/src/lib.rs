@@ -614,7 +614,7 @@ pub struct DapAggregationJobUncommitted {
 impl Encode for DapAggregationJobState {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.part_batch_sel.encode(bytes);
-        for report_state in self.seq.iter() {
+        for report_state in &self.seq {
             if report_state.draft02_prep_share.is_some() {
                 // draft02 compatibility: The prep share is kept in this data structure for
                 // backwards compatibility. It's only used by the Leader, so we don't ever expect
