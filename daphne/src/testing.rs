@@ -92,10 +92,10 @@ impl DapReportInitializer for AggregationJobTest {
             .into_iter()
             .map(|consumed| {
                 if reports_processed.contains(&consumed.metadata().id) {
-                    Ok(EarlyReportStateInitialized::Rejected {
-                        metadata: Cow::Owned(consumed.metadata().clone()),
-                        failure: TransitionFailure::ReportReplayed,
-                    })
+                    Ok(
+                        consumed
+                            .into_initialized_rejected_due_to(TransitionFailure::ReportReplayed),
+                    )
                 } else {
                     reports_processed.insert(consumed.metadata().id);
                     EarlyReportStateInitialized::initialize(
@@ -950,10 +950,7 @@ impl DapReportInitializer for MockAggregator {
             .into_iter()
             .map(|consumed| {
                 if let Some(failure) = early_fails.get(&consumed.metadata().id) {
-                    Ok(EarlyReportStateInitialized::Rejected {
-                        metadata: Cow::Owned(consumed.metadata().clone()),
-                        failure: *failure,
-                    })
+                    Ok(consumed.into_initialized_rejected_due_to(*failure))
                 } else {
                     EarlyReportStateInitialized::initialize(
                         is_leader,
