@@ -233,7 +233,7 @@ pub trait HpkeDecrypter {
     ) -> Result<Vec<u8>, DapError>;
 }
 
-/// Struct that combines HpkeConfig and HpkeSecretKey
+/// Struct that combines `HpkeConfig` and `HpkeSecretKey`
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
@@ -309,8 +309,8 @@ impl HpkeReceiverConfig {
 
 impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
     type Error = DapError;
-    /// Create a new HPKE receiver context given an HpkeConfig and a corresponding private key.
-    /// Returns an error if the public key does not correspond to the private_key.
+    /// Create a new HPKE receiver context given an `HpkeConfig` and a corresponding private key.
+    /// Returns an error if the public key does not correspond to the `private_key`.
     fn try_from((config, private_key): (HpkeConfig, HpkePrivateKey)) -> Result<Self, Self::Error> {
         let kem_id_u16: u16 = config.kem_id.into();
         let kem_id: KemAlgorithm = kem_id_u16.try_into().unwrap();

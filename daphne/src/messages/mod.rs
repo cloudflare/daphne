@@ -413,7 +413,7 @@ impl TryFrom<Query> for BatchSelector {
     }
 }
 
-/// The PrepareInit message consisting of the report share and the Leader's initial prep share.
+/// The `PrepareInit` message consisting of the report share and the Leader's initial prep share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrepareInit {
     pub report_share: ReportShare,

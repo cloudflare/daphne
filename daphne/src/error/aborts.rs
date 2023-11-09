@@ -110,7 +110,7 @@ pub enum DapAbort {
 
 impl DapAbort {
     /// Construct a problem details JSON object for this abort. `url` is the URL to which the
-    /// request was targeted and `task_id` is the associated TaskID.
+    /// request was targeted and `task_id` is the associated `TaskID`.
     pub fn into_problem_details(self) -> ProblemDetails {
         let (title, typ) = self.title_and_type();
         let (task_id, detail, agg_job_id_base64url) = match self {

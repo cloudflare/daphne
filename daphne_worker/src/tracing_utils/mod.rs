@@ -72,8 +72,8 @@ impl<'a> Visit for JsonVisitor<'a> {
     }
 }
 
-/// WasmTime provides a `tracing_subscriber::fmt::time::FormatTime` implementation that works
-/// using the clock available to WASM code, as the default FormatTime implementation does not
+/// `WasmTime` provides a `tracing_subscriber::fmt::time::FormatTime` implementation that works
+/// using the clock available to WASM code, as the default `FormatTime` implementation does not
 /// work.
 struct WasmTime {}
 
@@ -92,9 +92,9 @@ impl FormatTime for WasmTime {
     }
 }
 
-/// LogWriter helps us write to the worker console.
+/// `LogWriter` helps us write to the worker console.
 ///
-/// It provides and io::Write implementation that provides line buffering. It also takes care of
+/// It provides and `io::Write` implementation that provides line buffering. It also takes care of
 /// emitting a timestamp as the timestamp code in the tracing library tries to use standard clock
 /// code, which does not work in a worker.
 struct LogWriter {
@@ -185,7 +185,7 @@ where
 
 /// Setup logging.
 ///
-/// Initialize tracing using configuration from DAP_TRACING in the environment
+/// Initialize tracing using configuration from `DAP_TRACING` in the environment
 /// if present, otherwise using a default level of `info` and more severe.
 ///
 /// Panics if the log handler cannot be installed.

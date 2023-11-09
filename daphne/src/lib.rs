@@ -456,13 +456,13 @@ impl DapTaskConfig {
         }
     }
 
-    /// Return the greatest multiple of the time_precision which is less than or equal to the
+    /// Return the greatest multiple of the `time_precision` which is less than or equal to the
     /// specified time.
     pub fn quantized_time_lower_bound(&self, time: Time) -> Time {
         time - (time % self.time_precision)
     }
 
-    /// Return the least multiple of the time_precision which is greater than the specified time.
+    /// Return the least multiple of the `time_precision` which is greater than the specified time.
     pub fn quantized_time_upper_bound(&self, time: Time) -> Time {
         self.quantized_time_lower_bound(time) + self.time_precision
     }

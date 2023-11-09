@@ -137,7 +137,7 @@ impl DapMediaType {
     }
 
     /// draft02 compatibility: Construct the media type for the response to an
-    /// AggregatecontinueResp. This various depending upon the version used.
+    /// `AggregatecontinueResp`. This various depending upon the version used.
     pub(crate) fn agg_job_cont_resp_for_version(version: DapVersion) -> Self {
         match version {
             DapVersion::Draft02 => Self::Draft02AggregateContinueResp,

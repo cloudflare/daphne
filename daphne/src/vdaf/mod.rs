@@ -188,7 +188,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         })
     }
 
-    /// Convert this EarlyReportStateConsumed into a rejected [EarlyReportStateInitialized] using
+    /// Convert this `EarlyReportStateConsumed` into a rejected [`EarlyReportStateInitialized`] using
     /// `failure` as the reason. If this is already a rejected report, the passed in `failure`
     /// value overwrites the previous one.
     pub fn into_initialized_rejected_due_to(
@@ -541,7 +541,7 @@ impl VdafConfig {
     ///
     /// * `extensions` are the extensions.
     ///
-    /// * `version` is the DapVersion to use.
+    /// * `version` is the `DapVersion` to use.
     //
     // TODO(issue #100): Truncate the timestamp, as required in DAP-02.
     pub fn produce_report_with_extensions(
@@ -681,7 +681,7 @@ impl VdafConfig {
     ///
     /// * `measurement` is the measurement.
     ///
-    /// * `version` is the DapVersion to use.
+    /// * `version` is the `DapVersion` to use.
     pub fn produce_report(
         &self,
         hpke_config_list: &[HpkeConfig],
@@ -1519,7 +1519,7 @@ impl VdafConfig {
     /// * `encrypted_agg_shares` is the set of encrypted aggregate shares produced by the
     /// Aggregators. The first encrypted aggregate shares must be the Leader's.
     ///
-    /// * `version` is the DapVersion to use.
+    /// * `version` is the `DapVersion` to use.
     //
     // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
     pub async fn consume_encrypted_agg_shares(
