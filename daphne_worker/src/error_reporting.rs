@@ -6,7 +6,7 @@
 use daphne::error::DapAbort;
 
 /// Interface for error reporting in Daphne
-/// Refer to NoopErrorReporter for implementation example.
+/// Refer to `NoopErrorReporter` for implementation example.
 pub trait ErrorReporter {
     fn report_abort(&self, error: &DapAbort);
 }

@@ -101,7 +101,7 @@ pub(crate) fn initialize_timing_histograms(
     Ok(())
 }
 
-/// WasmTimingLayer provides a span's elapsed time.
+/// `WasmTimingLayer` provides a span's elapsed time.
 pub(super) struct WasmTimingLayer;
 
 fn milli_now() -> i64 {

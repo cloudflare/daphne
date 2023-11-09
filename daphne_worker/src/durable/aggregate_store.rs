@@ -65,11 +65,11 @@ pub struct AggregateStore {
 /// Minimum number of chunks needed to store 512K of aggregate share data.
 const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 4;
 
-/// Minimum number of chunks needed to store 10_000 report ids.
+/// Minimum number of chunks needed to store `10_000` report ids.
 const MAX_REPORT_ID_CHUNK_KEY_COUNT: usize = 2;
 
-/// The maximum chunk size as documented in:
-/// https://developers.cloudflare.com/durable-objects/platform/limits/
+/// The maximum chunk size as documented in
+/// [the public docs](https://developers.cloudflare.com/durable-objects/platform/limits/)
 const MAX_CHUNK_SIZE: usize = 128_000;
 
 /// Key used to store metadata under.

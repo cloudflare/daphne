@@ -158,7 +158,7 @@ impl Decode for UrlBytes {
     }
 }
 
-/// A QueryConfig type and its associated task configuration data.
+/// A `QueryConfig` type and its associated task configuration data.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum QueryConfigVar {
     TimeInterval,

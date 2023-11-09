@@ -87,12 +87,12 @@ pub(crate) fn expand_prk_into_verify_key(
     }
 }
 
-/// Compute the VDAF verify key for task_id and the specified VDAF type using the
-/// pre-shared secret verify_key_init.
+/// Compute the VDAF verify key for `task_id` and the specified VDAF type using the
+/// pre-shared secret `verify_key_init`.
 ///
-/// This is a convenience function to call compute_vdaf_verify_prk() and
-/// compute_vdaf_verify_key_from_prk(). Callers reusing the same PRK frequently
-/// should consider computing the prk once and then calling compute_vdaf_verify_key_from_prk()
+/// This is a convenience function to call `compute_vdaf_verify_prk`() and
+/// `compute_vdaf_verify_key_from_prk`(). Callers reusing the same PRK frequently
+/// should consider computing the prk once and then calling `compute_vdaf_verify_key_from_prk`()
 /// directly.
 #[allow(dead_code)]
 pub(crate) fn compute_vdaf_verify_key(

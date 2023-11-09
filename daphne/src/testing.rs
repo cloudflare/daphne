@@ -200,7 +200,7 @@ impl AggregationJobTest {
         reports
     }
 
-    /// Leader: Produce AggregationJobInitReq.
+    /// Leader: Produce `AggregationJobInitReq`.
     ///
     /// Panics if the Leader aborts.
     pub async fn produce_agg_job_init_req(
@@ -223,7 +223,7 @@ impl AggregationJobTest {
             .unwrap()
     }
 
-    /// Helper: Handle AggregationJobInitReq, produce first AggregationJobResp.
+    /// Helper: Handle `AggregationJobInitReq`, produce first `AggregationJobResp`.
     ///
     /// Panics if the Helper aborts.
     pub async fn handle_agg_job_init_req(
@@ -254,7 +254,7 @@ impl AggregationJobTest {
             .unwrap()
     }
 
-    /// Leader: Handle first AggregationJobResp, produce AggregationJobContinueReq.
+    /// Leader: Handle first `AggregationJobResp`, produce `AggregationJobContinueReq`.
     ///
     /// Panics if the Leader aborts.
     pub fn handle_agg_job_resp(
@@ -295,7 +295,7 @@ impl AggregationJobTest {
             .expect_err("handle_agg_job_resp() succeeded; expected failure")
     }
 
-    /// Helper: Handle AggregationJobContinueReq, produce second AggregationJobResp.
+    /// Helper: Handle `AggregationJobContinueReq`, produce second `AggregationJobResp`.
     ///
     /// Panics if the Helper aborts.
     pub fn handle_agg_job_cont_req(
@@ -335,7 +335,7 @@ impl AggregationJobTest {
             .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
     }
 
-    /// Leader: Handle the last AggregationJobResp.
+    /// Leader: Handle the last `AggregationJobResp`.
     ///
     /// Panics if the Leader aborts.
     pub fn handle_final_agg_job_resp(
@@ -1514,7 +1514,7 @@ pub enum CollectJobState {
     Processed(Collection),
 }
 
-/// LeaderState keeps track of the following:
+/// `LeaderState` keeps track of the following:
 /// * Collect IDs in their order of arrival.
 /// * The state of the collect job associated to the Collect ID.
 #[derive(Default)]
@@ -1525,7 +1525,7 @@ pub struct LeaderState {
     batch_queue: VecDeque<(BatchId, u64)>, // Batch ID, batch size
 }
 
-/// AggStore keeps track of the following:
+/// `AggStore` keeps track of the following:
 /// * Aggregate share
 /// * Whether this aggregate share has been collected
 #[derive(Default)]

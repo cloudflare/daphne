@@ -214,7 +214,7 @@ impl<'srv> Default for DaphneWorkerRouter<'srv> {
 }
 
 /// The response body for unhandled requests when [`DaphneWorkerRouter::enable_default_response`]
-/// is set. This value can be overrided by DAP_DEFAULT_RESPONSE_HTML.
+/// is set. This value can be overrided by `DAP_DEFAULT_RESPONSE_HTML`.
 pub const DEFAULT_RESPONSE_HTML: &str = "<body>Daphne-Worker</body>";
 
 static ISOLATE_STATE: OnceCell<DaphneWorkerIsolateState> = OnceCell::new();
