@@ -196,8 +196,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         failure: TransitionFailure,
     ) -> EarlyReportStateInitialized<'req> {
         let metadata = match self {
-            Self::Ready { metadata, .. } => metadata,
-            Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         };
         EarlyReportStateInitialized::Rejected { metadata, failure }
     }
@@ -206,8 +205,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
 impl EarlyReportState for EarlyReportStateConsumed<'_> {
     fn metadata(&self) -> &ReportMetadata {
         match self {
-            Self::Ready { metadata, .. } => metadata,
-            Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         }
     }
 
@@ -329,8 +327,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
         // this never aborts because the closure never panics
         replace_with_or_abort(self, |self_| {
             let metadata = match self_ {
-                Self::Rejected { metadata, .. } => metadata,
-                Self::Ready { metadata, .. } => metadata,
+                Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
             };
             Self::Rejected { metadata, failure }
         })
@@ -340,8 +337,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
 impl EarlyReportState for EarlyReportStateInitialized<'_> {
     fn metadata(&self) -> &ReportMetadata {
         match self {
-            Self::Ready { metadata, .. } => metadata,
-            Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         }
     }
 
@@ -376,9 +372,9 @@ impl deepsize::DeepSizeOf for VdafPrepState {
         //
         // This happens to be correct for helpers but not for leaders
         match self {
-            VdafPrepState::Prio2(_) => 0,
-            VdafPrepState::Prio3Field64(_) => 0,
-            VdafPrepState::Prio3Field128(_) => 0,
+            VdafPrepState::Prio2(_)
+            | VdafPrepState::Prio3Field64(_)
+            | VdafPrepState::Prio3Field128(_) => 0,
         }
     }
 }
@@ -1698,8 +1694,7 @@ mod test {
 
         fn unwrap_msg(self) -> M {
             match self {
-                Self::Continued(_, msg) => msg,
-                Self::Finished(_, msg) => msg,
+                Self::Continued(_, msg) | Self::Finished(_, msg) => msg,
             }
         }
     }
