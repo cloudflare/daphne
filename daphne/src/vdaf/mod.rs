@@ -1026,7 +1026,7 @@ impl VdafConfig {
                                 TransitionVar::Continued(prep_msg)
                             }
 
-                            Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                            Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                                 let failure = TransitionFailure::VdafPrepError;
                                 metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                                 TransitionVar::Failed(failure)
@@ -1167,7 +1167,7 @@ impl VdafConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                     let failure = TransitionFailure::VdafPrepError;
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
@@ -1267,7 +1267,7 @@ impl VdafConfig {
                     )?;
                 }
 
-                Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                     let failure = TransitionFailure::VdafPrepError;
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
@@ -1408,7 +1408,7 @@ impl VdafConfig {
                             TransitionVar::Finished
                         }
 
-                        Err(VdafError::Codec(..)) | Err(VdafError::Vdaf(..)) => {
+                        Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                             let failure = TransitionFailure::VdafPrepError;
                             TransitionVar::Failed(failure)
                         }

@@ -55,10 +55,11 @@ fn check_suite<T: HpkeCrypto>(
     let kdf = KdfAlgorithm::try_from(u16::from(kdf_id)).map_err(maperr)?;
     let aead = AeadAlgorithm::try_from(u16::from(aead_id)).map_err(maperr)?;
     match (kem, kdf, aead) {
-        (KemAlgorithm::DhKemP256, KdfAlgorithm::HkdfSha256, AeadAlgorithm::Aes128Gcm)
-        | (KemAlgorithm::DhKem25519, KdfAlgorithm::HkdfSha256, AeadAlgorithm::Aes128Gcm) => {
-            Ok(Hpke::new(Mode::Base, kem, kdf, aead))
-        }
+        (
+            KemAlgorithm::DhKemP256 | KemAlgorithm::DhKem25519,
+            KdfAlgorithm::HkdfSha256,
+            AeadAlgorithm::Aes128Gcm,
+        ) => Ok(Hpke::new(Mode::Base, kem, kdf, aead)),
         _ => Err(fatal_error!(err = s)),
     }
 }
