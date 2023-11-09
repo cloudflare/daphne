@@ -406,11 +406,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                         DURABLE_AGGREGATE_STORE_MERGE,
                         agg_store_name,
                         AggregateStoreMergeReq {
-                            contained_reports: report_metadatas
-                                .iter()
-                                .map(|(id, _)| id)
-                                .cloned()
-                                .collect(),
+                            contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
                             agg_share_delta: agg_share,
                         },
                     )

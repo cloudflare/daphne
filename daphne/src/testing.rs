@@ -812,8 +812,7 @@ impl MockAggregator {
         leader_state_store
             .batch_queue
             .front()
-            .cloned() // TODO(cjpatton) Avoid clone by returning MutexGuard
-            .map(|(batch_id, _report_count)| batch_id)
+            .map(|(batch_id, _report_count)| *batch_id)
     }
 
     pub(crate) async fn unchecked_get_task_config(&self, task_id: &TaskId) -> DapTaskConfig {
@@ -1085,9 +1084,8 @@ impl DapAggregator<BearerToken> for MockAggregator {
             .map(|(bucket, (agg_share, report_metadatas))| {
                 let replayed = report_metadatas
                     .iter()
-                    .map(|(id, _)| id)
+                    .map(|(id, _)| *id)
                     .filter(|id| report_store.processed.contains(id))
-                    .cloned()
                     .collect::<HashSet<_>>();
 
                 let result = if replayed.is_empty() {
