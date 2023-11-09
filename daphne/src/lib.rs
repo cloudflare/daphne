@@ -74,7 +74,6 @@ use prio::{
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
@@ -290,7 +289,7 @@ impl DapAggregateSpan<DapAggregateShare> {
                 batch_window: task_config.quantized_time_lower_bound(time),
             },
             PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
-                batch_id: batch_id.clone(),
+                batch_id: *batch_id,
             },
         };
 
@@ -495,7 +494,7 @@ impl DapTaskConfig {
             }
             BatchSelector::FixedSizeByBatchId { batch_id } => {
                 Ok(HashSet::from([DapBatchBucket::FixedSize {
-                    batch_id: batch_id.clone(),
+                    batch_id: *batch_id,
                 }]))
             }
         }
@@ -517,7 +516,7 @@ impl DapTaskConfig {
             .map(|consumed_report| {
                 let bucket = self.bucket_for(part_batch_sel, consumed_report);
                 let metadata = consumed_report.metadata();
-                (bucket, (metadata.id.clone(), metadata.time))
+                (bucket, (metadata.id, metadata.time))
             })
             .collect())
     }
@@ -532,7 +531,7 @@ impl DapTaskConfig {
                 batch_window: self.quantized_time_lower_bound(report.metadata().time),
             },
             PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
-                batch_id: batch_id.clone(),
+                batch_id: *batch_id,
             },
         }
     }
@@ -551,7 +550,7 @@ impl DapTaskConfig {
                         detail: format!(
                             "Report count ({report_count}) exceeds maximum ({max_batch_size})"
                         ),
-                        task_id: task_id.clone(),
+                        task_id: *task_id,
                     });
                 }
             }
@@ -1016,18 +1015,18 @@ pub struct DapLeaderProcessTelemetry {
 /// the HTTP request path. This type unifies these into one type so that any protocol logic that
 /// is agnostic to these details can use the same object.
 #[derive(Clone, Debug)]
-pub enum MetaAggregationJobId<'a> {
-    Draft02(Cow<'a, Draft02AggregationJobId>),
-    Draft07(Cow<'a, AggregationJobId>),
+pub enum MetaAggregationJobId {
+    Draft02(Draft02AggregationJobId),
+    Draft07(AggregationJobId),
 }
 
-impl MetaAggregationJobId<'_> {
+impl MetaAggregationJobId {
     /// Generate a random ID of the type required for the version.
     pub(crate) fn gen_for_version(version: &DapVersion) -> Self {
         let mut rng = thread_rng();
         match version {
-            DapVersion::Draft02 => Self::Draft02(Cow::Owned(Draft02AggregationJobId(rng.gen()))),
-            DapVersion::Draft07 => Self::Draft07(Cow::Owned(AggregationJobId(rng.gen()))),
+            DapVersion::Draft02 => Self::Draft02(Draft02AggregationJobId(rng.gen())),
+            DapVersion::Draft07 => Self::Draft07(AggregationJobId(rng.gen())),
         }
     }
 
@@ -1035,7 +1034,7 @@ impl MetaAggregationJobId<'_> {
     /// the HTTP request request.
     pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
         match self {
-            Self::Draft02(agg_job_id) => Some(agg_job_id.clone().into_owned()),
+            Self::Draft02(agg_job_id) => Some(*agg_job_id),
             Self::Draft07(..) => None,
         }
     }
@@ -1046,9 +1045,7 @@ impl MetaAggregationJobId<'_> {
         match self {
             // In draft02, the aggregation job ID is not determined until the payload is parsed.
             Self::Draft02(..) => DapResource::Undefined,
-            Self::Draft07(agg_job_id) => {
-                DapResource::AggregationJob(agg_job_id.clone().into_owned())
-            }
+            Self::Draft07(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
         }
     }
 

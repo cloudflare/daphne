@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
@@ -59,7 +59,7 @@ async fn leader_send_http_request<S>(
     let req = DapRequest {
         version: task_config.version,
         media_type: req_media_type.clone(),
-        task_id: Some(task_id.clone()),
+        task_id: Some(*task_id),
         resource,
         url,
         sender_auth: Some(
@@ -154,7 +154,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         check_request_content_type(req, DapMediaType::Report)?;
 
         let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         debug!("report id is {}", report.report_metadata.id);
 
         if let Some(taskprov_version) = self.get_global_config().taskprov_version {
@@ -168,7 +168,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .await?;
         }
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -187,7 +187,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                     "expected exactly two encrypted input shares; got {}",
                     report.encrypted_input_shares.len()
                 ),
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
             });
         }
 
@@ -232,7 +232,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         }
 
         let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(req.task_id()?))
+            .get_task_config_for(req.task_id()?)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -241,13 +241,13 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
         let mut collect_req =
             CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
-                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
@@ -288,7 +288,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let collect_job_id = match (req.version, &req.resource) {
             (DapVersion::Draft02, DapResource::Undefined) => None,
             (DapVersion::Draft07, DapResource::CollectionJob(ref collect_job_id)) => {
-                Some(collect_job_id.clone())
+                Some(*collect_job_id)
             }
             (DapVersion::Draft07, DapResource::Undefined) => {
                 return Err(DapAbort::BadRequest("undefined resource".into()));
@@ -380,7 +380,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         )
         .await?;
         let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         // Handle AggregationJobResp.
         let transition = task_config.vdaf.handle_agg_job_resp(
@@ -411,7 +411,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 )
                 .await?;
                 let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-                    .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+                    .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
                 // Handle AggregationJobResp.
                 task_config.vdaf.handle_final_agg_job_resp(
@@ -524,7 +524,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         )
         .await?;
         let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         // For draft07 and later, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
         let interval = match task_config.version {
@@ -582,7 +582,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
             tracing::debug!("RUNNING get_task_config_for {task_id}");
             let task_config = self
-                .get_task_config_for(Cow::Owned(task_id.clone()))
+                .get_task_config_for(&task_id)
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
@@ -612,7 +612,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         for (task_id, collect_id, collect_req) in self.get_pending_collect_jobs().await? {
             tracing::debug!("GETTING get_task_config_for {task_id}");
             let task_config = self
-                .get_task_config_for(Cow::Owned(task_id.clone()))
+                .get_task_config_for(&task_id)
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 

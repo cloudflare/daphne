@@ -161,7 +161,7 @@ impl LeaderBatchQueue {
                 };
 
                 let mut batch_assignments = vec![BatchCount {
-                    batch_id: curr.batch_id.clone(),
+                    batch_id: curr.batch_id,
                     report_count: 0,
                 }];
 

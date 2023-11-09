@@ -117,7 +117,7 @@ impl ReportsProcessed {
                     })
                     .buffer_unordered(usize::MAX)
                     .try_filter_map(|replay| ready(Ok(replay)))
-                    .try_collect::<Vec<_>>()
+                    .try_collect::<Vec<&ReportId>>()
                     .await?;
 
                 Response::from_json(&replays)
@@ -145,7 +145,7 @@ impl ReportsProcessed {
                             .await?
                             {
                                 if exists {
-                                    return Result::Ok(Some(consumed_report.metadata().id.clone()));
+                                    return Result::Ok(Some(consumed_report.metadata().id));
                                 }
                             }
                             Ok(None)

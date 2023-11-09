@@ -39,7 +39,9 @@ const EXTENSION_TASKPROV: u16 = 0xff00;
 macro_rules! id_struct {
     ($sname:ident, $len:expr, $doc:expr) => {
         #[doc=$doc]
-        #[derive(Clone, Default, Deserialize, Hash, PartialEq, Eq, Serialize, PartialOrd, Ord)]
+        #[derive(
+            Copy, Clone, Default, Deserialize, Hash, PartialEq, Eq, Serialize, PartialOrd, Ord,
+        )]
         #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
         pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
 
@@ -107,7 +109,7 @@ impl TaskId {
     /// request payload; in draft07, the task ID is included in the HTTP request path.
     pub fn for_request_payload(&self, version: &DapVersion) -> Option<TaskId> {
         match version {
-            DapVersion::Draft02 => Some(self.clone()),
+            DapVersion::Draft02 => Some(*self),
             DapVersion::Draft07 => None,
         }
     }

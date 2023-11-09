@@ -110,7 +110,7 @@ impl LeaderCollectionJobQueue {
                 let collect_queue_req: CollectQueueRequest = req_parse(&mut req).await?;
                 let collection_job_id: CollectionJobId =
                     if let Some(cid) = &collect_queue_req.collect_job_id {
-                        cid.clone()
+                        *cid
                     } else {
                         // draft02 legacy: Compute the collect job ID, used to derive the collect
                         // URI for this request. This value is computed by applying a pseudorandom
@@ -148,7 +148,7 @@ impl LeaderCollectionJobQueue {
                         &self.state,
                         (
                             collect_queue_req.task_id,
-                            collection_job_id.clone(),
+                            collection_job_id,
                             collect_queue_req.collect_req,
                         ),
                         PENDING_PREFIX,

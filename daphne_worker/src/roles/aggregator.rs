@@ -32,10 +32,7 @@ use daphne::{
     DapSender, DapTaskConfig,
 };
 use futures::{future::try_join_all, StreamExt, TryFutureExt, TryStreamExt};
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 #[async_trait(?Send)]
 impl DapReportInitializer for DaphneWorker<'_> {
@@ -157,7 +154,8 @@ impl DapReportInitializer for DaphneWorker<'_> {
 
 #[async_trait(?Send)]
 impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
-    type WrappedDapTaskConfig<'a> = DapTaskConfigKvPair<'a>;
+    type WrappedDapTaskConfig<'a> = DapTaskConfigKvPair<'a>
+        where Self: 'a;
 
     async fn unauthorized_reason(
         &self,
@@ -286,7 +284,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 .tasks
                 .write()
                 .map_err(|e| fatal_error!(err = ?e, "failed to lock tasks for writing"))?;
-            guarded_tasks.insert(task_id.clone(), task_config);
+            guarded_tasks.insert(*task_id, task_config);
 
             if let Some(ref leader_bearer_token) = taskprov.leader_auth.bearer_token {
                 let mut guarded_leader_bearer_tokens = self
@@ -296,7 +294,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     .map_err(|e| {
                         fatal_error!(err = ?e, "failed to lock leader_bearer_tokens for writing")
                     })?;
-                guarded_leader_bearer_tokens.insert(task_id.clone(), leader_bearer_token.clone());
+                guarded_leader_bearer_tokens.insert(*task_id, leader_bearer_token.clone());
             }
         } else {
             // Write the task config through to KV.
@@ -315,8 +313,8 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
     }
 
     async fn get_task_config_for<'req>(
-        &self,
-        task_id: Cow<'req, TaskId>,
+        &'req self,
+        task_id: &'req TaskId,
     ) -> std::result::Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         self.get_task_config(task_id)
             .await
@@ -379,7 +377,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     &task_config.as_ref().version,
                     &task_id.to_hex(),
                     &DapBatchBucket::FixedSize {
-                        batch_id: batch_id.clone(),
+                        batch_id: *batch_id,
                     },
                 ),
             )

@@ -190,7 +190,7 @@ impl DapAbort {
                 "The batch indicated by the request: {}",
                 serde_json::to_string(batch_sel).expect("failed to JSON-encode the batch selector while constructing a \"batchOverlap\" abort"),
             ),
-            task_id: task_id.clone(),
+            task_id: *task_id,
         }
     }
 
@@ -202,7 +202,7 @@ impl DapAbort {
     ) -> Self {
         Self::QueryMismatch {
             detail: format!("The task's query type is \"{query_type_for_task}\", but the request indicates \"{query_type_for_request}\"."),
-            task_id: task_id.clone(),
+            task_id: *task_id,
         }
     }
 

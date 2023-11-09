@@ -590,7 +590,7 @@ impl VdafConfig {
             _ => vec![],
         };
         let metadata = ReportMetadata {
-            id: report_id.clone(),
+            id: *report_id,
             time,
             extensions: report_extensions,
         };
@@ -714,7 +714,7 @@ impl VdafConfig {
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        agg_job_id: &MetaAggregationJobId<'_>,
+        agg_job_id: &MetaAggregationJobId,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
         metrics: &DaphneMetrics,
@@ -732,7 +732,7 @@ impl VdafConfig {
                 )
                 .into());
             }
-            processed.insert(report.report_metadata.id.clone());
+            processed.insert(report.report_metadata.id);
 
             let (leader_share, helper_share) = {
                 let mut it = report.encrypted_input_shares.into_iter();
@@ -784,7 +784,7 @@ impl VdafConfig {
                         draft02_prep_share,
                         prep_state: state,
                         time: metadata.time,
-                        report_id: metadata.id.clone(),
+                        report_id: metadata.id,
                     });
                     seq.push(PrepareInit {
                         report_share: ReportShare {
@@ -843,10 +843,10 @@ impl VdafConfig {
                         "report ID {} appears twice in the same aggregation job",
                         prep_init.report_share.report_metadata.id.to_base64url()
                     ),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 });
             }
-            processed.insert(prep_init.report_share.report_metadata.id.clone());
+            processed.insert(prep_init.report_share.report_metadata.id);
 
             consumed_reports.push(
                 EarlyReportStateConsumed::consume(
@@ -934,7 +934,7 @@ impl VdafConfig {
                             draft02_prep_share: None,
                             prep_state: helper_prep_state.clone(),
                             time: metadata.time,
-                            report_id: metadata.id.clone(),
+                            report_id: metadata.id,
                         });
                         TransitionVar::Continued(helper_prep_share.get_encoded())
                     }
@@ -950,7 +950,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                report_id: prep_init.report_share.report_metadata.id.clone(),
+                report_id: prep_init.report_share.report_metadata.id,
                 var,
             });
         }
@@ -994,7 +994,7 @@ impl VdafConfig {
                         let Some(ref leader_prep_share) = prep_init.draft07_payload else {
                             return Err(DapAbort::UnrecognizedMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
-                                task_id: Some(task_id.clone()),
+                                task_id: Some(*task_id),
                             });
                         };
 
@@ -1019,7 +1019,7 @@ impl VdafConfig {
                                 agg_span.add_out_share(
                                     task_config,
                                     &agg_job_init_req.part_batch_sel,
-                                    metadata.id.clone(),
+                                    metadata.id,
                                     metadata.time,
                                     data,
                                 )?;
@@ -1045,7 +1045,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                report_id: prep_init.report_share.report_metadata.id.clone(),
+                report_id: prep_init.report_share.report_metadata.id,
                 var,
             });
         }
@@ -1097,7 +1097,7 @@ impl VdafConfig {
                     agg_job_resp.transitions.len(),
                     state.seq.len(),
                 ),
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
             });
         }
 
@@ -1114,7 +1114,7 @@ impl VdafConfig {
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
                     ),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 });
             }
 
@@ -1131,7 +1131,7 @@ impl VdafConfig {
                 TransitionVar::Finished => {
                     return Err(DapAbort::UnrecognizedMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
-                        task_id: Some(task_id.clone()),
+                        task_id: Some(*task_id),
                     })
                 }
             };
@@ -1155,7 +1155,7 @@ impl VdafConfig {
             match res {
                 Ok((data, prep_msg)) => {
                     out_shares.push(DapOutputShare {
-                        report_id: leader.report_id.clone(),
+                        report_id: leader.report_id,
                         time: leader.time,
                         data,
                     });
@@ -1209,7 +1209,7 @@ impl VdafConfig {
                     agg_job_resp.transitions.len(),
                     state.seq.len(),
                 ),
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
             });
         }
 
@@ -1225,7 +1225,7 @@ impl VdafConfig {
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
                     ),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 });
             }
 
@@ -1242,7 +1242,7 @@ impl VdafConfig {
                 _ => {
                     return Err(DapAbort::UnrecognizedMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
-                        task_id: Some(task_id.clone()),
+                        task_id: Some(*task_id),
                     })
                 }
             };
@@ -1294,7 +1294,7 @@ impl VdafConfig {
         task_config: &DapTaskConfig,
         state: &DapAggregationJobState,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        agg_job_id: &MetaAggregationJobId<'_>,
+        agg_job_id: &MetaAggregationJobId,
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapAbort> {
         match agg_job_cont_req.round {
@@ -1302,7 +1302,7 @@ impl VdafConfig {
             Some(0) => {
                 return Err(DapAbort::UnrecognizedMessage {
                     detail: "request shouldn't indicate round 0".into(),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 })
             }
             // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
@@ -1310,7 +1310,7 @@ impl VdafConfig {
             Some(r) => {
                 return Err(DapAbort::RoundMismatch {
                     detail: format!("The request indicates round {r}; round 1 was expected."),
-                    task_id: task_id.clone(),
+                    task_id: *task_id,
                     agg_job_id_base64url: agg_job_id.to_base64url(),
                 })
             }
@@ -1319,7 +1319,7 @@ impl VdafConfig {
         let recognized = state
             .seq
             .iter()
-            .map(|report_state| report_state.report_id.clone())
+            .map(|report_state| report_state.report_id)
             .collect::<HashSet<_>>();
         let mut transitions = Vec::with_capacity(state.seq.len());
         let mut agg_span = DapAggregateSpan::default();
@@ -1339,7 +1339,7 @@ impl VdafConfig {
                         "report ID {} does not appear in the Helper's reports",
                         leader.report_id.to_base64url()
                     ),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 });
             }
             if processed.contains(&leader.report_id) {
@@ -1348,14 +1348,14 @@ impl VdafConfig {
                         "report ID {} appears twice in the same aggregation job",
                         leader.report_id.to_base64url()
                     ),
-                    task_id: Some(task_id.clone()),
+                    task_id: Some(*task_id),
                 });
             }
 
             // Find the next helper report that matches leader.report_id.
             let next_helper_report = helper_iter.by_ref().find(|report_state| {
                 // Presumably the report was removed from the candidate set by the Leader.
-                processed.insert(report_state.report_id.clone());
+                processed.insert(report_state.report_id);
                 report_state.report_id == leader.report_id
             });
 
@@ -1378,7 +1378,7 @@ impl VdafConfig {
                 _ => {
                     return Err(DapAbort::UnrecognizedMessage {
                         detail: "helper sent unexpected message instead of `Continued`".to_string(),
-                        task_id: Some(task_id.clone()),
+                        task_id: Some(*task_id),
                     })
                 }
             };
@@ -1401,7 +1401,7 @@ impl VdafConfig {
                             agg_span.add_out_share(
                                 task_config,
                                 &state.part_batch_sel,
-                                report_id.clone(),
+                                *report_id,
                                 *time,
                                 data,
                             )?;
@@ -1417,7 +1417,7 @@ impl VdafConfig {
             };
 
             transitions.push(Transition {
-                report_id: report_id.clone(),
+                report_id: *report_id,
                 var,
             });
         }
@@ -1473,7 +1473,7 @@ impl VdafConfig {
                 TransitionVar::Finished => agg_span.add_out_share(
                     task_config,
                     &state.part_batch_sel,
-                    out_share.report_id.clone(),
+                    out_share.report_id,
                     out_share.time,
                     out_share.data,
                 )?,
