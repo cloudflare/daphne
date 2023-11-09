@@ -138,7 +138,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
         //
         // TODO Figure out if we can safely handle each instance in parallel.
         let mut reports_per_task: HashMap<TaskId, Vec<Report>> = HashMap::new();
-        for reports_pending_id_hex in res.into_iter() {
+        for reports_pending_id_hex in res {
             let reports_from_durable: Vec<PendingReport> = durable
                 .post_by_id_hex(
                     BINDING_DAP_REPORTS_PENDING,
@@ -170,7 +170,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
         let mut reports_per_task_part: HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>> =
             HashMap::new();
-        for (task_id, mut reports) in reports_per_task.into_iter() {
+        for (task_id, mut reports) in reports_per_task {
             let task_config = self
                 .get_task_config(&task_id)
                 .await
@@ -193,7 +193,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                         )
                         .await
                         .map_err(|e| fatal_error!(err = ?e))?;
-                    for batch_count in batch_assignments.into_iter() {
+                    for batch_count in batch_assignments {
                         let BatchCount {
                             batch_id,
                             report_count,

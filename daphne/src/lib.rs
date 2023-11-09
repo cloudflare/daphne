@@ -318,7 +318,7 @@ impl DapAggregateSpan<DapAggregateShare> {
 
     /// Merge the span with another.
     pub fn merge(&mut self, other: Self) -> Result<(), DapError> {
-        for (bucket, (other_agg_share, mut other_reports)) in other.into_iter() {
+        for (bucket, (other_agg_share, mut other_reports)) in other {
             let (agg_share, reports) = self.span.entry(bucket).or_default();
             agg_share.merge(other_agg_share)?;
             reports.append(&mut other_reports);

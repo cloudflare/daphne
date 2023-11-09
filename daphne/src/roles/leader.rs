@@ -579,14 +579,14 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         tracing::debug!("RUNNING get_reports");
         // Fetch reports and run an aggregation job for each task.
-        for (task_id, reports) in self.get_reports(selector).await?.into_iter() {
+        for (task_id, reports) in self.get_reports(selector).await? {
             tracing::debug!("RUNNING get_task_config_for {task_id}");
             let task_config = self
                 .get_task_config_for(&task_id)
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
-            for (part_batch_sel, reports) in reports.into_iter() {
+            for (part_batch_sel, reports) in reports {
                 // TODO Consider splitting reports into smaller chunks.
                 // TODO Consider handling tasks in parallel.
                 telem.reports_processed += reports.len() as u64;
