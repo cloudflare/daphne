@@ -2384,8 +2384,8 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let leader_agg_share = DapAggregateShare {
             report_count: 50,
-            min_time: 1637359200,
-            max_time: 1637359200,
+            min_time: 1_637_359_200,
+            max_time: 1_637_359_200,
             checksum: [0; 32],
             data: Some(VdafAggregateShare::Field64(AggregateShare::from(
                 OutputShare::from(vec![Field64::from(23)]),
@@ -2393,8 +2393,8 @@ mod test {
         };
         let helper_agg_share = DapAggregateShare {
             report_count: 50,
-            min_time: 1637359200,
-            max_time: 1637359200,
+            min_time: 1_637_359_200,
+            max_time: 1_637_359_200,
             checksum: [0; 32],
             data: Some(VdafAggregateShare::Field64(AggregateShare::from(
                 OutputShare::from(vec![Field64::from(9)]),
@@ -2403,7 +2403,7 @@ mod test {
 
         let batch_selector = BatchSelector::TimeInterval {
             batch_interval: Interval {
-                start: 1637359200,
+                start: 1_637_359_200,
                 duration: 7200,
             },
         };

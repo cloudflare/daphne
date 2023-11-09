@@ -686,7 +686,7 @@ mod test {
 
     #[test]
     fn durable_name() {
-        let time = 1664850074;
+        let time = 1_664_850_074;
         let id1 = TaskId([17; 32]);
         let id2 = BatchId([34; 32]);
         let shard = 1234;

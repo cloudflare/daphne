@@ -371,7 +371,7 @@ mod test {
                     max_batch_size: 2048,
                 },
             },
-            task_expiration: 0x6352f9a5,
+            task_expiration: 0x6352_f9a5,
             vdaf_config: VdafConfig {
                 dp_config: DpConfig::None,
                 var: VdafTypeVar::Prio2 { dimension: 10 },
