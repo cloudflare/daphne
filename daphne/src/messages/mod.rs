@@ -769,9 +769,10 @@ impl ParameterizedEncode<DapVersion> for Query {
                 batch_id.encode(bytes);
             }
             Self::FixedSizeCurrentBatch => {
-                if *version == DapVersion::Draft02 {
-                    panic!("tried to encode a Query or BatchSelector fixed size current batch in DAP 02");
-                }
+                assert!(
+                    !(*version == DapVersion::Draft02),
+                    "tried to encode a Query or BatchSelector fixed size current batch in DAP 02"
+                );
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
                 FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes);
             }
