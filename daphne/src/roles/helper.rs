@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, collections::HashMap, sync::Once};
+use std::{collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
 use prio::codec::{Encode, ParameterizedDecode};
@@ -53,7 +53,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
     ) -> Result<DapResponse, DapAbort> {
         let agg_job_init_req =
             AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
-                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
 
@@ -87,7 +87,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     return Err(DapAbort::UnrecognizedMessage {
                         detail: "some reports include the taskprov extensions and some do not"
                             .to_string(),
-                        task_id: Some(task_id.clone()),
+                        task_id: Some(*task_id),
                     });
                 }
             };
@@ -95,7 +95,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
 
         let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -104,7 +104,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
@@ -214,7 +214,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
         }
         let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -223,7 +223,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
@@ -234,7 +234,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         let agg_job_cont_req =
             AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)
-                .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         let agg_job_id = resolve_agg_job_id(req, agg_job_cont_req.draft02_agg_job_id.as_ref())?;
 
@@ -242,7 +242,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             .get_helper_state(task_id, &agg_job_id)
             .await?
             .ok_or_else(|| DapAbort::UnrecognizedAggregationJob {
-                task_id: task_id.clone(),
+                task_id: *task_id,
                 agg_job_id_base64url: agg_job_id.to_base64url(),
             })?;
 
@@ -320,7 +320,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
 
         let wrapped_task_config = self
-            .get_task_config_for(Cow::Borrowed(req.task_id()?))
+            .get_task_config_for(req.task_id()?)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
         let task_config = wrapped_task_config.as_ref();
@@ -329,7 +329,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             error!("aborted unauthorized collect request: {reason}");
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
@@ -339,7 +339,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         }
 
         let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
         // collected batches.
@@ -367,7 +367,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     hex::encode(agg_share_req.checksum),
                     agg_share.report_count,
                     hex::encode(agg_share.checksum)),
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
@@ -381,7 +381,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     "Report count ({}) is less than minimum ({})",
                     agg_share.report_count, task_config.min_batch_size
                 ),
-                task_id: task_id.clone(),
+                task_id: *task_id,
             });
         }
 
@@ -430,7 +430,7 @@ fn check_part_batch(
         // TODO spec: Define this behavior.
         return Err(DapAbort::UnrecognizedMessage {
             detail: "invalid aggregation parameter".into(),
-            task_id: Some(task_id.clone()),
+            task_id: Some(*task_id),
         });
     }
 
@@ -440,16 +440,16 @@ fn check_part_batch(
 fn resolve_agg_job_id<'id, S>(
     req: &'id DapRequest<S>,
     draft02_agg_job_id: Option<&'id Draft02AggregationJobId>,
-) -> Result<MetaAggregationJobId<'id>, DapAbort> {
+) -> Result<MetaAggregationJobId, DapAbort> {
     // draft02 compatibility: In draft02, the aggregation job ID is parsed from the
     // HTTP request payload; in the latest, the aggregation job ID is parsed from the
     // request path.
-    match (req.version, &req.resource, &draft02_agg_job_id) {
+    match (req.version, &req.resource, draft02_agg_job_id) {
         (DapVersion::Draft02, DapResource::Undefined, Some(agg_job_id)) => {
-            Ok(MetaAggregationJobId::Draft02(Cow::Borrowed(agg_job_id)))
+            Ok(MetaAggregationJobId::Draft02(*agg_job_id))
         }
-        (DapVersion::Draft07, DapResource::AggregationJob(ref agg_job_id), None) => {
-            Ok(MetaAggregationJobId::Draft07(Cow::Borrowed(agg_job_id)))
+        (DapVersion::Draft07, DapResource::AggregationJob(agg_job_id), None) => {
+            Ok(MetaAggregationJobId::Draft07(*agg_job_id))
         }
         (DapVersion::Draft07, DapResource::Undefined, None) => {
             Err(DapAbort::BadRequest("undefined resource".into()))
@@ -547,7 +547,6 @@ async fn finish_agg_job_and_aggregate<S>(
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -576,19 +575,19 @@ mod tests {
 
         let report_ids = reports
             .iter()
-            .map(|r| r.report_metadata.id.clone())
+            .map(|r| r.report_metadata.id)
             .collect::<Vec<_>>();
 
         let req = test
             .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, reports)
             .await;
 
-        let meta_agg_job_id = MetaAggregationJobId::Draft02(Cow::Owned(
+        let meta_agg_job_id = MetaAggregationJobId::Draft02(
             AggregationJobInitReq::get_decoded_with_param(&DapVersion::Draft02, &req.payload)
                 .unwrap()
                 .draft02_agg_job_id
                 .unwrap(),
-        ));
+        );
 
         helper
             .handle_agg_job_init_req(&req, &helper.metrics, &task_id)
@@ -602,7 +601,7 @@ mod tests {
                     report_ids[0..2]
                         .iter()
                         .map(|id| Transition {
-                            report_id: id.clone(),
+                            report_id: *id,
                             var: TransitionVar::Continued(vec![]),
                         })
                         .collect(),
@@ -631,7 +630,7 @@ mod tests {
                     report_ids[1..3]
                         .iter()
                         .map(|id| Transition {
-                            report_id: id.clone(),
+                            report_id: *id,
                             var: TransitionVar::Continued(vec![]),
                         })
                         .collect(),

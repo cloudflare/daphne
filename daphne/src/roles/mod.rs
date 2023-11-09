@@ -13,7 +13,6 @@ use crate::{
     taskprov::{self, TaskprovVersion},
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
-use std::borrow::Cow;
 use tracing::warn;
 
 pub use aggregator::{DapAggregator, DapReportInitializer};
@@ -36,7 +35,7 @@ async fn check_batch<S>(
         // TODO spec: Define this behavior.
         return Err(DapAbort::UnrecognizedMessage {
             detail: "invalid aggregation parameter".into(),
-            task_id: Some(task_id.clone()),
+            task_id: Some(*task_id),
         });
     }
 
@@ -49,7 +48,7 @@ async fn check_batch<S>(
             {
                 return Err(DapAbort::BatchInvalid {
                     detail: format!("The queried batch interval ({batch_interval:?}) is too small or its boundaries are misaligned. The time precision for this task is {}s.", task_config.time_precision),
-                    task_id: task_id.clone(),
+                    task_id: *task_id,
                 });
             }
 
@@ -82,7 +81,7 @@ async fn check_batch<S>(
                         "The queried batch ({}) does not exist.",
                         batch_id.to_base64url()
                     ),
-                    task_id: task_id.clone(),
+                    task_id: *task_id,
                 });
             }
         }
@@ -121,11 +120,7 @@ async fn resolve_taskprov<S>(
     report_metadata_advertisement: Option<&ReportMetadata>,
     taskprov_version: TaskprovVersion,
 ) -> Result<(), DapError> {
-    if agg
-        .get_task_config_for(Cow::Borrowed(task_id))
-        .await?
-        .is_some()
-    {
+    if agg.get_task_config_for(task_id).await?.is_some() {
         // Task already configured, so nothing to do.
         return Ok(());
     }
@@ -157,7 +152,7 @@ async fn resolve_taskprov<S>(
     if let Some(reason) = agg.taskprov_opt_out_reason(&task_config)? {
         return Err(DapError::Abort(DapAbort::InvalidTask {
             detail: reason,
-            task_id: task_id.clone(),
+            task_id: *task_id,
         }));
     }
 
@@ -191,7 +186,7 @@ mod test {
     use matchit::Router;
     use prio::codec::{Decode, ParameterizedEncode};
     use rand::{thread_rng, Rng};
-    use std::{borrow::Cow, collections::HashMap, sync::Arc, time::SystemTime, vec};
+    use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
 
     macro_rules! get_reports {
@@ -287,7 +282,7 @@ mod test {
             let expired_task_id = TaskId(rng.gen());
             let mut tasks = HashMap::new();
             tasks.insert(
-                time_interval_task_id.clone(),
+                time_interval_task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
@@ -303,7 +298,7 @@ mod test {
                 },
             );
             tasks.insert(
-                fixed_size_task_id.clone(),
+                fixed_size_task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
@@ -319,7 +314,7 @@ mod test {
                 },
             );
             tasks.insert(
-                expired_task_id.clone(),
+                expired_task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
@@ -387,7 +382,7 @@ mod test {
             let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
 
             self.tasks.insert(
-                task_id.clone(),
+                task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: self.collector_hpke_receiver_config.config.clone(),
@@ -490,7 +485,7 @@ mod test {
             DapRequest {
                 version,
                 media_type: DapMediaType::Report,
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version),
                 url: task_config.leader_url.join("upload").unwrap(),
@@ -547,7 +542,7 @@ mod test {
 
         pub async fn gen_test_agg_job_cont_req_with_round(
             &self,
-            agg_job_id: &MetaAggregationJobId<'_>,
+            agg_job_id: &MetaAggregationJobId,
             transitions: Vec<Transition>,
             round: Option<u16>,
         ) -> DapRequest<BearerToken> {
@@ -572,7 +567,7 @@ mod test {
 
         pub async fn gen_test_agg_job_cont_req(
             &self,
-            agg_job_id: &MetaAggregationJobId<'_>,
+            agg_job_id: &MetaAggregationJobId,
             transitions: Vec<Transition>,
             version: DapVersion,
         ) -> DapRequest<BearerToken> {
@@ -649,14 +644,10 @@ mod test {
         }
 
         pub async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapAbort> {
-            let wrapped = self
-                .leader
-                .get_task_config_for(Cow::Owned(task_id.clone()))
-                .await
-                .unwrap();
+            let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
             let task_config = wrapped.as_ref().unwrap();
 
-            let report_sel = MockAggregatorReportSelector(task_id.clone());
+            let report_sel = MockAggregatorReportSelector(*task_id);
             let (task_id, part_batch_sel, reports) = get_reports!(self.leader, &report_sel);
 
             // Leader->Helper: Run aggregation job.
@@ -668,11 +659,7 @@ mod test {
         }
 
         pub async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapAbort> {
-            let wrapped = self
-                .leader
-                .get_task_config_for(Cow::Owned(task_id.clone()))
-                .await
-                .unwrap();
+            let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
             let task_config = wrapped.as_ref().unwrap();
 
             // Collector->Leader: Initialize collection job.
@@ -707,7 +694,7 @@ mod test {
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
-            agg_job_id: Option<&MetaAggregationJobId<'_>>,
+            agg_job_id: Option<&MetaAggregationJobId>,
             media_type: DapMediaType,
             msg: M,
             url: Url,
@@ -722,7 +709,7 @@ mod test {
             DapRequest {
                 version: task_config.version,
                 media_type,
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
                 resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
                 payload,
                 url,
@@ -750,7 +737,7 @@ mod test {
             DapRequest {
                 version: task_config.version,
                 media_type,
-                task_id: Some(task_id.clone()),
+                task_id: Some(*task_id),
                 resource: if task_config.version == DapVersion::Draft02 {
                     DapResource::Undefined
                 } else {
@@ -865,7 +852,7 @@ mod test {
             version: DapVersion::Draft02,
             media_type: DapMediaType::HpkeConfigList,
             payload: Vec::new(),
-            task_id: Some(task_id.clone()),
+            task_id: Some(task_id),
             resource: DapResource::Undefined,
             url: Url::parse(&format!(
                 "http://aggregator.biz/v02/hpke_config?task_id={}",
@@ -888,7 +875,7 @@ mod test {
         let req = DapRequest {
             version: DapVersion::Draft02,
             media_type: DapMediaType::HpkeConfigList,
-            task_id: Some(t.time_interval_task_id.clone()),
+            task_id: Some(t.time_interval_task_id),
             resource: DapResource::Undefined,
             payload: Vec::new(),
             url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),
@@ -1035,7 +1022,7 @@ mod test {
         let mut req = DapRequest {
             version: task_config.version,
             media_type: DapMediaType::CollectReq,
-            task_id: Some(task_id.clone()),
+            task_id: Some(*task_id),
             resource: if version == DapVersion::Draft02 {
                 DapResource::Undefined
             } else {
@@ -1132,10 +1119,8 @@ mod test {
                 .report_store
                 .lock()
                 .expect("report_store: failed to lock");
-            let report_store = guard.entry(task_id.clone()).or_default();
-            report_store
-                .processed
-                .insert(report.report_metadata.id.clone());
+            let report_store = guard.entry(*task_id).or_default();
+            report_store.processed.insert(report.report_metadata.id);
         }
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1178,7 +1163,7 @@ mod test {
                 .agg_store
                 .lock()
                 .expect("agg_store: failed to lock");
-            let agg_store = guard.entry(task_id.clone()).or_default();
+            let agg_store = guard.entry(*task_id).or_default();
 
             agg_store.insert(
                 DapBatchBucket::TimeInterval {
@@ -1307,7 +1292,7 @@ mod test {
         let req = DapRequest {
             version: task_config.version,
             media_type: DapMediaType::Report,
-            task_id: Some(task_id.clone()),
+            task_id: Some(*task_id),
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version),
             url: task_config.leader_url.join("upload").unwrap(),
@@ -1338,7 +1323,7 @@ mod test {
         // Get one report. This should return with the report that was uploaded earlier.
         // We also check that the task ID associated to the report is the same one we
         // requested.
-        let report_sel = MockAggregatorReportSelector(task_id.clone());
+        let report_sel = MockAggregatorReportSelector(*task_id);
         let (returned_task_id, _part_batch_sel, reports) = get_reports!(t.leader, &report_sel);
         assert_eq!(reports.len(), 1);
         assert_eq!(&returned_task_id, task_id);
@@ -1847,7 +1832,7 @@ mod test {
         let req = DapRequest {
             version,
             media_type: DapMediaType::Report,
-            task_id: Some(taskprov_id.clone()),
+            task_id: Some(taskprov_id),
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version),
             url: Url::parse("https://leader.com/upload").unwrap(),

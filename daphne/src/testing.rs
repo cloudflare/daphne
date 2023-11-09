@@ -31,7 +31,6 @@ use prio::codec::Encode;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     ops::DerefMut,
@@ -54,7 +53,7 @@ pub struct AggregationJobTest {
     pub(crate) collector_hpke_receiver_config: HpkeReceiverConfig,
 
     // aggregation job ID
-    pub(crate) agg_job_id: MetaAggregationJobId<'static>,
+    pub(crate) agg_job_id: MetaAggregationJobId,
 
     // the current time
     pub(crate) now: Time,
@@ -98,7 +97,7 @@ impl DapReportInitializer for AggregationJobTest {
                         failure: TransitionFailure::ReportReplayed,
                     })
                 } else {
-                    reports_processed.insert(consumed.metadata().id.clone());
+                    reports_processed.insert(consumed.metadata().id);
                     EarlyReportStateInitialized::initialize(
                         is_leader,
                         &task_config.vdaf_verify_key,
@@ -548,15 +547,11 @@ pub(crate) enum MetaAggregationJobIdOwned {
     Draft07(AggregationJobId),
 }
 
-impl From<&MetaAggregationJobId<'_>> for MetaAggregationJobIdOwned {
-    fn from(agg_job_id: &MetaAggregationJobId<'_>) -> Self {
+impl From<&MetaAggregationJobId> for MetaAggregationJobIdOwned {
+    fn from(agg_job_id: &MetaAggregationJobId) -> Self {
         match agg_job_id {
-            MetaAggregationJobId::Draft02(agg_job_id) => {
-                Self::Draft02(agg_job_id.clone().into_owned())
-            }
-            MetaAggregationJobId::Draft07(agg_job_id) => {
-                Self::Draft07(agg_job_id.clone().into_owned())
-            }
+            MetaAggregationJobId::Draft02(agg_job_id) => Self::Draft02(*agg_job_id),
+            MetaAggregationJobId::Draft07(agg_job_id) => Self::Draft07(*agg_job_id),
         }
     }
 }
@@ -724,7 +719,7 @@ impl MockAggregator {
         // Check AggStateStore to see whether the report is part of a batch that has already
         // been collected.
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(task_id.clone()).or_default();
+        let agg_store = guard.entry(*task_id).or_default();
         if matches!(agg_store.get(bucket), Some(inner_agg_store) if inner_agg_store.collected) {
             return Some(TransitionFailure::BatchCollected);
         }
@@ -734,7 +729,7 @@ impl MockAggregator {
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        let report_store = guard.entry(task_id.clone()).or_default();
+        let report_store = guard.entry(*task_id).or_default();
         if report_store.processed.contains(id) {
             return Some(TransitionFailure::ReportReplayed);
         }
@@ -758,7 +753,7 @@ impl MockAggregator {
     ) -> Option<DapBatchBucket> {
         let mut rng = thread_rng();
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
@@ -770,23 +765,21 @@ impl MockAggregator {
                     .leader_state_store
                     .lock()
                     .expect("leader_state_store: failed to lock");
-                let leader_state_store = guard.entry(task_id.clone()).or_default();
+                let leader_state_store = guard.entry(*task_id).or_default();
 
                 // Assign the report to the first unsaturated batch.
                 for (batch_id, report_count) in leader_state_store.batch_queue.iter_mut() {
                     if *report_count < task_config.min_batch_size {
                         *report_count += 1;
                         return Some(DapBatchBucket::FixedSize {
-                            batch_id: batch_id.clone(),
+                            batch_id: *batch_id,
                         });
                     }
                 }
 
                 // No unsaturated batch exists, so create a new batch.
                 let batch_id = BatchId(rng.gen());
-                leader_state_store
-                    .batch_queue
-                    .push_back((batch_id.clone(), 1));
+                leader_state_store.batch_queue.push_back((batch_id, 1));
                 Some(DapBatchBucket::FixedSize { batch_id })
             }
 
@@ -824,7 +817,7 @@ impl MockAggregator {
     }
 
     pub(crate) async fn unchecked_get_task_config(&self, task_id: &TaskId) -> DapTaskConfig {
-        self.get_task_config_for(Cow::Borrowed(task_id))
+        self.get_task_config_for(task_id)
             .await
             .expect("encountered unexpected error")
             .expect("missing task config")
@@ -948,7 +941,7 @@ impl DapReportInitializer for MockAggregator {
                 if let Some(transition_failure) =
                     self.check_report_early_fail(task_id, bucket, id).await
                 {
-                    early_fails.insert(id.clone(), transition_failure);
+                    early_fails.insert(*id, transition_failure);
                 };
             }
         }
@@ -1016,16 +1009,16 @@ impl DapAggregator<BearerToken> for MockAggregator {
     ) -> Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
         let mut tasks = self.tasks.lock().expect("tasks: lock failed");
-        tasks.deref_mut().insert(task_id.clone(), task_config);
+        tasks.deref_mut().insert(*task_id, task_config);
         Ok(())
     }
 
-    async fn get_task_config_for<'s>(
-        &self,
-        task_id: Cow<'s, TaskId>,
-    ) -> Result<Option<Self::WrappedDapTaskConfig<'s>>, DapError> {
+    async fn get_task_config_for<'req>(
+        &'req self,
+        task_id: &'req TaskId,
+    ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         let tasks = self.tasks.lock().expect("tasks: lock failed");
-        Ok(tasks.get(task_id.as_ref()).cloned())
+        Ok(tasks.get(task_id).cloned())
     }
 
     fn get_current_time(&self) -> Time {
@@ -1041,7 +1034,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
@@ -1068,7 +1061,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         if let Some(agg_store) = guard.get(task_id) {
             Ok(agg_store
                 .get(&DapBatchBucket::FixedSize {
-                    batch_id: batch_id.clone(),
+                    batch_id: *batch_id,
                 })
                 .is_some())
         } else {
@@ -1086,9 +1079,9 @@ impl DapAggregator<BearerToken> for MockAggregator {
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        let report_store = report_store_guard.entry(task_id.clone()).or_default();
+        let report_store = report_store_guard.entry(*task_id).or_default();
         let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = agg_store_guard.entry(task_id.clone()).or_default();
+        let agg_store = agg_store_guard.entry(*task_id).or_default();
 
         agg_agg_span
             .into_iter()
@@ -1103,7 +1096,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
                 let result = if replayed.is_empty() {
                     report_store
                         .processed
-                        .extend(report_metadatas.iter().map(|(id, _)| id.clone()));
+                        .extend(report_metadatas.iter().map(|(id, _)| *id));
                     // Add to aggregate share.
                     agg_store
                         .entry(bucket.clone())
@@ -1125,12 +1118,12 @@ impl DapAggregator<BearerToken> for MockAggregator {
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(task_id.clone()).or_default();
+        let agg_store = guard.entry(*task_id).or_default();
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
@@ -1154,7 +1147,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
     ) -> Result<(), DapError> {
         let task_config = self.unchecked_get_task_config(task_id).await;
         let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(task_id.clone()).or_default();
+        let agg_store = guard.entry(*task_id).or_default();
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             if let Some(inner_agg_store) = agg_store.get_mut(&bucket) {
@@ -1194,7 +1187,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         helper_state: &DapAggregationJobState,
     ) -> Result<bool, DapError> {
         let helper_state_info = HelperStateInfo {
-            task_id: task_id.clone(),
+            task_id: *task_id,
             agg_job_id_owned: agg_job_id.into(),
         };
 
@@ -1222,7 +1215,7 @@ impl DapHelper<BearerToken> for MockAggregator {
         agg_job_id: &MetaAggregationJobId,
     ) -> Result<Option<DapAggregationJobState>, DapError> {
         let helper_state_info = HelperStateInfo {
-            task_id: task_id.clone(),
+            task_id: *task_id,
             agg_job_id_owned: agg_job_id.into(),
         };
 
@@ -1282,7 +1275,7 @@ impl DapLeader<BearerToken> for MockAggregator {
             .report_store
             .lock()
             .expect("report_store: failed to lock");
-        let report_store = guard.entry(task_id.clone()).or_default();
+        let report_store = guard.entry(*task_id).or_default();
 
         // For the task indicated by the report selector, choose a single report to aggregate.
         match task_config.query {
@@ -1296,7 +1289,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                     }
                 }
                 return Ok(HashMap::from([(
-                    task_id.clone(),
+                    *task_id,
                     HashMap::from([(PartialBatchSelector::TimeInterval, reports)]),
                 )]));
             }
@@ -1315,7 +1308,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                     .expect("report_store: unknown bucket");
                 let reports = queue.drain(..1).collect();
                 return Ok(HashMap::from([(
-                    task_id.clone(),
+                    *task_id,
                     HashMap::from([(bucket.into(), reports)]),
                 )]));
             }
@@ -1331,7 +1324,7 @@ impl DapLeader<BearerToken> for MockAggregator {
     ) -> Result<Url, DapError> {
         let mut rng = thread_rng();
         let task_config = self
-            .get_task_config_for(Cow::Borrowed(task_id))
+            .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
@@ -1344,7 +1337,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         // Construct a new Collect URI for this CollectReq.
         let collect_id = collect_job_id
             .as_ref()
-            .map_or_else(|| CollectionJobId(rng.gen()), |cid| cid.clone());
+            .map_or_else(|| CollectionJobId(rng.gen()), |cid| *cid);
         let collect_uri = task_config
             .leader_url
             .join(&format!(
@@ -1355,8 +1348,8 @@ impl DapLeader<BearerToken> for MockAggregator {
             .map_err(|e| fatal_error!(err = ?e))?;
 
         // Store Collect ID and CollectReq into LeaderState.
-        let leader_state = leader_state_store.entry(task_id.clone()).or_default();
-        leader_state.collect_ids.push_back(collect_id.clone());
+        let leader_state = leader_state_store.entry(*task_id).or_default();
+        leader_state.collect_ids.push_back(collect_id);
         let collect_job_state = CollectJobState::Pending(collect_req.clone());
         leader_state
             .collect_jobs
@@ -1407,7 +1400,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 if let CollectJobState::Pending(collect_req) =
                     leader_state.collect_jobs.get(collect_id).unwrap()
                 {
-                    res.push((task_id.clone(), collect_id.clone(), collect_req.clone()));
+                    res.push((*task_id, *collect_id, collect_req.clone()));
                 }
             }
         }

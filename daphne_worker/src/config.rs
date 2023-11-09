@@ -39,7 +39,6 @@ use prio::codec::Decode;
 use prometheus::{Encoder, Registry};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     collections::HashMap,
     fmt::Display,
     io::Cursor,
@@ -598,7 +597,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
-        kv_key_suffix: Cow<'req, K>,
+        kv_key_suffix: &'req K,
         mapper: impl FnOnce(KvPair<'req, K, &V>) -> R,
     ) -> Result<Option<R>, worker::Error>
     where
@@ -611,7 +610,7 @@ impl<'srv> DaphneWorker<'srv> {
                 worker::Error::RustError(format!("Failed to lock map for reading: {e}"))
             })?;
 
-            if let Some(value) = guarded_map.get(&kv_key_suffix) {
+            if let Some(value) = guarded_map.get(kv_key_suffix) {
                 tracing::debug!(%kv_key_suffix, "found kv value in cache");
                 return Ok(Some(mapper(KvPair {
                     value,
@@ -633,14 +632,14 @@ impl<'srv> DaphneWorker<'srv> {
             let mut guarded_map = map.write().map_err(|e| {
                 worker::Error::RustError(format!("Failed to lock map for writing: {e}"))
             })?;
-            guarded_map.insert(kv_key_suffix.clone().into_owned(), kv_value);
+            guarded_map.insert(kv_key_suffix.clone(), kv_value);
         }
 
         let guarded_map = map.read().map_err(|e| {
             worker::Error::RustError(format!("Failed to lock map for reading: {e}"))
         })?;
 
-        if let Some(value) = guarded_map.get(kv_key_suffix.as_ref()) {
+        if let Some(value) = guarded_map.get(kv_key_suffix) {
             tracing::debug!(%kv_key, "found key in kv");
             Ok(Some(mapper(KvPair {
                 value,
@@ -679,7 +678,7 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         map: &'srv Arc<RwLock<HashMap<K, V>>>,
         kv_key_prefix: &str,
-        kv_key_suffix: Cow<'req, K>,
+        kv_key_suffix: &'req K,
     ) -> Result<Option<KvPair<'req, K, V>>, worker::Error>
     where
         K: Clone + Eq + std::hash::Hash + Display,
@@ -721,7 +720,7 @@ impl<'srv> DaphneWorker<'srv> {
                 .kv_get_cached_mapped(
                     &self.isolate_state().hpke_receiver_configs,
                     KV_KEY_PREFIX_HPKE_RECEIVER_CONFIG_SET,
-                    Cow::Owned(version),
+                    &version,
                     |pair| mapper(pair.value),
                 )
                 .await?
@@ -737,7 +736,7 @@ impl<'srv> DaphneWorker<'srv> {
         self.kv_get_cached(
             &self.isolate_state().leader_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_LEADER,
-            Cow::Borrowed(task_id),
+            task_id,
         )
         .await
     }
@@ -760,7 +759,7 @@ impl<'srv> DaphneWorker<'srv> {
         self.kv_get_cached(
             &self.isolate_state().collector_bearer_tokens,
             KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR,
-            Cow::Borrowed(task_id),
+            task_id,
         )
         .await
     }
@@ -768,7 +767,7 @@ impl<'srv> DaphneWorker<'srv> {
     /// Retrieve from KV the configuration for the given task.
     pub(crate) async fn get_task_config<'req>(
         &self,
-        task_id: Cow<'req, TaskId>,
+        task_id: &'req TaskId,
     ) -> Result<Option<DapTaskConfigKvPair<'req>>, worker::Error> {
         self.kv_get_cached(
             &self.isolate_state().tasks,
@@ -797,7 +796,7 @@ impl<'srv> DaphneWorker<'srv> {
     where
         'srv: 'req,
     {
-        self.get_task_config(Cow::Borrowed(task_id))
+        self.get_task_config(task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e, "getting task config"))?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))
@@ -1285,13 +1284,13 @@ impl<'srv> DaphneWorker<'srv> {
 
 /// KV pair
 pub(crate) struct KvPair<'a, K: Clone, V> {
-    key: Cow<'a, K>,
+    key: &'a K,
     value: V,
 }
 
 impl<K: Clone + Eq + std::hash::Hash, V> KvPair<'_, K, V> {
     pub(crate) fn key(&self) -> &K {
-        self.key.as_ref()
+        self.key
     }
 
     pub(crate) fn value(&self) -> &V {
@@ -1304,7 +1303,7 @@ pub(crate) type BearerTokenKvPair<'a> = KvPair<'a, TaskId, BearerToken>;
 impl<'a> BearerTokenKvPair<'a> {
     pub(crate) fn new(task_id: &'a TaskId, bearer_token: &BearerToken) -> Self {
         Self {
-            key: Cow::Borrowed(task_id),
+            key: task_id,
             value: bearer_token.clone(),
         }
     }

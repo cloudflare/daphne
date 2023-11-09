@@ -66,7 +66,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
         match res {
             Some(helper_state_hex) => {
                 let data = hex::decode(helper_state_hex)
-                    .map_err(|e| DapAbort::from_hex_error(e, task_id.clone()))?;
+                    .map_err(|e| DapAbort::from_hex_error(e, *task_id))?;
                 let helper_state =
                     DapAggregationJobState::get_decoded(&task_config.as_ref().vdaf, &data)?;
                 Ok(Some(helper_state))

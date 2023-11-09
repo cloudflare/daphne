@@ -40,7 +40,7 @@ use daphne::{
     DapCollectJob, DapError, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
 };
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 use tracing::debug;
 
 #[async_trait(?Send)]
@@ -80,7 +80,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
         let version = task_config.as_ref().version;
         let pending_report = PendingReport {
             version,
-            task_id: task_id.clone(),
+            task_id: *task_id,
             report_hex: hex::encode(report.get_encoded_with_param(&version)),
         };
         let res: ReportsPendingResult = self
@@ -151,7 +151,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
             for pending_report in reports_from_durable {
                 let report_bytes = hex::decode(&pending_report.report_hex)
-                    .map_err(|e| DapAbort::from_hex_error(e, pending_report.task_id.clone()))?;
+                    .map_err(|e| DapAbort::from_hex_error(e, pending_report.task_id))?;
 
                 let version = self
                     .try_get_task_config(&pending_report.task_id)
@@ -159,11 +159,11 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     .as_ref()
                     .version;
                 let report = Report::get_decoded_with_param(&version, &report_bytes)
-                    .map_err(|e| DapAbort::from_codec_error(e, pending_report.task_id.clone()))?;
+                    .map_err(|e| DapAbort::from_codec_error(e, pending_report.task_id))?;
                 if let Some(reports) = reports_per_task.get_mut(&pending_report.task_id) {
                     reports.push(report);
                 } else {
-                    reports_per_task.insert(pending_report.task_id.clone(), vec![report]);
+                    reports_per_task.insert(pending_report.task_id, vec![report]);
                 }
             }
         }
@@ -172,14 +172,12 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
             HashMap::new();
         for (task_id, mut reports) in reports_per_task.into_iter() {
             let task_config = self
-                .get_task_config(Cow::Owned(task_id))
+                .get_task_config(&task_id)
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?
                 .ok_or_else(|| fatal_error!(err = "unrecognized task"))?;
             let task_id_hex = task_config.key().to_hex();
-            let reports_per_part = reports_per_task_part
-                .entry(task_config.key().clone())
-                .or_default();
+            let reports_per_part = reports_per_task_part.entry(*task_config.key()).or_default();
             match task_config.as_ref().query {
                 DapQueryConfig::TimeInterval => {
                     reports_per_part.insert(PartialBatchSelector::TimeInterval, reports);
@@ -241,8 +239,8 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
         // with past requests, then abort.
         let collect_queue_req = CollectQueueRequest {
             collect_req: collect_req.clone(),
-            task_id: task_id.clone(),
-            collect_job_id: collect_job_id.clone(),
+            task_id: *task_id,
+            collect_job_id: *collect_job_id,
         };
         let collect_id: CollectionJobId = self
             .durable()

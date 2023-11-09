@@ -114,7 +114,7 @@ pub(crate) fn compute_vdaf_verify_key(
 fn malformed_task_config(task_id: &TaskId, detail: String) -> DapError {
     DapError::Abort(DapAbort::InvalidTask {
         detail,
-        task_id: task_id.clone(),
+        task_id: *task_id,
     })
 }
 
@@ -201,7 +201,7 @@ fn get_taskprov_task_config<S>(
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
     let task_config = TaskConfig::get_decoded_with_param(&taskprov_version, taskprov_data.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, task_id.clone()))?;
+        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     Ok(Some(task_config))
 }
@@ -388,7 +388,7 @@ mod test {
 
         let from_request_header = resolve_advertised_task_config(
             &DapRequest::<BearerToken> {
-                task_id: Some(task_id.clone()),
+                task_id: Some(task_id),
                 taskprov: Some(taskprov_task_config_base64url),
                 ..Default::default()
             },
@@ -403,7 +403,7 @@ mod test {
 
         let from_report_metadata = resolve_advertised_task_config(
             &DapRequest::<BearerToken> {
-                task_id: Some(task_id.clone()),
+                task_id: Some(task_id),
                 ..Default::default()
             },
             taskprov_version,
@@ -487,7 +487,7 @@ mod test {
             let req = DapRequest::<()> {
                 version,
                 media_type: DapMediaType::Missing, // ignored by test
-                task_id: Some(task_id.clone()),
+                task_id: Some(task_id),
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
                 url: Url::parse("https://example.com/").unwrap(), // ignored by test

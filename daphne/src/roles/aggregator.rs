@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::HashSet;
 
 use async_trait::async_trait;
 use prio::codec::Encode;
@@ -42,7 +42,9 @@ pub trait DapReportInitializer {
 #[async_trait(?Send)]
 pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
-    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig>;
+    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig>
+    where
+        Self: 'a;
 
     /// Decide whether the given DAP request is authorized.
     ///
@@ -87,8 +89,8 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
     /// Look up the DAP task configuration for the given task ID.
     async fn get_task_config_for<'req>(
-        &self,
-        task_id: Cow<'req, TaskId>,
+        &'req self,
+        task_id: &'req TaskId,
     ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
@@ -161,7 +163,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
         if let Some(task_id) = id {
             let task_config = self
-                .get_task_config_for(Cow::Owned(task_id))
+                .get_task_config_for(&task_id)
                 .await?
                 .ok_or(DapAbort::UnrecognizedTask)?;
 
