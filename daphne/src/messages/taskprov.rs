@@ -36,7 +36,7 @@ impl KeyType for VdafType {
     fn len(&self) -> usize {
         match self {
             VdafType::Prio2 => VDAF_VERIFY_KEY_SIZE_PRIO2,
-            _ => panic!("tried to get key length for undefined VDAF"),
+            VdafType::NotImplemented(_) => panic!("tried to get key length for undefined VDAF"),
         }
     }
 }

@@ -83,7 +83,7 @@ pub(crate) fn expand_prk_into_verify_key(
             okm.fill(&mut bytes[..]).unwrap();
             VdafVerifyKey::Prio2(bytes)
         }
-        _ => panic!("Unknown VDAF type"),
+        VdafType::NotImplemented(_) => panic!("Unknown VDAF type"),
     }
 }
 
@@ -182,7 +182,7 @@ fn get_taskprov_task_config<S>(
             0 => return Ok(None),
             1 => match &taskprovs[0] {
                 Extension::Taskprov { payload } => Cow::Borrowed(payload),
-                _ => panic!("cannot happen"),
+                Extension::Unhandled { .. } => panic!("cannot happen"),
             },
             _ => {
                 // The decoder already returns an error if an extension of a give type occurs more
@@ -291,7 +291,7 @@ impl ReportMetadata {
     pub fn is_taskprov(&self, version: TaskprovVersion, task_id: &TaskId) -> bool {
         return self.extensions.iter().any(|x| match x {
             Extension::Taskprov { payload } => *task_id == compute_task_id(version, payload),
-            _ => false,
+            Extension::Unhandled { .. } => false,
         });
     }
 }
@@ -344,7 +344,7 @@ mod test {
         ];
         match &vk {
             VdafVerifyKey::Prio2(bytes) => assert_eq!(*bytes, expected),
-            _ => unreachable!(),
+            VdafVerifyKey::Prio3(_) => unreachable!(),
         }
     }
 
