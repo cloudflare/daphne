@@ -11,7 +11,10 @@ use crate::{
     initialize_tracing, int_err,
 };
 use tracing::{debug, Instrument};
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    Method, Request, Response, Result, State,
+};
 
 use super::{DapDurableObject, GarbageCollectable};
 

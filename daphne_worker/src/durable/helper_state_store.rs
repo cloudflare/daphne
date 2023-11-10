@@ -8,7 +8,10 @@ use crate::{
 };
 use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
 use tracing::{trace, Instrument};
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    Method, Request, Response, Result, State,
+};
 
 use super::{req_parse, Alarmed, DapDurableObject};
 

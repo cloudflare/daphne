@@ -12,7 +12,7 @@ use tracing_core::Field;
 use tracing_subscriber::{
     fmt,
     fmt::{format::Writer, time::FormatTime},
-    layer::*,
+    layer::{Layered, SubscriberExt},
     prelude::*,
     registry, EnvFilter, Layer,
 };

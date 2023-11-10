@@ -19,7 +19,10 @@ use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
 use tracing::{info_span, warn};
-use worker::{js_sys::Uint8Array, *};
+use worker::{
+    async_trait, js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request,
+    RequestInit, Result, ScheduledTime, State, Stub,
+};
 
 pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
 

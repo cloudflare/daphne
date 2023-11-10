@@ -19,7 +19,10 @@ use prio::codec::{CodecError, ParameterizedDecode};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashSet, future::ready, ops::ControlFlow, time::Duration};
 use tracing::Instrument;
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    Method, Request, Response, Result, State,
+};
 
 use super::{req_parse, state_set_if_not_exists, Alarmed, DapDurableObject, GarbageCollectable};
 
