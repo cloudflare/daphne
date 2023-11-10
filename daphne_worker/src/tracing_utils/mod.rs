@@ -66,7 +66,7 @@ impl<'a> Visit for JsonVisitor<'a> {
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if let Ok(value) = serde_json::to_value(format!("{:?}", value)) {
+        if let Ok(value) = serde_json::to_value(format!("{value:?}")) {
             self.0.insert(field.name().to_string(), value);
         }
     }
