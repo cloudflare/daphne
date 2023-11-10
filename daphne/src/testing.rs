@@ -1095,7 +1095,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
                         .or_default()
                         .agg_share
                         .merge(agg_share.clone())
-                        .map(|_| HashSet::new())
+                        .map(|()| HashSet::new())
                 } else {
                     Ok(replayed)
                 };

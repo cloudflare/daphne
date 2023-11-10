@@ -1,4 +1,4 @@
-FROM rust:1.70-alpine AS builder
+FROM rust:1.73-alpine AS builder
 WORKDIR /tmp/dap_test
 RUN apk add --update \
     bash \
