@@ -174,7 +174,7 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::str;
 use tracing::{debug, error};
-use worker::*;
+use worker::{Date, Env, Error, Request, Response, Result};
 
 /// Parameters used by the Leader to select a set of reports for aggregation.
 #[derive(Debug, Deserialize, Serialize)]

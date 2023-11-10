@@ -18,7 +18,10 @@ use daphne::{
 use prio::codec::ParameterizedEncode;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    Error, Method, Request, Response, Result, State,
+};
 
 use super::{req_parse, DapDurableObject, GarbageCollectable};
 

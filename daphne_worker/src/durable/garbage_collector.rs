@@ -9,7 +9,10 @@ use crate::{
     initialize_tracing, int_err,
 };
 use tracing::{error, trace, Instrument};
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    Method, Request, Response, Result, State,
+};
 
 pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
 

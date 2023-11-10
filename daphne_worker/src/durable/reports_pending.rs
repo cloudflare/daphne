@@ -17,7 +17,10 @@ use daphne::{messages::TaskId, DapVersion};
 use serde::{Deserialize, Serialize};
 use std::{cmp::min, ops::ControlFlow};
 use tracing::{debug, Instrument};
-use worker::*;
+use worker::{
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
+    ListOptions, Method, Request, Response, Result, State,
+};
 
 use super::{DapDurableObject, GarbageCollectable};
 

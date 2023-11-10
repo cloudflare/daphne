@@ -3,7 +3,7 @@
 
 use daphne_worker::{initialize_tracing, DaphneWorkerRouter};
 use tracing::info;
-use worker::*;
+use worker::{event, Env, Request, Response, Result};
 
 mod utils;
 
