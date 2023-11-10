@@ -663,19 +663,17 @@ mod test {
             let task_config = wrapped.as_ref().unwrap();
 
             // Collector->Leader: Initialize collection job.
-            let req = self
-                .collector_authorized_req(
-                    task_id,
-                    task_config,
-                    DapMediaType::CollectReq,
-                    CollectionReq {
-                        draft02_task_id: task_id.for_request_payload(&task_config.version),
-                        query: query.clone(),
-                        agg_param: Vec::default(),
-                    },
-                    task_config.helper_url.join("collect").unwrap(),
-                )
-                .await;
+            let req = self.collector_authorized_req(
+                task_id,
+                task_config,
+                DapMediaType::CollectReq,
+                CollectionReq {
+                    draft02_task_id: task_id.for_request_payload(&task_config.version),
+                    query: query.clone(),
+                    agg_param: Vec::default(),
+                },
+                task_config.helper_url.join("collect").unwrap(),
+            );
 
             // Leader: Handle request from Collector.
             self.leader.handle_collect_job_req(&req).await?;
@@ -718,7 +716,7 @@ mod test {
             }
         }
 
-        pub async fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
+        pub fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
@@ -1345,19 +1343,17 @@ mod test {
 
         // Collector: Create a CollectReq.
         let version = task_config.version;
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    query: task_config.query_for_current_batch_window(t.now),
-                    agg_param: Vec::default(),
-                },
-                task_config.helper_url.join("collect").unwrap(),
-            )
-            .await;
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                query: task_config.query_for_current_batch_window(t.now),
+                agg_param: Vec::default(),
+            },
+            task_config.helper_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         t.leader.handle_collect_job_req(&req).await.unwrap();
@@ -1421,25 +1417,23 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq with a very large batch interval.
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    query: Query::TimeInterval {
-                        batch_interval: Interval {
-                            start: task_config.quantized_time_lower_bound(t.now),
-                            duration: t.leader.global_config.max_batch_duration
-                                + task_config.time_precision,
-                        },
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                query: Query::TimeInterval {
+                    batch_interval: Interval {
+                        start: task_config.quantized_time_lower_bound(t.now),
+                        duration: t.leader.global_config.max_batch_duration
+                            + task_config.time_precision,
                     },
-                    agg_param: Vec::default(),
                 },
-                task_config.helper_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.helper_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
@@ -1448,26 +1442,24 @@ mod test {
         assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too large".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the past.
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    query: Query::TimeInterval {
-                        batch_interval: Interval {
-                            start: task_config.quantized_time_lower_bound(t.now)
-                                - t.leader.global_config.min_batch_interval_start
-                                - task_config.time_precision,
-                            duration: task_config.time_precision * 2,
-                        },
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                query: Query::TimeInterval {
+                    batch_interval: Interval {
+                        start: task_config.quantized_time_lower_bound(t.now)
+                            - t.leader.global_config.min_batch_interval_start
+                            - task_config.time_precision,
+                        duration: task_config.time_precision * 2,
                     },
-                    agg_param: Vec::default(),
                 },
-                task_config.helper_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.helper_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
@@ -1476,26 +1468,24 @@ mod test {
         assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into past".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the future.
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    query: Query::TimeInterval {
-                        batch_interval: Interval {
-                            start: task_config.quantized_time_lower_bound(t.now)
-                                + t.leader.global_config.max_batch_interval_end
-                                - task_config.time_precision,
-                            duration: task_config.time_precision * 2,
-                        },
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                query: Query::TimeInterval {
+                    batch_interval: Interval {
+                        start: task_config.quantized_time_lower_bound(t.now)
+                            + t.leader.global_config.max_batch_interval_end
+                            - task_config.time_precision,
+                        duration: task_config.time_precision * 2,
                     },
-                    agg_param: Vec::default(),
                 },
-                task_config.leader_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
@@ -1512,25 +1502,23 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq with a very large batch interval.
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    query: Query::TimeInterval {
-                        batch_interval: Interval {
-                            start: task_config.quantized_time_lower_bound(t.now)
-                                - t.leader.global_config.max_batch_duration / 2,
-                            duration: t.leader.global_config.max_batch_duration,
-                        },
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: task_id.for_request_payload(&version),
+                query: Query::TimeInterval {
+                    batch_interval: Interval {
+                        start: task_config.quantized_time_lower_bound(t.now)
+                            - t.leader.global_config.max_batch_duration / 2,
+                        duration: t.leader.global_config.max_batch_duration,
                     },
-                    agg_param: Vec::default(),
                 },
-                task_config.leader_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         let _collect_uri = t.leader.handle_collect_job_req(&req).await.unwrap();
@@ -1580,15 +1568,13 @@ mod test {
             query: task_config.query_for_current_batch_window(t.now),
             agg_param: Vec::default(),
         };
-        let req = t
-            .collector_authorized_req(
-                task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                collector_collect_req.clone(),
-                task_config.leader_url.join("collect").unwrap(),
-            )
-            .await;
+        let req = t.collector_authorized_req(
+            task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            collector_collect_req.clone(),
+            task_config.leader_url.join("collect").unwrap(),
+        );
 
         // Leader: Handle the CollectReq received from Collector.
         let url = t.leader.handle_collect_job_req(&req).await.unwrap();
@@ -1625,21 +1611,19 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.time_interval_task_id)
             .await;
-        let req = t
-            .collector_authorized_req(
-                &t.time_interval_task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
-                    query: Query::FixedSizeByBatchId {
-                        batch_id: BatchId(rng.gen()),
-                    },
-                    agg_param: Vec::default(),
+        let req = t.collector_authorized_req(
+            &t.time_interval_task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
+                query: Query::FixedSizeByBatchId {
+                    batch_id: BatchId(rng.gen()),
                 },
-                task_config.leader_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        );
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await.unwrap_err(),
             DapAbort::QueryMismatch { .. }
@@ -1650,21 +1634,19 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.fixed_size_task_id)
             .await;
-        let req = t
-            .collector_authorized_req(
-                &t.fixed_size_task_id,
-                &task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
-                    query: Query::FixedSizeByBatchId {
-                        batch_id: BatchId(rng.gen()), // Unrecognized batch ID
-                    },
-                    agg_param: Vec::default(),
+        let req = t.collector_authorized_req(
+            &t.fixed_size_task_id,
+            &task_config,
+            DapMediaType::CollectReq,
+            CollectionReq {
+                draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
+                query: Query::FixedSizeByBatchId {
+                    batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                 },
-                task_config.leader_url.join("collect").unwrap(),
-            )
-            .await;
+                agg_param: Vec::default(),
+            },
+            task_config.leader_url.join("collect").unwrap(),
+        );
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await.unwrap_err(),
             DapAbort::BatchInvalid { .. }

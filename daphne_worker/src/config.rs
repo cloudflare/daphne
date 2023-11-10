@@ -877,7 +877,7 @@ impl<'srv> DaphneWorker<'srv> {
 
     /// Get the URL to use for this endpoint, as required by
     /// draft-dcook-ppm-dap-interop-test-design-02.
-    pub(crate) async fn internal_endpoint_for_task(
+    pub(crate) fn internal_endpoint_for_task(
         &self,
         version: DapVersion,
         cmd: InternalTestEndpointForTask,

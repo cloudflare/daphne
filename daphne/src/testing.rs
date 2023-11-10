@@ -710,7 +710,7 @@ impl MockAggregator {
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
     /// 2) the report has been submitted by the client in the past.
-    async fn check_report_early_fail(
+    fn check_report_early_fail(
         &self,
         task_id: &TaskId,
         bucket: &DapBatchBucket,
@@ -937,8 +937,7 @@ impl DapReportInitializer for MockAggregator {
         for (bucket, ((), report_ids_and_time)) in span.iter() {
             for (id, _) in report_ids_and_time {
                 // Check whether Report has been collected or replayed.
-                if let Some(transition_failure) =
-                    self.check_report_early_fail(task_id, bucket, id).await
+                if let Some(transition_failure) = self.check_report_early_fail(task_id, bucket, id)
                 {
                     early_fails.insert(*id, transition_failure);
                 };
@@ -1231,9 +1230,8 @@ impl DapLeader<BearerToken> for MockAggregator {
             .expect("could not determine batch for report");
 
         // Check whether Report has been collected or replayed.
-        if let Some(transition_failure) = self
-            .check_report_early_fail(task_id, &bucket, &report.report_metadata.id)
-            .await
+        if let Some(transition_failure) =
+            self.check_report_early_fail(task_id, &bucket, &report.report_metadata.id)
         {
             return Err(DapError::Transition(transition_failure));
         };

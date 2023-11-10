@@ -83,9 +83,9 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
             |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let cmd: InternalTestEndpointForTask = req.json().await?;
-                daph.internal_endpoint_for_task(daph.config().default_version, cmd)
-                    .instrument(info_span!("endpoint_for_task"))
-                    .await
+                info_span!("endpoint_for_task").in_scope(|| {
+                    daph.internal_endpoint_for_task(daph.config().default_version, cmd)
+                })
             },
         )
         .post_async(
@@ -95,9 +95,8 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
                 let cmd: InternalTestEndpointForTask = req.json().await?;
                 let version = DaphneWorker::parse_version_param(&ctx)
                     .map_err(|e| worker::Error::RustError(e.to_string()))?;
-                daph.internal_endpoint_for_task(version, cmd)
-                    .instrument(info_span!("endpoint_for_task"))
-                    .await
+                info_span!("endpoint_for_task")
+                    .in_scope(|| daph.internal_endpoint_for_task(version, cmd))
             },
         )
         .post_async("/internal/test/add_task", |mut req, ctx| async move {
