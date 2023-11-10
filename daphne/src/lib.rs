@@ -1022,7 +1022,7 @@ pub enum MetaAggregationJobId {
 
 impl MetaAggregationJobId {
     /// Generate a random ID of the type required for the version.
-    pub(crate) fn gen_for_version(version: &DapVersion) -> Self {
+    pub(crate) fn gen_for_version(version: DapVersion) -> Self {
         let mut rng = thread_rng();
         match version {
             DapVersion::Draft02 => Self::Draft02(Draft02AggregationJobId(rng.gen())),

@@ -321,7 +321,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let metrics = self.metrics();
 
         // Prepare AggregationJobInitReq.
-        let agg_job_id = MetaAggregationJobId::gen_for_version(&task_config.version);
+        let agg_job_id = MetaAggregationJobId::gen_for_version(task_config.version);
         let transition = task_config
             .vdaf
             .produce_agg_job_init_req(

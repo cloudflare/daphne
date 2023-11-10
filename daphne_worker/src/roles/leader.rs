@@ -188,7 +188,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                         .post(
                             BINDING_DAP_LEADER_BATCH_QUEUE,
                             DURABLE_LEADER_BATCH_QUEUE_ASSIGN,
-                            durable_name_task(&task_config.as_ref().version, &task_id_hex),
+                            durable_name_task(task_config.as_ref().version, &task_id_hex),
                             &(task_config.as_ref().min_batch_size, num_unassigned),
                         )
                         .await
@@ -316,7 +316,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 .post(
                     BINDING_DAP_LEADER_BATCH_QUEUE,
                     DURABLE_LEADER_BATCH_QUEUE_REMOVE,
-                    durable_name_task(&task_config.as_ref().version, &task_id.to_hex()),
+                    durable_name_task(task_config.as_ref().version, &task_id.to_hex()),
                     batch_id.to_hex(),
                 )
                 .await

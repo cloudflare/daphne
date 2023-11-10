@@ -395,7 +395,7 @@ pub(crate) fn durable_name_queue(shard: u64) -> String {
 }
 
 pub(crate) fn durable_name_report_store(
-    version: &DapVersion,
+    version: DapVersion,
     task_id_hex: &str,
     epoch: u64,
     shard: u64,
@@ -409,7 +409,7 @@ pub(crate) fn durable_name_report_store(
 }
 
 pub(crate) fn durable_name_agg_store(
-    version: &DapVersion,
+    version: DapVersion,
     task_id_hex: &str,
     bucket: &DapBatchBucket,
 ) -> String {
@@ -420,7 +420,7 @@ pub(crate) fn durable_name_agg_store(
     )
 }
 
-pub(crate) fn durable_name_task(version: &DapVersion, task_id_hex: &str) -> String {
+pub(crate) fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
     format!("{}/task/{}", version.as_ref(), task_id_hex)
 }
 
@@ -694,17 +694,17 @@ mod test {
         assert_eq!(durable_name_queue(shard), "queue/1234");
 
         assert_eq!(
-        durable_name_report_store(&DapVersion::Draft02, &id1.to_hex(), time, shard),
+        durable_name_report_store(DapVersion::Draft02, &id1.to_hex(), time, shard),
         "v02/task/1111111111111111111111111111111111111111111111111111111111111111/epoch/00000000001664850074/shard/1234",
     );
 
         assert_eq!(
-        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: id2 }),
+        durable_name_agg_store(DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: id2 }),
         "v02/task/1111111111111111111111111111111111111111111111111111111111111111/batch/2222222222222222222222222222222222222222222222222222222222222222",
     );
 
         assert_eq!(
-        durable_name_agg_store(&DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::TimeInterval{ batch_window: time }),
+        durable_name_agg_store(DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::TimeInterval{ batch_window: time }),
         "v02/task/1111111111111111111111111111111111111111111111111111111111111111/window/1664850074",
     );
     }
