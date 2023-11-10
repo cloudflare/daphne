@@ -1367,16 +1367,11 @@ impl VdafConfig {
                 break;
             };
 
-            let leader_message = match &leader.var {
-                TransitionVar::Continued(message) => message,
-
-                // TODO Log the fact that the helper sent an unexpected message.
-                _ => {
-                    return Err(DapAbort::UnrecognizedMessage {
-                        detail: "helper sent unexpected message instead of `Continued`".to_string(),
-                        task_id: Some(*task_id),
-                    })
-                }
+            let TransitionVar::Continued(leader_message) = &leader.var else {
+                return Err(DapAbort::UnrecognizedMessage {
+                    detail: "helper sent unexpected message instead of `Continued`".to_string(),
+                    task_id: Some(*task_id),
+                });
             };
 
             let var = match report_status.get(&leader.report_id) {

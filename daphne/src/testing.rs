@@ -1035,9 +1035,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
             .unwrap()
             .expect("tasks: unrecognized task");
         let guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = if let Some(agg_store) = guard.get(task_id) {
-            agg_store
-        } else {
+        let Some(agg_store) = guard.get(task_id) else {
             return Ok(false);
         };
 
