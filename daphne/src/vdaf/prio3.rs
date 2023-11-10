@@ -46,7 +46,7 @@ pub(crate) fn prio3_shard(
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
-            shard(vdaf, &(measurement as u128), nonce)
+            shard(vdaf, &u128::from(measurement), nonce)
         }
         (
             Prio3Config::SumVec {
