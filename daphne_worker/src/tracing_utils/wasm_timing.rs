@@ -55,11 +55,7 @@ pub(crate) fn initialize_timing_histograms(
     registry: &Registry,
     prefix: Option<&str>,
 ) -> Result<(), DapError> {
-    let front = if let Some(prefix) = prefix {
-        format!("{prefix}_")
-    } else {
-        "".into()
-    };
+    let front = prefix.map(|p| format!("{p}_")).unwrap_or_default();
     let aggregation_init_request_times = register_histogram_with_registry!(
         format!("{front}aggregation_init_request_times"),
         "Time taken to process an aggregation",
