@@ -140,7 +140,7 @@ impl TestRunner {
         let collector_bearer_token = hex::encode(rng.gen::<[u8; 16]>());
         let t = Self {
             global_config,
-            task_id: task_id.clone(),
+            task_id,
             now,
             task_config,
             leader_url,
@@ -725,7 +725,7 @@ impl TestRunner {
 
     pub fn collect_task_id_field(&self) -> Option<TaskId> {
         if self.version == DapVersion::Draft02 {
-            Some(self.task_id.clone())
+            Some(self.task_id)
         } else {
             None
         }

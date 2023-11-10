@@ -1204,9 +1204,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         query: if use_current {
             Query::FixedSizeCurrentBatch
         } else {
-            Query::FixedSizeByBatchId {
-                batch_id: batch_id.clone(),
-            }
+            Query::FixedSizeByBatchId { batch_id }
         },
         agg_param: Vec::new(),
     };
@@ -1240,9 +1238,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         .consume_encrypted_agg_shares(
             &t.collector_hpke_receiver,
             &t.task_id,
-            &BatchSelector::FixedSizeByBatchId {
-                batch_id: batch_id.clone(),
-            },
+            &BatchSelector::FixedSizeByBatchId { batch_id },
             collection.report_count,
             collection.encrypted_agg_shares.clone(),
             version,
@@ -1306,7 +1302,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
                 query: Query::FixedSizeByBatchId {
-                    batch_id: prev_batch_id.clone(),
+                    batch_id: prev_batch_id,
                 },
                 agg_param: Vec::new(),
             }
@@ -1324,7 +1320,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
                 query: Query::FixedSizeByBatchId {
-                    batch_id: prev_batch_id.clone(),
+                    batch_id: prev_batch_id,
                 },
                 agg_param: Vec::new(),
             }
@@ -1419,7 +1415,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
 
     // Get the collect URI.
     let collect_req = CollectionReq {
-        draft02_task_id: Some(task_id.clone()),
+        draft02_task_id: Some(task_id),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
