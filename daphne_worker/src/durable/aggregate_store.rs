@@ -247,7 +247,9 @@ fn shard_bytes_to_object(
         let end = usize::min(base_idx + MAX_CHUNK_SIZE + 1, bytes.len());
         let chunk = &bytes[base_idx..end];
 
-        let value = js_sys::Uint8Array::new_with_length(chunk.len() as _);
+        // unwrap cannot fail because chunk len is bounded by MAX_CHUNK_SIZE which is smaller than
+        // u32::MAX
+        let value = js_sys::Uint8Array::new_with_length(u32::try_from(chunk.len()).unwrap());
         value.copy_from(chunk);
 
         js_sys::Reflect::set(

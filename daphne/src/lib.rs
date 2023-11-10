@@ -172,7 +172,10 @@ impl DapGlobalConfig {
         assert!(self.supported_hpke_kems.len() <= u8::MAX.into());
         let kem_ids = self.supported_hpke_kems.clone();
         kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {
-            let (config_id, _overflowed) = first_config_id.overflowing_add(i as u8);
+            let (config_id, _overflowed) = first_config_id.overflowing_add(
+                i.try_into()
+                    .expect("there shouldn't be more than 256 KEM ids"),
+            );
             HpkeReceiverConfig::gen(config_id, kem_id)
         })
     }
@@ -484,7 +487,7 @@ impl DapTaskConfig {
                 batch_interval: Interval { start, duration },
             } => {
                 let windows = duration / self.time_precision;
-                let mut span = HashSet::with_capacity(windows as usize);
+                let mut span = HashSet::with_capacity(usize::try_from(windows).unwrap());
                 for i in 0..windows {
                     span.insert(DapBatchBucket::TimeInterval {
                         batch_window: start + i * self.time_precision,
@@ -638,7 +641,7 @@ impl DapAggregationJobState {
         let part_batch_sel = PartialBatchSelector::decode(&mut r)
             .map_err(|e| DapAbort::from_codec_error(e, None))?;
         let mut seq = vec![];
-        while (r.position() as usize) < data.len() {
+        while (usize::try_from(r.position()).unwrap()) < data.len() {
             let prep_state = VdafPrepState::decode_with_param(&(vdaf_config, false), &mut r)
                 .map_err(|e| DapAbort::from_codec_error(e, None))?;
             let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
