@@ -508,7 +508,7 @@ mod test {
                 },
             };
 
-            let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+            let agg_job_id = MetaAggregationJobId::gen_for_version(version);
 
             let DapLeaderAggregationJobTransition::Continued(_leader_state, agg_job_init_req) =
                 task_config
@@ -757,7 +757,7 @@ mod test {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
-        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
 
         // Helper expects "time_interval" query, but Leader indicates "fixed_size".
         let req = t
@@ -895,7 +895,7 @@ mod test {
 
     async fn handle_agg_job_cont_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
-        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let mut req = t
             .gen_test_agg_job_cont_req(&agg_job_id, Vec::default(), version)
             .await;
@@ -1228,7 +1228,7 @@ mod test {
 
     async fn handle_agg_job_req_fail_send_cont_req(version: DapVersion) {
         let t = Test::new(version);
-        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let req = t
             .gen_test_agg_job_cont_req(&agg_job_id, Vec::default(), version)
             .await;

@@ -120,7 +120,7 @@ impl AggregationJobTest {
             .unwrap()
             .as_secs();
         let task_id = TaskId(rng.gen());
-        let agg_job_id = MetaAggregationJobId::gen_for_version(&version);
+        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let vdaf_verify_key = vdaf.gen_verify_key();
         let leader_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
         let helper_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();

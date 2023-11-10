@@ -352,7 +352,7 @@ impl DaphneWorkerConfig {
                 .unwrap(),
         ) % self.report_shard_count;
         let epoch = report_time - (report_time % self.global.report_storage_epoch_duration);
-        durable_name_report_store(&task_config.version, task_id_hex, epoch, shard)
+        durable_name_report_store(task_config.version, task_id_hex, epoch, shard)
     }
 }
 
@@ -860,7 +860,7 @@ impl<'srv> DaphneWorker<'srv> {
             .get(
                 BINDING_DAP_LEADER_BATCH_QUEUE,
                 DURABLE_LEADER_BATCH_QUEUE_CURRENT,
-                durable_name_task(&task_config.as_ref().version, &task_id.to_hex()),
+                durable_name_task(task_config.as_ref().version, &task_id.to_hex()),
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;

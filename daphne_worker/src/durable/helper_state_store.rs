@@ -13,7 +13,7 @@ use worker::*;
 use super::{req_parse, Alarmed, DapDurableObject};
 
 pub(crate) fn durable_helper_state_name(
-    version: &DapVersion,
+    version: DapVersion,
     task_id: &TaskId,
     agg_job_id: &MetaAggregationJobId,
 ) -> String {

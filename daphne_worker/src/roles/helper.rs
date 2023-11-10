@@ -37,7 +37,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
             .post(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
-                durable_helper_state_name(&task_config.as_ref().version, task_id, agg_job_id),
+                durable_helper_state_name(task_config.as_ref().version, task_id, agg_job_id),
                 helper_state_hex,
             )
             .await
@@ -58,7 +58,7 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
             .get(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_GET,
-                durable_helper_state_name(&task_config.as_ref().version, task_id, agg_job_id),
+                durable_helper_state_name(task_config.as_ref().version, task_id, agg_job_id),
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
