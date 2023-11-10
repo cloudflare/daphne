@@ -104,14 +104,14 @@ pub(crate) fn initialize_timing_histograms(
 /// `WasmTimingLayer` provides a span's elapsed time.
 pub(super) struct WasmTimingLayer;
 
-fn milli_now() -> i64 {
-    Date::now().as_millis() as i64
+fn milli_now() -> u64 {
+    Date::now().as_millis()
 }
 
 struct Timestamps {
-    busy: i64,
-    entered_at: i64,
-    started_at: i64,
+    busy: u64,
+    entered_at: u64,
+    started_at: u64,
 }
 
 impl Timestamps {
