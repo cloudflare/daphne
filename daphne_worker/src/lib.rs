@@ -262,7 +262,7 @@ impl DaphneWorkerRouter<'_> {
                 enable_default_response: self.enable_default_response,
                 role: env.var("DAP_AGGREGATOR_ROLE")?.to_string().parse()?,
             },
-        )?;
+        );
 
         // NOTE that we do not have a tracing span for the whole request because it typically
         // reports the same times as the span covering the specific API entry point that the
