@@ -70,24 +70,19 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                 if version != DapVersion::Draft02 {
                     return Response::error("not implemented", 404);
                 }
-                let task_id = match ctx.param("task_id").and_then(TaskId::try_from_base64url) {
-                    Some(id) => id,
-                    None => {
-                        return ctx.data.dap_abort_to_worker_response(DapAbort::BadRequest(
-                            "missing task_id parameter".to_string(),
-                        ))
-                    }
+                let Some(task_id) = ctx.param("task_id").and_then(TaskId::try_from_base64url)
+                else {
+                    return ctx.data.dap_abort_to_worker_response(DapAbort::BadRequest(
+                        "missing task_id parameter".to_string(),
+                    ));
                 };
-                let collect_id = match ctx
+                let Some(collect_id) = ctx
                     .param("collect_id")
                     .and_then(CollectionJobId::try_from_base64url)
-                {
-                    Some(id) => id,
-                    None => {
-                        return ctx.data.dap_abort_to_worker_response(DapAbort::BadRequest(
-                            "missing collect_id parameter".to_string(),
-                        ))
-                    }
+                else {
+                    return ctx.data.dap_abort_to_worker_response(DapAbort::BadRequest(
+                        "missing collect_id parameter".to_string(),
+                    ));
                 };
                 let daph = ctx.data.handler(&ctx.env);
                 match daph
@@ -146,17 +141,15 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                 //
                 // We can unwrap() here as the parameter really must exist.
                 let collect_job_id_base64url = ctx.param("collect_job_id").unwrap();
-                let collect_job_id =
-                    match CollectionJobId::try_from_base64url(collect_job_id_base64url) {
-                        Some(id) => id,
-                        None => {
-                            return daph
-                                .state
-                                .dap_abort_to_worker_response(DapAbort::BadRequest(
-                                    "malformed collect id".into(),
-                                ))
-                        }
-                    };
+                let Some(collect_job_id) =
+                    CollectionJobId::try_from_base64url(collect_job_id_base64url)
+                else {
+                    return daph
+                        .state
+                        .dap_abort_to_worker_response(DapAbort::BadRequest(
+                            "malformed collect id".into(),
+                        ));
+                };
 
                 let span = info_span!(
                     "poll_collect_job",

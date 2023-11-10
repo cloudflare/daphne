@@ -39,15 +39,14 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
                     // Return the ID of the oldest, not-yet-collecgted batch for the specified
                     // task. The task ID and batch ID are both encoded in URL-safe base64.
                     let daph = ctx.data.handler(&ctx.env);
-                    let task_id =
-                        match ctx.param("task_id").and_then(TaskId::try_from_base64url) {
-                            Some(id) => id,
-                            None => {
-                                return daph.state.dap_abort_to_worker_response(
-                                    DapAbort::BadRequest("missing or malformed task ID".into()),
-                                )
-                            }
-                        };
+                    let Some(task_id) = ctx.param("task_id").and_then(TaskId::try_from_base64url)
+                    else {
+                        return daph
+                            .state
+                            .dap_abort_to_worker_response(DapAbort::BadRequest(
+                                "missing or malformed task ID".into(),
+                            ));
+                    };
                     match daph
                         .internal_current_batch(&task_id)
                         .instrument(info_span!("current_batch"))
