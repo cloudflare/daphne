@@ -1183,12 +1183,10 @@ impl DapHelper<BearerToken> for MockAggregator {
             agg_job_id_owned: agg_job_id.into(),
         };
 
-        let mut helper_state_store_mutex_guard = self
+        let mut helper_state_store = self
             .helper_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-
-        let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
         if helper_state_store.contains_key(&helper_state_info) {
             return Ok(false);
@@ -1211,12 +1209,10 @@ impl DapHelper<BearerToken> for MockAggregator {
             agg_job_id_owned: agg_job_id.into(),
         };
 
-        let mut helper_state_store_mutex_guard = self
+        let helper_state_store = self
             .helper_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-
-        let helper_state_store = helper_state_store_mutex_guard.deref_mut();
 
         // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
         // For VDAFs with more rounds, the helper state blob will need to be updated here.
@@ -1320,11 +1316,10 @@ impl DapLeader<BearerToken> for MockAggregator {
             .await?
             .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
-        let mut leader_state_store_mutex_guard = self
+        let mut leader_state_store = self
             .leader_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         // Construct a new Collect URI for this CollectReq.
         let collect_id = collect_job_id
@@ -1356,11 +1351,10 @@ impl DapLeader<BearerToken> for MockAggregator {
         task_id: &TaskId,
         collect_id: &CollectionJobId,
     ) -> Result<DapCollectJob, DapError> {
-        let mut leader_state_store_mutex_guard = self
+        let leader_state_store = self
             .leader_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store
             .get(task_id)
@@ -1379,11 +1373,10 @@ impl DapLeader<BearerToken> for MockAggregator {
     async fn get_pending_collect_jobs(
         &self,
     ) -> Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError> {
-        let mut leader_state_store_mutex_guard = self
+        let leader_state_store = self
             .leader_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let mut res = Vec::new();
         for (task_id, leader_state) in &*leader_state_store {
@@ -1405,11 +1398,10 @@ impl DapLeader<BearerToken> for MockAggregator {
         collect_id: &CollectionJobId,
         collect_resp: &Collection,
     ) -> Result<(), DapError> {
-        let mut leader_state_store_mutex_guard = self
+        let mut leader_state_store = self
             .leader_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
-        let leader_state_store = leader_state_store_mutex_guard.deref_mut();
 
         let leader_state = leader_state_store
             .get_mut(task_id)
