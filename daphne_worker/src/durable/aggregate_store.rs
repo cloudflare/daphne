@@ -144,13 +144,13 @@ fn js_map_to_chunks<T: DeserializeOwned>(keys: &[String], map: js_sys::Map) -> V
 }
 
 impl AggregateStore {
-    fn agg_share_shard_keys(&self) -> Vec<String> {
+    fn agg_share_shard_keys() -> Vec<String> {
         (0..MAX_AGG_SHARE_CHUNK_KEY_COUNT)
             .map(|n| format!("chunk_v2_{n:03}"))
             .collect()
     }
 
-    fn aggregated_reports_keys(&self) -> Vec<String> {
+    fn aggregated_reports_keys() -> Vec<String> {
         (0..MAX_REPORT_ID_CHUNK_KEY_COUNT)
             .map(|n| format!("aggregated_report_ids_{n:03}"))
             .collect()
@@ -208,10 +208,10 @@ impl AggregateStore {
         let chunks_map = self
             .state
             .storage()
-            .get_multiple(self.aggregated_reports_keys())
+            .get_multiple(Self::aggregated_reports_keys())
             .await?;
 
-        let bytes = js_map_to_chunks::<u8>(&self.aggregated_reports_keys(), chunks_map);
+        let bytes = js_map_to_chunks::<u8>(&Self::aggregated_reports_keys(), chunks_map);
 
         assert_eq!(bytes.len() % std::mem::size_of::<ReportId>(), 0);
         let mut ids = HashSet::with_capacity(bytes.len() / size_of::<ReportId>());
@@ -331,10 +331,10 @@ impl AggregateStore {
                     merged_report_ids
                         .into_iter()
                         .for_each(|id| id.encode(&mut as_bytes));
-                    shard_bytes_to_object(&self.aggregated_reports_keys(), as_bytes, &chunks_map)?;
+                    shard_bytes_to_object(&Self::aggregated_reports_keys(), as_bytes, &chunks_map)?;
                 };
 
-                let keys = self.agg_share_shard_keys();
+                let keys = Self::agg_share_shard_keys();
                 let mut agg_share = self.get_agg_share(&keys).await?;
                 agg_share.merge(agg_share_delta).map_err(int_err)?;
 
@@ -361,7 +361,7 @@ impl AggregateStore {
             // Idempotent
             // Output: `DapAggregateShare`
             (DURABLE_AGGREGATE_STORE_GET, Method::Get) => {
-                let agg_share = self.get_agg_share(&self.agg_share_shard_keys()).await?;
+                let agg_share = self.get_agg_share(&Self::agg_share_shard_keys()).await?;
                 Response::from_json(&agg_share)
             }
 

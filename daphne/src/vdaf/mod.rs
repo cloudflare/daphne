@@ -556,7 +556,7 @@ impl VdafConfig {
         let mut rng = thread_rng();
         let report_id = ReportId(rng.gen());
         let (public_share, input_shares) = self.produce_input_shares(measurement, &report_id.0)?;
-        self.produce_report_with_extensions_for_shares(
+        Self::produce_report_with_extensions_for_shares(
             public_share,
             input_shares,
             hpke_config_list,
@@ -571,7 +571,6 @@ impl VdafConfig {
     /// Generate a report for the given public and input shares with the given extensions.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn produce_report_with_extensions_for_shares(
-        &self,
         public_share: Vec<u8>,
         mut input_shares: Vec<Vec<u8>>,
         hpke_config_list: &[HpkeConfig],
@@ -884,7 +883,7 @@ impl VdafConfig {
         metrics: &DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapAbort> {
         match task_config.version {
-            DapVersion::Draft02 => Ok(self.draft02_handle_agg_job_init_req(
+            DapVersion::Draft02 => Ok(Self::draft02_handle_agg_job_init_req(
                 report_status,
                 initialized_reports,
                 agg_job_init_req,
@@ -902,7 +901,6 @@ impl VdafConfig {
     }
 
     fn draft02_handle_agg_job_init_req(
-        &self,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized<'_>],
         agg_job_init_req: &AggregationJobInitReq,
@@ -2451,19 +2449,17 @@ mod test {
                 .produce_input_shares(measurement, &report_id.0)
                 .unwrap();
             invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
-            self.task_config
-                .vdaf
-                .produce_report_with_extensions_for_shares(
-                    invalid_public_share,
-                    invalid_input_shares,
-                    &self.client_hpke_config_list,
-                    self.now,
-                    &self.task_id,
-                    &report_id,
-                    Vec::new(), // extensions
-                    version,
-                )
-                .unwrap()
+            VdafConfig::produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                &report_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
         }
 
         // Tweak the public share so that it can't be decoded.
@@ -2479,19 +2475,17 @@ mod test {
                 .produce_input_shares(measurement, &report_id.0)
                 .unwrap();
             invalid_public_share.push(1); // Add spurious byte at the end
-            self.task_config
-                .vdaf
-                .produce_report_with_extensions_for_shares(
-                    invalid_public_share,
-                    invalid_input_shares,
-                    &self.client_hpke_config_list,
-                    self.now,
-                    &self.task_id,
-                    &report_id,
-                    Vec::new(), // extensions
-                    version,
-                )
-                .unwrap()
+            VdafConfig::produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                &report_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
         }
 
         // Tweak the input shares so that they can't be decoded.
@@ -2508,19 +2502,17 @@ mod test {
                 .unwrap();
             invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
             invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share
-            self.task_config
-                .vdaf
-                .produce_report_with_extensions_for_shares(
-                    invalid_public_share,
-                    invalid_input_shares,
-                    &self.client_hpke_config_list,
-                    self.now,
-                    &self.task_id,
-                    &report_id,
-                    Vec::new(), // extensions
-                    version,
-                )
-                .unwrap()
+            VdafConfig::produce_report_with_extensions_for_shares(
+                invalid_public_share,
+                invalid_input_shares,
+                &self.client_hpke_config_list,
+                self.now,
+                &self.task_id,
+                &report_id,
+                Vec::new(), // extensions
+                version,
+            )
+            .unwrap()
         }
     }
 }
