@@ -620,7 +620,7 @@ impl<'srv> DaphneWorker<'srv> {
         }
 
         // If the value is not cached, try to populate it from KV before returning.
-        let kv_key = format!("{}/{}", kv_key_prefix, kv_key_suffix);
+        let kv_key = format!("{kv_key_prefix}/{kv_key_suffix}");
 
         tracing::debug!(%kv_key, "looking up key in kv");
         let kv_store = self.kv()?;
