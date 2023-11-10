@@ -208,7 +208,10 @@ impl<'srv> DurableConnector<'srv> {
                     let data = bincode::serialize(&data).map_err(|e| {
                         Error::RustError(format!("failed to serialize data: {e:?}"))
                     })?;
-                    let buffer = Uint8Array::new_with_length(data.len() as _);
+                    let buffer =
+                        Uint8Array::new_with_length(data.len().try_into().map_err(|_| {
+                            worker::Error::RustError(format!("buffer is too long {}", data.len()))
+                        })?);
                     buffer.copy_from(&data);
                     Request::new_with_init(
                         &format!("https://fake-host{durable_path}"),
