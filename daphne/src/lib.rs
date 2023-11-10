@@ -3,6 +3,21 @@
 
 #![warn(unused_crate_dependencies)]
 #![warn(rustdoc::broken_intra_doc_links)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::if_not_else)]
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::items_after_statements)]
+#![allow(clippy::redundant_closure_for_method_calls)]
+#![allow(clippy::inconsistent_struct_constructor)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::inline_always)]
 
 //! This crate implements the core protocol logic for the Distributed Aggregation Protocol
 //! ([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard under development in the

@@ -1,4 +1,4 @@
-FROM rust:1.70-bullseye
+FROM rust:1.73-bullseye
 
 WORKDIR /tmp/dap_test
 
