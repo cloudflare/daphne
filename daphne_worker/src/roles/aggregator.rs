@@ -200,7 +200,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 (sender, &taskprov_config.leader_auth.cf_tls_client_auth)
             {
                 trusted_certs
-            } else if let (Some(DapSender::Collector), Some(ref trusted_certs)) = (
+            } else if let (Some(DapSender::Collector), Some(trusted_certs)) = (
                 sender,
                 taskprov_config
                     .collector_auth
