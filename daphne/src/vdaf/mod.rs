@@ -884,12 +884,12 @@ impl VdafConfig {
         metrics: &DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapAbort> {
         match task_config.version {
-            DapVersion::Draft02 => self.draft02_handle_agg_job_init_req(
+            DapVersion::Draft02 => Ok(self.draft02_handle_agg_job_init_req(
                 report_status,
                 initialized_reports,
                 agg_job_init_req,
                 metrics,
-            ),
+            )),
             DapVersion::Draft07 => self.draft07_handle_agg_job_init_req(
                 task_id,
                 task_config,
@@ -907,7 +907,7 @@ impl VdafConfig {
         initialized_reports: &[EarlyReportStateInitialized<'_>],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapAbort> {
+    ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut states = Vec::with_capacity(num_reports);
         let mut transitions = Vec::with_capacity(num_reports);
@@ -951,13 +951,13 @@ impl VdafConfig {
             });
         }
 
-        Ok(DapHelperAggregationJobTransition::Continued(
+        DapHelperAggregationJobTransition::Continued(
             DapAggregationJobState {
                 part_batch_sel: agg_job_init_req.part_batch_sel.clone(),
                 seq: states,
             },
             AggregationJobResp { transitions },
-        ))
+        )
     }
 
     fn draft07_handle_agg_job_init_req(

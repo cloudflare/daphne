@@ -58,7 +58,7 @@ pub(super) type DapRouter<'s> = Router<'s, &'s DaphneWorkerRequestState<'s>>;
 pub(super) fn create_router<'s>(
     state: &'s DaphneWorkerRequestState<'s>,
     opts: RouterOptions,
-) -> Result<DapRouter<'s>> {
+) -> DapRouter<'s> {
     let router = Router::with_data(state);
 
     let router = aggregator::add_aggregator_routes(router);
@@ -74,7 +74,7 @@ pub(super) fn create_router<'s>(
         router
     };
 
-    let router = if opts.enable_default_response {
+    if opts.enable_default_response {
         router.or_else_any_method_async("/*catchall", |_req, ctx| async move {
             match ctx.var("DAP_DEFAULT_RESPONSE_HTML") {
                 Ok(text) => Response::from_html(text.to_string()),
@@ -83,9 +83,7 @@ pub(super) fn create_router<'s>(
         })
     } else {
         router
-    };
-
-    Ok(router)
+    }
 }
 
 fn dap_response_to_worker(resp: DapResponse) -> Result<Response> {
