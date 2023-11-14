@@ -1692,7 +1692,7 @@ mod test {
             (agg_span, msg)
         }
 
-        fn unwrap_msg(self) -> M {
+        fn into_message(self) -> M {
             match self {
                 Self::Continued(_, msg) | Self::Finished(_, msg) => msg,
             }
@@ -1956,7 +1956,7 @@ mod test {
         let agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -1985,7 +1985,7 @@ mod test {
         let agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -2035,7 +2035,7 @@ mod test {
         let agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         assert_eq!(agg_job_resp.transitions.len(), 2);
         assert_matches!(
@@ -2062,7 +2062,7 @@ mod test {
         let mut agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         // Helper sends transitions out of order.
         let tmp = agg_job_resp.transitions[0].clone();
@@ -2085,7 +2085,7 @@ mod test {
         let mut agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         // Helper sends a transition twice.
         let repeated_transition = agg_job_resp.transitions[0].clone();
@@ -2108,7 +2108,7 @@ mod test {
         let mut agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         // Helper sent a transition with an unrecognized report ID.
         agg_job_resp.transitions.push(Transition {
@@ -2132,7 +2132,7 @@ mod test {
         let mut agg_job_resp = t
             .handle_agg_job_init_req(&agg_job_init_req)
             .await
-            .unwrap_msg();
+            .into_message();
 
         // Helper sent a transition with an unrecognized report ID.
         agg_job_resp.transitions[0].var = TransitionVar::Finished;
