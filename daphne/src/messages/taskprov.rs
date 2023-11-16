@@ -236,7 +236,8 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TaskConfig {
     pub task_info: Vec<u8>,
-    pub aggregator_endpoints: Vec<UrlBytes>,
+    pub leader_url: UrlBytes,
+    pub helper_url: UrlBytes,
     pub query_config: QueryConfig,
     pub task_expiration: Time,
     pub vdaf_config: VdafConfig,
@@ -245,7 +246,17 @@ pub struct TaskConfig {
 impl ParameterizedEncode<DapVersion> for TaskConfig {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         encode_u8_items(bytes, &(), &self.task_info);
-        encode_u16_items(bytes, &(), &self.aggregator_endpoints);
+        match version {
+            DapVersion::Draft02 => encode_u16_items(
+                bytes,
+                &(),
+                &[self.leader_url.clone(), self.helper_url.clone()],
+            ),
+            DapVersion::Draft07 => {
+                self.leader_url.encode(bytes);
+                self.helper_url.encode(bytes);
+            }
+        }
         self.query_config.encode_with_param(version, bytes);
         self.task_expiration.encode(bytes);
         self.vdaf_config.encode(bytes);
@@ -257,9 +268,18 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let task_info = decode_u8_items(&(), bytes)?;
+        let [leader_url, helper_url] = match version {
+            DapVersion::Draft02 => decode_u16_items(&(), bytes)?
+                .try_into()
+                .map_err(|_| CodecError::UnexpectedValue)?, // Expect exactly two Aggregator endpoints.
+            DapVersion::Draft07 => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
+        };
+
         Ok(TaskConfig {
-            task_info: decode_u8_items(&(), bytes)?,
-            aggregator_endpoints: decode_u16_items(&(), bytes)?,
+            task_info,
+            leader_url,
+            helper_url,
             query_config: QueryConfig::decode_with_param(version, bytes)?,
             task_expiration: Time::decode(bytes)?,
             vdaf_config: VdafConfig::decode(bytes)?,

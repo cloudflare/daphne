@@ -1753,14 +1753,12 @@ mod test {
         // Create the upload extension.
         let taskprov_ext_payload = taskprov::TaskConfig {
             task_info: "cool task".as_bytes().to_vec(),
-            aggregator_endpoints: vec![
-                taskprov::UrlBytes {
-                    bytes: b"https://leader.com/".to_vec(),
-                },
-                taskprov::UrlBytes {
-                    bytes: b"http://helper.org:8788/".to_vec(),
-                },
-            ],
+            leader_url: taskprov::UrlBytes {
+                bytes: b"https://leader.com/".to_vec(),
+            },
+            helper_url: taskprov::UrlBytes {
+                bytes: b"http://helper.org:8788/".to_vec(),
+            },
             query_config: taskprov::QueryConfig {
                 time_precision: 3600,
                 max_batch_query_count: 1,

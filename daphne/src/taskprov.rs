@@ -236,20 +236,11 @@ impl DapTaskConfig {
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
     ) -> Result<DapTaskConfig, DapError> {
-        if task_config.aggregator_endpoints.len() != 2 {
-            return Err(malformed_task_config(
-                task_id,
-                format!(
-                    "The task config indicates an invalid number of Aggregators ({})",
-                    task_config.aggregator_endpoints.len()
-                ),
-            ));
-        }
         let vdaf_type = VdafType::from(task_config.vdaf_config.var.clone());
         Ok(DapTaskConfig {
             version,
-            leader_url: url_from_bytes(task_id, &task_config.aggregator_endpoints[0].bytes)?,
-            helper_url: url_from_bytes(task_id, &task_config.aggregator_endpoints[1].bytes)?,
+            leader_url: url_from_bytes(task_id, &task_config.leader_url.bytes)?,
+            helper_url: url_from_bytes(task_id, &task_config.helper_url.bytes)?,
             time_precision: task_config.query_config.time_precision,
             expiration: task_config.task_expiration,
             min_batch_size: task_config.query_config.min_batch_size.into(),
@@ -334,14 +325,12 @@ mod test {
         let version = DapVersion::Draft02;
         let taskprov_task_config = TaskConfig {
             task_info: "Hi".as_bytes().to_vec(),
-            aggregator_endpoints: vec![
-                UrlBytes {
-                    bytes: "https://leader.com".as_bytes().to_vec(),
-                },
-                UrlBytes {
-                    bytes: "https://helper.com".as_bytes().to_vec(),
-                },
-            ],
+            leader_url: UrlBytes {
+                bytes: "https://leader.com".as_bytes().to_vec(),
+            },
+            helper_url: UrlBytes {
+                bytes: "https://helper.com".as_bytes().to_vec(),
+            },
             query_config: QueryConfig {
                 time_precision: 0x01,
                 max_batch_query_count: 128,
@@ -366,6 +355,7 @@ mod test {
 
         let from_request_header = resolve_advertised_task_config(
             &DapRequest::<BearerToken> {
+                version,
                 task_id: Some(task_id),
                 taskprov: Some(taskprov_task_config_base64url),
                 ..Default::default()
@@ -380,6 +370,7 @@ mod test {
 
         let from_report_metadata = resolve_advertised_task_config(
             &DapRequest::<BearerToken> {
+                version,
                 task_id: Some(task_id),
                 ..Default::default()
             },
@@ -435,14 +426,12 @@ mod test {
         let (req, task_id) = {
             let taskprov_task_config_bytes = TaskConfig {
                 task_info: "cool task".as_bytes().to_vec(),
-                aggregator_endpoints: vec![
-                    UrlBytes {
-                        bytes: b"https://leader.com/".to_vec(),
-                    },
-                    UrlBytes {
-                        bytes: b"http://helper.org:8788/".to_vec(),
-                    },
-                ],
+                leader_url: UrlBytes {
+                    bytes: b"https://leader.com/".to_vec(),
+                },
+                helper_url: UrlBytes {
+                    bytes: b"http://helper.org:8788/".to_vec(),
+                },
                 query_config: taskprov::QueryConfig {
                     time_precision: 3600,
                     max_batch_query_count: 1,
@@ -456,8 +445,8 @@ mod test {
                     var: taskprov::VdafTypeVar::NotImplemented(1337),
                 },
             }
-            .get_encoded_with_param(&DapVersion::Draft02);
-            let task_id = compute_task_id(DapVersion::Draft02, &taskprov_task_config_bytes);
+            .get_encoded_with_param(&version);
+            let task_id = compute_task_id(version, &taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
             let req = DapRequest::<()> {
