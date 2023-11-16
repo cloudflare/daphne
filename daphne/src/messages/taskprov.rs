@@ -8,8 +8,8 @@ use crate::messages::{
     decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
     QUERY_TYPE_TIME_INTERVAL,
 };
-use crate::taskprov::TaskprovVersion;
 use crate::vdaf::VDAF_VERIFY_KEY_SIZE_PRIO2;
+use crate::DapVersion;
 use prio::codec::{
     decode_u16_items, decode_u8_items, encode_u16_items, encode_u8_items, CodecError, Decode,
     Encode, ParameterizedDecode, ParameterizedEncode,
@@ -192,8 +192,8 @@ impl QueryConfig {
     }
 }
 
-impl ParameterizedEncode<TaskprovVersion> for QueryConfig {
-    fn encode_with_param(&self, _encoding_parameter: &TaskprovVersion, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for QueryConfig {
+    fn encode_with_param(&self, _version: &DapVersion, bytes: &mut Vec<u8>) {
         self.encode_query_type(bytes);
         self.time_precision.encode(bytes);
         self.max_batch_query_count.encode(bytes);
@@ -207,9 +207,9 @@ impl ParameterizedEncode<TaskprovVersion> for QueryConfig {
     }
 }
 
-impl ParameterizedDecode<TaskprovVersion> for QueryConfig {
+impl ParameterizedDecode<DapVersion> for QueryConfig {
     fn decode_with_param(
-        _decoding_parameter: &TaskprovVersion,
+        _version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let query_type = u8::decode(bytes)?;
@@ -242,26 +242,25 @@ pub struct TaskConfig {
     pub vdaf_config: VdafConfig,
 }
 
-impl ParameterizedEncode<TaskprovVersion> for TaskConfig {
-    fn encode_with_param(&self, encoding_parameter: &TaskprovVersion, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for TaskConfig {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         encode_u8_items(bytes, &(), &self.task_info);
         encode_u16_items(bytes, &(), &self.aggregator_endpoints);
-        self.query_config
-            .encode_with_param(encoding_parameter, bytes);
+        self.query_config.encode_with_param(version, bytes);
         self.task_expiration.encode(bytes);
         self.vdaf_config.encode(bytes);
     }
 }
 
-impl ParameterizedDecode<TaskprovVersion> for TaskConfig {
+impl ParameterizedDecode<DapVersion> for TaskConfig {
     fn decode_with_param(
-        decoding_parameter: &TaskprovVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(TaskConfig {
             task_info: decode_u8_items(&(), bytes)?,
             aggregator_endpoints: decode_u16_items(&(), bytes)?,
-            query_config: QueryConfig::decode_with_param(decoding_parameter, bytes)?,
+            query_config: QueryConfig::decode_with_param(version, bytes)?,
             task_expiration: Time::decode(bytes)?,
             vdaf_config: VdafConfig::decode(bytes)?,
         })

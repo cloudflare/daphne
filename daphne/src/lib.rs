@@ -74,7 +74,6 @@ use crate::{
         AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
         Draft02AggregationJobId, Duration, Interval, PartialBatchSelector, ReportId, TaskId, Time,
     },
-    taskprov::TaskprovVersion,
     vdaf::{VdafAggregateShare, VdafPrepMessage, VdafPrepState, VdafVerifyKey},
 };
 use constants::DapMediaType;
@@ -171,9 +170,9 @@ pub struct DapGlobalConfig {
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
-    /// Is the taskprov extension allowed and which taskprov draft should be used?
+    /// Indicates if the taskprov extension is enabled.
     #[serde(default)]
-    pub taskprov_version: Option<TaskprovVersion>,
+    pub allow_taskprov: bool,
 }
 
 impl DapGlobalConfig {

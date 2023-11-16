@@ -60,7 +60,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         // taskprov: Resolve the task config to use for the request. We also need to ensure
         // that all of the reports include the task config in the report extensions. (See
         // section 6 of draft-wang-ppm-dap-taskprov-02.)
-        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
+        if self.get_global_config().allow_taskprov {
             let using_taskprov = agg_job_init_req
                 .prep_inits
                 .iter()
@@ -68,7 +68,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     prep_init
                         .report_share
                         .report_metadata
-                        .is_taskprov(taskprov_version, task_id)
+                        .is_taskprov(req.version, task_id)
                 })
                 .count();
 
@@ -91,7 +91,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     });
                 }
             };
-            resolve_taskprov(self, task_id, req, first_metadata, taskprov_version).await?;
+            resolve_taskprov(self, task_id, req, first_metadata).await?;
         }
 
         let wrapped_task_config = self
@@ -210,8 +210,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
         metrics: &DaphneMetrics,
         task_id: &TaskId,
     ) -> Result<DapResponse, DapAbort> {
-        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
-            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        if self.get_global_config().allow_taskprov {
+            resolve_taskprov(self, task_id, req, None).await?;
         }
         let wrapped_task_config = self
             .get_task_config_for(task_id)
@@ -315,8 +315,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
-            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        if self.get_global_config().allow_taskprov {
+            resolve_taskprov(self, task_id, req, None).await?;
         }
 
         let wrapped_task_config = self
