@@ -10,7 +10,6 @@ use daphne::{
     messages::{
         encode_base64url, BatchId, CollectionJobId, Duration, HpkeConfigList, Interval, TaskId,
     },
-    taskprov::TaskprovVersion,
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
@@ -118,7 +117,7 @@ impl TestRunner {
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-            taskprov_version: Some(TaskprovVersion::Draft02),
+            allow_taskprov: true,
         };
         let taskprov_vdaf_verify_key_init =
             hex::decode("b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18")

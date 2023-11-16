@@ -157,15 +157,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         debug!("report id is {}", report.report_metadata.id);
 
-        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
-            resolve_taskprov(
-                self,
-                task_id,
-                req,
-                Some(&report.report_metadata),
-                taskprov_version,
-            )
-            .await?;
+        if self.get_global_config().allow_taskprov {
+            resolve_taskprov(self, task_id, req, Some(&report.report_metadata)).await?;
         }
         let task_config = self
             .get_task_config_for(task_id)
@@ -227,8 +220,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         check_request_content_type(req, DapMediaType::CollectReq)?;
 
-        if let Some(taskprov_version) = self.get_global_config().taskprov_version {
-            resolve_taskprov(self, task_id, req, None, taskprov_version).await?;
+        if self.get_global_config().allow_taskprov {
+            resolve_taskprov(self, task_id, req, None).await?;
         }
 
         let wrapped_task_config = self

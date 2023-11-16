@@ -13,7 +13,7 @@ use daphne::{
         BatchSelector, Collection, CollectionReq, Extension, HpkeCiphertext, Interval, Query,
         Report, ReportId, ReportMetadata, TaskId,
     },
-    taskprov::{compute_task_id, TaskprovVersion},
+    taskprov::compute_task_id,
     DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
@@ -361,14 +361,12 @@ async fn leader_upload_taskprov() {
     let (task_config, task_id, taskprov_task_config) = {
         let taskprov_task_config = TaskConfig {
             task_info: "Hi".as_bytes().to_vec(),
-            aggregator_endpoints: vec![
-                UrlBytes {
-                    bytes: "https://test1".as_bytes().to_vec(),
-                },
-                UrlBytes {
-                    bytes: "https://test2".as_bytes().to_vec(),
-                },
-            ],
+            leader_url: UrlBytes {
+                bytes: "https://test1".as_bytes().to_vec(),
+            },
+            helper_url: UrlBytes {
+                bytes: "https://test2".as_bytes().to_vec(),
+            },
             query_config: QueryConfig {
                 time_precision: 0x01,
                 max_batch_query_count: 128,
@@ -381,12 +379,11 @@ async fn leader_upload_taskprov() {
             vdaf_config: taskprov_vdaf_config.clone(),
         };
         let task_id = compute_task_id(
-            TaskprovVersion::Draft02,
-            &taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
+            version,
+            &taskprov_task_config.get_encoded_with_param(&version),
         );
         let task_config = DapTaskConfig::try_from_taskprov(
             version,
-            TaskprovVersion::Draft02,
             &task_id,
             taskprov_task_config.clone(),
             &t.taskprov_vdaf_verify_key_init,
@@ -404,7 +401,7 @@ async fn leader_upload_taskprov() {
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
             vec![Extension::Taskprov {
-                payload: taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02),
+                payload: taskprov_task_config.get_encoded_with_param(&version),
             }],
             version,
         )
@@ -418,10 +415,10 @@ async fn leader_upload_taskprov() {
     .await;
 
     // Generate and upload a report with taskprov but with the wrong id
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
+    let payload = taskprov_task_config.get_encoded_with_param(&version);
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &bad_payload);
+    let task_id = compute_task_id(DapVersion::Draft02, &bad_payload);
     let extensions = vec![Extension::Taskprov { payload }];
     let report = task_config
         .vdaf
@@ -446,8 +443,8 @@ async fn leader_upload_taskprov() {
     .await;
 
     // Generate and upload a report with two copies of the taskprov extension
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&DapVersion::Draft02);
+    let task_id = compute_task_id(DapVersion::Draft02, &payload);
     let extensions = vec![
         Extension::Taskprov {
             payload: payload.clone(),
@@ -473,51 +470,6 @@ async fn leader_upload_taskprov() {
         report.get_encoded_with_param(&version),
         400,
         "unrecognizedMessage",
-    )
-    .await;
-
-    // Generate and upload a report with taskprov but only one endpoint, which is an error.
-    //
-    // We have to make this by hand as if we cut and paste a pre-serialized one it
-    // will have an expiring task.
-    let taskprov_task_config = TaskConfig {
-        task_info: "Hi".as_bytes().to_vec(),
-        aggregator_endpoints: vec![UrlBytes {
-            bytes: "https://test1".as_bytes().to_vec(),
-        }],
-        query_config: QueryConfig {
-            time_precision: 0x01,
-            max_batch_query_count: 128,
-            min_batch_size: 1024,
-            var: QueryConfigVar::FixedSize {
-                max_batch_size: 2048,
-            },
-        },
-        task_expiration: t.now + 86400,
-        vdaf_config: taskprov_vdaf_config,
-    };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
-    let extensions = vec![Extension::Taskprov { payload }];
-    let report = task_config
-        .vdaf
-        .produce_report_with_extensions(
-            &hpke_config_list,
-            t.now,
-            &task_id,
-            DapMeasurement::U32Vec(vec![1; 10]),
-            extensions,
-            version,
-        )
-        .unwrap();
-    t.leader_post_expect_abort(
-        &client,
-        None, // dap_auth_token
-        path,
-        DapMediaType::Report,
-        report.get_encoded_with_param(&version),
-        400,
-        "invalidTask",
     )
     .await;
 }
@@ -1353,14 +1305,12 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
 
     let taskprov_task_config = TaskConfig {
         task_info: "".as_bytes().to_vec(),
-        aggregator_endpoints: vec![
-            UrlBytes {
-                bytes: t.task_config.leader_url.as_str().as_bytes().to_vec(),
-            },
-            UrlBytes {
-                bytes: t.task_config.helper_url.as_str().as_bytes().to_vec(),
-            },
-        ],
+        leader_url: UrlBytes {
+            bytes: t.task_config.leader_url.as_str().as_bytes().to_vec(),
+        },
+        helper_url: UrlBytes {
+            bytes: t.task_config.helper_url.as_str().as_bytes().to_vec(),
+        },
         query_config: QueryConfig {
             time_precision: TIME_PRECISION,
             max_batch_query_count: 65535,
@@ -1373,11 +1323,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
             var: VdafTypeVar::Prio2 { dimension: 10 },
         },
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&TaskprovVersion::Draft02);
-    let task_id = compute_task_id(TaskprovVersion::Draft02, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&DapVersion::Draft02);
+    let task_id = compute_task_id(DapVersion::Draft02, &payload);
     let task_config = DapTaskConfig::try_from_taskprov(
         version,
-        TaskprovVersion::Draft02,
         &task_id.clone(),
         taskprov_task_config.clone(),
         &t.taskprov_vdaf_verify_key_init,

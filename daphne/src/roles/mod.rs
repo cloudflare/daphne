@@ -10,8 +10,7 @@ mod leader;
 use crate::{
     constants::DapMediaType,
     messages::{BatchSelector, ReportMetadata, TaskId, Time},
-    taskprov::{self, TaskprovVersion},
-    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
+    taskprov, DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
 use tracing::warn;
 
@@ -118,7 +117,6 @@ async fn resolve_taskprov<S>(
     task_id: &TaskId,
     req: &DapRequest<S>,
     report_metadata_advertisement: Option<&ReportMetadata>,
-    taskprov_version: TaskprovVersion,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
         // Task already configured, so nothing to do.
@@ -137,7 +135,6 @@ async fn resolve_taskprov<S>(
 
     let Some(task_config) = taskprov::resolve_advertised_task_config(
         req,
-        taskprov_version,
         vdaf_verify_key_init,
         collector_hpke_config,
         task_id,
@@ -174,7 +171,6 @@ mod test {
             Extension, Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata,
             TaskId, Time, Transition, TransitionFailure, TransitionVar,
         },
-        taskprov::TaskprovVersion,
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
@@ -266,7 +262,7 @@ mod test {
                 min_batch_interval_start: 259_200,
                 max_batch_interval_end: 259_200,
                 supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-                taskprov_version: Some(TaskprovVersion::Draft02),
+                allow_taskprov: true,
             };
 
             // Task Parameters that the Leader and Helper must agree on.
@@ -1777,11 +1773,8 @@ mod test {
                 var: taskprov::VdafTypeVar::Prio2 { dimension: 10 },
             },
         }
-        .get_encoded_with_param(&t.helper.global_config.taskprov_version.unwrap());
-        let taskprov_id = super::taskprov::compute_task_id(
-            t.helper.global_config.taskprov_version.unwrap(),
-            &taskprov_ext_payload,
-        );
+        .get_encoded_with_param(&version);
+        let taskprov_id = super::taskprov::compute_task_id(version, &taskprov_ext_payload);
 
         // Client: Send upload request to Leader.
         let hpke_config_list = [
