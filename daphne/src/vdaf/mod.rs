@@ -137,8 +137,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
             DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
         };
         let n: usize = input_share_text.len();
-        let mut info = Vec::new();
-        info.reserve(n + 2);
+        let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(input_share_text);
         info.push(CTX_ROLE_CLIENT); // Sender role (receiver role set below)
         info.push(if is_leader {
@@ -611,8 +610,7 @@ impl VdafConfig {
             DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
         };
         let n: usize = input_share_text.len();
-        let mut info = Vec::new();
-        info.reserve(n + 2);
+        let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(input_share_text);
         info.push(CTX_ROLE_CLIENT); // Sender role
         info.push(CTX_ROLE_LEADER); // Receiver role placeholder; updated below.
@@ -1529,8 +1527,7 @@ impl VdafConfig {
             DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
         };
         let n: usize = agg_share_text.len();
-        let mut info = Vec::new();
-        info.reserve(n + 2);
+        let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(agg_share_text);
         info.push(CTX_ROLE_LEADER); // Sender role placeholder
         info.push(CTX_ROLE_COLLECTOR); // Receiver role
@@ -1590,8 +1587,7 @@ fn produce_encrypted_agg_share(
         DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
     };
     let n: usize = agg_share_text.len();
-    let mut info = Vec::new();
-    info.reserve(n + 2);
+    let mut info = Vec::with_capacity(n + 2);
     info.extend_from_slice(agg_share_text);
     info.push(if is_leader {
         CTX_ROLE_LEADER
