@@ -314,7 +314,7 @@ async fn leader_upload(version: DapVersion) {
                     },
                 },
                 public_share: b"public share".to_vec(),
-                encrypted_input_shares: vec![
+                encrypted_input_shares: [
                     HpkeCiphertext {
                         config_id: hpke_config_list[0].id,
                         enc: b"encapsulated key".to_vec(),
