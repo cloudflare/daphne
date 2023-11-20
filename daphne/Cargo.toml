@@ -21,7 +21,7 @@ crate-type = ["cdylib", "rlib"]
 async-trait.workspace = true
 assert_matches = { workspace = true, optional = true }
 base64.workspace = true
-deepsize = { version = "0.2.0", optional = true }
+deepsize = { workspace = true, optional = true }
 hex.workspace = true
 hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
 hpke-rs-crypto.workspace = true
