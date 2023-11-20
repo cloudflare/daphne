@@ -96,9 +96,9 @@ pub enum DapAbort {
         agg_job_id_base64url: String,
     },
 
-    /// Unrecognized message. Sent in response to a malformed or unexpected message.
-    #[error("unrecognizedMessage")]
-    UnrecognizedMessage {
+    /// Invalid message. Sent in response to a malformed or unexpected message.
+    #[error("invalidMessage")]
+    InvalidMessage {
         detail: String,
         task_id: Option<TaskId>,
     },
@@ -142,7 +142,7 @@ impl DapAbort {
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id_base64url),
             ),
-            Self::UnrecognizedMessage { detail, task_id } => (task_id, Some(detail), None),
+            Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
             Self::ReportTooLate | Self::UnrecognizedTask | Self::Internal(_) => (None, None, None),
         };
 
@@ -261,9 +261,7 @@ impl DapAbort {
             Self::UnrecognizedAggregationJob { .. } => {
                 ("Unrecognized aggregation job", Some(self.to_string()))
             }
-            Self::UnrecognizedMessage { .. } => {
-                ("Malformed or invalid message", Some(self.to_string()))
-            }
+            Self::InvalidMessage { .. } => ("Malformed or invalid message", Some(self.to_string())),
             Self::UnrecognizedTask => (
                 "Task indicated by request is not recognized",
                 Some(self.to_string()),
@@ -291,14 +289,14 @@ impl From<DapError> for DapAbort {
 
 impl DapAbort {
     pub fn from_codec_error<Id: Into<Option<TaskId>>>(e: CodecError, task_id: Id) -> Self {
-        Self::UnrecognizedMessage {
+        Self::InvalidMessage {
             detail: format!("codec error: {e}"),
             task_id: task_id.into(),
         }
     }
 
     pub fn from_hex_error(e: FromHexError, task_id: TaskId) -> Self {
-        Self::UnrecognizedMessage {
+        Self::InvalidMessage {
             detail: format!("invalid hexadecimal string {e:?}"),
             task_id: Some(task_id),
         }

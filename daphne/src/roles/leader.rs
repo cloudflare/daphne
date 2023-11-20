@@ -174,8 +174,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         }
 
         if report.encrypted_input_shares.len() != 2 {
-            // TODO spec: Decide if this behavior should be specified.
-            return Err(DapAbort::UnrecognizedMessage {
+            return Err(DapAbort::InvalidMessage {
                 detail: format!(
                     "expected exactly two encrypted input shares; got {}",
                     report.encrypted_input_shares.len()

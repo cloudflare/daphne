@@ -959,7 +959,7 @@ impl<S> DapRequest<S> {
             // draft02: Handle missing task ID as decoding failure. Normally the task ID would be
             // encoded by the message payload; it may be missing becvause parsing failed earlier on
             // in the request.
-            Err(DapAbort::UnrecognizedMessage {
+            Err(DapAbort::InvalidMessage {
                 detail: "missing or malformed task ID".into(),
                 task_id: None,
             })

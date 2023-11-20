@@ -257,7 +257,7 @@ async fn leader_upload(version: DapVersion) {
         DapMediaType::Report,
         b"junk data".to_vec(),
         400,
-        "unrecognizedMessage",
+        "invalidMessage",
     )
     .await;
 
@@ -469,7 +469,7 @@ async fn leader_upload_taskprov() {
         DapMediaType::Report,
         report.get_encoded_with_param(&version),
         400,
-        "unrecognizedMessage",
+        "invalidMessage",
     )
     .await;
 }
