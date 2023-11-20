@@ -23,6 +23,7 @@ async-trait = "0.1.74"
 base64 = "0.21.5"
 cap = "0.1.2"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
+deepsize = { version = "0.2.0" }
 futures = "0.3.29"
 getrandom = { version = "0.2.11", features = ["js"] } # Required for prio
 hex = { version = "0.4.3", features = ["serde"] }
