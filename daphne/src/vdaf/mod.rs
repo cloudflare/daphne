@@ -161,16 +161,12 @@ impl<'req> EarlyReportStateConsumed<'req> {
             Err(e) => return Err(e),
         };
 
-        // For Draft02, the encoded input share is the VDAF-specific payload, but for Draft03 and
-        // later it is a serialized PlaintextInputShare.  For simplicity in later code, we wrap the Draft02
-        // payload into a PlaintextInputShare.
+        // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
+        // draft, the plaintext also encodes the report extensions.
         let input_share = match task_config.version {
-            DapVersion::Draft02 => PlaintextInputShare {
-                extensions: vec![],
-                payload: encoded_input_share,
-            },
+            DapVersion::Draft02 => encoded_input_share,
             DapVersion::Draft07 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
-                Ok(input_share) => input_share,
+                Ok(input_share) => input_share.payload,
                 Err(..) => {
                     return Ok(Self::Rejected {
                         metadata,
@@ -183,7 +179,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         Ok(Self::Ready {
             metadata,
             public_share,
-            input_share: input_share.payload,
+            input_share,
         })
     }
 
@@ -569,38 +565,46 @@ impl VdafConfig {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn produce_report_with_extensions_for_shares(
         public_share: Vec<u8>,
-        mut input_shares: Vec<Vec<u8>>,
-        hpke_config_list: &[HpkeConfig],
+        input_shares: Vec<Vec<u8>>,
+        hpke_configs: &[HpkeConfig],
         time: Time,
         task_id: &TaskId,
         report_id: &ReportId,
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
+        if input_shares.len() != 2 {
+            return Err(fatal_error!(err = "unexpected number of input shares"));
+        }
+        if hpke_configs.len() != 2 {
+            return Err(fatal_error!(err = "unexpected number of HPKE configs"));
+        }
+
+        let (draft02_extensions, mut draft07_plaintext_input_share) = match version {
+            DapVersion::Draft07 => (
+                None,
+                Some(PlaintextInputShare {
+                    extensions,
+                    payload: Vec::default(),
+                }),
+            ),
+            DapVersion::Draft02 => (Some(extensions), None),
+        };
+
         let metadata = ReportMetadata {
             id: *report_id,
             time,
-            draft02_extensions: match version {
-                DapVersion::Draft02 => Some(extensions.clone()),
-                DapVersion::Draft07 => None,
-            },
+            draft02_extensions,
         };
 
-        if version != DapVersion::Draft02 {
-            let mut encoded: Vec<Vec<u8>> = Vec::new();
-            for share in input_shares {
-                let input_share = PlaintextInputShare {
-                    extensions: extensions.clone(),
-                    payload: share,
-                };
-                encoded.push(PlaintextInputShare::get_encoded(&input_share));
+        let encoded_input_shares = input_shares.into_iter().map(|input_share| {
+            if let Some(ref mut plaintext_input_share) = draft07_plaintext_input_share {
+                plaintext_input_share.payload = input_share;
+                plaintext_input_share.get_encoded()
+            } else {
+                input_share
             }
-            input_shares = encoded;
-        }
-
-        if hpke_config_list.len() != input_shares.len() {
-            return Err(fatal_error!(err = "unexpected number of HPKE configs"));
-        }
+        });
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
@@ -621,16 +625,16 @@ impl VdafConfig {
         // so we have hard-coded it here.
         encode_u32_bytes(&mut aad, &public_share);
 
-        let mut encrypted_input_shares = Vec::with_capacity(input_shares.len());
-        for (i, (hpke_config, input_share_data)) in
-            hpke_config_list.iter().zip(input_shares).enumerate()
+        let mut encrypted_input_shares = Vec::with_capacity(2);
+        for (i, (hpke_config, encoded_input_share)) in
+            hpke_configs.iter().zip(encoded_input_shares).enumerate()
         {
             info[n + 1] = if i == 0 {
                 CTX_ROLE_LEADER
             } else {
                 CTX_ROLE_HELPER
             }; // Receiver role
-            let (enc, payload) = hpke_config.encrypt(&info, &aad, &input_share_data)?;
+            let (enc, payload) = hpke_config.encrypt(&info, &aad, &encoded_input_share)?;
 
             encrypted_input_shares.push(HpkeCiphertext {
                 config_id: hpke_config.id,
