@@ -1143,13 +1143,11 @@ impl Encode for PlaintextInputShare {
 
 impl Decode for PlaintextInputShare {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let share = Self {
-            extensions: decode_u16_items(&(), bytes)?,
-            payload: decode_u32_bytes(bytes)?,
-        };
+        let extensions: Vec<Extension> = decode_u16_items(&(), bytes)?;
+
         // Check for duplicate extensions and unknown extensions.
         let mut seen: HashSet<u16> = HashSet::new();
-        for extension in &share.extensions {
+        for extension in &extensions {
             if !seen.insert(extension.type_code()) {
                 return Err(CodecError::UnexpectedValue);
             }
@@ -1157,7 +1155,11 @@ impl Decode for PlaintextInputShare {
                 return Err(CodecError::UnexpectedValue);
             }
         }
-        Ok(share)
+
+        Ok(Self {
+            extensions,
+            payload: decode_u32_bytes(bytes)?,
+        })
     }
 }
 
