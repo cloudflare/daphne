@@ -84,7 +84,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 }
                 _ => {
                     // It's not all taskprov or no taskprov, so it's an error.
-                    return Err(DapAbort::UnrecognizedMessage {
+                    return Err(DapAbort::InvalidMessage {
                         detail: "some reports include the taskprov extensions and some do not"
                             .to_string(),
                         task_id: Some(*task_id),
@@ -428,7 +428,7 @@ fn check_part_batch(
     // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
         // TODO spec: Define this behavior.
-        return Err(DapAbort::UnrecognizedMessage {
+        return Err(DapAbort::InvalidMessage {
             detail: "invalid aggregation parameter".into(),
             task_id: Some(*task_id),
         });

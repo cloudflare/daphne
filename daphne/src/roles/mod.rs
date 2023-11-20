@@ -32,7 +32,7 @@ async fn check_batch<S>(
     // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
         // TODO spec: Define this behavior.
-        return Err(DapAbort::UnrecognizedMessage {
+        return Err(DapAbort::InvalidMessage {
             detail: "invalid aggregation parameter".into(),
             task_id: Some(*task_id),
         });
@@ -1270,7 +1270,7 @@ mod test {
         // Expect failure due to incorrect number of input shares
         assert_matches!(
             t.leader.handle_upload_req(&req).await,
-            Err(DapAbort::UnrecognizedMessage { .. })
+            Err(DapAbort::InvalidMessage { .. })
         );
     }
 

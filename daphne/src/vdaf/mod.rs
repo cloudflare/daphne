@@ -174,7 +174,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
                 Err(..) => {
                     return Ok(Self::Rejected {
                         metadata,
-                        failure: TransitionFailure::UnrecognizedMessage,
+                        failure: TransitionFailure::InvalidMessage,
                     })
                 }
             },
@@ -831,7 +831,7 @@ impl VdafConfig {
         let mut consumed_reports = Vec::with_capacity(num_reports);
         for prep_init in &agg_job_init_req.prep_inits {
             if processed.contains(&prep_init.report_share.report_metadata.id) {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} appears twice in the same aggregation job",
                         prep_init.report_share.report_metadata.id.to_base64url()
@@ -984,7 +984,7 @@ impl VdafConfig {
                         message: helper_prep_share,
                     } => {
                         let Some(ref leader_prep_share) = prep_init.draft07_payload else {
-                            return Err(DapAbort::UnrecognizedMessage {
+                            return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
                             });
@@ -1083,7 +1083,7 @@ impl VdafConfig {
         metrics: &DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::UnrecognizedMessage {
+            return Err(DapAbort::InvalidMessage {
                 detail: format!(
                     "aggregation job response has {} reports; expected {}",
                     agg_job_resp.transitions.len(),
@@ -1101,7 +1101,7 @@ impl VdafConfig {
             .zip(state.seq.into_iter())
         {
             if helper.report_id != leader.report_id {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
@@ -1121,7 +1121,7 @@ impl VdafConfig {
 
                 // TODO Log the fact that the helper sent an unexpected message.
                 TransitionVar::Finished => {
-                    return Err(DapAbort::UnrecognizedMessage {
+                    return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
                         task_id: Some(*task_id),
                     })
@@ -1195,7 +1195,7 @@ impl VdafConfig {
         metrics: &DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::UnrecognizedMessage {
+            return Err(DapAbort::InvalidMessage {
                 detail: format!(
                     "aggregation job response has {} reports; expected {}",
                     agg_job_resp.transitions.len(),
@@ -1212,7 +1212,7 @@ impl VdafConfig {
             .zip(state.seq.into_iter())
         {
             if helper.report_id != leader.report_id {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
@@ -1232,7 +1232,7 @@ impl VdafConfig {
                 }
 
                 TransitionVar::Finished => {
-                    return Err(DapAbort::UnrecognizedMessage {
+                    return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
                         task_id: Some(*task_id),
                     })
@@ -1292,7 +1292,7 @@ impl VdafConfig {
         match agg_job_cont_req.round {
             Some(1) | None => {}
             Some(0) => {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: "request shouldn't indicate round 0".into(),
                     task_id: Some(*task_id),
                 })
@@ -1326,7 +1326,7 @@ impl VdafConfig {
             // way to avoid this would be to require the leader to send the reports in a well-known
             // order, say, in ascending order by ID.
             if !recognized.contains(&leader.report_id) {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} does not appear in the Helper's reports",
                         leader.report_id.to_base64url()
@@ -1335,7 +1335,7 @@ impl VdafConfig {
                 });
             }
             if processed.contains(&leader.report_id) {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} appears twice in the same aggregation job",
                         leader.report_id.to_base64url()
@@ -1364,7 +1364,7 @@ impl VdafConfig {
             };
 
             let TransitionVar::Continued(leader_message) = &leader.var else {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: "helper sent unexpected message instead of `Continued`".to_string(),
                     task_id: Some(*task_id),
                 });
@@ -1421,7 +1421,7 @@ impl VdafConfig {
         metrics: &DaphneMetrics,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::UnrecognizedMessage {
+            return Err(DapAbort::InvalidMessage {
                 detail: format!(
                     "the Leader has {} reports, but it received {} reports from the Helper",
                     state.seq.len(),
@@ -1434,7 +1434,7 @@ impl VdafConfig {
         let mut agg_span = DapAggregateSpan::default();
         for (helper, out_share) in agg_job_resp.transitions.into_iter().zip(state.seq) {
             if helper.report_id != out_share.report_id {
-                return Err(DapAbort::UnrecognizedMessage {
+                return Err(DapAbort::InvalidMessage {
                     detail: format!(
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
@@ -1445,7 +1445,7 @@ impl VdafConfig {
 
             match &helper.var {
                 TransitionVar::Continued(..) => {
-                    return Err(DapAbort::UnrecognizedMessage {
+                    return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Continued` message".to_string(),
                         task_id: None,
                     })
@@ -2060,7 +2060,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2082,7 +2082,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2107,7 +2107,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2128,7 +2128,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2309,7 +2309,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2335,7 +2335,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 
@@ -2360,7 +2360,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::UnrecognizedMessage { .. }
+            DapAbort::InvalidMessage { .. }
         );
     }
 

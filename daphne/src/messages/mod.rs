@@ -639,7 +639,7 @@ pub enum TransitionFailure {
     VdafPrepError = 5,
     BatchSaturated = 6,
     TaskExpired = 7,
-    UnrecognizedMessage = 8,
+    InvalidMessage = 8,
     ReportTooEarly = 9,
 }
 
@@ -656,7 +656,7 @@ impl TryFrom<u8> for TransitionFailure {
             b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
             b if b == Self::BatchSaturated as u8 => Ok(Self::BatchSaturated),
             b if b == Self::TaskExpired as u8 => Ok(Self::TaskExpired),
-            b if b == Self::UnrecognizedMessage as u8 => Ok(Self::UnrecognizedMessage),
+            b if b == Self::InvalidMessage as u8 => Ok(Self::InvalidMessage),
             b if b == Self::ReportTooEarly as u8 => Ok(Self::ReportTooEarly),
             _ => Err(CodecError::UnexpectedValue),
         }
@@ -686,7 +686,7 @@ impl std::fmt::Display for TransitionFailure {
             Self::VdafPrepError => write!(f, "vdaf_prep_error"),
             Self::BatchSaturated => write!(f, "batch_saturated"),
             Self::TaskExpired => write!(f, "task_expired"),
-            Self::UnrecognizedMessage => write!(f, "unrecognized_message"),
+            Self::InvalidMessage => write!(f, "invalid_message"),
             Self::ReportTooEarly => write!(f, "report_too_early"),
         }
     }

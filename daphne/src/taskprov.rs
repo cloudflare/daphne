@@ -469,7 +469,7 @@ mod test {
 
         match resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id, None)
         {
-            Err(DapError::Abort(DapAbort::UnrecognizedMessage { detail, .. })) => {
+            Err(DapError::Abort(DapAbort::InvalidMessage { detail, .. })) => {
                 assert_eq!(detail, "codec error: unexpected value");
             }
             Err(e) => panic!("unexpected error: {e}"),
