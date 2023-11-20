@@ -541,8 +541,6 @@ impl VdafConfig {
     /// * `extensions` are the extensions.
     ///
     /// * `version` is the `DapVersion` to use.
-    //
-    // TODO(issue #100): Truncate the timestamp, as required in DAP-02.
     pub fn produce_report_with_extensions(
         &self,
         hpke_config_list: &[HpkeConfig],
