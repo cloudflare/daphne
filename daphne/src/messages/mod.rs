@@ -18,7 +18,6 @@ use prio::codec::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
     convert::{TryFrom, TryInto},
     fmt,
     io::{Cursor, Read},
@@ -132,7 +131,7 @@ pub enum Extension {
 
 impl Extension {
     /// Return the type code associated with the extension
-    fn type_code(&self) -> u16 {
+    pub(crate) fn type_code(&self) -> u16 {
         match self {
             Self::Taskprov { .. } => EXTENSION_TASKPROV,
             Self::Unhandled { typ, .. } => *typ,
@@ -198,22 +197,7 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
             draft02_extensions: match version {
-                DapVersion::Draft02 => {
-                    let extensions: Vec<Extension> = decode_u16_items(&(), bytes)?;
-
-                    // Check for duplicate extensions and unknown extensions.
-                    let mut seen: HashSet<u16> = HashSet::new();
-                    for extension in &extensions {
-                        if !seen.insert(extension.type_code()) {
-                            return Err(CodecError::UnexpectedValue);
-                        }
-                        if matches!(extension, Extension::Unhandled { .. }) {
-                            // Unrecognized extensions are an error.
-                            return Err(CodecError::UnexpectedValue);
-                        }
-                    }
-                    Some(extensions)
-                }
+                DapVersion::Draft02 => Some(decode_u16_items(&(), bytes)?),
                 DapVersion::Draft07 => None,
             },
         };
@@ -1143,21 +1127,8 @@ impl Encode for PlaintextInputShare {
 
 impl Decode for PlaintextInputShare {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        let extensions: Vec<Extension> = decode_u16_items(&(), bytes)?;
-
-        // Check for duplicate extensions and unknown extensions.
-        let mut seen: HashSet<u16> = HashSet::new();
-        for extension in &extensions {
-            if !seen.insert(extension.type_code()) {
-                return Err(CodecError::UnexpectedValue);
-            }
-            if matches!(extension, Extension::Unhandled { .. }) {
-                return Err(CodecError::UnexpectedValue);
-            }
-        }
-
         Ok(Self {
-            extensions,
+            extensions: decode_u16_items(&(), bytes)?,
             payload: decode_u32_bytes(bytes)?,
         })
     }
@@ -1281,39 +1252,6 @@ mod test {
     }
 
     test_versions! {read_report}
-
-    #[test]
-    fn read_report_with_unknown_extensions_draft02() {
-        let report = Report {
-            draft02_task_id: task_id_for_version(DapVersion::Draft02),
-            report_metadata: ReportMetadata {
-                id: ReportId([23; 16]),
-                time: 1_637_364_244,
-                draft02_extensions: Some(vec![Extension::Unhandled {
-                    typ: 0xfff,
-                    payload: b"some extension".to_vec(),
-                }]),
-            },
-            public_share: b"public share".to_vec(),
-            encrypted_input_shares: [
-                HpkeCiphertext {
-                    config_id: 23,
-                    enc: b"leader encapsulated key".to_vec(),
-                    payload: b"leader ciphertext".to_vec(),
-                },
-                HpkeCiphertext {
-                    config_id: 119,
-                    enc: b"helper encapsulated key".to_vec(),
-                    payload: b"helper ciphertext".to_vec(),
-                },
-            ],
-        };
-        let version = DapVersion::Draft02;
-        assert!(
-            Report::get_decoded_with_param(&version, &report.get_encoded_with_param(&version))
-                .is_err()
-        );
-    }
 
     #[test]
     fn read_agg_job_init_req_draft02() {
