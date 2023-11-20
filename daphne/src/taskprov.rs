@@ -5,6 +5,7 @@
 //! version of DAP, i.e., each version of taskprov implies a version of DAP.
 
 use crate::{
+    fatal_error,
     hpke::HpkeConfig,
     messages::{
         decode_base64url_vec,
@@ -155,8 +156,17 @@ fn get_taskprov_task_config<S>(
             )
         })?)
     } else if let Some(metadata) = report_metadata_advertisement {
+        if req.version == DapVersion::Draft07 {
+            return Ok(None);
+        }
         let taskprovs: Vec<&Extension> = metadata
-            .extensions
+            .draft02_extensions
+            .as_ref()
+            .ok_or_else(|| {
+                DapAbort::from(fatal_error!(
+                    err = "draft02: encountered report metadata with no extensions"
+                ))
+            })?
             .iter()
             .filter(|x| matches!(x, Extension::Taskprov { .. }))
             .collect();
@@ -261,9 +271,11 @@ impl DapTaskConfig {
 impl ReportMetadata {
     /// Does this metatdata have a taskprov extension and does it match the specified id?
     pub fn is_taskprov(&self, version: DapVersion, task_id: &TaskId) -> bool {
-        return self.extensions.iter().any(|x| match x {
-            Extension::Taskprov { payload } => *task_id == compute_task_id(version, payload),
-            Extension::Unhandled { .. } => false,
+        return self.draft02_extensions.as_ref().is_some_and(|extensions| {
+            extensions.iter().any(|x| match x {
+                Extension::Taskprov { payload } => *task_id == compute_task_id(version, payload),
+                Extension::Unhandled { .. } => false,
+            })
         });
     }
 }
@@ -380,9 +392,9 @@ mod test {
             Some(&ReportMetadata {
                 id: ReportId([0; 16]),
                 time: 0,
-                extensions: vec![Extension::Taskprov {
+                draft02_extensions: Some(vec![Extension::Taskprov {
                     payload: taskprov_task_config_data,
-                }],
+                }]),
             }),
         )
         .unwrap()

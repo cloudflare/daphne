@@ -579,14 +579,13 @@ impl VdafConfig {
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
-        let report_extensions = match version {
-            DapVersion::Draft02 => extensions.clone(),
-            DapVersion::Draft07 => vec![],
-        };
         let metadata = ReportMetadata {
             id: *report_id,
             time,
-            extensions: report_extensions,
+            draft02_extensions: match version {
+                DapVersion::Draft02 => Some(extensions.clone()),
+                DapVersion::Draft07 => None,
+            },
         };
 
         if version != DapVersion::Draft02 {
