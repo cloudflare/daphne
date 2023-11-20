@@ -173,19 +173,18 @@ impl Decode for Extension {
 pub struct ReportMetadata {
     pub id: ReportId,
     pub time: Time,
-
-    /// Report extensions, only used in draft02. In draft-03 and above, extensions are carried in encrypted input share.
-    pub extensions: Vec<Extension>,
+    /// draft02 compatibility: In the latest draft, extensions are carried in encrypted input share.
+    pub draft02_extensions: Option<Vec<Extension>>,
 }
 
 impl ParameterizedEncode<DapVersion> for ReportMetadata {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.id.encode(bytes);
         self.time.encode(bytes);
-        if matches!(version, DapVersion::Draft02) {
-            encode_u16_items(bytes, &(), &self.extensions);
-        } else if !self.extensions.is_empty() {
-            panic!("tried to encode extensions in the ReportMetadata for DAP > draft02")
+        match (version, &self.draft02_extensions) {
+            (DapVersion::Draft07, None) => (),
+            (DapVersion::Draft02, Some(extensions)) => encode_u16_items(bytes, &(), extensions),
+            _ => unreachable!("extensions should be set in (and only in) draft02"),
         }
     }
 }
@@ -198,22 +197,27 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
         let metadata = Self {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
-            extensions: match version {
-                DapVersion::Draft02 => decode_u16_items(&(), bytes)?,
-                DapVersion::Draft07 => Vec::new(),
+            draft02_extensions: match version {
+                DapVersion::Draft02 => {
+                    let extensions: Vec<Extension> = decode_u16_items(&(), bytes)?;
+
+                    // Check for duplicate extensions and unknown extensions.
+                    let mut seen: HashSet<u16> = HashSet::new();
+                    for extension in &extensions {
+                        if !seen.insert(extension.type_code()) {
+                            return Err(CodecError::UnexpectedValue);
+                        }
+                        if matches!(extension, Extension::Unhandled { .. }) {
+                            // Unrecognized extensions are an error.
+                            return Err(CodecError::UnexpectedValue);
+                        }
+                    }
+                    Some(extensions)
+                }
+                DapVersion::Draft07 => None,
             },
         };
-        // Check for duplicate extensions and unknown extensions.
-        let mut seen: HashSet<u16> = HashSet::new();
-        for extension in &metadata.extensions {
-            if !seen.insert(extension.type_code()) {
-                return Err(CodecError::UnexpectedValue);
-            }
-            if matches!(extension, Extension::Unhandled { .. }) {
-                // Unrecognized extensions are an error.
-                return Err(CodecError::UnexpectedValue);
-            }
-        }
+
         Ok(metadata)
     }
 }
@@ -1234,7 +1238,10 @@ mod test {
             report_metadata: ReportMetadata {
                 id: ReportId([23; 16]),
                 time: 1_637_364_244,
-                extensions: vec![],
+                draft02_extensions: match version {
+                    DapVersion::Draft02 => Some(Vec::new()),
+                    DapVersion::Draft07 => None,
+                },
             },
             public_share: b"public share".to_vec(),
             encrypted_input_shares: vec![
@@ -1266,10 +1273,10 @@ mod test {
             report_metadata: ReportMetadata {
                 id: ReportId([23; 16]),
                 time: 1_637_364_244,
-                extensions: vec![Extension::Unhandled {
+                draft02_extensions: Some(vec![Extension::Unhandled {
                     typ: 0xfff,
                     payload: b"some extension".to_vec(),
-                }],
+                }]),
             },
             public_share: b"public share".to_vec(),
             encrypted_input_shares: vec![
@@ -1327,7 +1334,7 @@ mod test {
                             report_metadata: ReportMetadata {
                                 id: ReportId([99; 16]),
                                 time: 1_637_361_337,
-                                extensions: Vec::default(),
+                                draft02_extensions: Some(Vec::default()),
                             },
                             public_share: b"public share".to_vec(),
                             encrypted_input_share: HpkeCiphertext {
@@ -1343,7 +1350,7 @@ mod test {
                             report_metadata: ReportMetadata {
                                 id: ReportId([17; 16]),
                                 time: 163_736_423,
-                                extensions: Vec::default(),
+                                draft02_extensions: Some(Vec::default()),
                             },
                             public_share: b"public share".to_vec(),
                             encrypted_input_share: HpkeCiphertext {
@@ -1374,7 +1381,7 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
                             time: 1_637_361_337,
-                            extensions: Vec::default(),
+                            draft02_extensions: Some(Vec::default()),
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1390,7 +1397,7 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
                             time: 163_736_423,
-                            extensions: Vec::default(),
+                            draft02_extensions: Some(Vec::default()),
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1424,7 +1431,7 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
                             time: 1_637_361_337,
-                            extensions: Vec::default(),
+                            draft02_extensions: None,
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1440,7 +1447,7 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
                             time: 163_736_423,
-                            extensions: Vec::default(),
+                            draft02_extensions: None,
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {

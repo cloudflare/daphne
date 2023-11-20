@@ -197,6 +197,13 @@ mod test {
         }};
     }
 
+    fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
+        match version {
+            DapVersion::Draft02 => Some(Vec::new()),
+            DapVersion::Draft07 => None,
+        }
+    }
+
     /// Check for transition failures due to:
     ///
     /// * the report having already been processed
@@ -1850,7 +1857,7 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now,
-            extensions: vec![],
+            draft02_extensions: empty_report_extensions_for_version(version),
         };
         // We declare these so the first call to early_metadata_check() is more readable.
         let processed = false;
@@ -1879,7 +1886,7 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now + 100,
-            extensions: vec![],
+            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -1889,7 +1896,7 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now + 101,
-            extensions: vec![],
+            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -1899,7 +1906,7 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now - 100,
-            extensions: vec![],
+            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -1909,7 +1916,7 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now - 101,
-            extensions: vec![],
+            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),

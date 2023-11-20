@@ -726,7 +726,10 @@ mod test {
             report_metadata: ReportMetadata {
                 id: ReportId(rng.gen()),
                 time: rng.gen(),
-                extensions: Vec::default(),
+                draft02_extensions: match version {
+                    DapVersion::Draft02 => Some(Vec::new()),
+                    DapVersion::Draft07 => None,
+                },
             },
             public_share: Vec::default(),
             encrypted_input_shares: Vec::default(),
