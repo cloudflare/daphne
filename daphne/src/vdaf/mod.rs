@@ -163,10 +163,10 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
         // draft, the plaintext also encodes the report extensions.
-        let input_share = match task_config.version {
-            DapVersion::Draft02 => encoded_input_share,
+        let (input_share, draft07_extensions) = match task_config.version {
+            DapVersion::Draft02 => (encoded_input_share, None),
             DapVersion::Draft07 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
-                Ok(input_share) => input_share.payload,
+                Ok(input_share) => (input_share.payload, Some(input_share.extensions)),
                 Err(..) => {
                     return Ok(Self::Rejected {
                         metadata,
@@ -175,6 +175,35 @@ impl<'req> EarlyReportStateConsumed<'req> {
                 }
             },
         };
+
+        // Handle report extensions.
+        {
+            let extensions = match task_config.version {
+                DapVersion::Draft07 => draft07_extensions.as_ref().unwrap(),
+                DapVersion::Draft02 => metadata.as_ref().draft02_extensions.as_ref().unwrap(),
+            };
+
+            let mut seen: HashSet<u16> = HashSet::with_capacity(extensions.len());
+            for extension in extensions {
+                if !seen.insert(extension.type_code()) {
+                    return Ok(Self::Rejected {
+                        metadata,
+                        failure: TransitionFailure::InvalidMessage,
+                    });
+                }
+                // draft02 compatibility: In the latest version, reports with unrecognized
+                // extensions are rejected; in draft02, the Aggregator is just supposed to ignore
+                // unrecognized extensions.
+                if task_config.version != DapVersion::Draft02
+                    && matches!(extension, Extension::Unhandled { .. })
+                {
+                    return Ok(Self::Rejected {
+                        metadata,
+                        failure: TransitionFailure::InvalidMessage,
+                    });
+                }
+            }
+        }
 
         Ok(Self::Ready {
             metadata,
@@ -1619,11 +1648,13 @@ mod test {
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
-            AggregationJobInitReq, BatchSelector, Interval, PartialBatchSelector, PrepareInit,
-            Report, ReportId, ReportShare, Transition, TransitionFailure, TransitionVar,
+            AggregationJobInitReq, BatchSelector, Extension, Interval, PartialBatchSelector,
+            PrepareInit, Report, ReportId, ReportShare, Transition, TransitionFailure,
+            TransitionVar,
         },
         test_versions,
         testing::AggregationJobTest,
+        vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
         DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
         DapAggregationJobUncommitted, DapError, DapHelperAggregationJobTransition,
         DapLeaderAggregationJobTransition, DapMeasurement, DapVersion, Prio3Config,
@@ -1641,8 +1672,6 @@ mod test {
     };
     use rand::prelude::*;
     use std::{borrow::Cow, fmt::Debug};
-
-    use super::{EarlyReportStateConsumed, EarlyReportStateInitialized};
 
     impl<M: Debug> DapLeaderAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
@@ -2431,6 +2460,90 @@ mod test {
 
         assert!(DapAggregationJobState::get_decoded(TEST_VDAF, b"invalid helper state").is_err());
     }
+
+    async fn heandle_unrecognized_report_extensions(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let report = t
+            .task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &t.client_hpke_config_list,
+                t.now,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                vec![Extension::Unhandled {
+                    typ: 0xffff,
+                    payload: b"some extension data".to_vec(),
+                }],
+                version,
+            )
+            .unwrap();
+
+        let consumed_report = EarlyReportStateConsumed::consume(
+            &t.leader_hpke_receiver_config,
+            true,
+            &t.task_id,
+            &t.task_config,
+            Cow::Borrowed(&report.report_metadata),
+            Cow::Borrowed(&report.public_share),
+            &report.encrypted_input_shares[0],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(consumed_report.metadata(), &report.report_metadata);
+
+        let expect_ready = match version {
+            // In draft02 we're meant to ignore extensions we don't recognize.
+            DapVersion::Draft02 => true,
+            // In the latest versioin we're meant to reject reports containing unrecognized
+            // extensions.
+            DapVersion::Draft07 => false,
+        };
+        assert_eq!(consumed_report.is_ready(), expect_ready);
+    }
+
+    async_test_versions! { heandle_unrecognized_report_extensions }
+
+    async fn heandle_repeated_report_extensions(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let report = t
+            .task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &t.client_hpke_config_list,
+                t.now,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                vec![
+                    Extension::Taskprov {
+                        payload: b"this payload shouldn't be interpretd yet".to_vec(),
+                    },
+                    Extension::Taskprov {
+                        payload: b"nor should this payload".to_vec(),
+                    },
+                ],
+                version,
+            )
+            .unwrap();
+
+        let consumed_report = EarlyReportStateConsumed::consume(
+            &t.leader_hpke_receiver_config,
+            true,
+            &t.task_id,
+            &t.task_config,
+            Cow::Borrowed(&report.report_metadata),
+            Cow::Borrowed(&report.public_share),
+            &report.encrypted_input_shares[0],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(consumed_report.metadata(), &report.report_metadata);
+        assert!(!consumed_report.is_ready());
+    }
+
+    async_test_versions! { heandle_repeated_report_extensions }
 
     impl AggregationJobTest {
         // Tweak the Helper's share so that decoding succeeds but preparation fails.

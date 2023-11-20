@@ -444,37 +444,6 @@ async fn leader_upload_taskprov() {
         "unrecognizedTask",
     )
     .await;
-
-    // Generate and upload a report with two copies of the taskprov extension
-    let payload = taskprov_task_config.get_encoded_with_param(&DapVersion::Draft02);
-    let task_id = compute_task_id(DapVersion::Draft02, &payload);
-    let extensions = vec![
-        Extension::Taskprov {
-            payload: payload.clone(),
-        },
-        Extension::Taskprov { payload },
-    ];
-    let report = task_config
-        .vdaf
-        .produce_report_with_extensions(
-            &hpke_config_list,
-            t.now,
-            &task_id,
-            DapMeasurement::U32Vec(vec![1; 10]),
-            extensions,
-            version,
-        )
-        .unwrap();
-    t.leader_post_expect_abort(
-        &client,
-        None, // dap_auth_token
-        path,
-        DapMediaType::Report,
-        report.get_encoded_with_param(&version),
-        400,
-        "invalidMessage",
-    )
-    .await;
 }
 
 async fn internal_leader_process(version: DapVersion) {
