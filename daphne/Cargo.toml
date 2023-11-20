@@ -17,10 +17,6 @@ readme = "../README.md"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bench]]
-name = "aggregation"
-harness = false
-
 [dependencies]
 async-trait.workspace = true
 assert_matches = { workspace = true, optional = true }
@@ -43,7 +39,6 @@ url.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
-criterion.workspace = true
 futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
