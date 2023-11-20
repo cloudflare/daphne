@@ -645,7 +645,7 @@ impl VdafConfig {
             draft02_task_id: task_id.for_request_payload(&version),
             report_metadata: metadata,
             public_share,
-            encrypted_input_shares,
+            encrypted_input_shares: encrypted_input_shares.try_into().unwrap(),
         })
     }
 

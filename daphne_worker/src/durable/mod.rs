@@ -684,7 +684,7 @@ mod test {
         reports_pending::PendingReport,
     };
     use daphne::{
-        messages::{BatchId, Report, ReportId, ReportMetadata, TaskId},
+        messages::{BatchId, HpkeCiphertext, Report, ReportId, ReportMetadata, TaskId},
         test_versions, DapBatchBucket, DapVersion,
     };
     use prio::codec::{ParameterizedDecode, ParameterizedEncode};
@@ -732,7 +732,18 @@ mod test {
                 },
             },
             public_share: Vec::default(),
-            encrypted_input_shares: Vec::default(),
+            encrypted_input_shares: [
+                HpkeCiphertext {
+                    config_id: 0,
+                    enc: Vec::default(),
+                    payload: Vec::default(),
+                },
+                HpkeCiphertext {
+                    config_id: 0,
+                    enc: Vec::default(),
+                    payload: Vec::default(),
+                },
+            ],
         };
 
         let pending_report = PendingReport {

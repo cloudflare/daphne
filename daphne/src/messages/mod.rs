@@ -229,7 +229,7 @@ pub struct Report {
     pub draft02_task_id: Option<TaskId>, // Set in draft02
     pub report_metadata: ReportMetadata,
     pub public_share: Vec<u8>,
-    pub encrypted_input_shares: Vec<HpkeCiphertext>,
+    pub encrypted_input_shares: [HpkeCiphertext; 2],
 }
 
 impl ParameterizedEncode<DapVersion> for Report {
@@ -243,7 +243,13 @@ impl ParameterizedEncode<DapVersion> for Report {
         }
         self.report_metadata.encode_with_param(version, bytes);
         encode_u32_bytes(bytes, &self.public_share);
-        encode_u32_items(bytes, &(), &self.encrypted_input_shares);
+        match version {
+            DapVersion::Draft02 => encode_u32_items(bytes, &(), &self.encrypted_input_shares),
+            DapVersion::Draft07 => {
+                self.encrypted_input_shares[0].encode(bytes);
+                self.encrypted_input_shares[1].encode(bytes);
+            }
+        }
     }
 }
 
@@ -261,7 +267,15 @@ impl ParameterizedDecode<DapVersion> for Report {
             draft02_task_id,
             report_metadata: ReportMetadata::decode_with_param(version, bytes)?,
             public_share: decode_u32_bytes(bytes)?,
-            encrypted_input_shares: decode_u32_items(&(), bytes)?,
+            encrypted_input_shares: match version {
+                DapVersion::Draft02 => decode_u32_items(&(), bytes)?
+                    .try_into()
+                    .map_err(|_| CodecError::UnexpectedValue)?,
+                DapVersion::Draft07 => [
+                    HpkeCiphertext::decode(bytes)?,
+                    HpkeCiphertext::decode(bytes)?,
+                ],
+            },
         })
     }
 }
@@ -1244,7 +1258,7 @@ mod test {
                 },
             },
             public_share: b"public share".to_vec(),
-            encrypted_input_shares: vec![
+            encrypted_input_shares: [
                 HpkeCiphertext {
                     config_id: 23,
                     enc: b"leader encapsulated key".to_vec(),
@@ -1279,7 +1293,7 @@ mod test {
                 }]),
             },
             public_share: b"public share".to_vec(),
-            encrypted_input_shares: vec![
+            encrypted_input_shares: [
                 HpkeCiphertext {
                     config_id: 23,
                     enc: b"leader encapsulated key".to_vec(),

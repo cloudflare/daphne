@@ -1267,18 +1267,6 @@ mod test {
             t.leader.handle_upload_req(&req).await,
             Err(DapAbort::UnrecognizedTask)
         );
-
-        // Construct an invalid report payload that only has one input share.
-        let mut report_one_input_share = t.gen_test_report(task_id).await;
-        report_one_input_share.encrypted_input_shares =
-            vec![report_one_input_share.encrypted_input_shares[0].clone()];
-        let req = t.gen_test_upload_req(report_one_input_share, task_id).await;
-
-        // Expect failure due to incorrect number of input shares
-        assert_matches!(
-            t.leader.handle_upload_req(&req).await,
-            Err(DapAbort::InvalidMessage { .. })
-        );
     }
 
     async_test_versions! { handle_upload_req_fail_send_invalid_report }
