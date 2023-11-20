@@ -77,8 +77,6 @@ use crate::{
     vdaf::{VdafAggregateShare, VdafPrepMessage, VdafPrepState, VdafVerifyKey},
 };
 use constants::DapMediaType;
-#[cfg(test)]
-use criterion as _;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use prio::{
