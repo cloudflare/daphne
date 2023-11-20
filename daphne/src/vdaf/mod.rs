@@ -37,7 +37,9 @@ use crate::{
 #[cfg(any(test, feature = "test-utils"))]
 use prio::field::FieldElement;
 use prio::{
-    codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+    codec::{
+        encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
+    },
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
         prio2::{Prio2PrepareShare, Prio2PrepareState},
@@ -50,6 +52,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    io::Cursor,
 };
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
@@ -63,6 +66,36 @@ const CTX_ROLE_HELPER: u8 = 3;
 
 pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO3: usize = 16;
 pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO2: usize = 32;
+
+// Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-07, Section 5.8. We do not
+// implement the "continue" message type because we only support 1-round VDAFs.
+enum PingPongMessageType {
+    Initialize = 0,
+    Finish = 2,
+}
+
+fn decode_ping_pong_framed(
+    bytes: &[u8],
+    expected_type: PingPongMessageType,
+) -> Result<&[u8], CodecError> {
+    let mut r = Cursor::new(bytes);
+
+    let message_type = u8::decode(&mut r)?;
+    if message_type != expected_type as u8 {
+        return Err(CodecError::UnexpectedValue);
+    }
+
+    let message_len = u32::decode(&mut r)?.try_into().unwrap();
+    let message_start = usize::try_from(r.position()).unwrap();
+    if bytes.len() - message_start < message_len {
+        return Err(CodecError::LengthPrefixTooBig(message_len));
+    }
+    if bytes.len() - message_start > message_len {
+        return Err(CodecError::BytesLeftOver(message_len));
+    }
+
+    Ok(&bytes[message_start..])
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
@@ -744,7 +777,7 @@ impl VdafConfig {
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapAbort> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
-        let mut seq = Vec::with_capacity(reports.len());
+        let mut prep_inits = Vec::with_capacity(reports.len());
         let mut consumed_reports = Vec::with_capacity(reports.len());
         let mut helper_shares = Vec::with_capacity(reports.len());
         for report in reports {
@@ -791,16 +824,25 @@ impl VdafConfig {
                     metadata,
                     public_share,
                     state,
-                    message,
+                    message: prep_share,
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
                     let (draft02_prep_share, draft07_payload) = match task_config.version {
-                        DapVersion::Draft02 => (Some(message), None),
-                        DapVersion::Draft07 => (
-                            None,
-                            Some(message.get_encoded_with_param(&task_config.version)),
-                        ),
+                        DapVersion::Draft02 => (Some(prep_share), None),
+                        DapVersion::Draft07 => {
+                            let mut outbound = Vec::with_capacity(
+                                prep_share
+                                    .encoded_len_with_param(&task_config.version)
+                                    .unwrap_or(0)
+                                    + 5,
+                            );
+                            // Add the ping-pong "initialize" message framing
+                            // (draft-irtf-cfrg-vdaf-07, Section 5.8).
+                            outbound.push(PingPongMessageType::Initialize as u8);
+                            encode_u32_items(&mut outbound, &task_config.version, &[prep_share]);
+                            (None, Some(outbound))
+                        }
                     };
 
                     states.push(AggregationJobReportState {
@@ -809,7 +851,7 @@ impl VdafConfig {
                         time: metadata.time,
                         report_id: metadata.id,
                     });
-                    seq.push(PrepareInit {
+                    prep_inits.push(PrepareInit {
                         report_share: ReportShare {
                             report_metadata: metadata.into_owned(),
                             public_share: public_share.into_owned(),
@@ -827,7 +869,7 @@ impl VdafConfig {
             }
         }
 
-        if seq.is_empty() {
+        if prep_inits.is_empty() {
             return Ok(DapLeaderAggregationJobTransition::Finished(
                 DapAggregateSpan::default(),
             ));
@@ -843,7 +885,7 @@ impl VdafConfig {
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
                 agg_param: Vec::default(),
                 part_batch_sel: part_batch_sel.clone(),
-                prep_inits: seq,
+                prep_inits,
             },
         ))
     }
@@ -1013,14 +1055,22 @@ impl VdafConfig {
                         state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
-                        let Some(ref leader_prep_share) = prep_init.draft07_payload else {
+                        let Some(ref leader_inbound) = prep_init.draft07_payload else {
                             return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
                             });
                         };
 
-                        let res = match self {
+                        // Decode the ping-pong "initialize" message framing.
+                        // (draft-irtf-cfrg-vdaf-07, Section 5.8).
+                        let leader_prep_share = decode_ping_pong_framed(
+                            leader_inbound,
+                            PingPongMessageType::Initialize,
+                        )
+                        .map_err(VdafError::Codec);
+
+                        let res = leader_prep_share.and_then(|leader_prep_share| match self {
                             Self::Prio3(prio3_config) => prio3_prep_finish_from_shares(
                                 prio3_config,
                                 1,
@@ -1034,7 +1084,7 @@ impl VdafConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
-                        };
+                        });
 
                         match res {
                             Ok((data, prep_msg)) => {
@@ -1045,7 +1095,13 @@ impl VdafConfig {
                                     metadata.time,
                                     data,
                                 )?;
-                                TransitionVar::Continued(prep_msg)
+
+                                let mut outbound = Vec::with_capacity(1 + prep_msg.len());
+                                // Add ping-pong "finish" message framing (draft-irtf-cfrg-vdaf-07,
+                                // Section 5.8).
+                                outbound.push(PingPongMessageType::Finish as u8);
+                                encode_u32_bytes(&mut outbound, &prep_msg);
+                                TransitionVar::Continued(outbound)
                             }
 
                             Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
@@ -1252,8 +1308,23 @@ impl VdafConfig {
             }
 
             let prep_msg = match &helper.var {
-                // TODO(cjpatton) issue #350: Square this with the wire format of the spec.
-                TransitionVar::Continued(payload) => payload,
+                TransitionVar::Continued(inbound) => {
+                    // Decode the ping-pong "finish" message frame (draft-irtf-cfrg-vdaf-07,
+                    // Section 5.8). Abort the aggregation job if not found.
+                    let Ok(prep_msg) =
+                        decode_ping_pong_framed(inbound, PingPongMessageType::Finish)
+                    else {
+                        // The Helper has done something wrong but may have already committed this
+                        // report to storage. If we just reject it, then a batch mismatch is
+                        // inevitable.
+                        return Err(DapAbort::InvalidMessage {
+                            detail: "The Helper's AggregationJobResp is invalid, but it may have already committed its state change. A batch mismatch is inevitable.".to_string(),
+                            task_id: Some(*task_id),
+                        });
+                    };
+
+                    prep_msg
+                }
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
@@ -2038,7 +2109,7 @@ mod test {
                         public_share: report0.public_share,
                         encrypted_input_share: report0.encrypted_input_shares[1].clone(),
                     },
-                    draft07_payload: None,
+                    draft07_payload: Some(b"malformed payload".to_vec()),
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -2046,7 +2117,7 @@ mod test {
                         public_share: report1.public_share,
                         encrypted_input_share: report1.encrypted_input_shares[1].clone(),
                     },
-                    draft07_payload: None,
+                    draft07_payload: Some(b"malformed payload".to_vec()),
                 },
             ],
         };
