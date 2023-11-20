@@ -615,10 +615,10 @@ impl VdafConfig {
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
         metadata.encode_with_param(&version, &mut aad);
-        // NOTE(cjpatton): In DAP-02, the tag-length prefix is not specified. However, the intent
-        // was to include the prefix, and it is specified unambiguoiusly in DAP-03. All of our
-        // partners for interop have agreed to include the prefix for DAP-02, so we have hard-coded
-        // it here.
+        // draft02 compatibility: In draft02, the tag-length prefix is not specified. However, the
+        // intent was to include the prefix, and it is specified unambiguoiusly in the latest
+        // version. All of our partners for interop have agreed to include the prefix for draft02,
+        // so we have hard-coded it here.
         encode_u32_bytes(&mut aad, &public_share);
 
         let mut encrypted_input_shares = Vec::with_capacity(input_shares.len());
