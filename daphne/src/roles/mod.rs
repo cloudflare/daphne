@@ -168,8 +168,8 @@ mod test {
         messages::{
             taskprov, AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, Interval, PartialBatchSelector, Query, Report, ReportId, ReportMetadata,
-            TaskId, Time, Transition, TransitionFailure, TransitionVar,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportId,
+            ReportMetadata, TaskId, Time, Transition, TransitionFailure, TransitionVar,
         },
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
@@ -1364,7 +1364,7 @@ mod test {
         let collect_resp = Collection {
             part_batch_sel: PartialBatchSelector::TimeInterval,
             report_count: 0,
-            interval: if version == DapVersion::Draft02 {
+            draft07_interval: if version == DapVersion::Draft02 {
                 None
             } else {
                 Some(Interval {
@@ -1372,7 +1372,18 @@ mod test {
                     duration: 2_000_000_000,
                 })
             },
-            encrypted_agg_shares: Vec::default(),
+            encrypted_agg_shares: [
+                HpkeCiphertext {
+                    config_id: Default::default(),
+                    enc: Default::default(),
+                    payload: Default::default(),
+                },
+                HpkeCiphertext {
+                    config_id: Default::default(),
+                    enc: Default::default(),
+                    payload: Default::default(),
+                },
+            ],
         };
 
         // Expect DapCollectJob::Pending due to pending collect job.

@@ -878,24 +878,23 @@ impl ParameterizedDecode<DapVersion> for CollectionReq {
 pub struct Collection {
     pub part_batch_sel: PartialBatchSelector,
     pub report_count: u64,
-    pub interval: Option<Interval>, // Not set in draft02
-    pub encrypted_agg_shares: Vec<HpkeCiphertext>,
+    pub draft07_interval: Option<Interval>, // Not set in draft02
+    pub encrypted_agg_shares: [HpkeCiphertext; 2],
 }
 
 impl ParameterizedEncode<DapVersion> for Collection {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.part_batch_sel.encode(bytes);
         self.report_count.encode(bytes);
-        match version {
-            DapVersion::Draft02 => {}
-            DapVersion::Draft07 => {
-                self.interval
-                    .as_ref()
-                    .expect("draft07: missing interval")
-                    .encode(bytes);
+        match (version, &self.draft07_interval) {
+            (DapVersion::Draft02, None) => encode_u32_items(bytes, &(), &self.encrypted_agg_shares),
+            (DapVersion::Draft07, Some(interval)) => {
+                interval.encode(bytes);
+                self.encrypted_agg_shares[0].encode(bytes);
+                self.encrypted_agg_shares[1].encode(bytes);
             }
+            _ => unreachable!("unhandled variant for version {version:?}"),
         };
-        encode_u32_items(bytes, &(), &self.encrypted_agg_shares);
     }
 }
 
@@ -904,14 +903,29 @@ impl ParameterizedDecode<DapVersion> for Collection {
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
+        let part_batch_sel = PartialBatchSelector::decode(bytes)?;
+        let report_count = u64::decode(bytes)?;
+        let (draft07_interval, encrypted_agg_shares) = match version {
+            DapVersion::Draft02 => (
+                None,
+                decode_u32_items(&(), bytes)?
+                    .try_into()
+                    .map_err(|_| CodecError::UnexpectedValue)?,
+            ),
+            DapVersion::Draft07 => (
+                Some(Interval::decode(bytes)?),
+                [
+                    HpkeCiphertext::decode(bytes)?,
+                    HpkeCiphertext::decode(bytes)?,
+                ],
+            ),
+        };
+
         Ok(Self {
-            part_batch_sel: PartialBatchSelector::decode(bytes)?,
-            report_count: u64::decode(bytes)?,
-            interval: match version {
-                DapVersion::Draft02 => None,
-                DapVersion::Draft07 => Some(Interval::decode(bytes)?),
-            },
-            encrypted_agg_shares: decode_u32_items(&(), bytes)?,
+            part_batch_sel,
+            report_count,
+            draft07_interval,
+            encrypted_agg_shares,
         })
     }
 }
