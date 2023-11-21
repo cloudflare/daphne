@@ -645,7 +645,7 @@ async fn leader_collect_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
-            collection.encrypted_agg_shares.clone(),
+            collection.encrypted_agg_shares.to_vec(),
             version,
         )
         .await
@@ -657,7 +657,7 @@ async fn leader_collect_ok(version: DapVersion) {
 
     if version != DapVersion::Draft02 {
         // Check that the time interval for the reports is correct.
-        let interval = collection.interval.as_ref().unwrap();
+        let interval = collection.draft07_interval.as_ref().unwrap();
         let low = t.task_config.quantized_time_lower_bound(time_min);
         let high = t.task_config.quantized_time_upper_bound(time_max);
         assert!(low < high);
@@ -1164,7 +1164,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             &t.task_id,
             &BatchSelector::FixedSizeByBatchId { batch_id },
             collection.report_count,
-            collection.encrypted_agg_shares.clone(),
+            collection.encrypted_agg_shares.to_vec(),
             version,
         )
         .await
@@ -1393,7 +1393,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
-            collection.encrypted_agg_shares.clone(),
+            collection.encrypted_agg_shares.to_vec(),
             version,
         )
         .await

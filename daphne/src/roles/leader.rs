@@ -519,7 +519,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         // For draft07 and later, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
-        let interval = match task_config.version {
+        let draft07_interval = match task_config.version {
             DapVersion::Draft02 => None,
             DapVersion::Draft07 => {
                 let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
@@ -540,8 +540,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let collection = Collection {
             part_batch_sel: batch_selector.into(),
             report_count: leader_agg_share.report_count,
-            interval,
-            encrypted_agg_shares: vec![leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
+            draft07_interval,
+            encrypted_agg_shares: [leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
         self.finish_collect_job(task_id, collect_id, &collection)
             .await?;

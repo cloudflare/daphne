@@ -1623,6 +1623,12 @@ impl VdafConfig {
         encrypted_agg_shares: Vec<HpkeCiphertext>,
         version: DapVersion,
     ) -> Result<DapAggregateResult, DapError> {
+        if encrypted_agg_shares.len() != 2 {
+            return Err(fatal_error!(
+                err = "unexpected number of encrypted aggregate shares"
+            ));
+        }
+
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
             DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
