@@ -1295,8 +1295,8 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
             var: VdafTypeVar::Prio2 { dimension: 10 },
         },
     };
-    let payload = taskprov_task_config.get_encoded_with_param(&DapVersion::Draft02);
-    let task_id = compute_task_id(DapVersion::Draft02, &payload);
+    let payload = taskprov_task_config.get_encoded_with_param(&version);
+    let task_id = compute_task_id(version, &payload);
     let task_config = DapTaskConfig::try_from_taskprov(
         version,
         &task_id.clone(),
