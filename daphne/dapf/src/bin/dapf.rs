@@ -268,6 +268,7 @@ async fn main() -> Result<()> {
                     &task_id,
                     &batch_selector,
                     collect_resp.report_count,
+                    &[],
                     collect_resp.encrypted_agg_shares.to_vec(),
                     version,
                 )

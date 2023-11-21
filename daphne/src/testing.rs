@@ -354,6 +354,7 @@ impl AggregationJobTest {
     pub fn produce_leader_encrypted_agg_share(
         &self,
         batch_selector: &BatchSelector,
+        agg_param: &[u8],
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.task_config
@@ -362,6 +363,7 @@ impl AggregationJobTest {
                 &self.task_config.collector_hpke_config,
                 &self.task_id,
                 batch_selector,
+                agg_param,
                 agg_share,
                 self.task_config.version,
             )
@@ -372,6 +374,7 @@ impl AggregationJobTest {
     pub fn produce_helper_encrypted_agg_share(
         &self,
         batch_selector: &BatchSelector,
+        agg_param: &[u8],
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.task_config
@@ -380,6 +383,7 @@ impl AggregationJobTest {
                 &self.task_config.collector_hpke_config,
                 &self.task_id,
                 batch_selector,
+                agg_param,
                 agg_share,
                 self.task_config.version,
             )
@@ -391,6 +395,7 @@ impl AggregationJobTest {
         &self,
         batch_selector: &BatchSelector,
         report_count: u64,
+        agg_param: &[u8],
         enc_agg_shares: Vec<HpkeCiphertext>,
     ) -> DapAggregateResult {
         self.task_config
@@ -400,6 +405,7 @@ impl AggregationJobTest {
                 &self.task_id,
                 batch_selector,
                 report_count,
+                agg_param,
                 enc_agg_shares,
                 self.task_config.version,
             )
@@ -409,6 +415,7 @@ impl AggregationJobTest {
 
     /// Generate a set of reports, aggregate them, and unshard the result.
     pub async fn roundtrip(&mut self, measurements: Vec<DapMeasurement>) -> DapAggregateResult {
+        let agg_param = &[];
         let batch_selector = BatchSelector::TimeInterval {
             batch_interval: Interval {
                 start: self.now,
@@ -461,16 +468,20 @@ impl AggregationJobTest {
         // Leader: Aggregation
         let leader_agg_share = leader_agg_span.collapsed();
         let leader_encrypted_agg_share =
-            self.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
+            self.produce_leader_encrypted_agg_share(&batch_selector, agg_param, &leader_agg_share);
 
         // Helper: Aggregation
-        let helper_encrypted_agg_share =
-            self.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_span.collapsed());
+        let helper_encrypted_agg_share = self.produce_helper_encrypted_agg_share(
+            &batch_selector,
+            agg_param,
+            &helper_agg_span.collapsed(),
+        );
 
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
             &batch_selector,
             report_count,
+            agg_param,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
         .await

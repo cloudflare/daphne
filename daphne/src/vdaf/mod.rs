@@ -182,7 +182,6 @@ impl<'req> EarlyReportStateConsumed<'req> {
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad);
         metadata.encode_with_param(&task_config.version, &mut aad);
-        // TODO spec: Consider folding the public share into a field called "header".
         encode_u32_bytes(&mut aad, public_share.as_ref());
 
         let encoded_input_share = match decrypter
@@ -1578,10 +1577,19 @@ impl VdafConfig {
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
+        agg_param: &[u8],
         agg_share: &DapAggregateShare,
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(true, hpke_config, task_id, batch_sel, agg_share, version)
+        produce_encrypted_agg_share(
+            true,
+            hpke_config,
+            task_id,
+            batch_sel,
+            agg_param,
+            agg_share,
+            version,
+        )
     }
 
     /// Like [`produce_leader_encrypted_agg_share`](Self::produce_leader_encrypted_agg_share) but run by the Helper in response to an
@@ -1591,10 +1599,19 @@ impl VdafConfig {
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
+        agg_param: &[u8],
         agg_share: &DapAggregateShare,
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapAbort> {
-        produce_encrypted_agg_share(false, hpke_config, task_id, batch_sel, agg_share, version)
+        produce_encrypted_agg_share(
+            false,
+            hpke_config,
+            task_id,
+            batch_sel,
+            agg_param,
+            agg_share,
+            version,
+        )
     }
 
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -1612,14 +1629,14 @@ impl VdafConfig {
     /// Aggregators. The first encrypted aggregate shares must be the Leader's.
     ///
     /// * `version` is the `DapVersion` to use.
-    //
-    // TODO spec: Allow the collector to have multiple HPKE public keys (the way Aggregators do).
+    #[allow(clippy::too_many_arguments)]
     pub async fn consume_encrypted_agg_shares(
         &self,
         decrypter: &impl HpkeDecrypter,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
         report_count: u64,
+        agg_param: &[u8],
         encrypted_agg_shares: Vec<HpkeCiphertext>,
         version: DapVersion,
     ) -> Result<DapAggregateResult, DapError> {
@@ -1641,6 +1658,9 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad);
+        if version != DapVersion::Draft02 {
+            encode_u32_bytes(&mut aad, agg_param);
+        }
         batch_sel.encode(&mut aad);
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
@@ -1680,6 +1700,7 @@ fn produce_encrypted_agg_share(
     hpke_config: &HpkeConfig,
     task_id: &TaskId,
     batch_sel: &BatchSelector,
+    agg_param: &[u8],
     agg_share: &DapAggregateShare,
     version: DapVersion,
 ) -> Result<HpkeCiphertext, DapAbort> {
@@ -1703,9 +1724,11 @@ fn produce_encrypted_agg_share(
     }); // Sender role
     info.push(CTX_ROLE_COLLECTOR); // Receiver role
 
-    // TODO spec: Consider adding agg param to AAD.
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad);
+    if version != DapVersion::Draft02 {
+        encode_u32_bytes(&mut aad, agg_param);
+    }
     batch_sel.encode(&mut aad);
 
     let (enc, payload) = hpke_config
@@ -2499,13 +2522,14 @@ mod test {
             },
         };
         let leader_encrypted_agg_share =
-            t.produce_leader_encrypted_agg_share(&batch_selector, &leader_agg_share);
+            t.produce_leader_encrypted_agg_share(&batch_selector, &[], &leader_agg_share);
         let helper_encrypted_agg_share =
-            t.produce_helper_encrypted_agg_share(&batch_selector, &helper_agg_share);
+            t.produce_helper_encrypted_agg_share(&batch_selector, &[], &helper_agg_share);
         let agg_res = t
             .consume_encrypted_agg_shares(
                 &batch_selector,
                 50,
+                &[],
                 vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
             )
             .await;
