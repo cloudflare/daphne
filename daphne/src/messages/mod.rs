@@ -995,8 +995,6 @@ impl ParameterizedDecode<DapVersion> for AggregateShareReq {
 }
 
 /// An aggregate-share response.
-//
-// TODO Add serialization tests.
 #[derive(Debug)]
 pub struct AggregateShare {
     pub encrypted_agg_share: HpkeCiphertext,

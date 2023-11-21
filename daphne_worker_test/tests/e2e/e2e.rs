@@ -645,6 +645,7 @@ async fn leader_collect_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
+            &collect_req.agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
@@ -1164,6 +1165,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             &t.task_id,
             &BatchSelector::FixedSizeByBatchId { batch_id },
             collection.report_count,
+            &collect_req.agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
@@ -1393,6 +1395,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
+            &collect_req.agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )

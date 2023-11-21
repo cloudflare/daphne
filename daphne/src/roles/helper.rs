@@ -393,6 +393,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
             &task_config.collector_hpke_config,
             task_id,
             &agg_share_req.batch_sel,
+            &agg_share_req.agg_param,
             &agg_share,
             task_config.version,
         )?;

@@ -481,6 +481,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             &task_config.collector_hpke_config,
             task_id,
             &batch_selector,
+            &collect_req.agg_param,
             &leader_agg_share,
             task_config.version,
         )?;
