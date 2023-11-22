@@ -34,7 +34,7 @@ DAP_GLOBAL_CONFIG = """{
      "min_batch_interval_start": 259200,
      "max_batch_interval_end": 259200,
      "supported_hpke_kems": ["x25519_hkdf_sha256"],
-     "taskprov_version": "v02"
+     "allow_taskprov": true
 }"""
 DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
 DAP_DEPLOYMENT = "dev"
@@ -114,8 +114,7 @@ DAP_GLOBAL_CONFIG = """{
   "min_batch_interval_start": 259200,
   "max_batch_interval_end": 259200,
   "supported_hpke_kems": ["x25519_hkdf_sha256"],
-  "allow_taskprov": true,
-  "taskprov_version": "v02"
+  "allow_taskprov": true
 }"""
 DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
 DAP_DEPLOYMENT = "dev"
