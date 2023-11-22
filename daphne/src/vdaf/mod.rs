@@ -109,7 +109,10 @@ pub(crate) enum VdafError {
 /// A VDAF verification key.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(deepsize::DeepSizeOf, PartialEq, Debug)
+)]
 pub enum VdafVerifyKey {
     Prio3(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO3]),
     Prio2(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO2]),
