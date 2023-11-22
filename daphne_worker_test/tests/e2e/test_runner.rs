@@ -106,7 +106,7 @@ impl TestRunner {
             vdaf: VDAF_CONFIG.clone(),
             vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
-            taskprov: false,
+            method: Default::default(),
         };
 
         // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
@@ -415,6 +415,7 @@ impl TestRunner {
         client: &reqwest::Client,
         path: &str,
         media_type: DapMediaType,
+        taskprov: Option<&str>,
         data: Vec<u8>,
     ) {
         // draft02 always POSTs
@@ -433,6 +434,12 @@ impl TestRunner {
                 .parse()
                 .unwrap(),
         );
+        if let Some(taskprov_advertisement) = taskprov {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+            );
+        }
 
         let resp = client
             .put(url.as_str())
@@ -526,11 +533,13 @@ impl TestRunner {
     pub async fn leader_post_collect_using_token(
         &self,
         client: &reqwest::Client,
-        data: Vec<u8>,
         token: &str,
+        taskprov: Option<&str>,
+        task_id: Option<&TaskId>,
+        data: Vec<u8>,
     ) -> Url {
-        let url_suffix = self.collect_url_suffix();
-        let url = self.leader_url.join(&url_suffix).unwrap();
+        let path = self.collect_path_for_task(task_id.unwrap_or(&self.task_id));
+        let url = self.leader_url.join(&path).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -545,6 +554,13 @@ impl TestRunner {
             reqwest::header::HeaderName::from_static("dap-auth-token"),
             reqwest::header::HeaderValue::from_str(token).unwrap(),
         );
+        if let Some(taskprov_advertisement) = taskprov {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+            );
+        }
+
         let builder = if self.version == DapVersion::Draft02 {
             client.post(url.as_str())
         } else {
@@ -578,7 +594,7 @@ impl TestRunner {
     }
 
     pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
-        self.leader_post_collect_using_token(client, data, &self.collector_bearer_token)
+        self.leader_post_collect_using_token(client, &self.collector_bearer_token, None, None, data)
             .await
     }
 
@@ -681,22 +697,22 @@ impl TestRunner {
         }
     }
 
-    pub fn upload_path(&self) -> String {
-        self.upload_path_for_task(&self.task_id)
+    pub fn collect_path_for_task(&self, task_id: &TaskId) -> String {
+        match self.version {
+            DapVersion::Draft02 => "collect".to_string(),
+            DapVersion::Draft07 => {
+                let collection_job_id = CollectionJobId(thread_rng().gen());
+                format!(
+                    "tasks/{}/collection_jobs/{}",
+                    task_id.to_base64url(),
+                    collection_job_id.to_base64url()
+                )
+            }
+        }
     }
 
-    pub fn collect_url_suffix(&self) -> String {
-        if self.version == DapVersion::Draft02 {
-            "collect".to_string()
-        } else {
-            let mut rng = thread_rng();
-            let collect_job_id = CollectionJobId(rng.gen());
-            format!(
-                "tasks/{}/collection_jobs/{}",
-                self.task_id.to_base64url(),
-                collect_job_id.to_base64url()
-            )
-        }
+    pub fn upload_path(&self) -> String {
+        self.upload_path_for_task(&self.task_id)
     }
 
     pub async fn poll_collection_url(

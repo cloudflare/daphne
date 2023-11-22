@@ -162,18 +162,18 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
         messages::{
-            self, encode_base64url, AggregateShareReq, AggregationJobContinueReq,
-            AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector, Collection,
-            CollectionJobId, CollectionReq, Extension, HpkeCiphertext, Interval,
-            PartialBatchSelector, Query, Report, ReportId, ReportMetadata, TaskId, Time,
-            Transition, TransitionFailure, TransitionVar,
+            AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
+            AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportId,
+            ReportMetadata, TaskId, Time, Transition, TransitionFailure, TransitionVar,
         },
-        taskprov, test_versions,
+        test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
         DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
         DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
-        DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config, VdafConfig,
+        DapTaskConfig, DapTaskParameters, DapVersion, MetaAggregationJobId, Prio3Config,
+        VdafConfig,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -294,7 +294,7 @@ mod test {
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config.clone(),
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
-                    taskprov: false,
+                    method: Default::default(),
                 },
             );
             tasks.insert(
@@ -310,7 +310,7 @@ mod test {
                     query: DapQueryConfig::FixedSize { max_batch_size: 2 },
                     vdaf: vdaf_config.clone(),
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
-                    taskprov: false,
+                    method: Default::default(),
                 },
             );
             tasks.insert(
@@ -326,7 +326,7 @@ mod test {
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
-                    taskprov: false,
+                    method: Default::default(),
                 },
             );
 
@@ -397,7 +397,7 @@ mod test {
                         VdafConfig::Prio3(_) => VdafVerifyKey::Prio3(rng.gen()),
                     },
                     vdaf,
-                    taskprov: false,
+                    method: Default::default(),
                 },
             );
             task_id
@@ -726,7 +726,7 @@ mod test {
         ) -> DapRequest<BearerToken> {
             let mut rng = thread_rng();
             let collect_job_id = CollectionJobId(rng.gen());
-            let sender_auth = if task_config.taskprov {
+            let sender_auth = if task_config.method_is_taskprov() {
                 Some(self.taskprov_collector_token.clone())
             } else {
                 Some(self.collector_token.clone())
@@ -1755,58 +1755,20 @@ mod test {
     async fn e2e_taskprov(version: DapVersion) {
         let t = Test::new(version);
 
-        let (task_id, task_config, taskprov_advertisement, taskprov_report_extension_payload) = {
-            // Author: Specify the taskprov config.
-            let taskprov_config = messages::taskprov::TaskConfig {
-                task_info: "cool task".as_bytes().to_vec(),
-                leader_url: messages::taskprov::UrlBytes {
-                    bytes: b"https://leader.com/".to_vec(),
-                },
-                helper_url: messages::taskprov::UrlBytes {
-                    bytes: b"http://helper.org:8788/".to_vec(),
-                },
-                query_config: messages::taskprov::QueryConfig {
-                    time_precision: 3600,
-                    max_batch_query_count: 1,
-                    min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
-                },
-                task_expiration: t.now + 86400 * 14,
-                vdaf_config: messages::taskprov::VdafConfig {
-                    dp_config: messages::taskprov::DpConfig::None,
-                    var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
-                },
-            };
-
-            let encoded_taskprov_config = taskprov_config.get_encoded_with_param(&version);
-            let task_id = taskprov::compute_task_id(version, &encoded_taskprov_config);
-
-            // Compute the DAP task config.
-            let task_config = DapTaskConfig::try_from_taskprov(
+        let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
+            DapTaskParameters {
                 version,
-                &task_id,
-                taskprov_config,
+                min_batch_size: 1,
+                query: DapQueryConfig::FixedSize { max_batch_size: 2 },
+                ..Default::default()
+            }
+            .to_config_with_taskprov(
+                b"cool task".to_vec(),
+                t.now,
                 &t.leader.taskprov_vdaf_verify_key_init,
                 &t.leader.collector_hpke_config,
             )
             .unwrap();
-
-            let (taskprov_advertisement, taskprov_report_extension_payload) = match version {
-                DapVersion::Draft07 => {
-                    (Some(encode_base64url(&encoded_taskprov_config)), Vec::new())
-                }
-                // draft02 compatibility: The taskprov config is advertised in an HTTP header in
-                // the latest draft. In draft02, it is carried by a report extension.
-                DapVersion::Draft02 => (None, encoded_taskprov_config),
-            };
-
-            (
-                task_id,
-                task_config,
-                taskprov_advertisement,
-                taskprov_report_extension_payload,
-            )
-        };
 
         // Clients: Send upload request to Leader.
         let hpke_config_list = [
@@ -1866,8 +1828,13 @@ mod test {
         };
         t.run_col_job(&task_id, &query).await.unwrap();
 
+        let agg_job_req_count = match version {
+            DapVersion::Draft02 => 2,
+            DapVersion::Draft07 => 1,
+        };
+
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,

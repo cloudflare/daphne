@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! End-to-end tests for daphne.
-use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
+use super::test_runner::TestRunner;
 use daphne::{
     async_test_versions,
     constants::DapMediaType,
@@ -14,7 +14,8 @@ use daphne::{
         Report, ReportId, ReportMetadata, TaskId,
     },
     taskprov::compute_task_id,
-    DapAggregateResult, DapMeasurement, DapTaskConfig, DapVersion,
+    DapAggregateResult, DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters,
+    DapVersion,
 };
 use daphne_worker::DaphneWorkerReportSelector;
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
@@ -185,6 +186,7 @@ async fn leader_upload(version: DapVersion) {
         &client,
         &path,
         DapMediaType::Report,
+        None,
         report.get_encoded_with_param(&version),
     )
     .await;
@@ -372,7 +374,7 @@ async fn leader_upload_taskprov() {
             },
             query_config: QueryConfig {
                 time_precision: 0x01,
-                max_batch_query_count: 128,
+                max_batch_query_count: 1,
                 min_batch_size: 1024,
                 var: QueryConfigVar::FixedSize {
                     max_batch_size: 2048,
@@ -468,6 +470,7 @@ async fn internal_leader_process(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -521,6 +524,7 @@ async fn leader_process_min_agg_rate(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -574,6 +578,7 @@ async fn leader_collect_ok(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -715,6 +720,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -779,6 +785,7 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -884,7 +891,7 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
-    let path = &t.collect_url_suffix();
+    let path = &t.collect_path_for_task(&t.task_id);
 
     // Start of batch interval does not align with time_precision.
     let collect_req = CollectionReq {
@@ -974,6 +981,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1039,7 +1047,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    let path = t.collect_url_suffix();
+    let path = &t.collect_path_for_task(&t.task_id);
     if t.version == DapVersion::Draft02 {
         t.leader_post_expect_abort(
             &client,
@@ -1090,6 +1098,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1191,6 +1200,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             &client,
             &path,
             DapMediaType::Report,
+            None,
             t.task_config
                 .vdaf
                 .produce_report(
@@ -1223,7 +1233,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         t.leader_post_expect_abort(
             &client,
             Some(&t.collector_bearer_token),
-            &t.collect_url_suffix(),
+            &t.collect_path_for_task(&t.task_id),
             DapMediaType::CollectReq,
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
@@ -1241,7 +1251,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         t.leader_put_expect_abort(
             &client,
             Some(&t.collector_bearer_token),
-            &t.collect_url_suffix(),
+            &t.collect_path_for_task(&t.task_id),
             DapMediaType::CollectReq,
             CollectionReq {
                 draft02_task_id: t.collect_task_id_field(),
@@ -1277,49 +1287,37 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
-    let taskprov_task_config = TaskConfig {
-        task_info: "".as_bytes().to_vec(),
-        leader_url: UrlBytes {
-            bytes: t.task_config.leader_url.as_str().as_bytes().to_vec(),
-        },
-        helper_url: UrlBytes {
-            bytes: t.task_config.helper_url.as_str().as_bytes().to_vec(),
-        },
-        query_config: QueryConfig {
-            time_precision: TIME_PRECISION,
-            max_batch_query_count: 65535,
-            min_batch_size: u32::try_from(MIN_BATCH_SIZE).unwrap(),
-            var: QueryConfigVar::TimeInterval,
-        },
-        task_expiration: t.now + 86400 * 14,
-        vdaf_config: VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio2 { dimension: 10 },
-        },
-    };
-    let payload = taskprov_task_config.get_encoded_with_param(&version);
-    let task_id = compute_task_id(version, &payload);
-    let task_config = DapTaskConfig::try_from_taskprov(
-        version,
-        &task_id.clone(),
-        taskprov_task_config.clone(),
-        &t.taskprov_vdaf_verify_key_init,
-        &t.taskprov_collector_hpke_receiver.config,
-    )
-    .unwrap();
+    let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
+        DapTaskParameters {
+            version,
+            min_batch_size: 10,
+            query: DapQueryConfig::TimeInterval,
+            leader_url: t.task_config.leader_url.clone(),
+            helper_url: t.task_config.helper_url.clone(),
+            ..Default::default()
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            t.now,
+            &t.taskprov_vdaf_verify_key_init,
+            &t.taskprov_collector_hpke_receiver.config,
+        )
+        .unwrap();
+
     let path = t.upload_path_for_task(&task_id);
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov {
-            payload: payload.clone(),
+            payload: taskprov_report_extension_payload.clone(),
         }];
         let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
             DapMediaType::Report,
+            taskprov_advertisement.as_deref(),
             task_config
                 .vdaf
                 .produce_report_with_extensions(
@@ -1347,8 +1345,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let collect_uri = t
         .leader_post_collect_using_token(
             &client,
+            "I am the collector!", // DAP_TASKPROV_COLLECTOR_AUTH
+            taskprov_advertisement.as_deref(),
+            Some(&task_id),
             collect_req.get_encoded_with_param(&t.version),
-            "I am the collector!", // Keep in sync with wrangler.toml
         )
         .await;
     println!("collect_uri: {}", collect_uri);

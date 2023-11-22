@@ -96,7 +96,7 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
         task_config: &DapTaskConfig,
     ) -> std::result::Result<Option<BearerTokenKvPair<'s>>, DapError> {
         if let Some(ref taskprov_config) = self.config().taskprov {
-            if self.get_global_config().allow_taskprov && task_config.taskprov {
+            if self.get_global_config().allow_taskprov && task_config.method_is_taskprov() {
                 return Ok(Some(BearerTokenKvPair::new(
                     task_id,
                     taskprov_config.leader_auth.as_ref(),
@@ -115,7 +115,7 @@ impl<'srv> BearerTokenProvider for DaphneWorker<'srv> {
         task_config: &DapTaskConfig,
     ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         if let Some(ref taskprov_config) = self.config().taskprov {
-            if self.get_global_config().allow_taskprov && task_config.taskprov {
+            if self.get_global_config().allow_taskprov && task_config.method_is_taskprov() {
                 return Ok(Some(BearerTokenKvPair::new(
                     task_id,
                     taskprov_config
