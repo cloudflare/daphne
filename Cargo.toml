@@ -25,16 +25,17 @@ cap = "0.1.2"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 deepsize = { version = "0.2.0" }
 futures = "0.3.29"
-getrandom = { version = "0.2.11", features = ["js"] } # Required for prio
+getrandom = { version = "0.2.11", features = ["js", "std"] } # Required for prio
 hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "=0.1.0"
 hpke-rs-crypto = "=0.1.1"
 hpke-rs-rust-crypto = "=0.1.1"
 matchit = "0.7.3"
 paste = "1.0.14"
-prio = "0.15.3"
+prio = { git = "https://github.com/divviup/libprio-rs", rev = "46e8b8bd3c9aed1a1b674e95c49fefeae737e06b" }
 prometheus = "0.13.3"
 rand = "0.8.5"
+rand_core = "0.6.4"
 reqwest = "0.11.22"
 replace_with = "0.1.7"
 ring = "0.16.20"
