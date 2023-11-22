@@ -55,7 +55,7 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
                         Ok(batch_id) => {
                             Response::from_bytes(batch_id.to_base64url().as_bytes().to_owned())
                         }
-                        Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
+                        Err(e) => daph.state.dap_abort_to_worker_response(e),
                     }
                 },
             )
@@ -71,7 +71,7 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
                 .await
             {
                 Ok(()) => Response::empty(),
-                Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
+                Err(e) => daph.state.dap_abort_to_worker_response(e),
             }
         })
         // Endpoints for draft-dcook-ppm-dap-interop-test-design-02

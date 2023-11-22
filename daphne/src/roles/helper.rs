@@ -50,7 +50,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         req: &'req DapRequest<S>,
         metrics: &DaphneMetrics,
         task_id: &TaskId,
-    ) -> Result<DapResponse, DapAbort> {
+    ) -> Result<DapResponse, DapError> {
         let agg_job_init_req =
             AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
                 .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
@@ -88,7 +88,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         detail: "some reports include the taskprov extensions and some do not"
                             .to_string(),
                         task_id: Some(*task_id),
-                    });
+                    }
+                    .into());
                 }
             };
             resolve_taskprov(self, task_id, req, first_metadata).await?;
@@ -105,14 +106,15 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
                 task_id: *task_id,
-            });
+            }
+            .into());
         }
 
         let agg_job_id = resolve_agg_job_id(req, agg_job_init_req.draft02_agg_job_id.as_ref())?;
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version));
+            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
         }
 
         // Ensure we know which batch the request pertains to.
@@ -140,7 +142,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                         metrics,
                     )?
                 else {
-                    return Err(DapAbort::from(fatal_error!(err = "unexpected transition")));
+                    return Err(fatal_error!(err = "unexpected transition"));
                 };
 
                 if !self
@@ -150,7 +152,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     // TODO spec: Consider an explicit abort for this case.
                     return Err(DapAbort::BadRequest(
                         "unexpected message for aggregation job (already exists)".into(),
-                    ));
+                    )
+                    .into());
                 }
                 metrics.agg_job_started_inc();
                 agg_job_resp
@@ -173,9 +176,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                                 metrics,
                             )?
                         else {
-                            return Err(DapAbort::from(fatal_error!(
-                                err = "unexpected transition"
-                            )));
+                            return Err(fatal_error!(err = "unexpected transition"));
                         };
                         Ok((agg_span, agg_job_resp))
                     },
@@ -209,7 +210,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         req: &'req DapRequest<S>,
         metrics: &DaphneMetrics,
         task_id: &TaskId,
-    ) -> Result<DapResponse, DapAbort> {
+    ) -> Result<DapResponse, DapError> {
         if self.get_global_config().allow_taskprov {
             resolve_taskprov(self, task_id, req, None).await?;
         }
@@ -224,12 +225,13 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
                 task_id: *task_id,
-            });
+            }
+            .into());
         }
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version));
+            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
         }
 
         let agg_job_cont_req =
@@ -290,7 +292,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
     }
 
     /// Handle a request pertaining to an aggregation job.
-    async fn handle_agg_job_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn handle_agg_job_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
         let metrics = self.metrics();
         let task_id = req.task_id()?;
 
@@ -302,13 +304,13 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 self.handle_agg_job_cont_req(req, metrics, task_id).await
             }
             //TODO spec: Specify this behavior.
-            _ => Err(DapAbort::BadRequest("unexpected media type".into())),
+            _ => Err(DapAbort::BadRequest("unexpected media type".into()).into()),
         }
     }
 
     /// Handle a request for an aggregate share. This is called by the Leader to complete a
     /// collection job.
-    async fn handle_agg_share_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn handle_agg_share_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
         let now = self.get_current_time();
         let metrics = self.metrics();
         let task_id = req.task_id()?;
@@ -330,12 +332,13 @@ pub trait DapHelper<S>: DapAggregator<S> {
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
                 task_id: *task_id,
-            });
+            }
+            .into());
         }
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version));
+            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
         }
 
         let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
@@ -368,7 +371,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     agg_share.report_count,
                     hex::encode(agg_share.checksum)),
                 task_id: *task_id,
-            });
+            }.into());
         }
 
         // Check the batch size.
@@ -382,7 +385,8 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     agg_share.report_count, task_config.min_batch_size
                 ),
                 task_id: *task_id,
-            });
+            }
+            .into());
         }
 
         // Mark each aggregated report as collected.
@@ -468,9 +472,9 @@ async fn finish_agg_job_and_aggregate<S>(
         &HashMap<ReportId, ReportProcessedStatus>,
     ) -> Result<
         (DapAggregateSpan<DapAggregateShare>, AggregationJobResp),
-        DapAbort,
+        DapError,
     >,
-) -> Result<AggregationJobResp, DapAbort> {
+) -> Result<AggregationJobResp, DapError> {
     // This loop is intended to run at most once on the "happy path". The intent is as follows:
     //
     // - try to aggregate the output shares into an `DapAggregateShareSpan`
@@ -522,7 +526,7 @@ async fn finish_agg_job_and_aggregate<S>(
                 // and if this error doesn't manifest itself all reports will be successfully
                 // aggregated. Which means that no reports will be lost in a such a state that
                 // they can never be aggregated.
-                (Err(e), _) => return Err(e.into()),
+                (Err(e), _) => return Err(e),
             }
         }
         if !inc_restart_metric.is_completed() {
@@ -541,9 +545,7 @@ async fn finish_agg_job_and_aggregate<S>(
 
     // We need to prevent an attacker from keeping this loop running for too long, potentially
     // enabling an DOS attack.
-    Err(DapAbort::BadRequest(
-        "AggregationJobContinueReq contained too many replays".into(),
-    ))
+    Err(DapAbort::BadRequest("AggregationJobContinueReq contained too many replays".into()).into())
 }
 
 #[cfg(test)]

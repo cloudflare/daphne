@@ -146,7 +146,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     async fn send_http_put(&self, req: DapRequest<S>) -> Result<DapResponse, DapError>;
 
     /// Handle a report from a Client.
-    async fn handle_upload_req(&self, req: &DapRequest<S>) -> Result<(), DapAbort> {
+    async fn handle_upload_req(&self, req: &DapRequest<S>) -> Result<(), DapError> {
         let metrics = self.metrics();
         let task_id = req.task_id()?;
         debug!("upload for task {task_id}");
@@ -167,10 +167,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.as_ref().version != req.version {
-            return Err(DapAbort::version_mismatch(
-                req.version,
-                task_config.as_ref().version,
-            ));
+            return Err(
+                DapAbort::version_mismatch(req.version, task_config.as_ref().version).into(),
+            );
         }
 
         if report.encrypted_input_shares.len() != 2 {
@@ -180,7 +179,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                     report.encrypted_input_shares.len()
                 ),
                 task_id: Some(*task_id),
-            });
+            }
+            .into());
         }
 
         // Check that the indicated HpkeConfig is present.
@@ -192,12 +192,13 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         {
             return Err(DapAbort::ReportRejected {
                 detail: "No current HPKE configuration matches the indicated ID.".into(),
-            });
+            }
+            .into());
         }
 
         // Check that the task has not expired.
         if report.report_metadata.time >= task_config.as_ref().expiration {
-            return Err(DapAbort::ReportTooLate);
+            return Err(DapAbort::ReportTooLate.into());
         }
 
         // Store the report for future processing. At this point, the report may be rejected if
@@ -211,7 +212,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
     /// Handle a collect job from the Collector. The response is the URI that the Collector will
     /// poll later on to get the collection.
-    async fn handle_collect_job_req(&self, req: &DapRequest<S>) -> Result<Url, DapAbort> {
+    async fn handle_collect_job_req(&self, req: &DapRequest<S>) -> Result<Url, DapError> {
         let now = self.get_current_time();
         let metrics = self.metrics();
         let task_id = req.task_id()?;
@@ -234,7 +235,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             return Err(DapAbort::UnauthorizedRequest {
                 detail: reason,
                 task_id: *task_id,
-            });
+            }
+            .into());
         }
 
         let mut collect_req =
@@ -243,7 +245,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version));
+            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
         }
 
         if collect_req.query == Query::FixedSizeCurrentBatch {
@@ -283,7 +285,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 Some(*collect_job_id)
             }
             (DapVersion::Draft07, DapResource::Undefined) => {
-                return Err(DapAbort::BadRequest("undefined resource".into()));
+                return Err(DapAbort::BadRequest("undefined resource".into()).into());
             }
             _ => unreachable!("unhandled resource {:?}", req.resource),
         };
@@ -309,7 +311,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-    ) -> Result<u64, DapAbort> {
+    ) -> Result<u64, DapError> {
         let metrics = self.metrics();
 
         // Prepare AggregationJobInitReq.
@@ -338,7 +340,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             }
             DapLeaderAggregationJobTransition::Finished(..)
             | DapLeaderAggregationJobTransition::Uncommitted(..) => {
-                return Err(fatal_error!(err = "unexpected state transition (uncommitted)").into())
+                return Err(fatal_error!(
+                    err = "unexpected state transition (uncommitted)"
+                ))
             }
         };
         let method = if task_config.version != DapVersion::Draft02 {
@@ -421,7 +425,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 }
             }
             DapLeaderAggregationJobTransition::Continued(..) => {
-                return Err(fatal_error!(err = "unexpected state transition (continue)").into())
+                return Err(fatal_error!(err = "unexpected state transition (continue)"))
             }
         };
 
@@ -460,7 +464,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         collect_id: &CollectionJobId,
         task_config: &DapTaskConfig,
         collect_req: &CollectionReq,
-    ) -> Result<u64, DapAbort> {
+    ) -> Result<u64, DapError> {
         let metrics = self.metrics();
 
         debug!("collecting id {collect_id}");
@@ -567,7 +571,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         &self,
         selector: &Self::ReportSelector,
         host: &str,
-    ) -> Result<DapLeaderProcessTelemetry, DapAbort> {
+    ) -> Result<DapLeaderProcessTelemetry, DapError> {
         let mut telem = DapLeaderProcessTelemetry::default();
 
         tracing::debug!("RUNNING get_reports");

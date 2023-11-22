@@ -81,7 +81,7 @@ impl<'srv> HpkeDecrypter for DaphneWorker<'srv> {
         })
         .await
         .map_err(|e| fatal_error!(err = ?e))?
-        .ok_or_else(|| DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
+        .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
     }
 }
 

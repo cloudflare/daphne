@@ -10,7 +10,7 @@ pub(super) fn add_aggregator_routes(router: DapRouter<'_>) -> DapRouter<'_> {
         let daph = ctx.data.handler(&ctx.env);
         let req = match daph.worker_request_to_dap(req, &ctx).await {
             Ok(req) => req,
-            Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+            Err(e) => return daph.state.dap_abort_to_worker_response(e),
         };
 
         let span = info_span_from_dap_request!("hpke_config", req);

@@ -35,7 +35,7 @@ async fn handle_agg_job(
     let daph = ctx.data.handler(&ctx.env);
     let req = match daph.worker_request_to_dap(req, &ctx).await {
         Ok(req) => req,
-        Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+        Err(e) => return daph.state.dap_abort_to_worker_response(e),
     };
 
     let span = match req.media_type {
@@ -61,7 +61,7 @@ async fn handle_agg_share_req(
     let daph = ctx.data.handler(&ctx.env);
     let req = match daph.worker_request_to_dap(req, &ctx).await {
         Ok(req) => req,
-        Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+        Err(e) => return daph.state.dap_abort_to_worker_response(e),
     };
 
     let span = info_span_from_dap_request!(MeasuredSpanName::AggregateShares.as_str(), req);

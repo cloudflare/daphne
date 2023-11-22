@@ -280,7 +280,7 @@ impl AggregationJobTest {
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-    ) -> DapAbort {
+    ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
             .vdaf
@@ -321,7 +321,7 @@ impl AggregationJobTest {
         &self,
         helper_state: DapAggregationJobState,
         agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> DapAbort {
+    ) -> DapError {
         self.task_config
             .vdaf
             .handle_agg_job_cont_req(

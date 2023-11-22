@@ -142,14 +142,14 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     ) -> Result<(), DapError>;
 
     /// Handle request for the Aggregator's HPKE configuration.
-    async fn handle_hpke_config_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapAbort> {
+    async fn handle_hpke_config_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
         let metrics = self.metrics();
 
         // Parse the task ID from the query string, ensuring that it is the only query parameter.
         let mut id = None;
         for (k, v) in req.url.query_pairs() {
             if k != "task_id" {
-                return Err(DapAbort::BadRequest("unexpected query parameter".into()));
+                return Err(DapAbort::BadRequest("unexpected query parameter".into()).into());
             }
 
             let bytes = decode_base64url(v.as_bytes()).ok_or(DapAbort::BadRequest(
@@ -169,10 +169,9 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
             // Check whether the DAP version in the request matches the task config.
             if task_config.as_ref().version != req.version {
-                return Err(DapAbort::version_mismatch(
-                    req.version,
-                    task_config.as_ref().version,
-                ));
+                return Err(
+                    DapAbort::version_mismatch(req.version, task_config.as_ref().version).into(),
+                );
             }
         }
 

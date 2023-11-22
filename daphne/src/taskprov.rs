@@ -125,8 +125,7 @@ pub fn resolve_advertised_task_config<S>(
     report_metadata_advertisement: Option<&ReportMetadata>,
 ) -> Result<Option<DapTaskConfig>, DapError> {
     let Some(advertised_task_config) =
-        get_taskprov_task_config(req, task_id, report_metadata_advertisement)
-            .map_err(DapError::Abort)?
+        get_taskprov_task_config(req, task_id, report_metadata_advertisement)?
     else {
         return Ok(None);
     };
@@ -147,7 +146,7 @@ fn get_taskprov_task_config<S>(
     req: &'_ DapRequest<S>,
     task_id: &TaskId,
     report_metadata_advertisement: Option<&ReportMetadata>,
-) -> Result<Option<TaskConfig>, DapAbort> {
+) -> Result<Option<TaskConfig>, DapError> {
     let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
         Cow::Owned(decode_base64url_vec(taskprov_base64url).ok_or_else(|| {
             DapAbort::BadRequest(
@@ -163,9 +162,7 @@ fn get_taskprov_task_config<S>(
             .draft02_extensions
             .as_ref()
             .ok_or_else(|| {
-                DapAbort::from(fatal_error!(
-                    err = "draft02: encountered report metadata with no extensions"
-                ))
+                fatal_error!(err = "draft02: encountered report metadata with no extensions")
             })?
             .iter()
             .filter(|x| matches!(x, Extension::Taskprov { .. }))
@@ -188,7 +185,7 @@ fn get_taskprov_task_config<S>(
 
     if compute_task_id(req.version, taskprov_data.as_ref()) != *task_id {
         // Return unrecognizedTask following section 5.1 of the taskprov draft.
-        return Err(DapAbort::UnrecognizedTask);
+        return Err(DapAbort::UnrecognizedTask.into());
     }
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.

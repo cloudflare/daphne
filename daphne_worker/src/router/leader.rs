@@ -22,7 +22,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
             let daph = ctx.data.handler(&ctx.env);
             let req = match daph.worker_request_to_dap(req, &ctx).await {
                 Ok(req) => req,
-                Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+                Err(e) => return daph.state.dap_abort_to_worker_response(e),
             };
             if req.version != DapVersion::Draft02 {
                 return Response::error("not implemented", 404);
@@ -33,7 +33,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
             let daph = ctx.data.handler(&ctx.env);
             let req = match daph.worker_request_to_dap(req, &ctx).await {
                 Ok(req) => req,
-                Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+                Err(e) => return daph.state.dap_abort_to_worker_response(e),
             };
             put_report_into_task(req, daph).await
         })
@@ -41,7 +41,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
             let daph = ctx.data.handler(&ctx.env);
             let req = match daph.worker_request_to_dap(req, &ctx).await {
                 Ok(req) => req,
-                Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+                Err(e) => return daph.state.dap_abort_to_worker_response(e),
             };
 
             if req.version != DapVersion::Draft02 {
@@ -103,7 +103,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                                 "unknown collect id".into(),
                             ))
                     }
-                    Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
+                    Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
             },
         ) // draft02
@@ -113,7 +113,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = match daph.worker_request_to_dap(req, &ctx).await {
                     Ok(req) => req,
-                    Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+                    Err(e) => return daph.state.dap_abort_to_worker_response(e),
                 };
 
                 let span = info_span_from_dap_request!("collect (PUT)", req);
@@ -130,7 +130,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                 let daph = ctx.data.handler(&ctx.env);
                 let req = match daph.worker_request_to_dap(req, &ctx).await {
                     Ok(req) => req,
-                    Err(e) => return daph.state.dap_abort_to_worker_response(e.into()),
+                    Err(e) => return daph.state.dap_abort_to_worker_response(e),
                 };
                 let task_id = match req.task_id() {
                     Ok(id) => id,
@@ -175,7 +175,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                                 "unknown collect id".into(),
                             ))
                     }
-                    Err(e) => daph.state.dap_abort_to_worker_response(e.into()),
+                    Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
             },
         )

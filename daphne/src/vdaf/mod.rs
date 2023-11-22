@@ -773,7 +773,7 @@ impl VdafConfig {
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
         metrics: &DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapAbort> {
+    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
         let mut prep_inits = Vec::with_capacity(reports.len());
@@ -784,8 +784,7 @@ impl VdafConfig {
                 return Err(fatal_error!(
                     err = "tried to process report sequence with non-unique report IDs",
                     non_unique_id = %report.report_metadata.id,
-                )
-                .into());
+                ));
             }
             processed.insert(report.report_metadata.id);
 
@@ -896,7 +895,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_init_req: &'req AggregationJobInitReq,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapAbort> {
+    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut consumed_reports = Vec::with_capacity(num_reports);
@@ -908,7 +907,8 @@ impl VdafConfig {
                         prep_init.report_share.report_metadata.id.to_base64url()
                     ),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             }
             processed.insert(prep_init.report_share.report_metadata.id);
 
@@ -950,7 +950,7 @@ impl VdafConfig {
         initialized_reports: &[EarlyReportStateInitialized<'_>],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapAbort> {
+    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         match task_config.version {
             DapVersion::Draft02 => Ok(Self::draft02_handle_agg_job_init_req(
                 report_status,
@@ -1035,7 +1035,7 @@ impl VdafConfig {
         initialized_reports: &[EarlyReportStateInitialized<'_>],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapAbort> {
+    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut agg_span = DapAggregateSpan::default();
         let mut transitions = Vec::with_capacity(num_reports);
@@ -1058,7 +1058,8 @@ impl VdafConfig {
                             return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
-                            });
+                            }
+                            .into());
                         };
 
                         // Decode the ping-pong "initialize" message framing.
@@ -1142,16 +1143,18 @@ impl VdafConfig {
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
+    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
         match task_config.version {
-            DapVersion::Draft02 => self.draft02_handle_agg_job_resp(
-                task_id,
-                task_config,
-                agg_job_id,
-                state,
-                agg_job_resp,
-                metrics,
-            ),
+            DapVersion::Draft02 => self
+                .draft02_handle_agg_job_resp(
+                    task_id,
+                    task_config,
+                    agg_job_id,
+                    state,
+                    agg_job_resp,
+                    metrics,
+                )
+                .map_err(Into::into),
             DapVersion::Draft07 => {
                 self.draft07_handle_agg_job_resp(task_id, task_config, state, agg_job_resp, metrics)
             }
@@ -1278,7 +1281,7 @@ impl VdafConfig {
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
+    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
@@ -1287,7 +1290,8 @@ impl VdafConfig {
                     state.seq.len(),
                 ),
                 task_id: Some(*task_id),
-            });
+            }
+            .into());
         }
 
         let mut agg_span = DapAggregateSpan::default();
@@ -1303,7 +1307,8 @@ impl VdafConfig {
                         helper.report_id.to_base64url()
                     ),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             }
 
             let prep_msg = match &helper.var {
@@ -1319,7 +1324,7 @@ impl VdafConfig {
                         return Err(DapAbort::InvalidMessage {
                             detail: "The Helper's AggregationJobResp is invalid, but it may have already committed its state change. A batch mismatch is inevitable.".to_string(),
                             task_id: Some(*task_id),
-                        });
+                        }.into());
                     };
 
                     prep_msg
@@ -1335,7 +1340,8 @@ impl VdafConfig {
                     return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
                         task_id: Some(*task_id),
-                    })
+                    }
+                    .into())
                 }
             };
 
@@ -1388,14 +1394,15 @@ impl VdafConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         agg_job_id: &MetaAggregationJobId,
         agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapAbort> {
+    ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
         match agg_job_cont_req.round {
             Some(1) | None => {}
             Some(0) => {
                 return Err(DapAbort::InvalidMessage {
                     detail: "request shouldn't indicate round 0".into(),
                     task_id: Some(*task_id),
-                })
+                }
+                .into())
             }
             // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
             // aggregation-round-skew-recovery.
@@ -1404,7 +1411,8 @@ impl VdafConfig {
                     detail: format!("The request indicates round {r}; round 1 was expected."),
                     task_id: *task_id,
                     agg_job_id_base64url: agg_job_id.to_base64url(),
-                })
+                }
+                .into())
             }
         }
         let mut processed = HashSet::with_capacity(state.seq.len());
@@ -1432,7 +1440,8 @@ impl VdafConfig {
                         leader.report_id.to_base64url()
                     ),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             }
             if processed.contains(&leader.report_id) {
                 return Err(DapAbort::InvalidMessage {
@@ -1441,7 +1450,8 @@ impl VdafConfig {
                         leader.report_id.to_base64url()
                     ),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             }
 
             // Find the next helper report that matches leader.report_id.
@@ -1467,7 +1477,8 @@ impl VdafConfig {
                 return Err(DapAbort::InvalidMessage {
                     detail: "helper sent unexpected message instead of `Continued`".to_string(),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             };
 
             let var = match report_status.get(&leader.report_id) {
@@ -1519,7 +1530,7 @@ impl VdafConfig {
         state: DapAggregationJobUncommitted,
         agg_job_resp: AggregationJobResp,
         metrics: &DaphneMetrics,
-    ) -> Result<DapAggregateSpan<DapAggregateShare>, DapAbort> {
+    ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
@@ -1528,7 +1539,8 @@ impl VdafConfig {
                     agg_job_resp.transitions.len()
                 ),
                 task_id: None,
-            });
+            }
+            .into());
         }
 
         let mut agg_span = DapAggregateSpan::default();
@@ -1540,7 +1552,8 @@ impl VdafConfig {
                         helper.report_id.to_base64url()
                     ),
                     task_id: None,
-                });
+                }
+                .into());
             }
 
             match &helper.var {
@@ -1548,7 +1561,8 @@ impl VdafConfig {
                     return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Continued` message".to_string(),
                         task_id: None,
-                    })
+                    }
+                    .into())
                 }
 
                 // Skip report that can't be processed any further.
@@ -1580,7 +1594,7 @@ impl VdafConfig {
         agg_param: &[u8],
         agg_share: &DapAggregateShare,
         version: DapVersion,
-    ) -> Result<HpkeCiphertext, DapAbort> {
+    ) -> Result<HpkeCiphertext, DapError> {
         produce_encrypted_agg_share(
             true,
             hpke_config,
@@ -1602,7 +1616,7 @@ impl VdafConfig {
         agg_param: &[u8],
         agg_share: &DapAggregateShare,
         version: DapVersion,
-    ) -> Result<HpkeCiphertext, DapAbort> {
+    ) -> Result<HpkeCiphertext, DapError> {
         produce_encrypted_agg_share(
             false,
             hpke_config,
@@ -1703,7 +1717,7 @@ fn produce_encrypted_agg_share(
     agg_param: &[u8],
     agg_share: &DapAggregateShare,
     version: DapVersion,
-) -> Result<HpkeCiphertext, DapAbort> {
+) -> Result<HpkeCiphertext, DapError> {
     let agg_share_data = agg_share
         .data
         .as_ref()
@@ -1731,9 +1745,7 @@ fn produce_encrypted_agg_share(
     }
     batch_sel.encode(&mut aad);
 
-    let (enc, payload) = hpke_config
-        .encrypt(&info, &aad, &agg_share_data)
-        .map_err(|e| DapAbort::Internal(Box::new(e)))?;
+    let (enc, payload) = hpke_config.encrypt(&info, &aad, &agg_share_data)?;
     Ok(HpkeCiphertext {
         config_id: hpke_config.id,
         enc,
@@ -2190,7 +2202,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2212,7 +2224,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2237,7 +2249,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2258,7 +2270,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_resp_expect_err(leader_state, agg_job_resp),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2439,7 +2451,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2465,7 +2477,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
@@ -2490,7 +2502,7 @@ mod test {
 
         assert_matches!(
             t.handle_agg_job_cont_req_expect_err(helper_state, &agg_job_cont_req),
-            DapAbort::InvalidMessage { .. }
+            DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
 
