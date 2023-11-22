@@ -42,6 +42,7 @@ assert_matches.workspace = true
 futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
+rand_core.workspace = true
 regex = "1.10.2"
 tokio.workspace = true
 
