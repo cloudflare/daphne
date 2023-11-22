@@ -25,7 +25,7 @@ async fn check_batch<S>(
     batch_sel: &BatchSelector,
     agg_param: &[u8],
     now: Time,
-) -> Result<(), DapAbort> {
+) -> Result<(), DapError> {
     let global_config = agg.get_global_config();
     let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
 
@@ -35,7 +35,8 @@ async fn check_batch<S>(
         return Err(DapAbort::InvalidMessage {
             detail: "invalid aggregation parameter".into(),
             task_id: Some(*task_id),
-        });
+        }
+        .into());
     }
 
     // Check that the batch boundaries are valid.
@@ -48,23 +49,23 @@ async fn check_batch<S>(
                 return Err(DapAbort::BatchInvalid {
                     detail: format!("The queried batch interval ({batch_interval:?}) is too small or its boundaries are misaligned. The time precision for this task is {}s.", task_config.time_precision),
                     task_id: *task_id,
-                });
+                }.into());
             }
 
             if batch_interval.duration > global_config.max_batch_duration {
-                return Err(DapAbort::BadRequest("batch interval too large".to_string()));
+                return Err(DapAbort::BadRequest("batch interval too large".to_string()).into());
             }
 
             if now.abs_diff(batch_interval.start) > global_config.min_batch_interval_start {
-                return Err(DapAbort::BadRequest(
-                    "batch interval too far into past".to_string(),
-                ));
+                return Err(
+                    DapAbort::BadRequest("batch interval too far into past".to_string()).into(),
+                );
             }
 
             if now.abs_diff(batch_interval.end()) > global_config.max_batch_interval_end {
-                return Err(DapAbort::BadRequest(
-                    "batch interval too far into future".to_string(),
-                ));
+                return Err(
+                    DapAbort::BadRequest("batch interval too far into future".to_string()).into(),
+                );
             }
         }
         (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSizeByBatchId { batch_id }) => {
@@ -81,21 +82,16 @@ async fn check_batch<S>(
                         batch_id.to_base64url()
                     ),
                     task_id: *task_id,
-                });
+                }
+                .into());
             }
         }
-        _ => {
-            return Err(DapAbort::query_mismatch(
-                task_id,
-                &task_config.query,
-                batch_sel,
-            ))
-        }
+        _ => return Err(DapAbort::query_mismatch(task_id, &task_config.query, batch_sel).into()),
     };
 
     // Check that the batch does not overlap with any previously collected batch.
     if batch_overlapping.await? {
-        return Err(DapAbort::batch_overlap(task_id, batch_sel));
+        return Err(DapAbort::batch_overlap(task_id, batch_sel).into());
     }
 
     Ok(())
@@ -174,7 +170,7 @@ mod test {
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
-        DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapGlobalConfig,
+        DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
         DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
         DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config, VdafConfig,
     };
@@ -646,7 +642,7 @@ mod test {
                 .unwrap()
         }
 
-        pub async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapAbort> {
+        pub async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapError> {
             let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
             let task_config = wrapped.as_ref().unwrap();
 
@@ -661,7 +657,7 @@ mod test {
             Ok(())
         }
 
-        pub async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapAbort> {
+        pub async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapError> {
             let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
             let task_config = wrapped.as_ref().unwrap();
 
@@ -781,7 +777,7 @@ mod test {
             .await;
         assert_matches!(
             t.helper.handle_agg_job_req(&req).await.unwrap_err(),
-            DapAbort::QueryMismatch { .. }
+            DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
         assert_eq!(t.helper.audit_log.invocations(), 0);
@@ -830,14 +826,14 @@ mod test {
         // Expect failure due to missing bearer token.
         assert_matches!(
             t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
             t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         assert_eq!(t.helper.audit_log.invocations(), 0);
@@ -865,7 +861,7 @@ mod test {
 
         assert_matches!(
             t.leader.handle_hpke_config_req(&req).await,
-            Err(DapAbort::UnrecognizedTask)
+            Err(DapError::Abort(DapAbort::UnrecognizedTask))
         );
     }
 
@@ -888,7 +884,7 @@ mod test {
         // used for all tasks.
         assert_matches!(
             t.leader.handle_hpke_config_req(&req).await,
-            Err(DapAbort::MissingTaskId)
+            Err(DapError::Abort(DapAbort::MissingTaskId))
         );
     }
 
@@ -905,14 +901,14 @@ mod test {
         // Expect failure due to missing bearer token.
         assert_matches!(
             t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
             t.helper.handle_agg_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         assert_eq!(t.helper.audit_log.invocations(), 0);
@@ -928,14 +924,14 @@ mod test {
         // Expect failure due to missing bearer token.
         assert_matches!(
             t.helper.handle_agg_share_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
             t.helper.handle_agg_share_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
     }
 
@@ -971,7 +967,7 @@ mod test {
             .await;
         assert_matches!(
             t.helper.handle_agg_share_req(&req).await.unwrap_err(),
-            DapAbort::QueryMismatch { .. }
+            DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
         // Leader sends aggregate share request for unrecognized batch ID.
@@ -999,7 +995,7 @@ mod test {
             .await;
         assert_matches!(
             t.helper.handle_agg_share_req(&req).await.unwrap_err(),
-            DapAbort::BatchInvalid { .. }
+            DapError::Abort(DapAbort::BatchInvalid { .. })
         );
     }
 
@@ -1042,14 +1038,14 @@ mod test {
         // Expect failure due to missing bearer token.
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await,
-            Err(DapAbort::UnauthorizedRequest { .. })
+            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
     }
 
@@ -1222,7 +1218,7 @@ mod test {
         assert_eq!(t.helper.audit_log.invocations(), 1);
 
         // Expect failure due to overwriting existing helper state.
-        assert_matches!(err, DapAbort::BadRequest(e) =>
+        assert_matches!(err, DapError::Abort(DapAbort::BadRequest(e)) =>
             assert_eq!(e, "unexpected message for aggregation job (already exists)")
         );
     }
@@ -1240,7 +1236,10 @@ mod test {
         let err = t.helper.handle_agg_job_req(&req).await.unwrap_err();
 
         // Expect failure due to sending continue request before initialization request.
-        assert_matches!(err, DapAbort::UnrecognizedAggregationJob { .. });
+        assert_matches!(
+            err,
+            DapError::Abort(DapAbort::UnrecognizedAggregationJob { .. })
+        );
     }
 
     async_test_versions! { handle_agg_job_req_fail_send_cont_req }
@@ -1265,7 +1264,7 @@ mod test {
         // Expect failure due to invalid task ID in report.
         assert_matches!(
             t.leader.handle_upload_req(&req).await,
-            Err(DapAbort::UnrecognizedTask)
+            Err(DapError::Abort(DapAbort::UnrecognizedTask))
         );
     }
 
@@ -1290,7 +1289,7 @@ mod test {
 
         assert_matches!(
             t.leader.handle_upload_req(&req).await.unwrap_err(),
-            DapAbort::ReportTooLate
+            DapError::Abort(DapAbort::ReportTooLate)
         );
     }
 
@@ -1441,7 +1440,7 @@ mod test {
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
         // Fails because the requested batch interval is too large.
-        assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too large".to_string()));
+        assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too large".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the past.
         let req = t.collector_authorized_req(
@@ -1467,7 +1466,7 @@ mod test {
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
         // Fails because the requested batch interval is too far into the past.
-        assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into past".to_string()));
+        assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into past".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the future.
         let req = t.collector_authorized_req(
@@ -1493,7 +1492,7 @@ mod test {
         let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
 
         // Fails because the requested batch interval is too far into the future.
-        assert_matches!(err, DapAbort::BadRequest(s) => assert_eq!(s, "batch interval too far into future".to_string()));
+        assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into future".to_string()));
     }
 
     async_test_versions! { handle_collect_job_req_fail_invalid_batch_interval }
@@ -1551,7 +1550,7 @@ mod test {
         // run a second collect job (expect failure due to overlapping batch).
         assert_matches!(
             t.run_col_job(task_id, &query).await.unwrap_err(),
-            DapAbort::BatchOverlap { .. }
+            DapError::Abort(DapAbort::BatchOverlap { .. })
         );
     }
 
@@ -1628,7 +1627,7 @@ mod test {
         );
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await.unwrap_err(),
-            DapAbort::QueryMismatch { .. }
+            DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
         // Collector indicates unrecognized batch ID.
@@ -1651,7 +1650,7 @@ mod test {
         );
         assert_matches!(
             t.leader.handle_collect_job_req(&req).await.unwrap_err(),
-            DapAbort::BatchInvalid { .. }
+            DapError::Abort(DapAbort::BatchInvalid { .. })
         );
     }
 

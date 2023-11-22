@@ -520,24 +520,33 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         Ok(())
     }
 
-    pub(crate) fn dap_abort_to_worker_response(
-        &self,
-        e: DapAbort,
-    ) -> Result<Response, worker::Error> {
-        let status = if matches!(e, DapAbort::Internal(..)) {
-            self.error_reporter.report_abort(&e);
+    pub(crate) fn dap_abort_to_worker_response<E>(&self, e: E) -> Result<Response, worker::Error>
+    where
+        E: Into<DapError>,
+    {
+        // trigger abort if transition failures reach this point.
+        let e = match e.into() {
+            DapError::Transition(failure) => DapAbort::report_rejected(failure),
+            e @ DapError::Fatal(..) => Err(e),
+            DapError::Abort(abort) => Ok(abort),
+        };
+        let status = if let Err(e) = &e {
+            self.error_reporter.report_abort(e);
             500
         } else {
             400
+        };
+        error!(error = ?e, "request aborted");
+        let problem_details = match e {
+            Ok(x) => x.into_problem_details(),
+            Err(x) => x.into_problem_details(),
         };
         self.metrics
             .dap_abort_counter
             // this to string is bounded by the
             // number of variants in the enum
-            .with_label_values(&[&e.to_string()])
+            .with_label_values(&[&problem_details.title])
             .inc();
-        error!(error = ?e, "request aborted");
-        let problem_details = e.into_problem_details();
         let mut headers = Headers::new();
         headers.set("Content-Type", "application/problem+json")?;
         Ok(Response::from_json(&problem_details)?

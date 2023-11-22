@@ -8,6 +8,8 @@ use std::fmt::{Debug, Display};
 use crate::{messages::TransitionFailure, vdaf::VdafError};
 pub use aborts::DapAbort;
 
+use self::aborts::ProblemDetails;
+
 /// DAP errors.
 #[derive(Debug, thiserror::Error)]
 pub enum DapError {
@@ -26,6 +28,23 @@ pub enum DapError {
     /// certain conditions, trigger an abort.
     #[error("transition error: {0}")]
     Transition(#[from] TransitionFailure),
+}
+
+impl DapError {
+    pub fn into_problem_details(self) -> ProblemDetails {
+        if let Self::Abort(a) = self {
+            return a.into_problem_details();
+        }
+
+        ProblemDetails {
+            typ: None,
+            title: "Internal server error".into(),
+            agg_job_id: None,
+            task_id: None,
+            instance: None,
+            detail: None,
+        }
+    }
 }
 
 impl FatalDapError {

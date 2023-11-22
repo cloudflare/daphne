@@ -35,10 +35,6 @@ pub enum DapAbort {
     #[error("batchOverlap")]
     BatchOverlap { detail: String, task_id: TaskId },
 
-    /// Internal error.
-    #[error("internal error")]
-    Internal(#[source] Box<dyn std::error::Error + 'static + Send + Sync>),
-
     /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
     /// AggregateShareReq.
     #[error("invalidBatchSize")]
@@ -143,7 +139,7 @@ impl DapAbort {
                 Some(agg_job_id_base64url),
             ),
             Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
-            Self::ReportTooLate | Self::UnrecognizedTask | Self::Internal(_) => (None, None, None),
+            Self::ReportTooLate | Self::UnrecognizedTask => (None, None, None),
         };
 
         ProblemDetails {
@@ -207,7 +203,7 @@ impl DapAbort {
     }
 
     #[inline]
-    pub fn report_rejected(failure_reason: TransitionFailure) -> Self {
+    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, DapError> {
         let detail = match failure_reason {
             TransitionFailure::BatchCollected => {
                 "The report pertains to a batch that has already been collected."
@@ -215,15 +211,17 @@ impl DapAbort {
             TransitionFailure::ReportReplayed => {
                 "A report with the same ID was uploaded previously."
             }
-            _ => return fatal_error!(
-                err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
-                unexpected_transition_failure = ?failure_reason,
-            ).into(),
+            _ => {
+                return Err(fatal_error!(
+                    err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
+                    unexpected_transition_failure = ?failure_reason,
+                ))
+            }
         };
 
-        Self::ReportRejected {
+        Ok(Self::ReportRejected {
             detail: detail.into(),
-        }
+        })
     }
 
     fn title_and_type(&self) -> (String, Option<String>) {
@@ -267,23 +265,12 @@ impl DapAbort {
                 Some(self.to_string()),
             ),
             Self::BadRequest(..) => ("Bad request", None),
-            Self::Internal(..) => ("Internal server error", None),
         };
 
         (
             title.to_string(),
             dap_abort_type.map(|t| format!("urn:ietf:params:ppm:dap:error:{t}")),
         )
-    }
-}
-
-impl From<DapError> for DapAbort {
-    fn from(e: DapError) -> Self {
-        match e {
-            e @ DapError::Fatal(..) => Self::Internal(Box::new(e)),
-            DapError::Abort(abort) => abort,
-            DapError::Transition(failure_reason) => Self::report_rejected(failure_reason),
-        }
     }
 }
 
