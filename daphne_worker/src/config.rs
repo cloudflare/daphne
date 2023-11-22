@@ -1032,7 +1032,7 @@ impl<'srv> DaphneWorker<'srv> {
                     vdaf,
                     vdaf_verify_key,
                     collector_hpke_config,
-                    taskprov: false,
+                    method: Default::default(),
                 },
             )
             .await?
@@ -1226,6 +1226,15 @@ impl<'srv> DaphneWorker<'srv> {
                 reqwest_wasm::header::HeaderName::from_static("dap-auth-token"),
                 reqwest_wasm::header::HeaderValue::from_str(bearer_token.as_ref()).map_err(
                     |e| fatal_error!(err = ?e, "failed to construct dap-auth-token header"),
+                )?,
+            );
+        }
+
+        if let Some(taskprov_advertisement) = req.taskprov.as_deref() {
+            headers.insert(
+                reqwest_wasm::header::HeaderName::from_static("dap-taskprov"),
+                reqwest_wasm::header::HeaderValue::from_str(taskprov_advertisement).map_err(
+                    |e| fatal_error!(err = ?e, "failed to construct dap-taskprov header"),
                 )?,
             );
         }

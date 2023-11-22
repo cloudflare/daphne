@@ -79,8 +79,9 @@ use crate::{
 use constants::DapMediaType;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
+use messages::encode_base64url;
 use prio::{
-    codec::{Decode, Encode, ParameterizedDecode},
+    codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 use rand::prelude::*;
@@ -95,13 +96,14 @@ use url::Url;
 use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
 /// DAP version used for a task.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
 
     #[serde(rename = "v07")]
+    #[default]
     Draft07,
 }
 
@@ -402,10 +404,22 @@ impl Extend<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
     }
 }
 
-/// Per-task DAP parameters.
-#[derive(Clone, Deserialize, Serialize)]
+/// Method for configuring tasks.
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Debug))]
-pub struct DapTaskConfig {
+pub enum DapTaskConfigMethod {
+    /// draft-wang-ppm-dap-taskprov-06
+    Taskprov {
+        /// `TaskConfig.task_info`. If not set, then the task info is unknown.
+        info: Option<Vec<u8>>,
+    },
+
+    #[default]
+    Unknown,
+}
+
+/// Base parameters used to configure a DAP task.
+pub struct DapTaskParameters {
     /// The protocol version (i.e., which draft).
     pub version: DapVersion,
 
@@ -419,8 +433,8 @@ pub struct DapTaskConfig {
     /// constrain the batch interval of time=interval queries.
     pub time_precision: Duration,
 
-    /// The time at which the task expires.
-    pub expiration: Time,
+    /// The amount of time before the task should expire.
+    pub lifetime: Duration,
 
     /// The smallest batch permitted for this task.
     pub min_batch_size: u64,
@@ -430,6 +444,101 @@ pub struct DapTaskConfig {
 
     /// The VDAF configuration for this task.
     pub vdaf: VdafConfig,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl DapTaskParameters {
+    /// Construct a new task config using the taskprov extension. Return the task ID, the taskprov
+    /// advertisement (if applicable), and the payload of the report extension.
+    pub fn to_config_with_taskprov(
+        &self,
+        task_info: Vec<u8>,
+        now: Time,
+        vdaf_verify_key_init: &[u8; 32],
+        collector_hpke_config: &HpkeConfig,
+    ) -> Result<(DapTaskConfig, TaskId, Option<String>, Vec<u8>), DapError> {
+        let taskprov_config = messages::taskprov::TaskConfig {
+            task_info,
+            leader_url: messages::taskprov::UrlBytes {
+                bytes: self.leader_url.to_string().into_bytes(),
+            },
+            helper_url: messages::taskprov::UrlBytes {
+                bytes: self.helper_url.to_string().into_bytes(),
+            },
+            query_config: messages::taskprov::QueryConfig {
+                time_precision: self.time_precision,
+                max_batch_query_count: 1,
+                min_batch_size: self.min_batch_size.try_into().unwrap(),
+                var: (&self.query).try_into()?,
+            },
+            task_expiration: now + 86400 * 14, // expires in two weeks
+            vdaf_config: messages::taskprov::VdafConfig {
+                dp_config: messages::taskprov::DpConfig::None,
+                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
+            },
+        };
+
+        let encoded_taskprov_config = taskprov_config.get_encoded_with_param(&self.version);
+        let task_id = taskprov::compute_task_id(self.version, &encoded_taskprov_config);
+
+        // Compute the DAP task config.
+        let task_config = DapTaskConfig::try_from_taskprov(
+            self.version,
+            &task_id,
+            taskprov_config,
+            vdaf_verify_key_init,
+            collector_hpke_config,
+        )
+        .unwrap();
+
+        let (taskprov_advertisement, taskprov_report_extension_payload) = match self.version {
+            DapVersion::Draft07 => (Some(encode_base64url(&encoded_taskprov_config)), Vec::new()),
+            // draft02 compatibility: The taskprov config is advertised in an HTTP header in
+            // the latest draft. In draft02, it is carried by a report extension.
+            DapVersion::Draft02 => (None, encoded_taskprov_config),
+        };
+
+        Ok((
+            task_config,
+            task_id,
+            taskprov_advertisement,
+            taskprov_report_extension_payload,
+        ))
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl Default for DapTaskParameters {
+    fn default() -> Self {
+        Self {
+            version: Default::default(),
+            leader_url: "https://leader.example.com/".parse().unwrap(),
+            helper_url: "https://helper.example.com/".parse().unwrap(),
+            time_precision: 3600, // 1 hour
+            lifetime: 86400 * 14, // two weeks
+            min_batch_size: 10,
+            query: DapQueryConfig::TimeInterval,
+            vdaf: VdafConfig::Prio2 { dimension: 10 },
+        }
+    }
+}
+
+/// Per-task DAP parameters.
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(PartialEq, Debug))]
+#[serde(from = "ShadowDapTaskConfig")]
+pub struct DapTaskConfig {
+    /// Same as [`DapTaskParameters`].
+    pub version: DapVersion,
+    pub leader_url: Url,
+    pub helper_url: Url,
+    pub time_precision: Duration,
+    pub min_batch_size: u64,
+    pub query: DapQueryConfig,
+    pub vdaf: VdafConfig,
+
+    /// The time at which the task expires.
+    pub expiration: Time,
 
     /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
     pub vdaf_verify_key: VdafVerifyKey,
@@ -437,9 +546,55 @@ pub struct DapTaskConfig {
     /// The Collector's HPKE configuration for this task.
     pub collector_hpke_config: HpkeConfig,
 
-    /// If true, then the taskprov extension was used to configure this task.
+    /// Method by which the task was configured.
     #[serde(default)]
-    pub taskprov: bool,
+    pub method: DapTaskConfigMethod,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ShadowDapTaskConfig {
+    version: DapVersion,
+    leader_url: Url,
+    helper_url: Url,
+    time_precision: Duration,
+    min_batch_size: u64,
+    query: DapQueryConfig,
+    vdaf: VdafConfig,
+    expiration: Time,
+    vdaf_verify_key: VdafVerifyKey,
+    collector_hpke_config: HpkeConfig,
+    #[serde(default)]
+    method: DapTaskConfigMethod,
+
+    // Deprecated. Indicates that the task was configured via draft-wang-ppm-taskprov. This flag
+    // was replaced by `method`.
+    #[serde(default, rename = "taskprov")]
+    deprecated_taskprov: bool,
+}
+
+impl From<ShadowDapTaskConfig> for DapTaskConfig {
+    fn from(shadow: ShadowDapTaskConfig) -> Self {
+        Self {
+            version: shadow.version,
+            leader_url: shadow.leader_url,
+            helper_url: shadow.helper_url,
+            time_precision: shadow.time_precision,
+            min_batch_size: shadow.min_batch_size,
+            query: shadow.query,
+            vdaf: shadow.vdaf,
+            expiration: shadow.expiration,
+            vdaf_verify_key: shadow.vdaf_verify_key,
+            collector_hpke_config: shadow.collector_hpke_config,
+            method: match shadow.method {
+                // If the configuration method is unknown or unspecified, but the deprecated
+                // taskprov flag is set, then set the method to taskprov with unknown info.
+                DapTaskConfigMethod::Unknown if shadow.deprecated_taskprov => {
+                    DapTaskConfigMethod::Taskprov { info: None }
+                }
+                method => method,
+            },
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -573,6 +728,32 @@ impl DapTaskConfig {
         };
 
         Ok(report_count >= self.min_batch_size)
+    }
+
+    /// Leader: Resolve taskprov advertisement to send in a request to the Helper.
+    pub(crate) fn resolve_taskprove_advertisement(&self) -> Result<Option<String>, DapError> {
+        if let DapTaskConfigMethod::Taskprov { info } = &self.method {
+            if info.is_none() && self.version != DapVersion::Draft02 {
+                // The task config indicates that the configuration method was taskprov, but we
+                // don't have enough information to construct the advertisement. This is not a
+                // problem for draft02, however, because the task config was encoded by the report
+                // extensions in that version.
+                return Err(fatal_error!(
+                    err = "not enough information to resolve taskprov advertisement"
+                ));
+            }
+
+            let encoded_taskprov_config = messages::taskprov::TaskConfig::try_from(self)?
+                .get_encoded_with_param(&self.version);
+            Ok(Some(encode_base64url(encoded_taskprov_config)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns true if the task configuration method is taskprov.
+    pub fn method_is_taskprov(&self) -> bool {
+        matches!(self.method, DapTaskConfigMethod::Taskprov { .. })
     }
 }
 

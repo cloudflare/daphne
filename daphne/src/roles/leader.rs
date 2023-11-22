@@ -29,6 +29,7 @@ struct LeaderHttpRequestOptions<'p> {
     resource: DapResource,
     req_data: Vec<u8>,
     method: LeaderHttpRequestMethod,
+    taskprov: Option<String>,
 }
 
 enum LeaderHttpRequestMethod {
@@ -49,6 +50,7 @@ async fn leader_send_http_request<S>(
         resource,
         req_data,
         method,
+        taskprov,
     } = opts;
 
     let url = task_config
@@ -67,7 +69,7 @@ async fn leader_send_http_request<S>(
                 .await?,
         ),
         payload: req_data,
-        taskprov: None,
+        taskprov,
     };
 
     let resp = match method {
@@ -314,6 +316,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
     ) -> Result<u64, DapError> {
         let metrics = self.metrics();
 
+        let taskprov = task_config.resolve_taskprove_advertisement()?;
+
         // Prepare AggregationJobInitReq.
         let agg_job_id = MetaAggregationJobId::gen_for_version(task_config.version);
         let transition = task_config
@@ -372,6 +376,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 resource: agg_job_id.for_request_path(),
                 req_data: agg_job_init_req.get_encoded_with_param(&task_config.version),
                 method,
+                taskprov: taskprov.clone(),
             },
         )
         .await?;
@@ -403,6 +408,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                         resource: agg_job_id.for_request_path(),
                         req_data: agg_job_cont_req.get_encoded_with_param(&task_config.version),
                         method: LeaderHttpRequestMethod::Post,
+                        taskprov,
                     },
                 )
                 .await?;
@@ -471,6 +477,8 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
         let leader_agg_share = self.get_agg_share(task_id, &batch_selector).await?;
 
+        let taskprov = task_config.resolve_taskprove_advertisement()?;
+
         // Check the batch size. If not not ready, then return early.
         //
         // TODO Consider logging this error, as it should never happen.
@@ -517,6 +525,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 resource: DapResource::Undefined,
                 req_data: agg_share_req.get_encoded_with_param(&task_config.version),
                 method: LeaderHttpRequestMethod::Post,
+                taskprov,
             },
         )
         .await?;

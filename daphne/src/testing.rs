@@ -166,7 +166,7 @@ impl AggregationJobTest {
                 vdaf: vdaf.clone(),
                 vdaf_verify_key,
                 collector_hpke_config,
-                taskprov: false,
+                method: Default::default(),
             },
             leader_registry,
             helper_registry,
@@ -843,7 +843,7 @@ impl BearerTokenProvider for MockAggregator {
         _task_id: &'s TaskId,
         task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if task_config.taskprov {
+        if task_config.method_is_taskprov() {
             Ok(Some(&self.taskprov_leader_token))
         } else {
             Ok(Some(&self.leader_token))
@@ -855,7 +855,7 @@ impl BearerTokenProvider for MockAggregator {
         _task_id: &'s TaskId,
         task_config: &DapTaskConfig,
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if task_config.taskprov {
+        if task_config.method_is_taskprov() {
             Ok(Some(self.taskprov_collector_token.as_ref().expect(
                 "MockAggregator not configured with taskprov collector token",
             )))

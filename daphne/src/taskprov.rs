@@ -8,12 +8,13 @@ use crate::{
     fatal_error,
     hpke::HpkeConfig,
     messages::{
-        decode_base64url_vec,
+        self, decode_base64url_vec,
         taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
         Extension, ReportMetadata, TaskId,
     },
     vdaf::{VdafVerifyKey, VDAF_VERIFY_KEY_SIZE_PRIO2},
-    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapVersion, VdafConfig,
+    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
+    VdafConfig,
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -101,11 +102,11 @@ pub(crate) fn compute_vdaf_verify_key(
 /// Opt out due to invalid configuration.
 //
 // TODO taskprov spec: Decide if this should be a different error type.
-fn malformed_task_config(task_id: &TaskId, detail: String) -> DapError {
-    DapError::Abort(DapAbort::InvalidTask {
+fn malformed_task_config(task_id: &TaskId, detail: String) -> DapAbort {
+    DapAbort::InvalidTask {
         detail,
         task_id: *task_id,
-    })
+    }
 }
 
 /// Convert a task config advertised by the peer into a [`DapTaskConfig`].
@@ -123,7 +124,7 @@ pub fn resolve_advertised_task_config<S>(
     collector_hpke_config: &HpkeConfig,
     task_id: &TaskId,
     report_metadata_advertisement: Option<&ReportMetadata>,
-) -> Result<Option<DapTaskConfig>, DapError> {
+) -> Result<Option<DapTaskConfig>, DapAbort> {
     let Some(advertised_task_config) =
         get_taskprov_task_config(req, task_id, report_metadata_advertisement)?
     else {
@@ -146,7 +147,7 @@ fn get_taskprov_task_config<S>(
     req: &'_ DapRequest<S>,
     task_id: &TaskId,
     report_metadata_advertisement: Option<&ReportMetadata>,
-) -> Result<Option<TaskConfig>, DapError> {
+) -> Result<Option<TaskConfig>, DapAbort> {
     let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
         Cow::Owned(decode_base64url_vec(taskprov_base64url).ok_or_else(|| {
             DapAbort::BadRequest(
@@ -161,9 +162,7 @@ fn get_taskprov_task_config<S>(
         let taskprovs: Vec<&Extension> = metadata
             .draft02_extensions
             .as_ref()
-            .ok_or_else(|| {
-                fatal_error!(err = "draft02: encountered report metadata with no extensions")
-            })?
+            .expect("draft02: encountered report metadata with no extensions")
             .iter()
             .filter(|x| matches!(x, Extension::Taskprov { .. }))
             .collect();
@@ -185,7 +184,7 @@ fn get_taskprov_task_config<S>(
 
     if compute_task_id(req.version, taskprov_data.as_ref()) != *task_id {
         // Return unrecognizedTask following section 5.1 of the taskprov draft.
-        return Err(DapAbort::UnrecognizedTask.into());
+        return Err(DapAbort::UnrecognizedTask);
     }
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
@@ -195,7 +194,7 @@ fn get_taskprov_task_config<S>(
     Ok(Some(task_config))
 }
 
-fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapError> {
+fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
     let url_string = str::from_utf8(url_bytes).map_err(|e| {
         malformed_task_config(
             task_id,
@@ -242,7 +241,29 @@ impl DapTaskConfig {
         task_config: TaskConfig,
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
-    ) -> Result<DapTaskConfig, DapError> {
+    ) -> Result<DapTaskConfig, DapAbort> {
+        // We don't implement any DP strategy at the moment.
+        if task_config.vdaf_config.dp_config != messages::taskprov::DpConfig::None {
+            return Err(DapAbort::InvalidTask {
+                detail: format!(
+                    "unsupported DpConfig variant {:?}",
+                    task_config.vdaf_config.dp_config
+                ),
+                task_id: *task_id,
+            });
+        }
+
+        // Only one query per batch is currently supported.
+        if task_config.query_config.max_batch_query_count != 1 {
+            return Err(DapAbort::InvalidTask {
+                detail: format!(
+                    "unsupported max batch query count {}",
+                    task_config.query_config.max_batch_query_count
+                ),
+                task_id: *task_id,
+            });
+        }
+
         let vdaf_type = VdafType::from(task_config.vdaf_config.var.clone());
         Ok(DapTaskConfig {
             version,
@@ -260,7 +281,79 @@ impl DapTaskConfig {
                 vdaf_type,
             ),
             collector_hpke_config: collector_hpke_config.clone(),
-            taskprov: true,
+            method: DapTaskConfigMethod::Taskprov {
+                info: Some(task_config.task_info),
+            },
+        })
+    }
+}
+
+impl TryFrom<&DapQueryConfig> for messages::taskprov::QueryConfigVar {
+    type Error = DapError;
+
+    fn try_from(query_config: &DapQueryConfig) -> Result<Self, DapError> {
+        Ok(match query_config {
+            DapQueryConfig::TimeInterval => messages::taskprov::QueryConfigVar::TimeInterval,
+            DapQueryConfig::FixedSize { max_batch_size } => {
+                messages::taskprov::QueryConfigVar::FixedSize {
+                    max_batch_size: (*max_batch_size).try_into().map_err(|_| {
+                        fatal_error!(err = "task max batch size is too large for taskprov")
+                    })?,
+                }
+            }
+        })
+    }
+}
+
+impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
+    type Error = DapError;
+
+    fn try_from(vdaf_config: &VdafConfig) -> Result<Self, DapError> {
+        match vdaf_config {
+            VdafConfig::Prio2 { dimension } => Ok(Self::Prio2 {
+                dimension: (*dimension)
+                    .try_into()
+                    .map_err(|_| fatal_error!(err = "Prio2 dimension is too large for taskprov"))?,
+            }),
+            VdafConfig::Prio3 { .. } => Err(fatal_error!(
+                err = "Prio3 is not currently supported for taskprov"
+            )),
+        }
+    }
+}
+
+impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
+    type Error = DapError;
+
+    fn try_from(task_config: &DapTaskConfig) -> Result<Self, DapError> {
+        let DapTaskConfigMethod::Taskprov {
+            info: Some(task_info),
+        } = &task_config.method
+        else {
+            return Err(fatal_error!(err = "task was not configured by taskprov"));
+        };
+
+        Ok(Self {
+            task_info: task_info.clone(),
+            leader_url: messages::taskprov::UrlBytes {
+                bytes: task_config.leader_url.to_string().into_bytes(),
+            },
+            helper_url: messages::taskprov::UrlBytes {
+                bytes: task_config.helper_url.to_string().into_bytes(),
+            },
+            query_config: messages::taskprov::QueryConfig {
+                time_precision: task_config.time_precision,
+                min_batch_size: task_config.min_batch_size.try_into().map_err(|_| {
+                    fatal_error!(err = "task min batch size is too large for taskprov")
+                })?,
+                max_batch_query_count: 1,
+                var: (&task_config.query).try_into()?,
+            },
+            task_expiration: task_config.expiration,
+            vdaf_config: messages::taskprov::VdafConfig {
+                dp_config: messages::taskprov::DpConfig::None,
+                var: (&task_config.vdaf).try_into()?,
+            },
         })
     }
 }
@@ -288,16 +381,55 @@ mod test {
         constants::DapMediaType,
         error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
-        messages::taskprov::VdafType,
-        messages::{
-            encode_base64url,
-            taskprov::{self, *},
-            Extension, ReportId, ReportMetadata, TaskId,
-        },
+        messages::{self, encode_base64url, Extension, ReportId, ReportMetadata, TaskId},
         test_versions,
         vdaf::VdafVerifyKey,
-        DapError, DapRequest, DapResource, DapVersion,
+        DapRequest, DapResource, DapTaskConfig, DapVersion,
     };
+
+    /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
+    fn try_from_taskprov(version: DapVersion) {
+        let taskprov_config = messages::taskprov::TaskConfig {
+            task_info: "cool task".as_bytes().to_vec(),
+            leader_url: messages::taskprov::UrlBytes {
+                bytes: b"https://leader.com/".to_vec(),
+            },
+            helper_url: messages::taskprov::UrlBytes {
+                bytes: b"http://helper.org:8788/".to_vec(),
+            },
+            query_config: messages::taskprov::QueryConfig {
+                time_precision: 3600,
+                max_batch_query_count: 1,
+                min_batch_size: 1,
+                var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+            },
+            task_expiration: 1337,
+            vdaf_config: messages::taskprov::VdafConfig {
+                dp_config: messages::taskprov::DpConfig::None,
+                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
+            },
+        };
+
+        let task_id = compute_task_id(version, &taskprov_config.get_encoded_with_param(&version));
+
+        let task_config = DapTaskConfig::try_from_taskprov(
+            version,
+            &task_id,
+            taskprov_config.clone(),
+            &[0; 32],
+            &HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256)
+                .unwrap()
+                .config,
+        )
+        .unwrap();
+
+        assert_eq!(
+            messages::taskprov::TaskConfig::try_from(&task_config).unwrap(),
+            taskprov_config
+        );
+    }
+
+    test_versions! { try_from_taskprov }
 
     #[test]
     fn check_vdaf_key_computation() {
@@ -315,7 +447,7 @@ mod test {
             DapVersion::Draft02,
             &verify_key_init,
             &task_id,
-            VdafType::Prio2,
+            messages::taskprov::VdafType::Prio2,
         );
         let expected: [u8; 32] = [
             251, 209, 125, 181, 57, 15, 148, 158, 227, 45, 38, 52, 220, 73, 159, 91, 145, 40, 123,
@@ -332,26 +464,26 @@ mod test {
     #[test]
     fn test_resolve_advertised_task_config() {
         let version = DapVersion::Draft02;
-        let taskprov_task_config = TaskConfig {
+        let taskprov_task_config = messages::taskprov::TaskConfig {
             task_info: "Hi".as_bytes().to_vec(),
-            leader_url: UrlBytes {
+            leader_url: messages::taskprov::UrlBytes {
                 bytes: "https://leader.com".as_bytes().to_vec(),
             },
-            helper_url: UrlBytes {
+            helper_url: messages::taskprov::UrlBytes {
                 bytes: "https://helper.com".as_bytes().to_vec(),
             },
-            query_config: QueryConfig {
+            query_config: messages::taskprov::QueryConfig {
                 time_precision: 0x01,
-                max_batch_query_count: 128,
+                max_batch_query_count: 1,
                 min_batch_size: 1024,
-                var: QueryConfigVar::FixedSize {
+                var: messages::taskprov::QueryConfigVar::FixedSize {
                     max_batch_size: 2048,
                 },
             },
             task_expiration: 0x6352_f9a5,
-            vdaf_config: VdafConfig {
-                dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio2 { dimension: 10 },
+            vdaf_config: messages::taskprov::VdafConfig {
+                dp_config: messages::taskprov::DpConfig::None,
+                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
             },
         };
 
@@ -433,25 +565,25 @@ mod test {
     fn resolve_advertised_task_config_expect_abort_unrecognized_vdaf(version: DapVersion) {
         // Create a request for a taskprov task with an unrecognized VDAF.
         let (req, task_id) = {
-            let taskprov_task_config_bytes = TaskConfig {
+            let taskprov_task_config_bytes = messages::taskprov::TaskConfig {
                 task_info: "cool task".as_bytes().to_vec(),
-                leader_url: UrlBytes {
+                leader_url: messages::taskprov::UrlBytes {
                     bytes: b"https://leader.com/".to_vec(),
                 },
-                helper_url: UrlBytes {
+                helper_url: messages::taskprov::UrlBytes {
                     bytes: b"http://helper.org:8788/".to_vec(),
                 },
-                query_config: taskprov::QueryConfig {
+                query_config: messages::taskprov::QueryConfig {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                    var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
                 },
                 task_expiration: 0,
-                vdaf_config: taskprov::VdafConfig {
-                    dp_config: taskprov::DpConfig::None,
+                vdaf_config: messages::taskprov::VdafConfig {
+                    dp_config: messages::taskprov::DpConfig::None,
                     // unrecognized VDAF
-                    var: taskprov::VdafTypeVar::NotImplemented(1337),
+                    var: messages::taskprov::VdafTypeVar::NotImplemented(1337),
                 },
             }
             .get_encoded_with_param(&version);
@@ -478,7 +610,7 @@ mod test {
 
         match resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id, None)
         {
-            Err(DapError::Abort(DapAbort::InvalidMessage { detail, .. })) => {
+            Err(DapAbort::InvalidMessage { detail, .. }) => {
                 assert_eq!(detail, "codec error: unexpected value");
             }
             Err(e) => panic!("unexpected error: {e}"),
