@@ -4,7 +4,7 @@
 //! End-to-end tests for daphne.
 use super::test_runner::{TestRunner, MIN_BATCH_SIZE, TIME_PRECISION};
 use daphne::{
-    async_test_version, async_test_versions,
+    async_test_versions,
     constants::DapMediaType,
     messages::{
         taskprov::{
@@ -1416,4 +1416,4 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     );
 }
 
-async_test_version! { leader_collect_taskprov_ok, Draft02 }
+async_test_versions! { leader_collect_taskprov_ok }

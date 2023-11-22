@@ -404,6 +404,7 @@ impl Extend<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
 
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct DapTaskConfig {
     /// The protocol version (i.e., which draft).
     pub version: DapVersion,
