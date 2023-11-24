@@ -1100,49 +1100,6 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_transition_continue }
 
-    async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
-        let t = Test::new(version);
-        let task_id = &t.time_interval_task_id;
-
-        let report = t.gen_test_report(task_id).await;
-        let req = t
-            .gen_test_agg_job_init_req(task_id, version, vec![report.clone()])
-            .await;
-
-        // Add dummy data to report store backend. This is done in a new scope so that the lock on the
-        // report store is released before running the test.
-        {
-            let mut guard = t
-                .helper
-                .report_store
-                .lock()
-                .expect("report_store: failed to lock");
-            let report_store = guard.entry(*task_id).or_default();
-            report_store.processed.insert(report.report_metadata.id);
-        }
-
-        // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
-            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
-        )
-        .unwrap();
-        let transition = &agg_job_resp.transitions[0];
-
-        // Expect failure due to report store marked as collected.
-        assert_matches!(
-            transition.var,
-            TransitionVar::Failed(TransitionFailure::ReportReplayed)
-        );
-
-        assert_metrics_include!(t.helper_registry, {
-            r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
-            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
-        });
-    }
-
-    async_test_versions! { handle_agg_job_req_failure_report_replayed }
-
     async fn handle_agg_job_req_failure_batch_collected(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;

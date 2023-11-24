@@ -12,9 +12,7 @@ use crate::{
             DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
             DURABLE_AGGREGATE_STORE_MERGE,
         },
-        durable_name_agg_store,
-        reports_processed::DURABLE_REPORTS_PROCESSED_INITIALIZED,
-        BINDING_DAP_AGGREGATE_STORE, BINDING_DAP_REPORTS_PROCESSED,
+        durable_name_agg_store, BINDING_DAP_AGGREGATE_STORE,
     },
     now,
 };
@@ -48,34 +46,14 @@ impl DapReportInitializer for DaphneWorker<'_> {
         let span = task_config
             .as_ref()
             .batch_span_for_meta(part_batch_sel, consumed_reports.iter())?;
-        let mut reports_processed_request_data = HashMap::new();
         let collected_reports = {
             let task_id_hex = task_id.to_hex();
 
-            let mut agg_store_request_names = Vec::new();
-            for (bucket, ((), report_ids_and_time)) in span.iter() {
-                for (id, time) in report_ids_and_time {
-                    let durable_name = self.config().durable_name_report_store(
-                        task_config.as_ref(),
-                        &task_id_hex,
-                        id,
-                        *time,
-                    );
-
-                    reports_processed_request_data
-                        .entry(durable_name)
-                        .or_insert_with(Vec::new)
-                        .push(id);
-                }
-                agg_store_request_names.push((
-                    bucket,
-                    durable_name_agg_store(task_config.version, &task_id_hex, bucket),
-                ));
-            }
-
             // Send AggregateStore requests.
-            futures::stream::iter(agg_store_request_names)
-                .map(|(bucket, durable_name)| {
+            futures::stream::iter(span.iter())
+                .map(|(bucket, _)| {
+                    let durable_name =
+                        durable_name_agg_store(task_config.version, &task_id_hex, bucket);
                     durable
                         .get(
                             BINDING_DAP_AGGREGATE_STORE,
@@ -93,7 +71,7 @@ impl DapReportInitializer for DaphneWorker<'_> {
         let min_time = self.least_valid_report_time(self.get_current_time());
         let max_time = self.greatest_valid_report_time(self.get_current_time());
 
-        let mut initialized_reports = consumed_reports
+        let initialized_reports = consumed_reports
             .into_iter()
             .map(|consumed_report| {
                 let metadata = consumed_report.metadata();
@@ -122,31 +100,6 @@ impl DapReportInitializer for DaphneWorker<'_> {
             })
             .collect::<Result<Vec<_>, DapError>>()
             .map_err(|e| fatal_error!(err = ?e, "failed to initialize a report"))?;
-
-        let replayed_reports_check = futures::stream::iter(reports_processed_request_data)
-            .map(|(durable_name, reports)| async {
-                durable
-                    .post::<_, HashSet<ReportId>>(
-                        BINDING_DAP_REPORTS_PROCESSED,
-                        DURABLE_REPORTS_PROCESSED_INITIALIZED,
-                        durable_name,
-                        reports,
-                    )
-                    .await
-            })
-            .buffer_unordered(usize::MAX)
-            .try_fold(HashSet::new(), |mut acc, replays| async {
-                acc.extend(replays);
-                Ok(acc)
-            })
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "checking for replayed reports"))?;
-
-        for rep in &mut initialized_reports {
-            if replayed_reports_check.contains(&rep.metadata().id) {
-                rep.reject_due_to(TransitionFailure::ReportReplayed);
-            }
-        }
 
         Ok(initialized_reports)
     }
