@@ -121,10 +121,6 @@ pub(crate) struct DaphneWorkerConfig {
     /// configured by the Leader.
     pub(crate) helper_state_store_garbage_collect_after_secs: Option<Duration>,
 
-    /// Additional time to wait before deletng an instance of ReportsProcessed. Added to the value
-    /// of the `report_storage_epoch_duration` field of the global DAP configuration.
-    pub(crate) processed_alarm_safety_interval: Duration,
-
     /// Metrics push configuration.
     metrics_push_config: Option<MetricsPushConfig>,
 }
@@ -281,17 +277,6 @@ impl DaphneWorkerConfig {
             None
         };
 
-        let processed_alarm_safety_interval = Duration::from_secs(
-            env.var("DAP_PROCESSED_ALARM_SAFETY_INTERVAL")?
-                .to_string()
-                .parse()
-                .map_err(|err| {
-                    worker::Error::RustError(format!(
-                        "Failed to parse DAP_PROCESSED_ALARM_SAFETY_INTERVAL: {err}"
-                    ))
-                })?,
-        );
-
         const DAP_METRICS_PUSH_SERVER_URL: &str = "DAP_METRICS_PUSH_SERVER_URL";
         const DAP_METRICS_PUSH_BEARER_TOKEN: &str = "DAP_METRICS_PUSH_BEARER_TOKEN";
         let metrics_push_config = match (
@@ -331,7 +316,6 @@ impl DaphneWorkerConfig {
             taskprov,
             default_version,
             helper_state_store_garbage_collect_after_secs,
-            processed_alarm_safety_interval,
             metrics_push_config,
         })
     }

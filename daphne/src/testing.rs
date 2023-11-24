@@ -721,11 +721,10 @@ impl MockAggregator {
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
     /// 2) the report has been submitted by the client in the past.
-    fn check_report_early_fail(
+    fn check_report_has_been_collected(
         &self,
         task_id: &TaskId,
         bucket: &DapBatchBucket,
-        id: &ReportId,
     ) -> Option<TransitionFailure> {
         // Check AggStateStore to see whether the report is part of a batch that has already
         // been collected.
@@ -733,16 +732,6 @@ impl MockAggregator {
         let agg_store = guard.entry(*task_id).or_default();
         if matches!(agg_store.get(bucket), Some(inner_agg_store) if inner_agg_store.collected) {
             return Some(TransitionFailure::BatchCollected);
-        }
-
-        // Check whether the same report has been submitted in the past.
-        let mut guard = self
-            .report_store
-            .lock()
-            .expect("report_store: failed to lock");
-        let report_store = guard.entry(*task_id).or_default();
-        if report_store.processed.contains(id) {
-            return Some(TransitionFailure::ReportReplayed);
         }
 
         None
@@ -948,7 +937,8 @@ impl DapReportInitializer for MockAggregator {
         for (bucket, ((), report_ids_and_time)) in span.iter() {
             for (id, _) in report_ids_and_time {
                 // Check whether Report has been collected or replayed.
-                if let Some(transition_failure) = self.check_report_early_fail(task_id, bucket, id)
+                if let Some(transition_failure) =
+                    self.check_report_has_been_collected(task_id, bucket)
                 {
                     early_fails.insert(*id, transition_failure);
                 };
@@ -1240,21 +1230,14 @@ impl DapLeader<BearerToken> for MockAggregator {
             .await
             .expect("could not determine batch for report");
 
-        // Check whether Report has been collected or replayed.
-        if let Some(transition_failure) =
-            self.check_report_early_fail(task_id, &bucket, &report.report_metadata.id)
-        {
-            return Err(DapError::Transition(transition_failure));
-        };
-
         // Store Report for future processing.
         let mut guard = self
             .report_store
             .lock()
             .expect("report_store: failed to lock");
         let queue = guard
-            .get_mut(task_id)
-            .expect("report_store: unrecognized task")
+            .entry(*task_id)
+            .or_default()
             .pending
             .entry(bucket)
             .or_default();

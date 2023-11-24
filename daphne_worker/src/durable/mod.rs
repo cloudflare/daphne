@@ -8,7 +8,6 @@ pub(crate) mod leader_agg_job_queue;
 pub(crate) mod leader_batch_queue;
 pub(crate) mod leader_col_job_queue;
 pub(crate) mod reports_pending;
-pub(crate) mod reports_processed;
 
 use crate::{
     int_err, now,

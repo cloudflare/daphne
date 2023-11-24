@@ -36,7 +36,6 @@ DAP_GLOBAL_CONFIG = """{
      "supported_hpke_kems": ["x25519_hkdf_sha256"],
      "allow_taskprov": true
 }"""
-DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
 DAP_DEPLOYMENT = "dev"
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
@@ -116,7 +115,6 @@ DAP_GLOBAL_CONFIG = """{
   "supported_hpke_kems": ["x25519_hkdf_sha256"],
   "allow_taskprov": true
 }"""
-DAP_PROCESSED_ALARM_SAFETY_INTERVAL = "300"
 DAP_DEPLOYMENT = "dev"
 DAP_TASKPROV_HPKE_COLLECTOR_CONFIG = """{
   "id": 23,
@@ -139,7 +137,6 @@ bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
     { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
     { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
-    { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
 

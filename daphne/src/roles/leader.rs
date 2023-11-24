@@ -333,6 +333,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
                 metrics,
             )
             .await?;
+
         let (state, agg_job_init_req) = match transition {
             DapLeaderAggregationJobTransition::Continued(state, agg_job_init_req) => {
                 (state, agg_job_init_req)

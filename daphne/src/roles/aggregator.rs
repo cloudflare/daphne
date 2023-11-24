@@ -26,8 +26,8 @@ use crate::{
 #[async_trait(?Send)]
 pub trait DapReportInitializer {
     /// Initialize a sequence of reports that are in the "consumed" state by performing the early
-    /// validation steps (check if the report was replayed, belongs to a batch that has been
-    /// collected) and initializing VDAF preparation.
+    /// validation steps (belongs to a batch that has been collected) and initializing VDAF
+    /// preparation.
     async fn initialize_reports<'req>(
         &self,
         is_leader: bool,
