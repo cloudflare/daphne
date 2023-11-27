@@ -209,13 +209,17 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
     })
 }
 
-impl From<QueryConfigVar> for DapQueryConfig {
-    fn from(var: QueryConfigVar) -> Self {
+impl DapQueryConfig {
+    fn try_from_taskprov(task_id: &TaskId, var: QueryConfigVar) -> Result<Self, DapAbort> {
         match var {
-            QueryConfigVar::FixedSize { max_batch_size } => DapQueryConfig::FixedSize {
+            QueryConfigVar::FixedSize { max_batch_size } => Ok(DapQueryConfig::FixedSize {
                 max_batch_size: max_batch_size.into(),
-            },
-            QueryConfigVar::TimeInterval => DapQueryConfig::TimeInterval,
+            }),
+            QueryConfigVar::TimeInterval => Ok(DapQueryConfig::TimeInterval),
+            QueryConfigVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
+                detail: format!("unimplemented query type ({typ})"),
+                task_id: *task_id,
+            }),
         }
     }
 }
@@ -272,7 +276,7 @@ impl DapTaskConfig {
             time_precision: task_config.query_config.time_precision,
             expiration: task_config.task_expiration,
             min_batch_size: task_config.query_config.min_batch_size.into(),
-            query: DapQueryConfig::from(task_config.query_config.var),
+            query: DapQueryConfig::try_from_taskprov(task_id, task_config.query_config.var)?,
             vdaf: VdafConfig::from(task_config.vdaf_config.var),
             vdaf_verify_key: compute_vdaf_verify_key(
                 version,

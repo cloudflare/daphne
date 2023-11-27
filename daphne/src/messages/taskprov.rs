@@ -16,7 +16,7 @@ use prio::codec::{
 };
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
@@ -163,12 +163,8 @@ impl Decode for UrlBytes {
 pub enum QueryConfigVar {
     TimeInterval,
     FixedSize { max_batch_size: u32 },
+    NotImplemented { typ: u8, param: Vec<u8> },
 }
-
-// There is no Encode or Decode for QueryConfigVar as we have to split the query type and
-// the associated configuration data in the message format, so we must do all of the work
-// in QueryConfig's Encode and Decode.  If the spec is revised to allow these fields
-// to be encoded and decoded contiguously, then we will revise this code.
 
 /// A query configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -188,20 +184,41 @@ impl QueryConfig {
             QueryConfigVar::FixedSize { .. } => {
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
             }
+            QueryConfigVar::NotImplemented { typ, .. } => {
+                typ.encode(bytes);
+            }
         }
     }
 }
 
 impl ParameterizedEncode<DapVersion> for QueryConfig {
-    fn encode_with_param(&self, _version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.encode_query_type(bytes);
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+        if *version == DapVersion::Draft02 {
+            self.encode_query_type(bytes);
+        }
         self.time_precision.encode(bytes);
         self.max_batch_query_count.encode(bytes);
         self.min_batch_size.encode(bytes);
         match &self.var {
-            QueryConfigVar::TimeInterval => (),
+            QueryConfigVar::TimeInterval => {
+                if *version == DapVersion::Draft07 {
+                    QUERY_TYPE_TIME_INTERVAL.encode(bytes);
+                    0_u16.encode(bytes);
+                }
+            }
             QueryConfigVar::FixedSize { max_batch_size } => {
+                if *version == DapVersion::Draft07 {
+                    QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                    4_u16.encode(bytes);
+                }
                 max_batch_size.encode(bytes);
+            }
+            QueryConfigVar::NotImplemented { typ, param } => {
+                if *version == DapVersion::Draft07 {
+                    typ.encode(bytes);
+                    u16::try_from(param.len()).unwrap().encode(bytes);
+                }
+                bytes.extend_from_slice(param);
             }
         }
     }
@@ -209,26 +226,59 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
 
 impl ParameterizedDecode<DapVersion> for QueryConfig {
     fn decode_with_param(
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let query_type = u8::decode(bytes)?;
-        let time_precision = Duration::decode(bytes)?;
-        let max_batch_query_count = u16::decode(bytes)?;
-        let min_batch_size = u32::decode(bytes)?;
-        let var = match query_type {
-            QUERY_TYPE_TIME_INTERVAL => Ok(QueryConfigVar::TimeInterval),
-            QUERY_TYPE_FIXED_SIZE => Ok(QueryConfigVar::FixedSize {
-                max_batch_size: u32::decode(bytes)?,
-            }),
-            _ => Err(CodecError::UnexpectedValue),
-        }?;
-        Ok(Self {
-            time_precision,
-            max_batch_query_count,
-            min_batch_size,
-            var,
-        })
+        match version {
+            DapVersion::Draft07 => {
+                let time_precision = Duration::decode(bytes)?;
+                let max_batch_query_count = u16::decode(bytes)?;
+                let min_batch_size = u32::decode(bytes)?;
+                let query_type = u8::decode(bytes)?;
+                let query_type_param_len = u16::decode(bytes)?.try_into().unwrap();
+                let var = match query_type {
+                    QUERY_TYPE_TIME_INTERVAL => QueryConfigVar::TimeInterval,
+                    QUERY_TYPE_FIXED_SIZE => QueryConfigVar::FixedSize {
+                        max_batch_size: u32::decode(bytes)?,
+                    },
+                    _ => {
+                        let mut query_type_param = vec![0; query_type_param_len];
+                        bytes.read_exact(&mut query_type_param)?;
+                        QueryConfigVar::NotImplemented {
+                            typ: query_type,
+                            param: query_type_param,
+                        }
+                    }
+                };
+                Ok(Self {
+                    time_precision,
+                    max_batch_query_count,
+                    min_batch_size,
+                    var,
+                })
+            }
+            DapVersion::Draft02 => {
+                let query_type = u8::decode(bytes)?;
+                let time_precision = Duration::decode(bytes)?;
+                let max_batch_query_count = u16::decode(bytes)?;
+                let min_batch_size = u32::decode(bytes)?;
+                let var = match query_type {
+                    QUERY_TYPE_TIME_INTERVAL => QueryConfigVar::TimeInterval,
+                    QUERY_TYPE_FIXED_SIZE => QueryConfigVar::FixedSize {
+                        max_batch_size: u32::decode(bytes)?,
+                    },
+                    // draft02 compatibility: Unrecognized query types are not decodable, so we're
+                    // forced to abort at this point.
+                    _ => return Err(CodecError::UnexpectedValue),
+                };
+                Ok(Self {
+                    time_precision,
+                    max_batch_query_count,
+                    min_batch_size,
+                    var,
+                })
+            }
+        }
     }
 }
 
@@ -284,5 +334,89 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             task_expiration: Time::decode(bytes)?,
             vdaf_config: VdafConfig::decode(bytes)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_versions;
+
+    use super::*;
+
+    fn roundtrip_query_config(version: DapVersion) {
+        let query_config = QueryConfig {
+            time_precision: 12_345_678,
+            max_batch_query_count: 1337,
+            min_batch_size: 12_345_678,
+            var: QueryConfigVar::TimeInterval,
+        };
+        assert_eq!(
+            QueryConfig::get_decoded_with_param(
+                &version,
+                &query_config.get_encoded_with_param(&version)
+            )
+            .unwrap(),
+            query_config
+        );
+
+        let query_config = QueryConfig {
+            time_precision: 12_345_678,
+            max_batch_query_count: 1337,
+            min_batch_size: 12_345_678,
+            var: QueryConfigVar::FixedSize {
+                max_batch_size: 12_345_678,
+            },
+        };
+        assert_eq!(
+            QueryConfig::get_decoded_with_param(
+                &version,
+                &query_config.get_encoded_with_param(&version)
+            )
+            .unwrap(),
+            query_config
+        );
+    }
+
+    test_versions! { roundtrip_query_config }
+
+    #[test]
+    fn roundtrip_query_config_not_implemented_draft07() {
+        let query_config = QueryConfig {
+            time_precision: 12_345_678,
+            max_batch_query_count: 1337,
+            min_batch_size: 12_345_678,
+            var: QueryConfigVar::NotImplemented {
+                typ: 0,
+                param: b"query config param".to_vec(),
+            },
+        };
+        assert_eq!(
+            QueryConfig::get_decoded_with_param(
+                &DapVersion::Draft07,
+                &query_config.get_encoded_with_param(&DapVersion::Draft07)
+            )
+            .unwrap(),
+            query_config
+        );
+    }
+
+    #[test]
+    fn roundtrip_query_config_not_implemented_draft02() {
+        let query_config = QueryConfig {
+            time_precision: 12_345_678,
+            max_batch_query_count: 1337,
+            min_batch_size: 12_345_678,
+            var: QueryConfigVar::NotImplemented {
+                typ: 0,
+                param: b"query config param".to_vec(),
+            },
+        };
+
+        // Expect error because unimplemented query types aren't decodable.
+        assert!(QueryConfig::get_decoded_with_param(
+            &DapVersion::Draft02,
+            &query_config.get_encoded_with_param(&DapVersion::Draft02)
+        )
+        .is_err());
     }
 }
