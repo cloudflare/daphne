@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{dap_response_to_worker, DapRouter};
-use daphne::{constants::DapMediaType, roles::DapHelper};
+use daphne::{constants::DapMediaType, roles::helper};
 use tracing::Instrument;
 use worker::{Request, Response, Result, RouteContext};
 
@@ -48,7 +48,10 @@ async fn handle_agg_job(
         _ => info_span_from_dap_request!("aggregate", req),
     };
 
-    match daph.handle_agg_job_req(&req).instrument(span).await {
+    match helper::handle_agg_job_req(&daph, &req)
+        .instrument(span)
+        .await
+    {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
@@ -66,7 +69,10 @@ async fn handle_agg_share_req(
 
     let span = info_span_from_dap_request!(MeasuredSpanName::AggregateShares.as_str(), req);
 
-    match daph.handle_agg_share_req(&req).instrument(span).await {
+    match helper::handle_agg_share_req(&daph, &req)
+        .instrument(span)
+        .await
+    {
         Ok(resp) => dap_response_to_worker(resp),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }

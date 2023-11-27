@@ -4,8 +4,8 @@
 //! Trait definitions for Daphne backends.
 
 pub mod aggregator;
-mod helper;
-mod leader;
+pub mod helper;
+pub mod leader;
 
 use crate::{
     constants::DapMediaType,
@@ -155,7 +155,7 @@ async fn resolve_taskprov<S>(
 
 #[cfg(test)]
 mod test {
-    use super::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader};
+    use super::{aggregator, helper, leader, DapAggregator, DapAuthorizedSender, DapLeader};
     use crate::{
         assert_metrics_include, async_test_versions,
         auth::BearerToken,
@@ -545,11 +545,11 @@ mod test {
 
         pub async fn gen_test_agg_job_cont_req_with_round(
             &self,
+            task_id: &TaskId,
             agg_job_id: &MetaAggregationJobId,
             transitions: Vec<Transition>,
             round: Option<u16>,
         ) -> DapRequest<BearerToken> {
-            let task_id = &self.time_interval_task_id;
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
             self.leader_authorized_req(
@@ -570,6 +570,7 @@ mod test {
 
         pub async fn gen_test_agg_job_cont_req(
             &self,
+            task_id: &TaskId,
             agg_job_id: &MetaAggregationJobId,
             transitions: Vec<Transition>,
             version: DapVersion,
@@ -579,7 +580,7 @@ mod test {
             } else {
                 Some(1)
             };
-            self.gen_test_agg_job_cont_req_with_round(agg_job_id, transitions, round)
+            self.gen_test_agg_job_cont_req_with_round(task_id, agg_job_id, transitions, round)
                 .await
         }
 
@@ -654,10 +655,14 @@ mod test {
             let (task_id, part_batch_sel, reports) = get_reports!(self.leader, &report_sel);
 
             // Leader->Helper: Run aggregation job.
-            let _reports_aggregated = self
-                .leader
-                .run_agg_job(&task_id, task_config, &part_batch_sel, reports)
-                .await?;
+            let _reports_aggregated = leader::run_agg_job(
+                &*self.leader,
+                &task_id,
+                task_config,
+                &part_batch_sel,
+                reports,
+            )
+            .await?;
             Ok(())
         }
 
@@ -679,15 +684,19 @@ mod test {
             );
 
             // Leader: Handle request from Collector.
-            self.leader.handle_collect_job_req(&req).await?;
+            leader::handle_collect_job_req(&*self.leader, &req).await?;
             let resp = self.leader.get_pending_collect_jobs().await?;
             let (task_id, collect_id, collect_req) = &resp[0];
 
             // Leader->Helper: Complete collection job.
-            let _reports_collected = self
-                .leader
-                .run_collect_job(task_id, collect_id, task_config, collect_req)
-                .await?;
+            let _reports_collected = leader::run_collect_job(
+                &*self.leader,
+                task_id,
+                collect_id,
+                task_config,
+                collect_req,
+            )
+            .await?;
             Ok(())
         }
 
@@ -780,7 +789,9 @@ mod test {
             )
             .await;
         assert_matches!(
-            t.helper.handle_agg_job_req(&req).await.unwrap_err(),
+            helper::handle_agg_job_req(&*t.helper, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
@@ -829,14 +840,14 @@ mod test {
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
+            helper::handle_agg_job_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
+            helper::handle_agg_job_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
@@ -864,7 +875,7 @@ mod test {
         };
 
         assert_matches!(
-            t.leader.handle_hpke_config_req(&req).await,
+            aggregator::handle_hpke_config_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnrecognizedTask))
         );
     }
@@ -887,7 +898,7 @@ mod test {
         // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
         // used for all tasks.
         assert_matches!(
-            t.leader.handle_hpke_config_req(&req).await,
+            aggregator::handle_hpke_config_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::MissingTaskId))
         );
     }
@@ -898,20 +909,25 @@ mod test {
         let t = Test::new(version);
         let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let mut req = t
-            .gen_test_agg_job_cont_req(&agg_job_id, Vec::default(), version)
+            .gen_test_agg_job_cont_req(
+                &t.time_interval_task_id,
+                &agg_job_id,
+                Vec::default(),
+                version,
+            )
             .await;
         req.sender_auth = None;
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
+            helper::handle_agg_job_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            t.helper.handle_agg_job_req(&req).await,
+            helper::handle_agg_job_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
@@ -927,14 +943,14 @@ mod test {
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            t.helper.handle_agg_share_req(&req).await,
+            helper::handle_agg_share_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            t.helper.handle_agg_share_req(&req).await,
+            helper::handle_agg_share_req(&*t.helper, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
     }
@@ -970,7 +986,9 @@ mod test {
             )
             .await;
         assert_matches!(
-            t.helper.handle_agg_share_req(&req).await.unwrap_err(),
+            helper::handle_agg_share_req(&*t.helper, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
@@ -998,7 +1016,9 @@ mod test {
             )
             .await;
         assert_matches!(
-            t.helper.handle_agg_share_req(&req).await.unwrap_err(),
+            helper::handle_agg_share_req(&*t.helper, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::BatchInvalid { .. })
         );
     }
@@ -1041,14 +1061,14 @@ mod test {
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            t.leader.handle_collect_job_req(&req).await,
+            leader::handle_collect_job_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            t.leader.handle_collect_job_req(&req).await,
+            leader::handle_collect_job_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
     }
@@ -1067,7 +1087,10 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+            &helper::handle_agg_job_req(&*t.helper, &req)
+                .await
+                .unwrap()
+                .payload,
         )
         .unwrap();
         let transition = &agg_job_resp.transitions[0];
@@ -1092,7 +1115,10 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+            &helper::handle_agg_job_req(&*t.helper, &req)
+                .await
+                .unwrap()
+                .payload,
         )
         .unwrap();
         let transition = &agg_job_resp.transitions[0];
@@ -1126,7 +1152,10 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+            &helper::handle_agg_job_req(&*t.helper, &req)
+                .await
+                .unwrap()
+                .payload,
         )
         .unwrap();
         let transitions = if version == DapVersion::Draft02 {
@@ -1157,13 +1186,17 @@ mod test {
             };
             let req = t
                 .gen_test_agg_job_cont_req(
+                    task_id,
                     &MetaAggregationJobId::Draft02(agg_job_id),
                     transitions,
                     version,
                 )
                 .await;
             AggregationJobResp::get_decoded(
-                &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+                &helper::handle_agg_job_req(&*t.helper, &req)
+                    .await
+                    .unwrap()
+                    .payload,
             )
             .unwrap()
             .transitions
@@ -1219,7 +1252,10 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+            &helper::handle_agg_job_req(&*t.helper, &req)
+                .await
+                .unwrap()
+                .payload,
         )
         .unwrap();
         let transition = &agg_job_resp.transitions[0];
@@ -1252,12 +1288,14 @@ mod test {
             .await;
 
         // Send aggregate request.
-        let _ = t.helper.handle_agg_job_req(&req).await;
+        let _ = helper::handle_agg_job_req(&*t.helper, &req).await;
 
         assert_eq!(t.helper.audit_log.invocations(), 1);
 
         // Send another aggregate request.
-        let err = t.helper.handle_agg_job_req(&req).await.unwrap_err();
+        let err = helper::handle_agg_job_req(&*t.helper, &req)
+            .await
+            .unwrap_err();
 
         assert_eq!(t.helper.audit_log.invocations(), 1);
 
@@ -1271,13 +1309,20 @@ mod test {
         let t = Test::new(version);
         let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let req = t
-            .gen_test_agg_job_cont_req(&agg_job_id, Vec::default(), version)
+            .gen_test_agg_job_cont_req(
+                &t.time_interval_task_id,
+                &agg_job_id,
+                Vec::default(),
+                version,
+            )
             .await;
 
         assert_eq!(t.helper.audit_log.invocations(), 0);
 
         // Send aggregate continue request to helper.
-        let err = t.helper.handle_agg_job_req(&req).await.unwrap_err();
+        let err = helper::handle_agg_job_req(&*t.helper, &req)
+            .await
+            .unwrap_err();
 
         // Expect failure due to sending continue request before initialization request.
         assert_matches!(
@@ -1307,7 +1352,7 @@ mod test {
 
         // Expect failure due to invalid task ID in report.
         assert_matches!(
-            t.leader.handle_upload_req(&req).await,
+            leader::handle_upload_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnrecognizedTask))
         );
     }
@@ -1332,7 +1377,9 @@ mod test {
         };
 
         assert_matches!(
-            t.leader.handle_upload_req(&req).await.unwrap_err(),
+            leader::handle_upload_req(&*t.leader, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::ReportTooLate)
         );
     }
@@ -1347,8 +1394,7 @@ mod test {
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
 
         // Upload report.
-        t.leader
-            .handle_upload_req(&req)
+        leader::handle_upload_req(&*t.leader, &req)
             .await
             .expect("upload failed unexpectedly");
 
@@ -1390,7 +1436,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        t.leader.handle_collect_job_req(&req).await.unwrap();
+        leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap();
 
         // Expect DapCollectJob::Unknown due to invalid collect ID.
         assert_eq!(
@@ -1481,7 +1529,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
+        let err = leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap_err();
 
         // Fails because the requested batch interval is too large.
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too large".to_string()));
@@ -1507,7 +1557,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
+        let err = leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap_err();
 
         // Fails because the requested batch interval is too far into the past.
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into past".to_string()));
@@ -1533,7 +1585,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = t.leader.handle_collect_job_req(&req).await.unwrap_err();
+        let err = leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap_err();
 
         // Fails because the requested batch interval is too far into the future.
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into future".to_string()));
@@ -1566,7 +1620,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let _collect_uri = t.leader.handle_collect_job_req(&req).await.unwrap();
+        let _collect_uri = leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap();
     }
 
     async_test_versions! { handle_collect_job_req_succeed_max_batch_interval }
@@ -1582,7 +1638,7 @@ mod test {
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
 
         // Client: Send upload request to Leader.
-        t.leader.handle_upload_req(&req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
 
         // Leader: Run aggregation job.
         t.run_agg_job(task_id).await.unwrap();
@@ -1622,7 +1678,9 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let url = t.leader.handle_collect_job_req(&req).await.unwrap();
+        let url = leader::handle_collect_job_req(&*t.leader, &req)
+            .await
+            .unwrap();
         let resp = t.leader.get_pending_collect_jobs().await.unwrap();
         let (_leader_task_id, leader_collect_id, leader_collect_req) = &resp[0];
 
@@ -1670,7 +1728,9 @@ mod test {
             task_config.leader_url.join("collect").unwrap(),
         );
         assert_matches!(
-            t.leader.handle_collect_job_req(&req).await.unwrap_err(),
+            leader::handle_collect_job_req(&*t.leader, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
         );
 
@@ -1693,7 +1753,9 @@ mod test {
             task_config.leader_url.join("collect").unwrap(),
         );
         assert_matches!(
-            t.leader.handle_collect_job_req(&req).await.unwrap_err(),
+            leader::handle_collect_job_req(&*t.leader, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::BatchInvalid { .. })
         );
     }
@@ -1707,8 +1769,7 @@ mod test {
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report, task_id).await;
 
-        t.leader
-            .handle_upload_req(&req)
+        leader::handle_upload_req(&*t.leader, &req)
             .await
             .expect("upload failed unexpectedly");
     }
@@ -1724,7 +1785,7 @@ mod test {
         let req = t.gen_test_upload_req(report, task_id).await;
 
         // Client: Send upload request to Leader.
-        t.leader.handle_upload_req(&req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
 
         // Leader: Run aggregation job.
         t.run_agg_job(task_id).await.unwrap();
@@ -1763,7 +1824,7 @@ mod test {
         let req = t.gen_test_upload_req(report, task_id).await;
 
         // Client: Send upload request to Leader.
-        t.leader.handle_upload_req(&req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
 
         // Leader: Run aggregation job.
         t.run_agg_job(task_id).await.unwrap();
@@ -1856,7 +1917,7 @@ mod test {
                 taskprov: taskprov_advertisement.clone(),
                 ..Default::default()
             };
-            t.leader.handle_upload_req(&req).await.unwrap();
+            leader::handle_upload_req(&*t.leader, &req).await.unwrap();
         }
 
         // Leader: Run aggregation job.

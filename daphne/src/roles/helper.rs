@@ -49,326 +49,333 @@ pub trait DapHelper<S>: DapAggregator<S> {
     ) -> Result<Option<DapAggregationJobState>, DapError>
     where
         Id: Into<MetaAggregationJobId> + Send;
+}
 
-    async fn handle_agg_job_init_req<'req>(
-        &self,
-        req: &'req DapRequest<S>,
-        metrics: &DaphneMetrics,
-        task_id: &TaskId,
-    ) -> Result<DapResponse, DapError> {
-        let agg_job_init_req =
-            AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
-                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
-
-        metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
-
-        // taskprov: Resolve the task config to use for the request.
-        if self.get_global_config().allow_taskprov {
-            // draft02 compatibility: We also need to ensure that all of the reports include the task
-            // config in the report extensions. (See draft-wang-ppm-dap-taskprov-02, Section 6.)
-            let first_metadata = if req.version == DapVersion::default() {
-                let using_taskprov = agg_job_init_req
-                    .prep_inits
-                    .iter()
-                    .filter(|prep_init| {
-                        prep_init
-                            .report_share
-                            .report_metadata
-                            .is_taskprov(req.version, task_id)
-                    })
-                    .count();
-
-                match using_taskprov {
-                    0 => None,
-                    c if c == agg_job_init_req.prep_inits.len() => {
-                        // All the extensions use taskprov and look ok, so compute first_metadata.
-                        // Note this will always be Some().
-                        agg_job_init_req
-                            .prep_inits
-                            .first()
-                            .map(|prep_init| &prep_init.report_share.report_metadata)
-                    }
-                    _ => {
-                        // It's not all taskprov or no taskprov, so it's an error.
-                        return Err(DapAbort::InvalidMessage {
-                            detail: "some reports include the taskprov extensions and some do not"
-                                .to_string(),
-                            task_id: Some(*task_id),
-                        }
-                        .into());
-                    }
-                }
-            } else {
-                None
-            };
-
-            resolve_taskprov(self, task_id, req, first_metadata).await?;
-        }
-
-        let wrapped_task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_config = wrapped_task_config.as_ref();
-
-        if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
-            error!("aborted unauthorized collect request: {reason}");
-            return Err(DapAbort::UnauthorizedRequest {
-                detail: reason,
-                task_id: *task_id,
-            }
-            .into());
-        }
-
-        let agg_job_id = resolve_agg_job_id(req, agg_job_init_req.draft02_agg_job_id.as_ref())?;
-
-        // Check whether the DAP version in the request matches the task config.
-        if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-        }
-
-        // Ensure we know which batch the request pertains to.
-        check_part_batch(
-            task_id,
-            task_config,
-            &agg_job_init_req.part_batch_sel,
-            &agg_job_init_req.agg_param,
-        )?;
-
-        let initialized_reports = task_config
-            .vdaf
-            .helper_initialize_reports(self, self, task_id, task_config, &agg_job_init_req)
-            .await?;
-
-        let agg_job_resp = match task_config.version {
-            DapVersion::Draft02 => {
-                let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) =
-                    task_config.vdaf.handle_agg_job_init_req(
-                        task_id,
-                        task_config,
-                        &HashMap::default(), // no reports have been processed yet
-                        &initialized_reports,
-                        &agg_job_init_req,
-                        metrics,
-                    )?
-                else {
-                    return Err(fatal_error!(err = "unexpected transition"));
-                };
-
-                if !self
-                    .put_helper_state_if_not_exists(task_id, agg_job_id, &state)
-                    .await?
-                {
-                    // TODO spec: Consider an explicit abort for this case.
-                    return Err(DapAbort::BadRequest(
-                        "unexpected message for aggregation job (already exists)".into(),
-                    )
-                    .into());
-                }
-                metrics.agg_job_started_inc();
-                agg_job_resp
-            }
-
-            DapVersion::DraftLatest => {
-                let agg_job_resp = finish_agg_job_and_aggregate(
-                    self,
-                    task_id,
-                    task_config,
-                    metrics,
-                    |report_status| {
-                        let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
-                            task_config.vdaf.handle_agg_job_init_req(
-                                task_id,
-                                task_config,
-                                report_status,
-                                &initialized_reports,
-                                &agg_job_init_req,
-                                metrics,
-                            )?
-                        else {
-                            return Err(fatal_error!(err = "unexpected transition"));
-                        };
-                        Ok((agg_span, agg_job_resp))
-                    },
-                )
-                .await?;
-
-                metrics.agg_job_started_inc();
-                metrics.agg_job_completed_inc();
-                agg_job_resp
-            }
-        };
-
-        self.audit_log().on_aggregation_job(
-            req.host(),
-            task_id,
-            task_config,
-            agg_job_init_req.prep_inits.len() as u64,
-            AggregationJobAuditAction::Init,
-        );
-
-        metrics.inbound_req_inc(DaphneRequestType::Aggregate);
-        Ok(DapResponse {
-            version: req.version,
-            media_type: DapMediaType::AggregationJobResp,
-            payload: agg_job_resp.get_encoded(),
-        })
-    }
-
-    async fn handle_agg_job_cont_req<'req>(
-        &self,
-        req: &'req DapRequest<S>,
-        metrics: &DaphneMetrics,
-        task_id: &TaskId,
-    ) -> Result<DapResponse, DapError> {
-        if self.get_global_config().allow_taskprov {
-            resolve_taskprov(self, task_id, req, None).await?;
-        }
-        let wrapped_task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_config = wrapped_task_config.as_ref();
-
-        if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
-            error!("aborted unauthorized collect request: {reason}");
-            return Err(DapAbort::UnauthorizedRequest {
-                detail: reason,
-                task_id: *task_id,
-            }
-            .into());
-        }
-
-        // Check whether the DAP version in the request matches the task config.
-        if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-        }
-
-        let agg_job_cont_req =
-            AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)
-                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
-
-        let agg_job_id = resolve_agg_job_id(req, agg_job_cont_req.draft02_agg_job_id.as_ref())?;
-
-        let state = self
-            .get_helper_state(task_id, agg_job_id)
-            .await?
-            .ok_or_else(|| DapAbort::UnrecognizedAggregationJob {
-                task_id: *task_id,
-                agg_job_id_base64url: agg_job_id.to_base64url(),
-            })?;
-
-        let agg_job_resp =
-            finish_agg_job_and_aggregate(self, task_id, task_config, metrics, |report_status| {
-                task_config.vdaf.handle_agg_job_cont_req(
-                    task_id,
-                    task_config,
-                    &state,
-                    report_status,
-                    &agg_job_id,
-                    &agg_job_cont_req,
-                )
-            })
-            .await?;
-
-        let out_shares_count = agg_job_resp
-            .transitions
-            .iter()
-            .filter(|t| matches!(t.var, TransitionVar::Finished))
-            .count()
-            .try_into()
-            .expect("usize to fit in u64");
-        self.audit_log().on_aggregation_job(
-            req.host(),
-            task_id,
-            task_config,
-            out_shares_count,
-            AggregationJobAuditAction::Continue,
-        );
-
-        metrics.agg_job_completed_inc();
-        metrics.inbound_req_inc(DaphneRequestType::Aggregate);
-        Ok(DapResponse {
-            version: req.version,
-            media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
-            payload: agg_job_resp.get_encoded(),
-        })
-    }
-
-    /// Handle a request pertaining to an aggregation job.
-    async fn handle_agg_job_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
-        let metrics = self.metrics();
-        let task_id = req.task_id()?;
-
-        match req.media_type {
-            DapMediaType::AggregationJobInitReq => {
-                self.handle_agg_job_init_req(req, metrics, task_id).await
-            }
-            DapMediaType::AggregationJobContinueReq => {
-                self.handle_agg_job_cont_req(req, metrics, task_id).await
-            }
-            //TODO spec: Specify this behavior.
-            _ => Err(DapAbort::BadRequest("unexpected media type".into()).into()),
-        }
-    }
-
-    /// Handle a request for an aggregate share. This is called by the Leader to complete a
-    /// collection job.
-    async fn handle_agg_share_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
-        let now = self.get_current_time();
-        let metrics = self.metrics();
-        let task_id = req.task_id()?;
-
-        check_request_content_type(req, DapMediaType::AggregateShareReq)?;
-
-        if self.get_global_config().allow_taskprov {
-            resolve_taskprov(self, task_id, req, None).await?;
-        }
-
-        let wrapped_task_config = self
-            .get_task_config_for(req.task_id()?)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_config = wrapped_task_config.as_ref();
-
-        if let Some(reason) = self.unauthorized_reason(task_config, req).await? {
-            error!("aborted unauthorized collect request: {reason}");
-            return Err(DapAbort::UnauthorizedRequest {
-                detail: reason,
-                task_id: *task_id,
-            }
-            .into());
-        }
-
-        // Check whether the DAP version in the request matches the task config.
-        if task_config.version != req.version {
-            return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-        }
-
-        let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
+pub async fn handle_agg_job_init_req<'req, S, A: DapHelper<S>>(
+    aggregator: &A,
+    req: &'req DapRequest<S>,
+) -> Result<DapResponse, DapError> {
+    let task_id = req.task_id()?;
+    let metrics = aggregator.metrics();
+    let agg_job_init_req =
+        AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
-        // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
-        // collected batches.
-        check_batch(
-            self,
-            task_config,
+    metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
+
+    // taskprov: Resolve the task config to use for the request.
+    if aggregator.get_global_config().allow_taskprov {
+        // draft02 compatibility: We also need to ensure that all of the reports include the task
+        // config in the report extensions. (See draft-wang-ppm-dap-taskprov-02, Section 6.)
+        let first_metadata = if req.version == DapVersion::default() {
+            let using_taskprov = agg_job_init_req
+                .prep_inits
+                .iter()
+                .filter(|prep_init| {
+                    prep_init
+                        .report_share
+                        .report_metadata
+                        .is_taskprov(req.version, task_id)
+                })
+                .count();
+
+            match using_taskprov {
+                0 => None,
+                c if c == agg_job_init_req.prep_inits.len() => {
+                    // All the extensions use taskprov and look ok, so compute first_metadata.
+                    // Note this will always be Some().
+                    agg_job_init_req
+                        .prep_inits
+                        .first()
+                        .map(|prep_init| &prep_init.report_share.report_metadata)
+                }
+                _ => {
+                    // It's not all taskprov or no taskprov, so it's an error.
+                    return Err(DapAbort::InvalidMessage {
+                        detail: "some reports include the taskprov extensions and some do not"
+                            .to_string(),
+                        task_id: Some(*task_id),
+                    }
+                    .into());
+                }
+            }
+        } else {
+            None
+        };
+
+        resolve_taskprov(aggregator, task_id, req, first_metadata).await?;
+    }
+
+    let wrapped_task_config = aggregator
+        .get_task_config_for(task_id)
+        .await?
+        .ok_or(DapAbort::UnrecognizedTask)?;
+    let task_config = wrapped_task_config.as_ref();
+
+    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
+        error!("aborted unauthorized collect request: {reason}");
+        return Err(DapAbort::UnauthorizedRequest {
+            detail: reason,
+            task_id: *task_id,
+        }
+        .into());
+    }
+
+    let agg_job_id = resolve_agg_job_id(req, agg_job_init_req.draft02_agg_job_id.as_ref())?;
+
+    // Check whether the DAP version in the request matches the task config.
+    if task_config.version != req.version {
+        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
+    }
+
+    // Ensure we know which batch the request pertains to.
+    check_part_batch(
+        task_id,
+        task_config,
+        &agg_job_init_req.part_batch_sel,
+        &agg_job_init_req.agg_param,
+    )?;
+
+    let initialized_reports = task_config
+        .vdaf
+        .helper_initialize_reports(
+            aggregator,
+            aggregator,
             task_id,
-            &agg_share_req.batch_sel,
-            &agg_share_req.agg_param,
-            now,
+            task_config,
+            &agg_job_init_req,
         )
         .await?;
 
-        let agg_share = self
-            .get_agg_share(task_id, &agg_share_req.batch_sel)
+    let agg_job_resp = match task_config.version {
+        DapVersion::Draft02 => {
+            let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) =
+                task_config.vdaf.handle_agg_job_init_req(
+                    task_id,
+                    task_config,
+                    &HashMap::default(), // no reports have been processed yet
+                    &initialized_reports,
+                    &agg_job_init_req,
+                    metrics,
+                )?
+            else {
+                return Err(fatal_error!(err = "unexpected transition"));
+            };
+
+            if !aggregator
+                .put_helper_state_if_not_exists(task_id, agg_job_id, &state)
+                .await?
+            {
+                // TODO spec: Consider an explicit abort for this case.
+                return Err(DapAbort::BadRequest(
+                    "unexpected message for aggregation job (already exists)".into(),
+                )
+                .into());
+            }
+            metrics.agg_job_started_inc();
+            agg_job_resp
+        }
+
+        DapVersion::DraftLatest => {
+            let agg_job_resp = finish_agg_job_and_aggregate(
+                aggregator,
+                task_id,
+                task_config,
+                metrics,
+                |report_status| {
+                    let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
+                        task_config.vdaf.handle_agg_job_init_req(
+                            task_id,
+                            task_config,
+                            report_status,
+                            &initialized_reports,
+                            &agg_job_init_req,
+                            metrics,
+                        )?
+                    else {
+                        return Err(fatal_error!(err = "unexpected transition"));
+                    };
+                    Ok((agg_span, agg_job_resp))
+                },
+            )
             .await?;
 
-        // Check that we have aggreagted the same set of reports as the Leader.
-        if agg_share_req.report_count != agg_share.report_count
-            || !constant_time_eq(&agg_share_req.checksum, &agg_share.checksum)
-        {
-            return Err(DapAbort::BatchMismatch{
+            metrics.agg_job_started_inc();
+            metrics.agg_job_completed_inc();
+            agg_job_resp
+        }
+    };
+
+    aggregator.audit_log().on_aggregation_job(
+        req.host(),
+        task_id,
+        task_config,
+        agg_job_init_req.prep_inits.len() as u64,
+        AggregationJobAuditAction::Init,
+    );
+
+    metrics.inbound_req_inc(DaphneRequestType::Aggregate);
+    Ok(DapResponse {
+        version: req.version,
+        media_type: DapMediaType::AggregationJobResp,
+        payload: agg_job_resp.get_encoded(),
+    })
+}
+
+pub async fn handle_agg_job_cont_req<'req, S, A: DapHelper<S>>(
+    aggregator: &A,
+    req: &'req DapRequest<S>,
+) -> Result<DapResponse, DapError> {
+    let task_id = req.task_id()?;
+    let metrics = aggregator.metrics();
+
+    if aggregator.get_global_config().allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, None).await?;
+    }
+    let wrapped_task_config = aggregator
+        .get_task_config_for(task_id)
+        .await?
+        .ok_or(DapAbort::UnrecognizedTask)?;
+    let task_config = wrapped_task_config.as_ref();
+
+    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
+        error!("aborted unauthorized collect request: {reason}");
+        return Err(DapAbort::UnauthorizedRequest {
+            detail: reason,
+            task_id: *task_id,
+        }
+        .into());
+    }
+
+    // Check whether the DAP version in the request matches the task config.
+    if task_config.version != req.version {
+        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
+    }
+
+    let agg_job_cont_req =
+        AggregationJobContinueReq::get_decoded_with_param(&req.version, &req.payload)
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
+    let agg_job_id = resolve_agg_job_id(req, agg_job_cont_req.draft02_agg_job_id.as_ref())?;
+
+    let state = aggregator
+        .get_helper_state(task_id, agg_job_id)
+        .await?
+        .ok_or_else(|| DapAbort::UnrecognizedAggregationJob {
+            task_id: *task_id,
+            agg_job_id_base64url: agg_job_id.to_base64url(),
+        })?;
+
+    let agg_job_resp =
+        finish_agg_job_and_aggregate(aggregator, task_id, task_config, metrics, |report_status| {
+            task_config.vdaf.handle_agg_job_cont_req(
+                task_id,
+                task_config,
+                &state,
+                report_status,
+                &agg_job_id,
+                &agg_job_cont_req,
+            )
+        })
+        .await?;
+
+    let out_shares_count = agg_job_resp
+        .transitions
+        .iter()
+        .filter(|t| matches!(t.var, TransitionVar::Finished))
+        .count()
+        .try_into()
+        .expect("usize to fit in u64");
+    aggregator.audit_log().on_aggregation_job(
+        req.host(),
+        task_id,
+        task_config,
+        out_shares_count,
+        AggregationJobAuditAction::Continue,
+    );
+
+    metrics.agg_job_completed_inc();
+    metrics.inbound_req_inc(DaphneRequestType::Aggregate);
+    Ok(DapResponse {
+        version: req.version,
+        media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
+        payload: agg_job_resp.get_encoded(),
+    })
+}
+
+/// Handle a request pertaining to an aggregation job.
+pub async fn handle_agg_job_req<'req, S, A: DapHelper<S>>(
+    aggregator: &A,
+    req: &DapRequest<S>,
+) -> Result<DapResponse, DapError> {
+    match req.media_type {
+        DapMediaType::AggregationJobInitReq => handle_agg_job_init_req(aggregator, req).await,
+        DapMediaType::AggregationJobContinueReq => handle_agg_job_cont_req(aggregator, req).await,
+        //TODO spec: Specify this behavior.
+        _ => Err(DapAbort::BadRequest("unexpected media type".into()).into()),
+    }
+}
+
+/// Handle a request for an aggregate share. This is called by the Leader to complete a
+/// collection job.
+pub async fn handle_agg_share_req<'req, S, A: DapHelper<S>>(
+    aggregator: &A,
+    req: &DapRequest<S>,
+) -> Result<DapResponse, DapError> {
+    let now = aggregator.get_current_time();
+    let metrics = aggregator.metrics();
+    let task_id = req.task_id()?;
+
+    check_request_content_type(req, DapMediaType::AggregateShareReq)?;
+
+    if aggregator.get_global_config().allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, None).await?;
+    }
+
+    let wrapped_task_config = aggregator
+        .get_task_config_for(req.task_id()?)
+        .await?
+        .ok_or(DapAbort::UnrecognizedTask)?;
+    let task_config = wrapped_task_config.as_ref();
+
+    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
+        error!("aborted unauthorized collect request: {reason}");
+        return Err(DapAbort::UnauthorizedRequest {
+            detail: reason,
+            task_id: *task_id,
+        }
+        .into());
+    }
+
+    // Check whether the DAP version in the request matches the task config.
+    if task_config.version != req.version {
+        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
+    }
+
+    let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
+        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
+    // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
+    // collected batches.
+    check_batch(
+        aggregator,
+        task_config,
+        task_id,
+        &agg_share_req.batch_sel,
+        &agg_share_req.agg_param,
+        now,
+    )
+    .await?;
+
+    let agg_share = aggregator
+        .get_agg_share(task_id, &agg_share_req.batch_sel)
+        .await?;
+
+    // Check that we have aggreagted the same set of reports as the Leader.
+    if agg_share_req.report_count != agg_share.report_count
+        || !constant_time_eq(&agg_share_req.checksum, &agg_share.checksum)
+    {
+        return Err(DapAbort::BatchMismatch{
                 detail: format!("Either the report count or checksum does not match: the Leader computed {} and {}; the Helper computed {} and {}.",
                     agg_share_req.report_count,
                     hex::encode(agg_share_req.checksum),
@@ -376,48 +383,48 @@ pub trait DapHelper<S>: DapAggregator<S> {
                     hex::encode(agg_share.checksum)),
                 task_id: *task_id,
             }.into());
-        }
-
-        // Check the batch size.
-        if !task_config
-            .is_report_count_compatible(task_id, agg_share.report_count)
-            .unwrap_or(false)
-        {
-            return Err(DapAbort::InvalidBatchSize {
-                detail: format!(
-                    "Report count ({}) is less than minimum ({})",
-                    agg_share.report_count, task_config.min_batch_size
-                ),
-                task_id: *task_id,
-            }
-            .into());
-        }
-
-        // Mark each aggregated report as collected.
-        self.mark_collected(task_id, &agg_share_req.batch_sel)
-            .await?;
-
-        let encrypted_agg_share = task_config.vdaf.produce_helper_encrypted_agg_share(
-            &task_config.collector_hpke_config,
-            task_id,
-            &agg_share_req.batch_sel,
-            &agg_share_req.agg_param,
-            &agg_share,
-            task_config.version,
-        )?;
-
-        let agg_share_resp = AggregateShare {
-            encrypted_agg_share,
-        };
-
-        metrics.report_inc_by("collected", agg_share_req.report_count);
-        metrics.inbound_req_inc(DaphneRequestType::Collect);
-        Ok(DapResponse {
-            version: req.version,
-            media_type: DapMediaType::AggregateShare,
-            payload: agg_share_resp.get_encoded(),
-        })
     }
+
+    // Check the batch size.
+    if !task_config
+        .is_report_count_compatible(task_id, agg_share.report_count)
+        .unwrap_or(false)
+    {
+        return Err(DapAbort::InvalidBatchSize {
+            detail: format!(
+                "Report count ({}) is less than minimum ({})",
+                agg_share.report_count, task_config.min_batch_size
+            ),
+            task_id: *task_id,
+        }
+        .into());
+    }
+
+    // Mark each aggregated report as collected.
+    aggregator
+        .mark_collected(task_id, &agg_share_req.batch_sel)
+        .await?;
+
+    let encrypted_agg_share = task_config.vdaf.produce_helper_encrypted_agg_share(
+        &task_config.collector_hpke_config,
+        task_id,
+        &agg_share_req.batch_sel,
+        &agg_share_req.agg_param,
+        &agg_share,
+        task_config.version,
+    )?;
+
+    let agg_share_resp = AggregateShare {
+        encrypted_agg_share,
+    };
+
+    metrics.report_inc_by("collected", agg_share_req.report_count);
+    metrics.inbound_req_inc(DaphneRequestType::Collect);
+    Ok(DapResponse {
+        version: req.version,
+        media_type: DapMediaType::AggregateShare,
+        payload: agg_share_resp.get_encoded(),
+    })
 }
 
 fn check_part_batch(
@@ -570,6 +577,7 @@ async fn finish_agg_job_and_aggregate<S>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -577,7 +585,6 @@ mod tests {
     use prio::codec::ParameterizedDecode;
 
     use crate::messages::{AggregationJobInitReq, AggregationJobResp, Transition, TransitionVar};
-    use crate::roles::DapHelper;
     use crate::{assert_metrics_include, MetaAggregationJobId};
     use crate::{roles::test::TestData, DapVersion};
 
@@ -612,14 +619,14 @@ mod tests {
                 .unwrap(),
         );
 
-        helper
-            .handle_agg_job_init_req(&req, &helper.metrics, &task_id)
+        super::handle_agg_job_init_req(&*helper, &req)
             .await
             .unwrap();
 
         {
             let req = test
                 .gen_test_agg_job_cont_req(
+                    &task_id,
                     &meta_agg_job_id,
                     report_ids[0..2]
                         .iter()
@@ -632,10 +639,7 @@ mod tests {
                 )
                 .await;
 
-            let resp = helper
-                .handle_agg_job_cont_req(&req, &helper.metrics, &task_id)
-                .await
-                .unwrap();
+            let resp = handle_agg_job_cont_req(&*helper, &req).await.unwrap();
 
             let a_job_resp =
                 AggregationJobResp::get_decoded_with_param(&DapVersion::Draft02, &resp.payload)
@@ -649,6 +653,7 @@ mod tests {
         {
             let req = test
                 .gen_test_agg_job_cont_req(
+                    &task_id,
                     &meta_agg_job_id,
                     report_ids[1..3]
                         .iter()
@@ -661,10 +666,7 @@ mod tests {
                 )
                 .await;
 
-            let resp = helper
-                .handle_agg_job_cont_req(&req, &helper.metrics, &task_id)
-                .await
-                .unwrap();
+            let resp = handle_agg_job_cont_req(&*helper, &req).await.unwrap();
 
             let a_job_resp =
                 AggregationJobResp::get_decoded_with_param(&DapVersion::Draft02, &resp.payload)

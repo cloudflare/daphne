@@ -5,7 +5,7 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{CollectionJobId, TaskId},
-    roles::DapLeader,
+    roles::{leader, DapLeader},
     DapCollectJob, DapRequest, DapResponse, DapVersion,
 };
 use prio::codec::ParameterizedEncode;
@@ -50,7 +50,10 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
 
             let span = info_span_from_dap_request!("collect", req);
 
-            match daph.handle_collect_job_req(&req).instrument(span).await {
+            match leader::handle_collect_job_req(&daph, &req)
+                .instrument(span)
+                .await
+            {
                 Ok(collect_uri) => {
                     let mut headers = Headers::new();
                     headers.set("Location", collect_uri.as_str())?;
@@ -118,7 +121,10 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
 
                 let span = info_span_from_dap_request!("collect (PUT)", req);
 
-                match daph.handle_collect_job_req(&req).instrument(span).await {
+                match leader::handle_collect_job_req(&daph, &req)
+                    .instrument(span)
+                    .await
+                {
                     Ok(_) => Ok(Response::empty().unwrap().with_status(201)),
                     Err(e) => daph.state.dap_abort_to_worker_response(e),
                 }
@@ -187,7 +193,10 @@ async fn put_report_into_task(
 ) -> Result<Response> {
     let span = info_span_from_dap_request!("upload", req);
 
-    match daph.handle_upload_req(&req).instrument(span).await {
+    match leader::handle_upload_req(&daph, &req)
+        .instrument(span)
+        .await
+    {
         Ok(()) => Response::empty(),
         Err(e) => daph.state.dap_abort_to_worker_response(e),
     }
