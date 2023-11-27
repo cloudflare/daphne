@@ -554,22 +554,6 @@ macro_rules! async_test_versions {
     };
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub(crate) enum MetaAggregationJobIdOwned {
-    Draft02(Draft02AggregationJobId),
-    DraftLatest(AggregationJobId),
-}
-
-impl From<&MetaAggregationJobId> for MetaAggregationJobIdOwned {
-    fn from(agg_job_id: &MetaAggregationJobId) -> Self {
-        match agg_job_id {
-            MetaAggregationJobId::Draft02(agg_job_id) => Self::Draft02(*agg_job_id),
-            MetaAggregationJobId::DraftLatest(agg_job_id) => Self::DraftLatest(*agg_job_id),
-        }
-    }
-}
-
 impl From<DapBatchBucket> for PartialBatchSelector {
     fn from(bucket: DapBatchBucket) -> Self {
         match bucket {
@@ -1177,12 +1161,15 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
 #[async_trait(?Send)]
 impl DapHelper<BearerToken> for MockAggregator {
-    async fn put_helper_state_if_not_exists(
+    async fn put_helper_state_if_not_exists<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
+        agg_job_id: Id,
         helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError> {
+    ) -> Result<bool, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send,
+    {
         let helper_state_info = HelperStateInfo {
             task_id: *task_id,
             agg_job_id_owned: agg_job_id.into(),
@@ -1204,11 +1191,14 @@ impl DapHelper<BearerToken> for MockAggregator {
         Ok(true)
     }
 
-    async fn get_helper_state(
+    async fn get_helper_state<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
-    ) -> Result<Option<DapAggregationJobState>, DapError> {
+        agg_job_id: Id,
+    ) -> Result<Option<DapAggregationJobState>, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send,
+    {
         let helper_state_info = HelperStateInfo {
             task_id: *task_id,
             agg_job_id_owned: agg_job_id.into(),
@@ -1480,7 +1470,7 @@ impl DapLeader<BearerToken> for MockAggregator {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct HelperStateInfo {
     task_id: TaskId,
-    agg_job_id_owned: MetaAggregationJobIdOwned,
+    agg_job_id_owned: MetaAggregationJobId,
 }
 
 /// Stores the reports received from Clients.

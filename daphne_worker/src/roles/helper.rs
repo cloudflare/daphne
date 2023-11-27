@@ -23,12 +23,15 @@ use prio::codec::Encode;
 
 #[async_trait(?Send)]
 impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
-    async fn put_helper_state_if_not_exists(
+    async fn put_helper_state_if_not_exists<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
+        agg_job_id: Id,
         helper_state: &DapAggregationJobState,
-    ) -> std::result::Result<bool, DapError> {
+    ) -> std::result::Result<bool, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send,
+    {
         let task_config = self.try_get_task_config(task_id).await?;
         let helper_state_hex = hex::encode(helper_state.get_encoded());
         Ok(self
@@ -37,18 +40,25 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
             .post(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
-                durable_helper_state_name(task_config.as_ref().version, task_id, agg_job_id),
+                durable_helper_state_name(
+                    task_config.as_ref().version,
+                    task_id,
+                    &agg_job_id.into(),
+                ),
                 helper_state_hex,
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?)
     }
 
-    async fn get_helper_state(
+    async fn get_helper_state<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
-    ) -> std::result::Result<Option<DapAggregationJobState>, DapError> {
+        agg_job_id: Id,
+    ) -> std::result::Result<Option<DapAggregationJobState>, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send,
+    {
         let task_config = self.try_get_task_config(task_id).await?;
         // TODO(cjpatton) Figure out if retry is safe, since the request is not actually
         // idempotent. (It removes the helper's state from storage if it exists.)
@@ -58,7 +68,11 @@ impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
             .get(
                 BINDING_DAP_HELPER_STATE_STORE,
                 DURABLE_HELPER_STATE_GET,
-                durable_helper_state_name(task_config.as_ref().version, task_id, agg_job_id),
+                durable_helper_state_name(
+                    task_config.as_ref().version,
+                    task_id,
+                    &agg_job_id.into(),
+                ),
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;

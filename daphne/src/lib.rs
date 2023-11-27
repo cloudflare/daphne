@@ -1234,11 +1234,31 @@ pub struct DapLeaderProcessTelemetry {
 /// string included in the HTTP request payload; in the latest draft, this is a 16-byte string
 /// included in the HTTP request path. This type unifies these into one type so that any protocol
 /// logic that is agnostic to these details can use the same object.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum MetaAggregationJobId {
     Draft02(Draft02AggregationJobId),
     DraftLatest(AggregationJobId),
 }
+
+macro_rules! generate_from_id_impls_for_meta_agg_job_id {
+    ($draft:ident => $t:ty) => {
+        impl From<&$t> for MetaAggregationJobId {
+            fn from(id: &$t) -> Self {
+                Self::$draft(*id)
+            }
+        }
+
+        impl From<$t> for MetaAggregationJobId {
+            fn from(id: $t) -> Self {
+                Self::$draft(id)
+            }
+        }
+    };
+}
+
+generate_from_id_impls_for_meta_agg_job_id!(Draft02 => Draft02AggregationJobId);
+generate_from_id_impls_for_meta_agg_job_id!(DraftLatest => AggregationJobId);
 
 impl MetaAggregationJobId {
     /// Generate a random ID of the type required for the version.
