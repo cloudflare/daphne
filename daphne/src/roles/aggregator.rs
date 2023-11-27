@@ -150,58 +150,6 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError>;
 
-    /// Handle request for the Aggregator's HPKE configuration.
-    async fn handle_hpke_config_req(&self, req: &DapRequest<S>) -> Result<DapResponse, DapError> {
-        let metrics = self.metrics();
-
-        // Parse the task ID from the query string, ensuring that it is the only query parameter.
-        let mut id = None;
-        for (k, v) in req.url.query_pairs() {
-            if k != "task_id" {
-                return Err(DapAbort::BadRequest("unexpected query parameter".into()).into());
-            }
-
-            let bytes = decode_base64url(v.as_bytes()).ok_or(DapAbort::BadRequest(
-                "failed to parse query parameter as URL-safe Base64".into(),
-            ))?;
-
-            id = Some(TaskId(bytes));
-        }
-
-        let hpke_config = self.get_hpke_config_for(req.version, id.as_ref()).await?;
-
-        if let Some(task_id) = id {
-            let task_config = self
-                .get_task_config_for(&task_id)
-                .await?
-                .ok_or(DapAbort::UnrecognizedTask)?;
-
-            // Check whether the DAP version in the request matches the task config.
-            if task_config.as_ref().version != req.version {
-                return Err(
-                    DapAbort::version_mismatch(req.version, task_config.as_ref().version).into(),
-                );
-            }
-        }
-
-        let payload = match req.version {
-            DapVersion::Draft02 => hpke_config.as_ref().get_encoded(),
-            DapVersion::DraftLatest => {
-                let hpke_config_list = HpkeConfigList {
-                    hpke_configs: vec![hpke_config.as_ref().clone()],
-                };
-                hpke_config_list.get_encoded()
-            }
-        };
-
-        metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);
-        Ok(DapResponse {
-            version: req.version,
-            media_type: DapMediaType::HpkeConfigList,
-            payload,
-        })
-    }
-
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Access the Prometheus metrics.
@@ -209,4 +157,64 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
 
     /// Access the audit log.
     fn audit_log(&self) -> &dyn AuditLog;
+}
+
+/// Handle request for the Aggregator's HPKE configuration.
+pub async fn handle_hpke_config_req<S, A>(
+    aggregator: &A,
+    req: &DapRequest<S>,
+) -> Result<DapResponse, DapError>
+where
+    A: DapAggregator<S>,
+{
+    let metrics = aggregator.metrics();
+
+    // Parse the task ID from the query string, ensuring that it is the only query parameter.
+    let mut id = None;
+    for (k, v) in req.url.query_pairs() {
+        if k != "task_id" {
+            return Err(DapAbort::BadRequest("unexpected query parameter".into()).into());
+        }
+
+        let bytes = decode_base64url(v.as_bytes()).ok_or(DapAbort::BadRequest(
+            "failed to parse query parameter as URL-safe Base64".into(),
+        ))?;
+
+        id = Some(TaskId(bytes));
+    }
+
+    let hpke_config = aggregator
+        .get_hpke_config_for(req.version, id.as_ref())
+        .await?;
+
+    if let Some(task_id) = id {
+        let task_config = aggregator
+            .get_task_config_for(&task_id)
+            .await?
+            .ok_or(DapAbort::UnrecognizedTask)?;
+
+        // Check whether the DAP version in the request matches the task config.
+        if task_config.as_ref().version != req.version {
+            return Err(
+                DapAbort::version_mismatch(req.version, task_config.as_ref().version).into(),
+            );
+        }
+    }
+
+    let payload = match req.version {
+        DapVersion::Draft02 => hpke_config.as_ref().get_encoded(),
+        DapVersion::DraftLatest => {
+            let hpke_config_list = HpkeConfigList {
+                hpke_configs: vec![hpke_config.as_ref().clone()],
+            };
+            hpke_config_list.get_encoded()
+        }
+    };
+
+    metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);
+    Ok(DapResponse {
+        version: req.version,
+        media_type: DapMediaType::HpkeConfigList,
+        payload,
+    })
 }

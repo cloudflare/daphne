@@ -1,4 +1,4 @@
-use daphne::roles::DapAggregator;
+use daphne::roles::aggregator;
 use tracing::Instrument;
 
 use crate::info_span_from_dap_request;
@@ -15,7 +15,10 @@ pub(super) fn add_aggregator_routes(router: DapRouter<'_>) -> DapRouter<'_> {
 
         let span = info_span_from_dap_request!("hpke_config", req);
 
-        match daph.handle_hpke_config_req(&req).instrument(span).await {
+        match aggregator::handle_hpke_config_req(&daph, &req)
+            .instrument(span)
+            .await
+        {
             Ok(req) => dap_response_to_worker(req),
             Err(e) => daph.state.dap_abort_to_worker_response(e),
         }

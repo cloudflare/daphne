@@ -5,7 +5,7 @@ use daphne::{
     error::DapAbort,
     hpke::HpkeReceiverConfig,
     messages::{Duration, TaskId, Time},
-    roles::DapLeader,
+    roles::leader,
 };
 use serde::Deserialize;
 use tracing::{debug, info_span, Instrument};
@@ -21,8 +21,7 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
             .post_async("/internal/process", |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
                 let report_sel: DaphneWorkerReportSelector = req.json().await?;
-                match daph
-                    .process(&report_sel, &daph.state.host)
+                match leader::process(&daph, &report_sel, &daph.state.host)
                     .instrument(info_span!("process"))
                     .await
                 {
