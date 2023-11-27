@@ -23,7 +23,8 @@ use crate::{
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
 /// job.
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 pub trait DapReportInitializer {
     /// Initialize a sequence of reports that are in the "consumed" state by initializing VDAF
     /// preparation.
@@ -45,10 +46,11 @@ pub enum MergeAggShareError {
 }
 
 /// DAP Aggregator functionality.
-#[async_trait(?Send)]
-pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
+pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
-    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig>
+    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig> + Send
     where
         Self: 'a;
 
@@ -165,6 +167,7 @@ pub async fn handle_hpke_config_req<S, A>(
     req: &DapRequest<S>,
 ) -> Result<DapResponse, DapError>
 where
+    S: Sync,
     A: DapAggregator<S>,
 {
     let metrics = aggregator.metrics();
