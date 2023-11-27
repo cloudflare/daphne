@@ -31,20 +31,24 @@ use crate::{
 pub trait DapHelper<S>: DapAggregator<S> {
     /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
     /// indicating if the operation succeeded.
-    async fn put_helper_state_if_not_exists(
+    async fn put_helper_state_if_not_exists<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
+        agg_job_id: Id,
         helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError>;
+    ) -> Result<bool, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send;
 
     /// Fetch the Helper's aggregation-flow state. `None` is returned if the Helper has no state
     /// associated with the given task and aggregation job.
-    async fn get_helper_state(
+    async fn get_helper_state<Id>(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
-    ) -> Result<Option<DapAggregationJobState>, DapError>;
+        agg_job_id: Id,
+    ) -> Result<Option<DapAggregationJobState>, DapError>
+    where
+        Id: Into<MetaAggregationJobId> + Send;
 
     async fn handle_agg_job_init_req<'req>(
         &self,
@@ -152,7 +156,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
                 };
 
                 if !self
-                    .put_helper_state_if_not_exists(task_id, &agg_job_id, &state)
+                    .put_helper_state_if_not_exists(task_id, agg_job_id, &state)
                     .await?
                 {
                     // TODO spec: Consider an explicit abort for this case.
@@ -247,7 +251,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         let agg_job_id = resolve_agg_job_id(req, agg_job_cont_req.draft02_agg_job_id.as_ref())?;
 
         let state = self
-            .get_helper_state(task_id, &agg_job_id)
+            .get_helper_state(task_id, agg_job_id)
             .await?
             .ok_or_else(|| DapAbort::UnrecognizedAggregationJob {
                 task_id: *task_id,
