@@ -74,7 +74,8 @@ pub struct AggregationJobTest {
 // NOTE(cjpatton) This implementation of the report initializer is not feature complete. Since
 // [`AggrregationJobTest`], is only used to test the aggregation flow, features that are not
 // directly relevant to the tests aren't implemented.
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapReportInitializer for AggregationJobTest {
     async fn initialize_reports<'req>(
         &self,
@@ -736,13 +737,13 @@ impl MockAggregator {
         report: &Report,
         task_id: &TaskId,
     ) -> Option<DapBatchBucket> {
-        let mut rng = thread_rng();
         let task_config = self
             .get_task_config_for(task_id)
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
 
+        let mut rng = thread_rng();
         match task_config.query {
             // For fixed-size queries, the bucket corresponds to a single batch.
             DapQueryConfig::FixedSize { .. } => {
@@ -808,7 +809,8 @@ impl MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl BearerTokenProvider for MockAggregator {
     type WrappedBearerToken<'a> = &'a BearerToken;
 
@@ -841,7 +843,8 @@ impl BearerTokenProvider for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl HpkeDecrypter for MockAggregator {
     type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
@@ -887,7 +890,8 @@ impl HpkeDecrypter for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
@@ -903,7 +907,8 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapReportInitializer for MockAggregator {
     async fn initialize_reports<'req>(
         &self,
@@ -948,7 +953,8 @@ impl DapReportInitializer for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapAggregator<BearerToken> for MockAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
     // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
@@ -1158,7 +1164,8 @@ impl DapAggregator<BearerToken> for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapHelper<BearerToken> for MockAggregator {
     async fn put_helper_state_if_not_exists<Id>(
         &self,
@@ -1214,7 +1221,8 @@ impl DapHelper<BearerToken> for MockAggregator {
     }
 }
 
-#[async_trait(?Send)]
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
 impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = MockAggregatorReportSelector;
 
@@ -1296,12 +1304,12 @@ impl DapLeader<BearerToken> for MockAggregator {
         collect_job_id: &Option<CollectionJobId>,
         collect_req: &CollectionReq,
     ) -> Result<Url, DapError> {
-        let mut rng = thread_rng();
         let task_config = self
             .get_task_config_for(task_id)
             .await?
             .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
+        let mut rng = thread_rng();
         let mut leader_state_store = self
             .leader_state_store
             .lock()

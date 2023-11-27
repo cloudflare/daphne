@@ -27,8 +27,9 @@ use crate::{
 };
 
 /// DAP Helper functionality.
-#[async_trait(?Send)]
-pub trait DapHelper<S>: DapAggregator<S> {
+#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
+#[cfg_attr(feature = "send-traits", async_trait)]
+pub trait DapHelper<S: Sync>: DapAggregator<S> {
     /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
     /// indicating if the operation succeeded.
     async fn put_helper_state_if_not_exists<Id>(
@@ -51,7 +52,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         Id: Into<MetaAggregationJobId> + Send;
 }
 
-pub async fn handle_agg_job_init_req<'req, S, A: DapHelper<S>>(
+pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &'req DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
@@ -222,7 +223,7 @@ pub async fn handle_agg_job_init_req<'req, S, A: DapHelper<S>>(
     })
 }
 
-pub async fn handle_agg_job_cont_req<'req, S, A: DapHelper<S>>(
+pub async fn handle_agg_job_cont_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &'req DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
@@ -304,7 +305,7 @@ pub async fn handle_agg_job_cont_req<'req, S, A: DapHelper<S>>(
 }
 
 /// Handle a request pertaining to an aggregation job.
-pub async fn handle_agg_job_req<'req, S, A: DapHelper<S>>(
+pub async fn handle_agg_job_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
@@ -318,7 +319,7 @@ pub async fn handle_agg_job_req<'req, S, A: DapHelper<S>>(
 
 /// Handle a request for an aggregate share. This is called by the Leader to complete a
 /// collection job.
-pub async fn handle_agg_share_req<'req, S, A: DapHelper<S>>(
+pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
@@ -474,7 +475,7 @@ fn resolve_agg_job_id<'id, S>(
     }
 }
 
-async fn finish_agg_job_and_aggregate<S>(
+async fn finish_agg_job_and_aggregate<S: Sync>(
     helper: &impl DapHelper<S>,
     task_id: &TaskId,
     task_config: &DapTaskConfig,

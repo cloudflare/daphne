@@ -18,7 +18,7 @@ pub use aggregator::{DapAggregator, DapReportInitializer};
 pub use helper::DapHelper;
 pub use leader::{DapAuthorizedSender, DapLeader};
 
-async fn check_batch<S>(
+async fn check_batch<S: Sync>(
     agg: &impl DapAggregator<S>,
     task_config: &DapTaskConfig,
     task_id: &TaskId,
@@ -108,7 +108,7 @@ fn check_request_content_type<S>(
     }
 }
 
-async fn resolve_taskprov<S>(
+async fn resolve_taskprov<S: Sync>(
     agg: &impl DapAggregator<S>,
     task_id: &TaskId,
     req: &DapRequest<S>,

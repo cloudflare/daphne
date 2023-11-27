@@ -49,4 +49,5 @@ tokio.workspace = true
 
 [features]
 test-utils = ["dep:assert_matches", "dep:deepsize"]
+send-traits = []
 default = []
