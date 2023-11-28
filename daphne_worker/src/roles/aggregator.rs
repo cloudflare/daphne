@@ -271,12 +271,6 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             .as_ref()
             .ok_or_else(|| fatal_error!(err = "taskprov configuration not found"))?;
 
-        // If `resolve_advertised_task_config()` returned a `TaskConfig` and `req.taskprov` is set,
-        // then the task was advertised in the HTTP "dap-taskprov" header. In this case we expect
-        // the peer to send the header in every request for this task.
-        //
-        // NOTE(cjpatton) This behavior is not specified in taskprov-02, but we expect it to be
-        // mandatory in a future draft.
         if !self.config().is_leader && req.taskprov.is_some() {
             // Store the task config in Worker memory, but don't write it through to KV.
             let mut guarded_tasks = self

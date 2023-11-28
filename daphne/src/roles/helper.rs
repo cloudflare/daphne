@@ -60,7 +60,7 @@ pub trait DapHelper<S>: DapAggregator<S> {
         // taskprov: Resolve the task config to use for the request.
         if self.get_global_config().allow_taskprov {
             // draft02 compatibility: We also need to ensure that all of the reports include the task
-            // config in the report extensions. (See section 6 of draft-wang-ppm-dap-taskprov-02.)
+            // config in the report extensions. (See draft-wang-ppm-dap-taskprov-02, Section 6.)
             let first_metadata = if req.version == DapVersion::default() {
                 let using_taskprov = agg_job_init_req
                     .prep_inits

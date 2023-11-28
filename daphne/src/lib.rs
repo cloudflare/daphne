@@ -170,7 +170,7 @@ pub struct DapGlobalConfig {
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
-    /// Indicates if the taskprov extension is enabled.
+    /// draft-wang-ppm-dap-taskprov: Indicates if the taskprov extension is enabled.
     #[serde(default)]
     pub allow_taskprov: bool,
 }
@@ -408,7 +408,7 @@ impl Extend<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub enum DapTaskConfigMethod {
-    /// draft-wang-ppm-dap-taskprov-06
+    /// draft-wang-ppm-dap-taskprov
     Taskprov {
         /// `TaskConfig.task_info`. If not set, then the task info is unknown.
         info: Option<Vec<u8>>,
