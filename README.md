@@ -4,8 +4,14 @@ Daphne is a Rust implementation of the Distributed Aggregation Protocol
 ([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard. DAP is
 under active development in the PPM working group of the IETF.
 
-Daphne currently implements draft-ietf-ppm-dap-02. The next draft,
-draft-ietf-ppm-dap-03, is a work-in-progress.
+Daphne currently implements:
+
+* draft-ietf-ppm-dap-02
+    * VDAF: draft-irtf-cfrg-vdaf-03
+    * Taskprov extension: draft-wang-ppm-dap-taskprov-02
+* draft-ietf-ppm-dap-09
+    * VDAF: draft-irtf-cfrg-vdaf-08
+    * Taskprov extension: draft-wang-ppm-dap-taskprov-06
 
 This software is intended to support experimental DAP deployments and is not yet
 suitable for use in production. Daphne will evolve along with the DAP draft:

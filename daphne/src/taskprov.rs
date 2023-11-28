@@ -1,8 +1,9 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Functions for implementing the taskprov extension. The extension's behavior depends on the
-//! version of DAP, i.e., each version of taskprov implies a version of DAP.
+//! draft-wang-ppm-dap-taskprov: Functions for implementing the taskprov extension. The extension's
+//! behavior depends on the version of DAP, i.e., each version of taskprov implies a version of
+//! DAP.
 
 use crate::{
     fatal_error,

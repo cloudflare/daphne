@@ -59,7 +59,7 @@ const DAP_BASE_URL: &str = "DAP_BASE_URL";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
-/// Long-lived parameters for tasks using draft-wang-ppm-dap-taskprov-02 ("taskprov").
+/// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension.
 pub(crate) struct TaskprovConfig {
     /// HPKE collector configuration for all taskprov tasks.
     pub(crate) hpke_collector_config: HpkeConfig,
@@ -110,8 +110,8 @@ pub(crate) struct DaphneWorkerConfig {
     /// this field is used for endpoint configuration for interop testing.
     base_url: Option<Url>,
 
-    /// Optional: draft-wang-ppm-dap-taskprov-02 configuration. If not configured, then taskprov
-    /// will be disabled.
+    /// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension. If not set,
+    /// then taskprov will be disabled.
     pub(crate) taskprov: Option<TaskprovConfig>,
 
     /// Default DAP version to use if not specified by the API URL

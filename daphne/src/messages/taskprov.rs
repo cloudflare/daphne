@@ -1,8 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Messages in the taskprov extension to the DAP protocol, as
-//! defined in draft-wang-ppm-dap-taskprov-02.
+//! draft-wang-ppm-dap-taskprov: Messages for the taskrpov extension for DAP.
 
 use crate::messages::{
     decode_u16_bytes, decode_u16_item_for_version, encode_u16_bytes, encode_u16_item_for_version,

@@ -40,8 +40,7 @@ pub enum DapAbort {
     #[error("invalidBatchSize")]
     InvalidBatchSize { detail: String, task_id: TaskId },
 
-    /// draft-wang-ppm-dap-taskprov-02: Invalid DAP task. Sent when a server opts out of a
-    /// taskprov task configuration.
+    /// taskprov: Invalid DAP task. Sent when a server opts out of a taskprov task configuration.
     #[error("invalidTask")]
     InvalidTask { detail: String, task_id: TaskId },
 
