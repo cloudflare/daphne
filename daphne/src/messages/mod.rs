@@ -1214,6 +1214,61 @@ pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(input).ok()
 }
 
+fn encode_u16_item_for_version<E: ParameterizedEncode<DapVersion>>(
+    bytes: &mut Vec<u8>,
+    version: DapVersion,
+    item: &E,
+) {
+    match version {
+        DapVersion::Draft07 => {
+            // Cribbed from `decode_u16_items()` from libprio.
+            //
+            // Reserve space for the length prefix.
+            let len_offset = bytes.len();
+            0_u16.encode(bytes);
+
+            item.encode_with_param(&version, bytes);
+            let len_bytes = std::mem::size_of::<u16>();
+            let len = bytes.len() - len_offset - len_bytes;
+            bytes[len_offset..len_offset + len_bytes]
+                .copy_from_slice(&u16::to_be_bytes(len.try_into().unwrap()));
+        }
+
+        DapVersion::Draft02 => item.encode_with_param(&version, bytes),
+    }
+}
+
+pub fn decode_u16_item_for_version<D: ParameterizedDecode<DapVersion>>(
+    version: &DapVersion,
+    bytes: &mut Cursor<&[u8]>,
+) -> Result<D, CodecError> {
+    match version {
+        DapVersion::Draft07 => {
+            // Cribbed from `decode_u16_items()` from libprio.
+            //
+            // Read the length prefix.
+            let len = usize::from(u16::decode(bytes)?);
+
+            let item_start = usize::try_from(bytes.position()).unwrap();
+
+            // Make sure encoded length doesn't overflow usize or go past the end of provided byte buffer.
+            let item_end = item_start
+                .checked_add(len)
+                .ok_or_else(|| CodecError::LengthPrefixTooBig(len))?;
+
+            let decoded =
+                D::get_decoded_with_param(version, &bytes.get_ref()[item_start..item_end])?;
+
+            // Advance outer cursor by the amount read in the inner cursor.
+            bytes.set_position(item_end.try_into().unwrap());
+
+            Ok(decoded)
+        }
+
+        DapVersion::Draft02 => D::decode_with_param(version, bytes),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
