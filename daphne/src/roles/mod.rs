@@ -1794,7 +1794,10 @@ mod test {
                     &task_id,
                     DapMeasurement::U32Vec(vec![1; 10]),
                     vec![Extension::Taskprov {
-                        payload: taskprov_report_extension_payload.clone(),
+                        draft02_payload: match version {
+                            DapVersion::Draft07 => None,
+                            DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
+                        },
                     }],
                     version,
                 )

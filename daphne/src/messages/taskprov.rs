@@ -55,7 +55,7 @@ impl ParameterizedDecode<DapVersion> for VdafTypeVar {
         let vdaf_type = u32::decode(bytes)?;
         match (version, vdaf_type) {
             (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
-                dimension: decode_u16_item_for_version(version, bytes)?,
+                dimension: decode_u16_item_for_version(*version, bytes)?,
             }),
             (DapVersion::Draft07, ..) => Ok(Self::NotImplemented {
                 typ: vdaf_type,
@@ -102,7 +102,7 @@ impl ParameterizedDecode<DapVersion> for DpConfig {
         let dp_mechanism = u8::decode(bytes)?;
         match (version, dp_mechanism) {
             (.., DP_MECHANISM_NONE) => {
-                decode_u16_item_for_version::<()>(version, bytes)?;
+                decode_u16_item_for_version::<()>(*version, bytes)?;
                 Ok(Self::None)
             }
             (DapVersion::Draft07, ..) => Ok(Self::NotImplemented {
@@ -240,11 +240,11 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
         let query_type = query_type.unwrap_or(u8::decode(bytes)?);
         let var = match (version, query_type) {
             (.., QUERY_TYPE_TIME_INTERVAL) => {
-                decode_u16_item_for_version::<()>(version, bytes)?;
+                decode_u16_item_for_version::<()>(*version, bytes)?;
                 QueryConfigVar::TimeInterval
             }
             (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
-                max_batch_size: decode_u16_item_for_version(version, bytes)?,
+                max_batch_size: decode_u16_item_for_version(*version, bytes)?,
             },
             (DapVersion::Draft07, ..) => QueryConfigVar::NotImplemented {
                 typ: query_type,

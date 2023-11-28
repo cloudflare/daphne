@@ -220,15 +220,20 @@ impl<'req> EarlyReportStateConsumed<'req> {
         // draft, the plaintext also encodes the report extensions.
         let (input_share, draft07_extensions) = match task_config.version {
             DapVersion::Draft02 => (encoded_input_share, None),
-            DapVersion::Draft07 => match PlaintextInputShare::get_decoded(&encoded_input_share) {
-                Ok(input_share) => (input_share.payload, Some(input_share.extensions)),
-                Err(..) => {
-                    return Ok(Self::Rejected {
-                        metadata,
-                        failure: TransitionFailure::InvalidMessage,
-                    })
+            DapVersion::Draft07 => {
+                match PlaintextInputShare::get_decoded_with_param(
+                    &task_config.version,
+                    &encoded_input_share,
+                ) {
+                    Ok(input_share) => (input_share.payload, Some(input_share.extensions)),
+                    Err(..) => {
+                        return Ok(Self::Rejected {
+                            metadata,
+                            failure: TransitionFailure::InvalidMessage,
+                        })
+                    }
                 }
-            },
+            }
         };
 
         // Handle report extensions.
@@ -238,25 +243,42 @@ impl<'req> EarlyReportStateConsumed<'req> {
                 DapVersion::Draft02 => metadata.as_ref().draft02_extensions.as_ref().unwrap(),
             };
 
+            let mut taskprov_indicated = false;
             let mut seen: HashSet<u16> = HashSet::with_capacity(extensions.len());
             for extension in extensions {
+                // Reject reports with duplicated extensions.
                 if !seen.insert(extension.type_code()) {
                     return Ok(Self::Rejected {
                         metadata,
                         failure: TransitionFailure::InvalidMessage,
                     });
                 }
-                // draft02 compatibility: In the latest version, reports with unrecognized
-                // extensions are rejected; in draft02, the Aggregator is just supposed to ignore
-                // unrecognized extensions.
-                if task_config.version != DapVersion::Draft02
-                    && matches!(extension, Extension::Unhandled { .. })
-                {
-                    return Ok(Self::Rejected {
-                        metadata,
-                        failure: TransitionFailure::InvalidMessage,
-                    });
+
+                match (task_config.version, extension) {
+                    (.., Extension::Taskprov { .. }) if task_config.method_is_taskprov() => {
+                        taskprov_indicated = true;
+                    }
+
+                    // Reject reports with unrecognized extensions.
+                    (DapVersion::Draft07, ..) => {
+                        return Ok(Self::Rejected {
+                            metadata,
+                            failure: TransitionFailure::InvalidMessage,
+                        })
+                    }
+
+                    // draft02 compatibility: Ignore unrecognized extensions.
+                    (DapVersion::Draft02, ..) => (),
                 }
+            }
+
+            if task_config.method_is_taskprov() && !taskprov_indicated {
+                // taskprov: If the task configuration method is taskprov, then we expect each
+                // report to indicate support.
+                return Ok(Self::Rejected {
+                    metadata,
+                    failure: TransitionFailure::InvalidMessage,
+                });
             }
         }
 
@@ -691,7 +713,7 @@ impl VdafConfig {
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
             if let Some(ref mut plaintext_input_share) = draft07_plaintext_input_share {
                 plaintext_input_share.payload = input_share;
-                plaintext_input_share.get_encoded()
+                plaintext_input_share.get_encoded_with_param(&version)
             } else {
                 input_share
             }
@@ -2604,7 +2626,7 @@ mod test {
         assert!(DapAggregationJobState::get_decoded(TEST_VDAF, b"invalid helper state").is_err());
     }
 
-    async fn heandle_unrecognized_report_extensions(version: DapVersion) {
+    async fn handle_unrecognized_report_extensions(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
@@ -2614,7 +2636,7 @@ mod test {
                 t.now,
                 &t.task_id,
                 DapMeasurement::U64(1),
-                vec![Extension::Unhandled {
+                vec![Extension::NotImplemented {
                     typ: 0xffff,
                     payload: b"some extension data".to_vec(),
                 }],
@@ -2646,9 +2668,9 @@ mod test {
         assert_eq!(consumed_report.is_ready(), expect_ready);
     }
 
-    async_test_versions! { heandle_unrecognized_report_extensions }
+    async_test_versions! { handle_unrecognized_report_extensions }
 
-    async fn heandle_repeated_report_extensions(version: DapVersion) {
+    async fn handle_repeated_report_extensions(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
@@ -2659,10 +2681,12 @@ mod test {
                 &t.task_id,
                 DapMeasurement::U64(1),
                 vec![
-                    Extension::Taskprov {
+                    Extension::NotImplemented {
+                        typ: 23,
                         payload: b"this payload shouldn't be interpretd yet".to_vec(),
                     },
-                    Extension::Taskprov {
+                    Extension::NotImplemented {
+                        typ: 23,
                         payload: b"nor should this payload".to_vec(),
                     },
                 ],
@@ -2686,7 +2710,7 @@ mod test {
         assert!(!consumed_report.is_ready());
     }
 
-    async_test_versions! { heandle_repeated_report_extensions }
+    async_test_versions! { handle_repeated_report_extensions }
 
     impl AggregationJobTest {
         // Tweak the Helper's share so that decoding succeeds but preparation fails.

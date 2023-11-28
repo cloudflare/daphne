@@ -159,8 +159,10 @@ fn get_taskprov_task_config<S>(
         match taskprovs.len() {
             0 => return Ok(None),
             1 => match &taskprovs[0] {
-                Extension::Taskprov { payload } => Cow::Borrowed(payload),
-                Extension::Unhandled { .. } => panic!("cannot happen"),
+                Extension::Taskprov {
+                    draft02_payload: Some(payload),
+                } => Cow::Borrowed(payload),
+                _ => panic!("cannot happen"),
             },
             _ => {
                 // The decoder already returns an error if an extension of a give type occurs more
@@ -354,11 +356,13 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
 
 impl ReportMetadata {
     /// Does this metatdata have a taskprov extension and does it match the specified id?
-    pub fn is_taskprov(&self, version: DapVersion, task_id: &TaskId) -> bool {
+    pub(crate) fn is_taskprov(&self, version: DapVersion, task_id: &TaskId) -> bool {
         return self.draft02_extensions.as_ref().is_some_and(|extensions| {
             extensions.iter().any(|x| match x {
-                Extension::Taskprov { payload } => *task_id == compute_task_id(version, payload),
-                Extension::Unhandled { .. } => false,
+                Extension::Taskprov {
+                    draft02_payload: Some(payload),
+                } => *task_id == compute_task_id(version, payload),
+                _ => false,
             })
         });
     }
@@ -516,7 +520,7 @@ mod test {
                 id: ReportId([0; 16]),
                 time: 0,
                 draft02_extensions: Some(vec![Extension::Taskprov {
-                    payload: taskprov_task_config_data,
+                    draft02_payload: Some(taskprov_task_config_data),
                 }]),
             }),
         )

@@ -57,41 +57,46 @@ pub trait DapHelper<S>: DapAggregator<S> {
 
         metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
 
-        // taskprov: Resolve the task config to use for the request. We also need to ensure
-        // that all of the reports include the task config in the report extensions. (See
-        // section 6 of draft-wang-ppm-dap-taskprov-02.)
+        // taskprov: Resolve the task config to use for the request.
         if self.get_global_config().allow_taskprov {
-            let using_taskprov = agg_job_init_req
-                .prep_inits
-                .iter()
-                .filter(|prep_init| {
-                    prep_init
-                        .report_share
-                        .report_metadata
-                        .is_taskprov(req.version, task_id)
-                })
-                .count();
+            // draft02 compatibility: We also need to ensure that all of the reports include the task
+            // config in the report extensions. (See section 6 of draft-wang-ppm-dap-taskprov-02.)
+            let first_metadata = if req.version == DapVersion::default() {
+                let using_taskprov = agg_job_init_req
+                    .prep_inits
+                    .iter()
+                    .filter(|prep_init| {
+                        prep_init
+                            .report_share
+                            .report_metadata
+                            .is_taskprov(req.version, task_id)
+                    })
+                    .count();
 
-            let first_metadata = match using_taskprov {
-                0 => None,
-                c if c == agg_job_init_req.prep_inits.len() => {
-                    // All the extensions use taskprov and look ok, so compute first_metadata.
-                    // Note this will always be Some().
-                    agg_job_init_req
-                        .prep_inits
-                        .first()
-                        .map(|prep_init| &prep_init.report_share.report_metadata)
-                }
-                _ => {
-                    // It's not all taskprov or no taskprov, so it's an error.
-                    return Err(DapAbort::InvalidMessage {
-                        detail: "some reports include the taskprov extensions and some do not"
-                            .to_string(),
-                        task_id: Some(*task_id),
+                match using_taskprov {
+                    0 => None,
+                    c if c == agg_job_init_req.prep_inits.len() => {
+                        // All the extensions use taskprov and look ok, so compute first_metadata.
+                        // Note this will always be Some().
+                        agg_job_init_req
+                            .prep_inits
+                            .first()
+                            .map(|prep_init| &prep_init.report_share.report_metadata)
                     }
-                    .into());
+                    _ => {
+                        // It's not all taskprov or no taskprov, so it's an error.
+                        return Err(DapAbort::InvalidMessage {
+                            detail: "some reports include the taskprov extensions and some do not"
+                                .to_string(),
+                            task_id: Some(*task_id),
+                        }
+                        .into());
+                    }
                 }
+            } else {
+                None
             };
+
             resolve_taskprov(self, task_id, req, first_metadata).await?;
         }
 
