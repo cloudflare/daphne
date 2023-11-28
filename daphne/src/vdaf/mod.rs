@@ -49,6 +49,7 @@ use prio::{
 };
 use rand::prelude::*;
 use replace_with::replace_with_or_abort;
+use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
     borrow::Cow,
@@ -118,11 +119,29 @@ pub enum VdafVerifyKey {
     Prio2(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO2]),
 }
 
+impl KeyType for VdafVerifyKey {
+    fn len(&self) -> usize {
+        match self {
+            Self::Prio2(bytes) => bytes.len(),
+            Self::Prio3(bytes) => bytes.len(),
+        }
+    }
+}
+
 impl AsRef<[u8]> for VdafVerifyKey {
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Prio3(ref bytes) => &bytes[..],
             Self::Prio2(ref bytes) => &bytes[..],
+        }
+    }
+}
+
+impl AsMut<[u8]> for VdafVerifyKey {
+    fn as_mut(&mut self) -> &mut [u8] {
+        match self {
+            Self::Prio3(ref mut bytes) => &mut bytes[..],
+            Self::Prio2(ref mut bytes) => &mut bytes[..],
         }
     }
 }
@@ -580,6 +599,13 @@ impl VdafConfig {
         match self {
             Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
             Self::Prio2 { .. } => VdafVerifyKey::Prio2(rng.gen()),
+        }
+    }
+
+    pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
+        match self {
+            Self::Prio3(..) => VdafVerifyKey::Prio3([0; VDAF_VERIFY_KEY_SIZE_PRIO3]),
+            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; VDAF_VERIFY_KEY_SIZE_PRIO2]),
         }
     }
 

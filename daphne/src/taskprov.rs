@@ -9,10 +9,10 @@ use crate::{
     hpke::HpkeConfig,
     messages::{
         self, decode_base64url_vec,
-        taskprov::{QueryConfigVar, TaskConfig, VdafType, VdafTypeVar},
+        taskprov::{QueryConfigVar, TaskConfig, VdafTypeVar},
         Extension, ReportMetadata, TaskId,
     },
-    vdaf::{VdafVerifyKey, VDAF_VERIFY_KEY_SIZE_PRIO2},
+    vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
     VdafConfig,
 };
@@ -58,23 +58,15 @@ pub(crate) fn extract_prk_from_verify_key_init(
     Salt::new(HKDF_SHA256, &TASKPROV_SALT).extract(verify_key_init)
 }
 
-/// Expand a pseudorandom key into the VDAF verification key for a given task.
-pub(crate) fn expand_prk_into_verify_key(
-    prk: &Prk,
-    task_id: &TaskId,
-    vdaf_type: VdafType,
-) -> VdafVerifyKey {
-    let info = [task_id.as_ref()];
-    // This expand(), and the associated fill() below can only fail if the length is wrong,
-    // and it won't be, so we unwrap().
-    let okm = prk.expand(&info, vdaf_type).unwrap();
-    match &vdaf_type {
-        VdafType::Prio2 => {
-            let mut bytes = [0u8; VDAF_VERIFY_KEY_SIZE_PRIO2];
-            okm.fill(&mut bytes[..]).unwrap();
-            VdafVerifyKey::Prio2(bytes)
-        }
-        VdafType::NotImplemented(_) => panic!("Unknown VDAF type"),
+impl VdafConfig {
+    fn expand_into_taskprov_verify_key(&self, prk: &Prk, task_id: &TaskId) -> VdafVerifyKey {
+        let mut verify_key = self.uninitialized_verify_key();
+        let info = [task_id.as_ref()];
+        // This expand(), and the associated fill() below can only fail if the length is wrong,
+        // and it won't be, so we unwrap().
+        let okm = prk.expand(&info, verify_key.clone()).unwrap();
+        okm.fill(verify_key.as_mut()).unwrap();
+        verify_key
     }
 }
 
@@ -85,17 +77,15 @@ pub(crate) fn expand_prk_into_verify_key(
 /// `compute_vdaf_verify_key_from_prk`(). Callers reusing the same PRK frequently
 /// should consider computing the prk once and then calling `compute_vdaf_verify_key_from_prk`()
 /// directly.
-#[allow(dead_code)]
-pub(crate) fn compute_vdaf_verify_key(
+fn compute_vdaf_verify_key(
     version: DapVersion,
     verify_key_init: &[u8; 32],
     task_id: &TaskId,
-    vdaf_type: VdafType,
+    vdaf_config: &VdafConfig,
 ) -> VdafVerifyKey {
-    expand_prk_into_verify_key(
+    vdaf_config.expand_into_taskprov_verify_key(
         &extract_prk_from_verify_key_init(version, verify_key_init),
         task_id,
-        vdaf_type,
     )
 }
 
@@ -224,16 +214,19 @@ impl DapQueryConfig {
     }
 }
 
-impl From<VdafTypeVar> for VdafConfig {
-    fn from(var: VdafTypeVar) -> Self {
+impl VdafConfig {
+    fn try_from_taskprov(task_id: &TaskId, var: VdafTypeVar) -> Result<Self, DapAbort> {
         match var {
-            VdafTypeVar::Prio2 { dimension } => VdafConfig::Prio2 {
-                dimension: dimension.try_into().expect("u32 does not fit into usize"),
-            },
-            #[cfg(test)]
-            VdafTypeVar::NotImplemented(..) => {
-                unreachable!("VDAF not implemented")
-            }
+            VdafTypeVar::Prio2 { dimension } => Ok(VdafConfig::Prio2 {
+                dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
+                    detail: "dimension is larger than the system's word size".to_string(),
+                    task_id: *task_id,
+                })?,
+            }),
+            VdafTypeVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
+                detail: format!("unimplemented VDAF type ({typ})"),
+                task_id: *task_id,
+            }),
         }
     }
 }
@@ -268,7 +261,9 @@ impl DapTaskConfig {
             });
         }
 
-        let vdaf_type = VdafType::from(task_config.vdaf_config.var.clone());
+        let vdaf = VdafConfig::try_from_taskprov(task_id, task_config.vdaf_config.var)?;
+        let vdaf_verify_key =
+            compute_vdaf_verify_key(version, vdaf_verify_key_init, task_id, &vdaf);
         Ok(DapTaskConfig {
             version,
             leader_url: url_from_bytes(task_id, &task_config.leader_url.bytes)?,
@@ -277,13 +272,8 @@ impl DapTaskConfig {
             expiration: task_config.task_expiration,
             min_batch_size: task_config.query_config.min_batch_size.into(),
             query: DapQueryConfig::try_from_taskprov(task_id, task_config.query_config.var)?,
-            vdaf: VdafConfig::from(task_config.vdaf_config.var),
-            vdaf_verify_key: compute_vdaf_verify_key(
-                version,
-                vdaf_verify_key_init,
-                task_id,
-                vdaf_type,
-            ),
+            vdaf,
+            vdaf_verify_key,
             collector_hpke_config: collector_hpke_config.clone(),
             method: DapTaskConfigMethod::Taskprov {
                 info: Some(task_config.task_info),
@@ -388,7 +378,7 @@ mod test {
         messages::{self, encode_base64url, Extension, ReportId, ReportMetadata, TaskId},
         test_versions,
         vdaf::VdafVerifyKey,
-        DapRequest, DapResource, DapTaskConfig, DapVersion,
+        DapRequest, DapResource, DapTaskConfig, DapVersion, VdafConfig,
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
@@ -451,7 +441,7 @@ mod test {
             DapVersion::Draft02,
             &verify_key_init,
             &task_id,
-            messages::taskprov::VdafType::Prio2,
+            &VdafConfig::Prio2 { dimension: 10 },
         );
         let expected: [u8; 32] = [
             251, 209, 125, 181, 57, 15, 148, 158, 227, 45, 38, 52, 220, 73, 159, 91, 145, 40, 123,
@@ -587,7 +577,10 @@ mod test {
                 vdaf_config: messages::taskprov::VdafConfig {
                     dp_config: messages::taskprov::DpConfig::None,
                     // unrecognized VDAF
-                    var: messages::taskprov::VdafTypeVar::NotImplemented(1337),
+                    var: messages::taskprov::VdafTypeVar::NotImplemented {
+                        typ: 1337,
+                        param: b"vdaf type param".to_vec(),
+                    },
                 },
             }
             .get_encoded_with_param(&version);
@@ -612,13 +605,17 @@ mod test {
             .unwrap()
             .config;
 
-        match resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id, None)
-        {
-            Err(DapAbort::InvalidMessage { detail, .. }) => {
+        match (
+            version,
+            resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id, None),
+        ) {
+            (DapVersion::Draft02, Err(DapAbort::InvalidMessage { detail, .. })) => {
                 assert_eq!(detail, "codec error: unexpected value");
             }
-            Err(e) => panic!("unexpected error: {e}"),
-            Ok(..) => panic!("expected error"),
+            (DapVersion::Draft07, Err(DapAbort::InvalidTask { detail, .. })) => {
+                assert_eq!(detail, "unimplemented VDAF type (1337)");
+            }
+            (_, r) => panic!("unexpected result: {r:?} ({version})"),
         }
     }
 
