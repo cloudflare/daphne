@@ -406,7 +406,7 @@ async fn leader_upload_taskprov() {
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
             vec![Extension::Taskprov {
-                payload: taskprov_task_config.get_encoded_with_param(&version),
+                draft02_payload: Some(taskprov_task_config.get_encoded_with_param(&version)),
             }],
             version,
         )
@@ -424,7 +424,9 @@ async fn leader_upload_taskprov() {
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
     let task_id = compute_task_id(DapVersion::Draft02, &bad_payload);
-    let extensions = vec![Extension::Taskprov { payload }];
+    let extensions = vec![Extension::Taskprov {
+        draft02_payload: Some(payload),
+    }];
     let report = task_config
         .vdaf
         .produce_report_with_extensions(
@@ -1310,7 +1312,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov {
-            payload: taskprov_report_extension_payload.clone(),
+            draft02_payload: match version {
+                DapVersion::Draft07 => None,
+                DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
+            },
         }];
         let now = rng.gen_range(t.report_interval(&batch_interval));
         t.leader_put_expect_ok(

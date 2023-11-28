@@ -125,8 +125,18 @@ pub type Time = u64;
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum Extension {
-    Taskprov { payload: Vec<u8> }, // Not a TaskConfig to make computing the expected task id more efficient
-    Unhandled { typ: u16, payload: Vec<u8> },
+    Taskprov {
+        // draft02 compatibility: The payload is the serialized `TaskConfig` advertised by each
+        // Client. We treat it as an opaque byte string here to save time during the aggregation
+        // sub-protocol. Before we deserialize it, we need to check (1) each Client has the same
+        // extension paylaod and (2) the task ID matches the hash of the extension payload. After
+        // we do this check, we need only to deserialize it once.
+        draft02_payload: Option<Vec<u8>>,
+    },
+    NotImplemented {
+        typ: u16,
+        payload: Vec<u8>,
+    },
 }
 
 impl Extension {
@@ -134,19 +144,23 @@ impl Extension {
     pub(crate) fn type_code(&self) -> u16 {
         match self {
             Self::Taskprov { .. } => EXTENSION_TASKPROV,
-            Self::Unhandled { typ, .. } => *typ,
+            Self::NotImplemented { typ, .. } => *typ,
         }
     }
 }
 
-impl Encode for Extension {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+impl ParameterizedEncode<DapVersion> for Extension {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         match self {
-            Self::Taskprov { payload } => {
+            Self::Taskprov { draft02_payload } => {
                 EXTENSION_TASKPROV.encode(bytes);
-                encode_u16_bytes(bytes, payload);
+                match (version, draft02_payload) {
+                    (DapVersion::Draft07, None) => encode_u16_item(bytes, *version, &()),
+                    (DapVersion::Draft02, Some(payload)) => encode_u16_bytes(bytes, payload),
+                    _ => unreachable!("unhandled version {version:?}"),
+                }
             }
-            Self::Unhandled { typ, payload } => {
+            Self::NotImplemented { typ, payload } => {
                 typ.encode(bytes);
                 encode_u16_bytes(bytes, payload);
             }
@@ -154,13 +168,26 @@ impl Encode for Extension {
     }
 }
 
-impl Decode for Extension {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for Extension {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         let typ = u16::decode(bytes)?;
-        let payload = decode_u16_bytes(bytes)?;
-        match typ {
-            EXTENSION_TASKPROV => Ok(Self::Taskprov { payload }),
-            _ => Ok(Self::Unhandled { typ, payload }),
+        match (version, typ) {
+            (DapVersion::Draft07, EXTENSION_TASKPROV) => {
+                decode_u16_item::<()>(*version, bytes)?;
+                Ok(Self::Taskprov {
+                    draft02_payload: None,
+                })
+            }
+            (DapVersion::Draft02, EXTENSION_TASKPROV) => Ok(Self::Taskprov {
+                draft02_payload: Some(decode_u16_bytes(bytes)?),
+            }),
+            _ => Ok(Self::NotImplemented {
+                typ,
+                payload: decode_u16_bytes(bytes)?,
+            }),
         }
     }
 }
@@ -182,7 +209,7 @@ impl ParameterizedEncode<DapVersion> for ReportMetadata {
         self.time.encode(bytes);
         match (version, &self.draft02_extensions) {
             (DapVersion::Draft07, None) => (),
-            (DapVersion::Draft02, Some(extensions)) => encode_u16_items(bytes, &(), extensions),
+            (DapVersion::Draft02, Some(extensions)) => encode_u16_items(bytes, version, extensions),
             _ => unreachable!("extensions should be set in (and only in) draft02"),
         }
     }
@@ -197,7 +224,7 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
             draft02_extensions: match version {
-                DapVersion::Draft02 => Some(decode_u16_items(&(), bytes)?),
+                DapVersion::Draft02 => Some(decode_u16_items(version, bytes)?),
                 DapVersion::Draft07 => None,
             },
         };
@@ -1130,17 +1157,20 @@ pub struct PlaintextInputShare {
     pub payload: Vec<u8>,
 }
 
-impl Encode for PlaintextInputShare {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_u16_items(bytes, &(), &self.extensions);
+impl ParameterizedEncode<DapVersion> for PlaintextInputShare {
+    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+        encode_u16_items(bytes, version, &self.extensions);
         encode_u32_bytes(bytes, &self.payload);
     }
 }
 
-impl Decode for PlaintextInputShare {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for PlaintextInputShare {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
-            extensions: decode_u16_items(&(), bytes)?,
+            extensions: decode_u16_items(version, bytes)?,
             payload: decode_u32_bytes(bytes)?,
         })
     }
@@ -1214,58 +1244,64 @@ pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(input).ok()
 }
 
+// Cribbed from `decode_u16_items()` from libprio.
+fn encode_u16_item<E: ParameterizedEncode<DapVersion>>(
+    bytes: &mut Vec<u8>,
+    version: DapVersion,
+    item: &E,
+) {
+    // Reserve space for the length prefix.
+    let len_offset = bytes.len();
+    0_u16.encode(bytes);
+
+    item.encode_with_param(&version, bytes);
+    let len_bytes = std::mem::size_of::<u16>();
+    let len = bytes.len() - len_offset - len_bytes;
+    bytes[len_offset..len_offset + len_bytes]
+        .copy_from_slice(&u16::to_be_bytes(len.try_into().unwrap()));
+}
+
+// Cribbed from `decode_u16_items()` from libprio.
+fn decode_u16_item<D: ParameterizedDecode<DapVersion>>(
+    version: DapVersion,
+    bytes: &mut Cursor<&[u8]>,
+) -> Result<D, CodecError> {
+    // Read the length prefix.
+    let len = usize::from(u16::decode(bytes)?);
+
+    let item_start = usize::try_from(bytes.position()).unwrap();
+
+    // Make sure encoded length doesn't overflow usize or go past the end of provided byte buffer.
+    let item_end = item_start
+        .checked_add(len)
+        .ok_or_else(|| CodecError::LengthPrefixTooBig(len))?;
+
+    let decoded = D::get_decoded_with_param(&version, &bytes.get_ref()[item_start..item_end])?;
+
+    // Advance outer cursor by the amount read in the inner cursor.
+    bytes.set_position(item_end.try_into().unwrap());
+
+    Ok(decoded)
+}
+
 fn encode_u16_item_for_version<E: ParameterizedEncode<DapVersion>>(
     bytes: &mut Vec<u8>,
     version: DapVersion,
     item: &E,
 ) {
     match version {
-        DapVersion::Draft07 => {
-            // Cribbed from `decode_u16_items()` from libprio.
-            //
-            // Reserve space for the length prefix.
-            let len_offset = bytes.len();
-            0_u16.encode(bytes);
-
-            item.encode_with_param(&version, bytes);
-            let len_bytes = std::mem::size_of::<u16>();
-            let len = bytes.len() - len_offset - len_bytes;
-            bytes[len_offset..len_offset + len_bytes]
-                .copy_from_slice(&u16::to_be_bytes(len.try_into().unwrap()));
-        }
-
+        DapVersion::Draft07 => encode_u16_item(bytes, version, item),
         DapVersion::Draft02 => item.encode_with_param(&version, bytes),
     }
 }
 
-pub fn decode_u16_item_for_version<D: ParameterizedDecode<DapVersion>>(
-    version: &DapVersion,
+fn decode_u16_item_for_version<D: ParameterizedDecode<DapVersion>>(
+    version: DapVersion,
     bytes: &mut Cursor<&[u8]>,
 ) -> Result<D, CodecError> {
     match version {
-        DapVersion::Draft07 => {
-            // Cribbed from `decode_u16_items()` from libprio.
-            //
-            // Read the length prefix.
-            let len = usize::from(u16::decode(bytes)?);
-
-            let item_start = usize::try_from(bytes.position()).unwrap();
-
-            // Make sure encoded length doesn't overflow usize or go past the end of provided byte buffer.
-            let item_end = item_start
-                .checked_add(len)
-                .ok_or_else(|| CodecError::LengthPrefixTooBig(len))?;
-
-            let decoded =
-                D::get_decoded_with_param(version, &bytes.get_ref()[item_start..item_end])?;
-
-            // Advance outer cursor by the amount read in the inner cursor.
-            bytes.set_position(item_end.try_into().unwrap());
-
-            Ok(decoded)
-        }
-
-        DapVersion::Draft02 => D::decode_with_param(version, bytes),
+        DapVersion::Draft07 => decode_u16_item(version, bytes),
+        DapVersion::Draft02 => D::decode_with_param(&version, bytes),
     }
 }
 
