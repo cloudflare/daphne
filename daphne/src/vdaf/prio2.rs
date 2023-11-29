@@ -6,7 +6,7 @@
 
 use crate::{
     vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare, VdafPrepMessage,
-    VdafPrepState,
+    VdafPrepState, VdafVerifyKey,
 };
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
@@ -42,12 +42,16 @@ pub(crate) fn prio2_shard(
 /// Consume an input share and return the corresponding prep state and share.
 pub(crate) fn prio2_prep_init(
     dimension: usize,
-    verify_key: &[u8; 32],
+    verify_key: &VdafVerifyKey,
     agg_id: usize,
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
+    let VdafVerifyKey::Prio2(verify_key) = verify_key else {
+        panic!("unhandled verify key type");
+    };
+
     let vdaf = Prio2::new(dimension)?;
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =

@@ -775,6 +775,7 @@ impl AsRef<DapTaskConfig> for DapTaskConfig {
 pub enum DapMeasurement {
     U64(u64),
     U32Vec(Vec<u32>),
+    U64Vec(Vec<u64>),
     U128Vec(Vec<u128>),
 }
 
@@ -784,6 +785,7 @@ pub enum DapMeasurement {
 pub enum DapAggregateResult {
     U32Vec(Vec<u32>),
     U64(u64),
+    U64Vec(Vec<u64>),
     U128(u128),
     U128Vec(Vec<u128>),
 }
@@ -1038,6 +1040,15 @@ pub enum Prio3Config {
         length: usize,
         chunk_length: usize,
     },
+
+    /// A variant of `SumVec` that uses a smaller field (`Field64`), multiple proofs, and a custom
+    /// XOF (`XofHmacSha256Aes128`).
+    SumVecField64MultiproofHmacSha256Aes128 {
+        bits: usize,
+        length: usize,
+        chunk_length: usize,
+        num_proofs: u8,
+    },
 }
 
 impl Display for Prio3Config {
@@ -1054,6 +1065,12 @@ impl Display for Prio3Config {
                 length,
                 chunk_length,
             } => write!(f, "SumVec({bits},{length},{chunk_length})"),
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            } => write!(f, "SumVecField64MultiproofHmacSha256Aes128({bits},{length},{chunk_length},{num_proofs})"),
         }
     }
 }

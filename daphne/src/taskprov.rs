@@ -458,7 +458,7 @@ mod test {
         ];
         match &vk {
             VdafVerifyKey::Prio2(bytes) => assert_eq!(*bytes, expected),
-            VdafVerifyKey::Prio3(_) => unreachable!(),
+            _ => unreachable!(),
         }
     }
 

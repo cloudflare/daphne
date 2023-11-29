@@ -4,12 +4,19 @@
 //! Parameters for the [Prio3 VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
-    vdaf::VdafError, DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare,
-    VdafPrepMessage, VdafPrepState,
+    vdaf::{xof::XofHmacSha256Aes128, VdafError, VdafVerifyKey},
+    DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepMessage,
+    VdafPrepState,
 };
 use prio::{
     codec::{Encode, ParameterizedDecode},
+    field::Field64,
+    flp::{
+        gadgets::{Mul, ParallelSum},
+        types::SumVec,
+    },
     vdaf::{
+        self,
         prio3::{
             Prio3, Prio3InputShare, Prio3PrepareMessage, Prio3PrepareShare, Prio3PrepareState,
             Prio3PublicShare,
@@ -21,6 +28,23 @@ use std::io::Cursor;
 
 const ERR_EXPECT_FINISH: &str = "unexpected transition (continued)";
 const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
+
+type Prio3SumVecField64MultiproofHmacSha256Aes128 =
+    Prio3<SumVec<Field64, ParallelSum<Field64, Mul<Field64>>>, XofHmacSha256Aes128, 32>;
+
+fn new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+    bits: usize,
+    length: usize,
+    chunk_length: usize,
+    num_proofs: u8,
+) -> Result<Prio3SumVecField64MultiproofHmacSha256Aes128, VdafError> {
+    Ok(Prio3::new(
+        2,
+        num_proofs,
+        0xFFFF_1003,
+        SumVec::new(bits, length, chunk_length).map_err(vdaf::VdafError::from)?,
+    )?)
+}
 
 /// Split the given measurement into a sequence of encoded input shares.
 pub(crate) fn prio3_shard(
@@ -59,6 +83,23 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             shard(vdaf, &measurement, nonce)
         }
+        (
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            },
+            DapMeasurement::U64Vec(measurement),
+        ) => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            shard(vdaf, &measurement, nonce)
+        }
         _ => panic!("prio3_shard: unexpected VDAF config {config:?}"),
     };
 
@@ -87,14 +128,14 @@ pub(crate) fn prio3_shard(
 /// Consume an input share and return the corresponding VDAF step and message.
 pub(crate) fn prio3_prep_init(
     config: &Prio3Config,
-    verify_key: &[u8; 16],
+    verify_key: &VdafVerifyKey,
     agg_id: usize,
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
-    return match &config {
-        Prio3Config::Count => {
+    return match (&config, verify_key) {
+        (Prio3Config::Count, VdafVerifyKey::Prio3(verify_key)) => {
             let vdaf = Prio3::new_count(2)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -109,10 +150,13 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepMessage::Prio3ShareField64(share),
             ))
         }
-        Prio3Config::Histogram {
-            length,
-            chunk_length,
-        } => {
+        (
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            },
+            VdafVerifyKey::Prio3(verify_key),
+        ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -127,7 +171,7 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepMessage::Prio3ShareField128(share),
             ))
         }
-        Prio3Config::Sum { bits } => {
+        (Prio3Config::Sum { bits }, VdafVerifyKey::Prio3(verify_key)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -142,11 +186,14 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepMessage::Prio3ShareField128(share),
             ))
         }
-        Prio3Config::SumVec {
-            bits,
-            length,
-            chunk_length,
-        } => {
+        (
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            },
+            VdafVerifyKey::Prio3(verify_key),
+        ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -161,6 +208,35 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepMessage::Prio3ShareField128(share),
             ))
         }
+        (
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            },
+            VdafVerifyKey::Prio3HmacSha256Aes128(verify_key),
+        ) => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            let (state, share) = prep_init(
+                vdaf,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data,
+            )?;
+            Ok((
+                VdafPrepState::Prio3Field64HmacSha256Aes128(state),
+                VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(share),
+            ))
+        }
+        _ => panic!("unhandled config and verify key combination"),
     };
 
     type Prio3Prepared<T, const SEED_SIZE: usize> = (
@@ -252,6 +328,27 @@ pub(crate) fn prio3_prep_finish_from_shares(
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
             (agg_share, outbound)
         }
+        (
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            },
+            VdafPrepState::Prio3Field64HmacSha256Aes128(state),
+            VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(share),
+        ) => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            let (out_share, outbound) =
+                prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
+            let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
+            (agg_share, outbound)
+        }
         _ => panic!("prio3_prep_finish_from_shares: {ERR_FIELD_TYPE}"),
     };
 
@@ -332,6 +429,25 @@ pub(crate) fn prio3_prep_finish(
             let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
+        (
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            },
+            VdafPrepState::Prio3Field64HmacSha256Aes128(state),
+        ) => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            let out_share = prep_finish(&vdaf, state, peer_message_data)?;
+            VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
+        }
+
         _ => panic!("prio3_prep_finish: {ERR_FIELD_TYPE}"),
     };
 
@@ -399,6 +515,22 @@ pub(crate) fn prio3_decode_prep_state(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
+        Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            bits,
+            length,
+            chunk_length,
+            num_proofs,
+        } => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            Ok(VdafPrepState::Prio3Field64HmacSha256Aes128(
+                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
+            ))
+        }
     }
 }
 
@@ -436,6 +568,21 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
+        Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            bits,
+            length,
+            chunk_length,
+            num_proofs,
+        } => {
+            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                *bits,
+                *length,
+                *chunk_length,
+                *num_proofs,
+            )?;
+            let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+            Ok(DapAggregateResult::U64Vec(agg_res))
+        }
     };
 
     fn unshard<T, P, M, const SEED_SIZE: usize>(
@@ -459,145 +606,117 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
 
 #[cfg(test)]
 mod test {
+
     use crate::{
-        vdaf::{
-            prio3::{
-                prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init, prio3_shard,
-                prio3_unshard,
-            },
-            VdafError,
-        },
-        DapAggregateResult, DapMeasurement, Prio3Config,
+        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest, DapAggregateResult,
+        DapMeasurement, DapVersion, Prio3Config, VdafConfig,
     };
-    use prio::codec::Encode;
-    use rand::prelude::*;
 
-    #[test]
-    fn prep_count() {
-        test_prep(
-            &Prio3Config::Count,
-            DapMeasurement::U64(0),
-            DapAggregateResult::U64(0),
-        )
-        .unwrap();
+    async fn roundtrip_count(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::Count),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let got = t
+            .roundtrip(vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(0),
+            ])
+            .await;
+        assert_eq!(got, DapAggregateResult::U64(3));
     }
 
-    #[test]
-    fn prep_sum() {
-        test_prep(
-            &Prio3Config::Sum { bits: 23 },
-            DapMeasurement::U64(1337),
-            DapAggregateResult::U128(1337),
-        )
-        .unwrap();
+    async_test_versions! { roundtrip_count }
+
+    async fn roundtrip_sum(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::Sum { bits: 23 }),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let got = t
+            .roundtrip(vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1337),
+                DapMeasurement::U64(4),
+                DapMeasurement::U64(0),
+            ])
+            .await;
+        assert_eq!(got, DapAggregateResult::U128(1342));
     }
 
-    #[test]
-    fn prep_histogram() {
-        test_prep(
-            &Prio3Config::Histogram {
+    async_test_versions! { roundtrip_sum }
+
+    async fn roundtrip_sum_vec(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::SumVec {
+                bits: 23,
+                length: 2,
+                chunk_length: 1,
+            }),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let got = t
+            .roundtrip(vec![
+                DapMeasurement::U128Vec(vec![1337, 0]),
+                DapMeasurement::U128Vec(vec![0, 1337]),
+                DapMeasurement::U128Vec(vec![1, 1]),
+            ])
+            .await;
+        assert_eq!(got, DapAggregateResult::U128Vec(vec![1338, 1338]));
+    }
+
+    async_test_versions! { roundtrip_sum_vec }
+
+    async fn roundtrip_histogram(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::Histogram {
                 length: 3,
                 chunk_length: 1,
-            },
-            DapMeasurement::U64(2),
-            DapAggregateResult::U128Vec(vec![0, 0, 1]),
-        )
-        .unwrap();
+            }),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let got = t
+            .roundtrip(vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(2),
+                DapMeasurement::U64(2),
+                DapMeasurement::U64(2),
+            ])
+            .await;
+        assert_eq!(got, DapAggregateResult::U128Vec(vec![1, 1, 3]));
     }
 
-    #[test]
-    fn prep_sum_vec() {
-        test_prep(
-            &Prio3Config::SumVec {
+    async_test_versions! { roundtrip_histogram }
+
+    async fn roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 23,
-                length: 1,
+                length: 2,
                 chunk_length: 1,
-            },
-            DapMeasurement::U128Vec(vec![(1 << 23) - 1]),
-            DapAggregateResult::U128Vec(vec![(1 << 23) - 1]),
-        )
-        .unwrap();
-
-        test_prep(
-            &Prio3Config::SumVec {
-                bits: 23,
-                length: 3,
-                chunk_length: 1,
-            },
-            DapMeasurement::U128Vec(vec![1, 0, 42]),
-            DapAggregateResult::U128Vec(vec![1, 0, 42]),
-        )
-        .unwrap();
+                num_proofs: 4,
+            }),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let got = t
+            .roundtrip(vec![
+                DapMeasurement::U64Vec(vec![1337, 0]),
+                DapMeasurement::U64Vec(vec![0, 1337]),
+                DapMeasurement::U64Vec(vec![1, 1]),
+            ])
+            .await;
+        assert_eq!(got, DapAggregateResult::U64Vec(vec![1338, 1338]));
     }
 
-    fn test_prep(
-        config: &Prio3Config,
-        measurement: DapMeasurement,
-        expected_result: DapAggregateResult,
-    ) -> Result<(), VdafError> {
-        let mut rng = thread_rng();
-        let verify_key = rng.gen();
-        let nonce = [0; 16];
-
-        // Shard
-        let (encoded_public_share, encoded_input_shares) =
-            prio3_shard(config, measurement, &nonce).unwrap();
-        assert_eq!(encoded_input_shares.len(), 2);
-
-        // Prepare
-        let (leader_state, leader_share) = prio3_prep_init(
-            config,
-            &verify_key,
-            0,
-            &nonce,
-            &encoded_public_share,
-            &encoded_input_shares[0],
-        )?;
-
-        let (helper_state, helper_share) = prio3_prep_init(
-            config,
-            &verify_key,
-            1,
-            &nonce,
-            &encoded_public_share,
-            &encoded_input_shares[1],
-        )?;
-
-        let (leader_out_share, message_data) = prio3_prep_finish_from_shares(
-            config,
-            0,
-            leader_state,
-            leader_share.clone(),
-            &helper_share.get_encoded(),
-        )?;
-
-        // If the Helper completes preparation, then the it should compute the same message.
-        {
-            let (_helper_out_share, other_message_data) = prio3_prep_finish_from_shares(
-                config,
-                1,
-                helper_state.clone(),
-                helper_share,
-                &leader_share.get_encoded(),
-            )?;
-
-            assert_eq!(message_data, other_message_data);
-        }
-
-        let helper_out_share = prio3_prep_finish(config, helper_state, &message_data)?;
-
-        // Unshard
-        let agg_res = prio3_unshard(
-            config,
-            1,
-            [
-                leader_out_share.get_encoded(),
-                helper_out_share.get_encoded(),
-            ],
-        )
-        .unwrap();
-        assert_eq!(agg_res, expected_result);
-
-        Ok(())
-    }
+    async_test_versions! { roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 }
