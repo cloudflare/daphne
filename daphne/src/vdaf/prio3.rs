@@ -4,6 +4,7 @@
 //! Parameters for the [Prio3 VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
+    messages::taskprov::VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
     vdaf::{xof::XofHmacSha256Aes128, VdafError, VdafVerifyKey},
     DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepMessage,
     VdafPrepState,
@@ -41,7 +42,7 @@ fn new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
     Ok(Prio3::new(
         2,
         num_proofs,
-        0xFFFF_1003,
+        VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
         SumVec::new(bits, length, chunk_length).map_err(vdaf::VdafError::from)?,
     )?)
 }

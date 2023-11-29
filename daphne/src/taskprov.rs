@@ -15,7 +15,7 @@ use crate::{
     },
     vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
-    VdafConfig,
+    Prio3Config, VdafConfig,
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -230,6 +230,32 @@ impl VdafConfig {
                     task_id: *task_id,
                 })?,
             }),
+            (
+                DapVersion::DraftLatest,
+                VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                    bits,
+                    length,
+                    chunk_length,
+                    num_proofs,
+                },
+            ) => Ok(VdafConfig::Prio3(
+                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits: bits.into(),
+                    length: length.try_into().map_err(|_| DapAbort::InvalidTask {
+                        detail: "length is larger than the system's word size".to_string(),
+                        task_id: *task_id,
+                    })?,
+                    chunk_length: chunk_length.try_into().map_err(|_| DapAbort::InvalidTask {
+                        detail: "chunk_length is larger than the system's word size".to_string(),
+                        task_id: *task_id,
+                    })?,
+                    num_proofs,
+                },
+            )),
+            (DapVersion::Draft02, var) => Err(DapAbort::InvalidTask {
+                detail: format!("draft02: unsupported VDAF: {var:?}"),
+                task_id: *task_id,
+            }),
             (.., VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
                 task_id: *task_id,
@@ -312,12 +338,30 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
     fn try_from(vdaf_config: &VdafConfig) -> Result<Self, DapError> {
         match vdaf_config {
             VdafConfig::Prio2 { dimension } => Ok(Self::Prio2 {
-                dimension: (*dimension)
-                    .try_into()
-                    .map_err(|_| fatal_error!(err = "Prio2 dimension is too large for taskprov"))?,
+                dimension: (*dimension).try_into().map_err(|_| {
+                    fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
+                })?,
             }),
-            VdafConfig::Prio3 { .. } => Err(fatal_error!(
-                err = "Prio3 is not currently supported for taskprov"
+            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            }) => Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                bits: (*bits).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+                length: (*length).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+
+                chunk_length: (*chunk_length).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+                num_proofs: *num_proofs,
+            }),
+            VdafConfig::Prio3(..) => Err(fatal_error!(
+                err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
         }
     }

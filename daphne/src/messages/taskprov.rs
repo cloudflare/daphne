@@ -4,8 +4,8 @@
 //! draft-wang-ppm-dap-taskprov: Messages for the taskrpov extension for DAP.
 
 use crate::messages::{
-    decode_u16_bytes, decode_u16_item_for_version, encode_u16_bytes, encode_u16_item_for_version,
-    Duration, Time, QUERY_TYPE_FIXED_SIZE, QUERY_TYPE_TIME_INTERVAL,
+    decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
+    QUERY_TYPE_TIME_INTERVAL,
 };
 use crate::DapVersion;
 use prio::codec::{
@@ -15,8 +15,11 @@ use prio::codec::{
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
+use super::{decode_u16_prefixed, encode_u16_prefixed};
+
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
+pub(crate) const VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128: u32 = 0xFFFF_1003;
 
 // Differential privacy mechanism types.
 const DP_MECHANISM_NONE: u8 = 0x01;
@@ -24,8 +27,19 @@ const DP_MECHANISM_NONE: u8 = 0x01;
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub enum VdafTypeVar {
-    Prio2 { dimension: u32 },
-    NotImplemented { typ: u32, param: Vec<u8> },
+    Prio2 {
+        dimension: u32,
+    },
+    Prio3SumVecField64MultiproofHmacSha256Aes128 {
+        bits: u8,
+        length: u32,
+        chunk_length: u32,
+        num_proofs: u8,
+    },
+    NotImplemented {
+        typ: u32,
+        param: Vec<u8>,
+    },
 }
 
 impl ParameterizedEncode<DapVersion> for VdafTypeVar {
@@ -33,14 +47,29 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
         match self {
             Self::Prio2 { dimension } => {
                 VDAF_TYPE_PRIO2.encode(bytes);
-                encode_u16_item_for_version(bytes, *version, dimension);
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    dimension.encode(inner);
+                });
+            }
+            Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            } => {
+                VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128.encode(bytes);
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    bits.encode(inner);
+                    length.encode(inner);
+                    chunk_length.encode(inner);
+                    num_proofs.encode(inner);
+                });
             }
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
-                match version {
-                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
-                    DapVersion::Draft02 => bytes.extend_from_slice(param),
-                }
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    inner.extend_from_slice(param);
+                });
             }
         }
     }
@@ -53,9 +82,23 @@ impl ParameterizedDecode<DapVersion> for VdafTypeVar {
     ) -> Result<Self, CodecError> {
         let vdaf_type = u32::decode(bytes)?;
         match (version, vdaf_type) {
-            (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
-                dimension: decode_u16_item_for_version(*version, bytes)?,
-            }),
+            (.., VDAF_TYPE_PRIO2) => {
+                taskprov_decode_u16_prefixed(*version, bytes, |_version, inner| {
+                    Ok(Self::Prio2 {
+                        dimension: u32::decode(inner)?,
+                    })
+                })
+            }
+            (.., VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128) => {
+                taskprov_decode_u16_prefixed(*version, bytes, |_version, inner| {
+                    Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                        bits: u8::decode(inner)?,
+                        length: u32::decode(inner)?,
+                        chunk_length: u32::decode(inner)?,
+                        num_proofs: u8::decode(inner)?,
+                    })
+                })
+            }
             (DapVersion::DraftLatest, ..) => Ok(Self::NotImplemented {
                 typ: vdaf_type,
                 param: decode_u16_bytes(bytes)?,
@@ -79,15 +122,14 @@ impl ParameterizedEncode<DapVersion> for DpConfig {
         match self {
             Self::None => {
                 DP_MECHANISM_NONE.encode(bytes);
-                encode_u16_item_for_version(bytes, *version, &());
+                taskprov_encode_u16_prefixed(*version, bytes, |_, _| ());
             }
 
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
-                match version {
-                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
-                    DapVersion::Draft02 => bytes.extend_from_slice(param),
-                }
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    inner.extend_from_slice(param);
+                });
             }
         }
     }
@@ -101,7 +143,9 @@ impl ParameterizedDecode<DapVersion> for DpConfig {
         let dp_mechanism = u8::decode(bytes)?;
         match (version, dp_mechanism) {
             (.., DP_MECHANISM_NONE) => {
-                decode_u16_item_for_version::<()>(*version, bytes)?;
+                taskprov_decode_u16_prefixed::<()>(*version, bytes, |_version, inner| {
+                    <()>::decode(inner)
+                })?;
                 Ok(Self::None)
             }
             (DapVersion::DraftLatest, ..) => Ok(Self::NotImplemented {
@@ -207,18 +251,19 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         match &self.var {
             QueryConfigVar::TimeInterval => {
                 QUERY_TYPE_TIME_INTERVAL.encode(bytes);
-                encode_u16_item_for_version(bytes, *version, &());
+                taskprov_encode_u16_prefixed(*version, bytes, |_, _| ());
             }
             QueryConfigVar::FixedSize { max_batch_size } => {
                 QUERY_TYPE_FIXED_SIZE.encode(bytes);
-                encode_u16_item_for_version(bytes, *version, max_batch_size);
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    max_batch_size.encode(inner);
+                });
             }
             QueryConfigVar::NotImplemented { typ, param } => {
                 typ.encode(bytes);
-                match version {
-                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
-                    DapVersion::Draft02 => bytes.extend_from_slice(param),
-                }
+                taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
+                    inner.extend_from_slice(param);
+                });
             }
         }
     }
@@ -239,12 +284,18 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
         let query_type = query_type.unwrap_or(u8::decode(bytes)?);
         let var = match (version, query_type) {
             (.., QUERY_TYPE_TIME_INTERVAL) => {
-                decode_u16_item_for_version::<()>(*version, bytes)?;
+                taskprov_decode_u16_prefixed::<()>(*version, bytes, |_version, inner| {
+                    <()>::decode(inner)
+                })?;
                 QueryConfigVar::TimeInterval
             }
-            (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
-                max_batch_size: decode_u16_item_for_version(*version, bytes)?,
-            },
+            (.., QUERY_TYPE_FIXED_SIZE) => {
+                taskprov_decode_u16_prefixed(*version, bytes, |_version, inner| {
+                    Ok(QueryConfigVar::FixedSize {
+                        max_batch_size: u32::decode(inner)?,
+                    })
+                })?
+            }
             (DapVersion::DraftLatest, ..) => QueryConfigVar::NotImplemented {
                 typ: query_type,
                 param: decode_u16_bytes(bytes)?,
@@ -315,6 +366,30 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             task_expiration: Time::decode(bytes)?,
             vdaf_config: VdafConfig::decode_with_param(version, bytes)?,
         })
+    }
+}
+
+fn taskprov_encode_u16_prefixed(
+    version: DapVersion,
+    bytes: &mut Vec<u8>,
+    e: impl Fn(DapVersion, &mut Vec<u8>),
+) {
+    match version {
+        DapVersion::DraftLatest => encode_u16_prefixed(version, bytes, e),
+        // draft02 compatibility: No length prefix is used.
+        DapVersion::Draft02 => e(version, bytes),
+    }
+}
+
+fn taskprov_decode_u16_prefixed<O>(
+    version: DapVersion,
+    bytes: &mut Cursor<&[u8]>,
+    d: impl Fn(DapVersion, &mut Cursor<&[u8]>) -> Result<O, CodecError>,
+) -> Result<O, CodecError> {
+    match version {
+        DapVersion::DraftLatest => decode_u16_prefixed(version, bytes, d),
+        // draft02 compatibility: No length prefix is used.
+        DapVersion::Draft02 => d(version, bytes),
     }
 }
 
@@ -443,7 +518,7 @@ mod tests {
         .is_err());
     }
 
-    fn roundtrip_vdaf_config(version: DapVersion) {
+    fn roundtrip_vdaf_config_prio2(version: DapVersion) {
         let vdaf_config = VdafConfig {
             dp_config: DpConfig::None,
             var: VdafTypeVar::Prio2 { dimension: 1337 },
@@ -458,7 +533,31 @@ mod tests {
         );
     }
 
-    test_versions! { roundtrip_vdaf_config }
+    test_versions! { roundtrip_vdaf_config_prio2 }
+
+    fn roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+        version: DapVersion,
+    ) {
+        let vdaf_config = VdafConfig {
+            dp_config: DpConfig::None,
+            var: VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                bits: 23,
+                length: 1337,
+                chunk_length: 42,
+                num_proofs: 99,
+            },
+        };
+        assert_eq!(
+            VdafConfig::get_decoded_with_param(
+                &version,
+                &vdaf_config.get_encoded_with_param(&version)
+            )
+            .unwrap(),
+            vdaf_config
+        );
+    }
+
+    test_versions! { roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
     #[test]
     fn roundtrip_vdaf_config_not_implemented_draft09() {

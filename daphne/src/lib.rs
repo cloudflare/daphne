@@ -478,7 +478,7 @@ impl DapTaskParameters {
             task_expiration: now + 86400 * 14, // expires in two weeks
             vdaf_config: messages::taskprov::VdafConfig {
                 dp_config: messages::taskprov::DpConfig::None,
-                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
+                var: (&self.vdaf).try_into()?,
             },
         };
 
