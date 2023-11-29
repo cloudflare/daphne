@@ -64,7 +64,6 @@ bindings = [
     { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
     { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
     { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
-    { name = "DAP_REPORTS_PROCESSED", class_name = "ReportsProcessed" },
 ]
 
 
@@ -163,5 +162,4 @@ new_classes = [
     "LeaderCollectionJobQueue",
     "GarbageCollector",
     "ReportsPending",
-    "ReportsProcessed",
 ]

@@ -8,7 +8,10 @@ use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use tracing::{debug, error};
 use url::Url;
 
-use super::{check_batch, check_request_content_type, resolve_taskprov, DapAggregator};
+use super::{
+    aggregator::MergeAggShareError, check_batch, check_request_content_type, resolve_taskprov,
+    DapAggregator,
+};
 use crate::{
     constants::DapMediaType,
     error::DapAbort,
@@ -446,8 +449,13 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .try_put_agg_share_span(task_id, task_config, agg_span)
             .await
             .into_iter()
-            .map(|(_bucket, (result, _report_metadata))| {
-                result.map(|replayed_reports| replayed_reports.len())
+            .map(|(_bucket, (result, _report_metadata))| match result {
+                Ok(()) => Ok(0),
+                Err(MergeAggShareError::AlreadyCollected) => {
+                    panic!("aggregated to a collected agg share")
+                }
+                Err(MergeAggShareError::ReplaysDetected(replays)) => Ok(replays.len()),
+                Err(MergeAggShareError::Other(e)) => Err(e),
             })
             .sum::<Result<usize, _>>()?;
 

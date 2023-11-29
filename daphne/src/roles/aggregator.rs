@@ -38,6 +38,13 @@ pub trait DapReportInitializer {
     ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError>;
 }
 
+#[derive(Debug)]
+pub enum MergeAggShareError {
+    AlreadyCollected,
+    ReplaysDetected(HashSet<ReportId>),
+    Other(DapError),
+}
+
 /// DAP Aggregator functionality.
 #[async_trait(?Send)]
 pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
@@ -125,7 +132,7 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_share_span: DapAggregateSpan<DapAggregateShare>,
-    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>>;
+    ) -> DapAggregateSpan<Result<(), MergeAggShareError>>;
 
     /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(

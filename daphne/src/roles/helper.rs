@@ -19,6 +19,7 @@ use crate::{
         ReportId, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
+    roles::aggregator::MergeAggShareError,
     vdaf::ReportProcessedStatus,
     DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapError,
     DapHelperAggregationJobTransition, DapRequest, DapResource, DapResponse, DapTaskConfig,
@@ -503,7 +504,7 @@ async fn finish_agg_job_and_aggregate<S>(
         for (_bucket, result) in put_shares_result {
             match result {
                 // This bucket had no replays.
-                (Ok(replays), reports) if replays.is_empty() => {
+                (Ok(()), reports) => {
                     // Every report in the bucket has been committed to aggregate storage.
                     report_status.extend(
                         reports.into_iter().map(|(report_id, _time)| {
@@ -512,12 +513,22 @@ async fn finish_agg_job_and_aggregate<S>(
                     );
                 }
                 // This bucket had replays.
-                (Ok(replays), _reports) => {
+                (Err(MergeAggShareError::ReplaysDetected(replays)), _reports) => {
                     // At least one report was replayed (no change to aggregate storage).
                     report_status.extend(replays.into_iter().map(|report_id| {
                         (
                             report_id,
                             ReportProcessedStatus::Rejected(TransitionFailure::ReportReplayed),
+                        )
+                    }));
+                    inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
+                }
+                // This bucket belongs to a collected aggregate share.
+                (Err(MergeAggShareError::AlreadyCollected), reports) => {
+                    report_status.extend(reports.into_iter().map(|(report_id, _)| {
+                        (
+                            report_id,
+                            ReportProcessedStatus::Rejected(TransitionFailure::BatchCollected),
                         )
                     }));
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
@@ -531,7 +542,7 @@ async fn finish_agg_job_and_aggregate<S>(
                 // and if this error doesn't manifest itself all reports will be successfully
                 // aggregated. Which means that no reports will be lost in a such a state that
                 // they can never be aggregated.
-                (Err(e), _) => return Err(e),
+                (Err(MergeAggShareError::Other(other)), _) => return Err(other),
             }
         }
         if !inc_restart_metric.is_completed() {

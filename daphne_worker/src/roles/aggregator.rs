@@ -8,9 +8,9 @@ use crate::{
     config::{DapTaskConfigKvPair, DaphneWorker},
     durable::{
         aggregate_store::{
-            AggregateStoreMergeReq, DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
-            DURABLE_AGGREGATE_STORE_GET, DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
-            DURABLE_AGGREGATE_STORE_MERGE,
+            AggregateStoreMergeReq, AggregateStoreMergeResp,
+            DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, DURABLE_AGGREGATE_STORE_GET,
+            DURABLE_AGGREGATE_STORE_MARK_COLLECTED, DURABLE_AGGREGATE_STORE_MERGE,
         },
         durable_name_agg_store, BINDING_DAP_AGGREGATE_STORE,
     },
@@ -22,52 +22,25 @@ use daphne::{
     auth::BearerTokenProvider,
     fatal_error,
     hpke::HpkeConfig,
-    messages::{BatchId, BatchSelector, PartialBatchSelector, ReportId, TaskId, TransitionFailure},
+    messages::{BatchId, BatchSelector, PartialBatchSelector, TaskId, TransitionFailure},
     metrics::DaphneMetrics,
-    roles::{DapAggregator, DapReportInitializer},
+    roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapRequest,
     DapSender, DapTaskConfig,
 };
-use futures::{future::try_join_all, StreamExt, TryFutureExt, TryStreamExt};
-use std::collections::{HashMap, HashSet};
+use futures::{future::try_join_all, StreamExt};
 
 #[async_trait(?Send)]
 impl DapReportInitializer for DaphneWorker<'_> {
     async fn initialize_reports<'req>(
         &self,
         is_leader: bool,
-        task_id: &TaskId,
+        _task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
+        _part_batch_sel: &PartialBatchSelector,
         consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
     ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
-        let durable = self.durable();
-        let span = task_config
-            .as_ref()
-            .batch_span_for_meta(part_batch_sel, consumed_reports.iter())?;
-        let collected_reports = {
-            let task_id_hex = task_id.to_hex();
-
-            // Send AggregateStore requests.
-            futures::stream::iter(span.iter())
-                .map(|(bucket, _)| {
-                    let durable_name =
-                        durable_name_agg_store(task_config.version, &task_id_hex, bucket);
-                    durable
-                        .get(
-                            BINDING_DAP_AGGREGATE_STORE,
-                            DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
-                            durable_name,
-                        )
-                        .map_ok(move |collected| (bucket, collected))
-                })
-                .buffer_unordered(usize::MAX)
-                .try_collect::<HashMap<&DapBatchBucket, bool>>()
-                .map_err(|e| fatal_error!(err = ?e, "failed to check collected"))
-                .await?
-        };
-
         let min_time = self.least_valid_report_time(self.get_current_time());
         let max_time = self.greatest_valid_report_time(self.get_current_time());
 
@@ -82,11 +55,6 @@ impl DapReportInitializer for DaphneWorker<'_> {
                 } else if metadata.time > max_time {
                     consumed_report
                         .into_initialized_rejected_due_to(TransitionFailure::ReportTooEarly)
-                } else if collected_reports
-                    [&task_config.bucket_for(part_batch_sel, &consumed_report)]
-                {
-                    consumed_report
-                        .into_initialized_rejected_due_to(TransitionFailure::BatchCollected)
                 } else {
                     EarlyReportStateInitialized::initialize(
                         is_leader,
@@ -339,7 +307,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_share_span: DapAggregateSpan<DapAggregateShare>,
-    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>> {
+    ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
         let task_id_hex = task_id.to_hex();
         let durable = self.durable().with_retry();
 
@@ -348,7 +316,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 let agg_store_name =
                     durable_name_agg_store(task_config.version, &task_id_hex, &bucket);
                 let result = durable
-                    .post::<_, HashSet<ReportId>>(
+                    .post::<_, AggregateStoreMergeResp>(
                         BINDING_DAP_AGGREGATE_STORE,
                         DURABLE_AGGREGATE_STORE_MERGE,
                         agg_store_name,
@@ -359,6 +327,16 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                     )
                     .await
                     .map_err(|e| fatal_error!(err = ?e));
+                let result = match result {
+                    Ok(AggregateStoreMergeResp::Ok) => Ok(()),
+                    Ok(AggregateStoreMergeResp::AlreadyCollected) => {
+                        Err(MergeAggShareError::AlreadyCollected)
+                    }
+                    Ok(AggregateStoreMergeResp::ReplaysDetected(replays)) => {
+                        Err(MergeAggShareError::ReplaysDetected(replays))
+                    }
+                    Err(e) => Err(MergeAggShareError::Other(e)),
+                };
                 (bucket, (result, report_metadatas))
             })
             .buffer_unordered(usize::MAX)

@@ -3,7 +3,7 @@
 
 //! Trait definitions for Daphne backends.
 
-mod aggregator;
+pub mod aggregator;
 mod helper;
 mod leader;
 
