@@ -78,7 +78,7 @@ impl TestRunner {
         // aggregator URL with 127.0.0.1.
         let version_path = match version {
             DapVersion::Draft02 => "v02",
-            DapVersion::Latest => "v09",
+            DapVersion::DraftLatest => "v09",
         };
         let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
         let mut helper_url = Url::parse(&format!("http://helper:8788/{}/", version_path)).unwrap();
@@ -693,14 +693,14 @@ impl TestRunner {
     pub fn upload_path_for_task(&self, id: &TaskId) -> String {
         match self.version {
             DapVersion::Draft02 => "upload".to_string(),
-            DapVersion::Latest => format!("tasks/{}/reports", id.to_base64url()),
+            DapVersion::DraftLatest => format!("tasks/{}/reports", id.to_base64url()),
         }
     }
 
     pub fn collect_path_for_task(&self, task_id: &TaskId) -> String {
         match self.version {
             DapVersion::Draft02 => "collect".to_string(),
-            DapVersion::Latest => {
+            DapVersion::DraftLatest => {
                 let collection_job_id = CollectionJobId(thread_rng().gen());
                 format!(
                     "tasks/{}/collection_jobs/{}",

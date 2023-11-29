@@ -190,7 +190,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Latest => CTX_INPUT_SHARE_DRAFT_LATEST,
+            DapVersion::DraftLatest => CTX_INPUT_SHARE_DRAFT_LATEST,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -218,9 +218,9 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
         // draft, the plaintext also encodes the report extensions.
-        let (input_share, draft09_extensions) = match task_config.version {
+        let (input_share, draft_latest_extensions) = match task_config.version {
             DapVersion::Draft02 => (encoded_input_share, None),
-            DapVersion::Latest => {
+            DapVersion::DraftLatest => {
                 match PlaintextInputShare::get_decoded_with_param(
                     &task_config.version,
                     &encoded_input_share,
@@ -239,7 +239,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         // Handle report extensions.
         {
             let extensions = match task_config.version {
-                DapVersion::Latest => draft09_extensions.as_ref().unwrap(),
+                DapVersion::DraftLatest => draft_latest_extensions.as_ref().unwrap(),
                 DapVersion::Draft02 => metadata.as_ref().draft02_extensions.as_ref().unwrap(),
             };
 
@@ -260,7 +260,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
                     }
 
                     // Reject reports with unrecognized extensions.
-                    (DapVersion::Latest, ..) => {
+                    (DapVersion::DraftLatest, ..) => {
                         return Ok(Self::Rejected {
                             metadata,
                             failure: TransitionFailure::InvalidMessage,
@@ -693,8 +693,8 @@ impl VdafConfig {
             return Err(fatal_error!(err = "unexpected number of HPKE configs"));
         }
 
-        let (draft02_extensions, mut draft09_plaintext_input_share) = match version {
-            DapVersion::Latest => (
+        let (draft02_extensions, mut draft_latest_plaintext_input_share) = match version {
+            DapVersion::DraftLatest => (
                 None,
                 Some(PlaintextInputShare {
                     extensions,
@@ -711,7 +711,7 @@ impl VdafConfig {
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
-            if let Some(ref mut plaintext_input_share) = draft09_plaintext_input_share {
+            if let Some(ref mut plaintext_input_share) = draft_latest_plaintext_input_share {
                 plaintext_input_share.payload = input_share;
                 plaintext_input_share.get_encoded_with_param(&version)
             } else {
@@ -721,7 +721,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Latest => CTX_INPUT_SHARE_DRAFT_LATEST,
+            DapVersion::DraftLatest => CTX_INPUT_SHARE_DRAFT_LATEST,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -878,9 +878,9 @@ impl VdafConfig {
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
-                    let (draft02_prep_share, draft09_payload) = match task_config.version {
+                    let (draft02_prep_share, draft_latest_payload) = match task_config.version {
                         DapVersion::Draft02 => (Some(prep_share), None),
-                        DapVersion::Latest => {
+                        DapVersion::DraftLatest => {
                             let mut outbound = Vec::with_capacity(
                                 prep_share
                                     .encoded_len_with_param(&task_config.version)
@@ -907,7 +907,7 @@ impl VdafConfig {
                             public_share: public_share.into_owned(),
                             encrypted_input_share: helper_share,
                         },
-                        draft09_payload,
+                        draft_latest_payload,
                     });
                 }
 
@@ -1010,7 +1010,7 @@ impl VdafConfig {
                 agg_job_init_req,
                 metrics,
             )),
-            DapVersion::Latest => self.draft09_handle_agg_job_init_req(
+            DapVersion::DraftLatest => self.draft_latest_handle_agg_job_init_req(
                 task_id,
                 task_config,
                 report_status,
@@ -1079,7 +1079,7 @@ impl VdafConfig {
         )
     }
 
-    fn draft09_handle_agg_job_init_req(
+    fn draft_latest_handle_agg_job_init_req(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -1106,7 +1106,7 @@ impl VdafConfig {
                         state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
-                        let Some(ref leader_inbound) = prep_init.draft09_payload else {
+                        let Some(ref leader_inbound) = prep_init.draft_latest_payload else {
                             return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
@@ -1207,9 +1207,13 @@ impl VdafConfig {
                     metrics,
                 )
                 .map_err(Into::into),
-            DapVersion::Latest => {
-                self.draft09_handle_agg_job_resp(task_id, task_config, state, agg_job_resp, metrics)
-            }
+            DapVersion::DraftLatest => self.draft_latest_handle_agg_job_resp(
+                task_id,
+                task_config,
+                state,
+                agg_job_resp,
+                metrics,
+            ),
         }
     }
 
@@ -1326,7 +1330,7 @@ impl VdafConfig {
         ))
     }
 
-    fn draft09_handle_agg_job_resp(
+    fn draft_latest_handle_agg_job_resp(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -1714,7 +1718,7 @@ impl VdafConfig {
 
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Latest => CTX_AGG_SHARE_DRAFT_LATEST,
+            DapVersion::DraftLatest => CTX_AGG_SHARE_DRAFT_LATEST,
         };
         let n: usize = agg_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -1778,7 +1782,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Latest => CTX_AGG_SHARE_DRAFT_LATEST,
+        DapVersion::DraftLatest => CTX_AGG_SHARE_DRAFT_LATEST,
     };
     let n: usize = agg_share_text.len();
     let mut info = Vec::with_capacity(n + 2);
@@ -2202,7 +2206,7 @@ mod test {
                         public_share: report0.public_share,
                         encrypted_input_share: report0.encrypted_input_shares[1].clone(),
                     },
-                    draft09_payload: Some(b"malformed payload".to_vec()),
+                    draft_latest_payload: Some(b"malformed payload".to_vec()),
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -2210,7 +2214,7 @@ mod test {
                         public_share: report1.public_share,
                         encrypted_input_share: report1.encrypted_input_shares[1].clone(),
                     },
-                    draft09_payload: Some(b"malformed payload".to_vec()),
+                    draft_latest_payload: Some(b"malformed payload".to_vec()),
                 },
             ],
         };
@@ -2441,11 +2445,18 @@ mod test {
 
     #[tokio::test]
     async fn agg_job_init_req_skip_vdaf_prep_error_draft09() {
-        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, DapVersion::Latest);
+        let t = AggregationJobTest::new(
+            TEST_VDAF,
+            HpkeKemId::X25519HkdfSha256,
+            DapVersion::DraftLatest,
+        );
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         reports.insert(
             1,
-            t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Latest),
+            t.produce_invalid_report_vdaf_prep_failure(
+                DapMeasurement::U64(1),
+                DapVersion::DraftLatest,
+            ),
         );
 
         let (leader_state, agg_job_init_req) =
@@ -2662,7 +2673,7 @@ mod test {
             DapVersion::Draft02 => true,
             // In the latest version we're meant to reject reports containing unrecognized
             // extensions.
-            DapVersion::Latest => false,
+            DapVersion::DraftLatest => false,
         };
         assert_eq!(consumed_report.is_ready(), expect_ready);
     }

@@ -301,7 +301,7 @@ async fn leader_upload(version: DapVersion) {
     );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::Latest => client.put(url.as_str()),
+        DapVersion::DraftLatest => client.put(url.as_str()),
     };
     let resp = builder
         .body(
@@ -312,7 +312,7 @@ async fn leader_upload(version: DapVersion) {
                     time: t.now,
                     draft02_extensions: match version {
                         DapVersion::Draft02 => Some(Vec::default()),
-                        DapVersion::Latest => None,
+                        DapVersion::DraftLatest => None,
                     },
                 },
                 public_share: b"public share".to_vec(),
@@ -665,7 +665,7 @@ async fn leader_collect_ok(version: DapVersion) {
 
     if version != DapVersion::Draft02 {
         // Check that the time interval for the reports is correct.
-        let interval = collection.draft09_interval.as_ref().unwrap();
+        let interval = collection.draft_latest_interval.as_ref().unwrap();
         let low = t.task_config.quantized_time_lower_bound(time_min);
         let high = t.task_config.quantized_time_upper_bound(time_max);
         assert!(low < high);
@@ -1312,7 +1312,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov {
             draft02_payload: match version {
-                DapVersion::Latest => None,
+                DapVersion::DraftLatest => None,
                 DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
             },
         }];

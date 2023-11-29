@@ -524,7 +524,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::test_version! { $fname, Draft02 }
-            $crate::test_version! { $fname, Latest }
+            $crate::test_version! { $fname, DraftLatest }
         )*
     };
 }
@@ -546,7 +546,7 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::async_test_version! { $fname, Draft02 }
-            $crate::async_test_version! { $fname, Latest }
+            $crate::async_test_version! { $fname, DraftLatest }
         )*
     };
 }
@@ -555,14 +555,14 @@ macro_rules! async_test_versions {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub(crate) enum MetaAggregationJobIdOwned {
     Draft02(Draft02AggregationJobId),
-    Latest(AggregationJobId),
+    DraftLatest(AggregationJobId),
 }
 
 impl From<&MetaAggregationJobId> for MetaAggregationJobIdOwned {
     fn from(agg_job_id: &MetaAggregationJobId) -> Self {
         match agg_job_id {
             MetaAggregationJobId::Draft02(agg_job_id) => Self::Draft02(*agg_job_id),
-            MetaAggregationJobId::Latest(agg_job_id) => Self::Latest(*agg_job_id),
+            MetaAggregationJobId::DraftLatest(agg_job_id) => Self::DraftLatest(*agg_job_id),
         }
     }
 }
