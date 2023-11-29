@@ -38,7 +38,7 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Draft07 => encode_u16_bytes(bytes, param),
+                    DapVersion::Latest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -56,7 +56,7 @@ impl ParameterizedDecode<DapVersion> for VdafTypeVar {
             (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
                 dimension: decode_u16_item_for_version(*version, bytes)?,
             }),
-            (DapVersion::Draft07, ..) => Ok(Self::NotImplemented {
+            (DapVersion::Latest, ..) => Ok(Self::NotImplemented {
                 typ: vdaf_type,
                 param: decode_u16_bytes(bytes)?,
             }),
@@ -85,7 +85,7 @@ impl ParameterizedEncode<DapVersion> for DpConfig {
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Draft07 => encode_u16_bytes(bytes, param),
+                    DapVersion::Latest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -104,7 +104,7 @@ impl ParameterizedDecode<DapVersion> for DpConfig {
                 decode_u16_item_for_version::<()>(*version, bytes)?;
                 Ok(Self::None)
             }
-            (DapVersion::Draft07, ..) => Ok(Self::NotImplemented {
+            (DapVersion::Latest, ..) => Ok(Self::NotImplemented {
                 typ: dp_mechanism,
                 param: decode_u16_bytes(bytes)?,
             }),
@@ -216,7 +216,7 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
             QueryConfigVar::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Draft07 => encode_u16_bytes(bytes, param),
+                    DapVersion::Latest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -230,7 +230,7 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let query_type = match version {
-            DapVersion::Draft07 => None,
+            DapVersion::Latest => None,
             DapVersion::Draft02 => Some(u8::decode(bytes)?),
         };
         let time_precision = Duration::decode(bytes)?;
@@ -245,7 +245,7 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
             (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
                 max_batch_size: decode_u16_item_for_version(*version, bytes)?,
             },
-            (DapVersion::Draft07, ..) => QueryConfigVar::NotImplemented {
+            (DapVersion::Latest, ..) => QueryConfigVar::NotImplemented {
                 typ: query_type,
                 param: decode_u16_bytes(bytes)?,
             },
@@ -283,7 +283,7 @@ impl ParameterizedEncode<DapVersion> for TaskConfig {
                 &(),
                 &[self.leader_url.clone(), self.helper_url.clone()],
             ),
-            DapVersion::Draft07 => {
+            DapVersion::Latest => {
                 self.leader_url.encode(bytes);
                 self.helper_url.encode(bytes);
             }
@@ -304,7 +304,7 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             DapVersion::Draft02 => decode_u16_items(&(), bytes)?
                 .try_into()
                 .map_err(|_| CodecError::UnexpectedValue)?, // Expect exactly two Aggregator endpoints.
-            DapVersion::Draft07 => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
+            DapVersion::Latest => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
         };
 
         Ok(TaskConfig {
@@ -361,7 +361,7 @@ mod tests {
     test_versions! { roundtrip_query_config }
 
     #[test]
-    fn roundtrip_query_config_not_implemented_draft07() {
+    fn roundtrip_query_config_not_implemented_draft09() {
         let query_config = QueryConfig {
             time_precision: 12_345_678,
             max_batch_query_count: 1337,
@@ -373,8 +373,8 @@ mod tests {
         };
         assert_eq!(
             QueryConfig::get_decoded_with_param(
-                &DapVersion::Draft07,
-                &query_config.get_encoded_with_param(&DapVersion::Draft07)
+                &DapVersion::Latest,
+                &query_config.get_encoded_with_param(&DapVersion::Latest)
             )
             .unwrap(),
             query_config
@@ -413,15 +413,15 @@ mod tests {
     test_versions! { roundtrip_dp_config }
 
     #[test]
-    fn roundtrip_dp_config_not_implemented_draft07() {
+    fn roundtrip_dp_config_not_implemented_draft09() {
         let dp_config = DpConfig::NotImplemented {
             typ: 0,
             param: b"dp mechanism param".to_vec(),
         };
         assert_eq!(
             DpConfig::get_decoded_with_param(
-                &DapVersion::Draft07,
-                &dp_config.get_encoded_with_param(&DapVersion::Draft07)
+                &DapVersion::Latest,
+                &dp_config.get_encoded_with_param(&DapVersion::Latest)
             )
             .unwrap(),
             dp_config
@@ -461,7 +461,7 @@ mod tests {
     test_versions! { roundtrip_vdaf_config }
 
     #[test]
-    fn roundtrip_vdaf_config_not_implemented_draft07() {
+    fn roundtrip_vdaf_config_not_implemented_draft09() {
         let vdaf_config = VdafConfig {
             dp_config: DpConfig::None,
             var: VdafTypeVar::NotImplemented {
@@ -472,8 +472,8 @@ mod tests {
 
         assert_eq!(
             VdafConfig::get_decoded_with_param(
-                &DapVersion::Draft07,
-                &vdaf_config.get_encoded_with_param(&DapVersion::Draft07)
+                &DapVersion::Latest,
+                &vdaf_config.get_encoded_with_param(&DapVersion::Latest)
             )
             .unwrap(),
             vdaf_config

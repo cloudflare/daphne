@@ -58,9 +58,9 @@ use std::{
 };
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
-const CTX_INPUT_SHARE_DRAFT07: &[u8] = b"dap-07 input share";
+const CTX_INPUT_SHARE_DRAFT_LATEST: &[u8] = b"dap-09 input share";
 const CTX_AGG_SHARE_DRAFT02: &[u8] = b"dap-02 aggregate share";
-const CTX_AGG_SHARE_DRAFT07: &[u8] = b"dap-07 aggregate share";
+const CTX_AGG_SHARE_DRAFT_LATEST: &[u8] = b"dap-09 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -69,7 +69,7 @@ const CTX_ROLE_HELPER: u8 = 3;
 pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO3: usize = 16;
 pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO2: usize = 32;
 
-// Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-07, Section 5.8. We do not
+// Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
 // implement the "continue" message type because we only support 1-round VDAFs.
 enum PingPongMessageType {
     Initialize = 0,
@@ -190,7 +190,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
+            DapVersion::Latest => CTX_INPUT_SHARE_DRAFT_LATEST,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -218,9 +218,9 @@ impl<'req> EarlyReportStateConsumed<'req> {
 
         // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
         // draft, the plaintext also encodes the report extensions.
-        let (input_share, draft07_extensions) = match task_config.version {
+        let (input_share, draft09_extensions) = match task_config.version {
             DapVersion::Draft02 => (encoded_input_share, None),
-            DapVersion::Draft07 => {
+            DapVersion::Latest => {
                 match PlaintextInputShare::get_decoded_with_param(
                     &task_config.version,
                     &encoded_input_share,
@@ -239,7 +239,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         // Handle report extensions.
         {
             let extensions = match task_config.version {
-                DapVersion::Draft07 => draft07_extensions.as_ref().unwrap(),
+                DapVersion::Latest => draft09_extensions.as_ref().unwrap(),
                 DapVersion::Draft02 => metadata.as_ref().draft02_extensions.as_ref().unwrap(),
             };
 
@@ -260,7 +260,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
                     }
 
                     // Reject reports with unrecognized extensions.
-                    (DapVersion::Draft07, ..) => {
+                    (DapVersion::Latest, ..) => {
                         return Ok(Self::Rejected {
                             metadata,
                             failure: TransitionFailure::InvalidMessage,
@@ -693,8 +693,8 @@ impl VdafConfig {
             return Err(fatal_error!(err = "unexpected number of HPKE configs"));
         }
 
-        let (draft02_extensions, mut draft07_plaintext_input_share) = match version {
-            DapVersion::Draft07 => (
+        let (draft02_extensions, mut draft09_plaintext_input_share) = match version {
+            DapVersion::Latest => (
                 None,
                 Some(PlaintextInputShare {
                     extensions,
@@ -711,7 +711,7 @@ impl VdafConfig {
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
-            if let Some(ref mut plaintext_input_share) = draft07_plaintext_input_share {
+            if let Some(ref mut plaintext_input_share) = draft09_plaintext_input_share {
                 plaintext_input_share.payload = input_share;
                 plaintext_input_share.get_encoded_with_param(&version)
             } else {
@@ -721,7 +721,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft07 => CTX_INPUT_SHARE_DRAFT07,
+            DapVersion::Latest => CTX_INPUT_SHARE_DRAFT_LATEST,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -878,9 +878,9 @@ impl VdafConfig {
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
-                    let (draft02_prep_share, draft07_payload) = match task_config.version {
+                    let (draft02_prep_share, draft09_payload) = match task_config.version {
                         DapVersion::Draft02 => (Some(prep_share), None),
-                        DapVersion::Draft07 => {
+                        DapVersion::Latest => {
                             let mut outbound = Vec::with_capacity(
                                 prep_share
                                     .encoded_len_with_param(&task_config.version)
@@ -888,7 +888,7 @@ impl VdafConfig {
                                     + 5,
                             );
                             // Add the ping-pong "initialize" message framing
-                            // (draft-irtf-cfrg-vdaf-07, Section 5.8).
+                            // (draft-irtf-cfrg-vdaf-08, Section 5.8).
                             outbound.push(PingPongMessageType::Initialize as u8);
                             encode_u32_items(&mut outbound, &task_config.version, &[prep_share]);
                             (None, Some(outbound))
@@ -907,7 +907,7 @@ impl VdafConfig {
                             public_share: public_share.into_owned(),
                             encrypted_input_share: helper_share,
                         },
-                        draft07_payload,
+                        draft09_payload,
                     });
                 }
 
@@ -1010,7 +1010,7 @@ impl VdafConfig {
                 agg_job_init_req,
                 metrics,
             )),
-            DapVersion::Draft07 => self.draft07_handle_agg_job_init_req(
+            DapVersion::Latest => self.draft09_handle_agg_job_init_req(
                 task_id,
                 task_config,
                 report_status,
@@ -1079,7 +1079,7 @@ impl VdafConfig {
         )
     }
 
-    fn draft07_handle_agg_job_init_req(
+    fn draft09_handle_agg_job_init_req(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -1106,7 +1106,7 @@ impl VdafConfig {
                         state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
-                        let Some(ref leader_inbound) = prep_init.draft07_payload else {
+                        let Some(ref leader_inbound) = prep_init.draft09_payload else {
                             return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
@@ -1115,7 +1115,7 @@ impl VdafConfig {
                         };
 
                         // Decode the ping-pong "initialize" message framing.
-                        // (draft-irtf-cfrg-vdaf-07, Section 5.8).
+                        // (draft-irtf-cfrg-vdaf-08, Section 5.8).
                         let leader_prep_share = decode_ping_pong_framed(
                             leader_inbound,
                             PingPongMessageType::Initialize,
@@ -1149,7 +1149,7 @@ impl VdafConfig {
                                 )?;
 
                                 let mut outbound = Vec::with_capacity(1 + prep_msg.len());
-                                // Add ping-pong "finish" message framing (draft-irtf-cfrg-vdaf-07,
+                                // Add ping-pong "finish" message framing (draft-irtf-cfrg-vdaf-08,
                                 // Section 5.8).
                                 outbound.push(PingPongMessageType::Finish as u8);
                                 encode_u32_bytes(&mut outbound, &prep_msg);
@@ -1207,8 +1207,8 @@ impl VdafConfig {
                     metrics,
                 )
                 .map_err(Into::into),
-            DapVersion::Draft07 => {
-                self.draft07_handle_agg_job_resp(task_id, task_config, state, agg_job_resp, metrics)
+            DapVersion::Latest => {
+                self.draft09_handle_agg_job_resp(task_id, task_config, state, agg_job_resp, metrics)
             }
         }
     }
@@ -1326,7 +1326,7 @@ impl VdafConfig {
         ))
     }
 
-    fn draft07_handle_agg_job_resp(
+    fn draft09_handle_agg_job_resp(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -1365,7 +1365,7 @@ impl VdafConfig {
 
             let prep_msg = match &helper.var {
                 TransitionVar::Continued(inbound) => {
-                    // Decode the ping-pong "finish" message frame (draft-irtf-cfrg-vdaf-07,
+                    // Decode the ping-pong "finish" message frame (draft-irtf-cfrg-vdaf-08,
                     // Section 5.8). Abort the aggregation job if not found.
                     let Ok(prep_msg) =
                         decode_ping_pong_framed(inbound, PingPongMessageType::Finish)
@@ -1714,7 +1714,7 @@ impl VdafConfig {
 
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
+            DapVersion::Latest => CTX_AGG_SHARE_DRAFT_LATEST,
         };
         let n: usize = agg_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -1778,7 +1778,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Draft07 => CTX_AGG_SHARE_DRAFT07,
+        DapVersion::Latest => CTX_AGG_SHARE_DRAFT_LATEST,
     };
     let n: usize = agg_share_text.len();
     let mut info = Vec::with_capacity(n + 2);
@@ -2202,7 +2202,7 @@ mod test {
                         public_share: report0.public_share,
                         encrypted_input_share: report0.encrypted_input_shares[1].clone(),
                     },
-                    draft07_payload: Some(b"malformed payload".to_vec()),
+                    draft09_payload: Some(b"malformed payload".to_vec()),
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -2210,7 +2210,7 @@ mod test {
                         public_share: report1.public_share,
                         encrypted_input_share: report1.encrypted_input_shares[1].clone(),
                     },
-                    draft07_payload: Some(b"malformed payload".to_vec()),
+                    draft09_payload: Some(b"malformed payload".to_vec()),
                 },
             ],
         };
@@ -2440,13 +2440,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn agg_job_init_req_skip_vdaf_prep_error_draft07() {
-        let t =
-            AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, DapVersion::Draft07);
+    async fn agg_job_init_req_skip_vdaf_prep_error_draft09() {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, DapVersion::Latest);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         reports.insert(
             1,
-            t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Draft07),
+            t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Latest),
         );
 
         let (leader_state, agg_job_init_req) =
@@ -2661,9 +2660,9 @@ mod test {
         let expect_ready = match version {
             // In draft02 we're meant to ignore extensions we don't recognize.
             DapVersion::Draft02 => true,
-            // In the latest versioin we're meant to reject reports containing unrecognized
+            // In the latest version we're meant to reject reports containing unrecognized
             // extensions.
-            DapVersion::Draft07 => false,
+            DapVersion::Latest => false,
         };
         assert_eq!(consumed_report.is_ready(), expect_ready);
     }

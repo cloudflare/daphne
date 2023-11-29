@@ -1136,7 +1136,7 @@ impl<'srv> DaphneWorker<'srv> {
                 let mut r = Cursor::new(payload.as_ref());
                 (TaskId::decode(&mut r).ok(), DapResource::Undefined)
             }
-            DapVersion::Draft07 => {
+            DapVersion::Latest => {
                 let task_id = ctx.param("task_id").and_then(TaskId::try_from_base64url);
                 let resource = match media_type {
                     DapMediaType::AggregationJobInitReq

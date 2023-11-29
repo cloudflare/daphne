@@ -105,11 +105,11 @@ id_struct!(TaskId, 32, "Task ID");
 impl TaskId {
     /// draft02 compatibility: Convert the task ID to the field that would be added to the DAP
     /// request for the given version. In draft02, the task ID is generally included in the HTTP
-    /// request payload; in draft07, the task ID is included in the HTTP request path.
+    /// request payload; in the latest draft, the task ID is included in the HTTP request path.
     pub fn for_request_payload(&self, version: &DapVersion) -> Option<TaskId> {
         match version {
             DapVersion::Draft02 => Some(*self),
-            DapVersion::Draft07 => None,
+            DapVersion::Latest => None,
         }
     }
 }
@@ -155,7 +155,7 @@ impl ParameterizedEncode<DapVersion> for Extension {
             Self::Taskprov { draft02_payload } => {
                 EXTENSION_TASKPROV.encode(bytes);
                 match (version, draft02_payload) {
-                    (DapVersion::Draft07, None) => encode_u16_item(bytes, *version, &()),
+                    (DapVersion::Latest, None) => encode_u16_item(bytes, *version, &()),
                     (DapVersion::Draft02, Some(payload)) => encode_u16_bytes(bytes, payload),
                     _ => unreachable!("unhandled version {version:?}"),
                 }
@@ -175,7 +175,7 @@ impl ParameterizedDecode<DapVersion> for Extension {
     ) -> Result<Self, CodecError> {
         let typ = u16::decode(bytes)?;
         match (version, typ) {
-            (DapVersion::Draft07, EXTENSION_TASKPROV) => {
+            (DapVersion::Latest, EXTENSION_TASKPROV) => {
                 decode_u16_item::<()>(*version, bytes)?;
                 Ok(Self::Taskprov {
                     draft02_payload: None,
@@ -208,7 +208,7 @@ impl ParameterizedEncode<DapVersion> for ReportMetadata {
         self.id.encode(bytes);
         self.time.encode(bytes);
         match (version, &self.draft02_extensions) {
-            (DapVersion::Draft07, None) => (),
+            (DapVersion::Latest, None) => (),
             (DapVersion::Draft02, Some(extensions)) => encode_u16_items(bytes, version, extensions),
             _ => unreachable!("extensions should be set in (and only in) draft02"),
         }
@@ -225,7 +225,7 @@ impl ParameterizedDecode<DapVersion> for ReportMetadata {
             time: Time::decode(bytes)?,
             draft02_extensions: match version {
                 DapVersion::Draft02 => Some(decode_u16_items(version, bytes)?),
-                DapVersion::Draft07 => None,
+                DapVersion::Latest => None,
             },
         };
 
@@ -256,7 +256,7 @@ impl ParameterizedEncode<DapVersion> for Report {
         encode_u32_bytes(bytes, &self.public_share);
         match version {
             DapVersion::Draft02 => encode_u32_items(bytes, &(), &self.encrypted_input_shares),
-            DapVersion::Draft07 => {
+            DapVersion::Latest => {
                 self.encrypted_input_shares[0].encode(bytes);
                 self.encrypted_input_shares[1].encode(bytes);
             }
@@ -282,7 +282,7 @@ impl ParameterizedDecode<DapVersion> for Report {
                 DapVersion::Draft02 => decode_u32_items(&(), bytes)?
                     .try_into()
                     .map_err(|_| CodecError::UnexpectedValue)?,
-                DapVersion::Draft07 => [
+                DapVersion::Latest => [
                     HpkeCiphertext::decode(bytes)?,
                     HpkeCiphertext::decode(bytes)?,
                 ],
@@ -446,15 +446,15 @@ impl TryFrom<Query> for BatchSelector {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrepareInit {
     pub report_share: ReportShare,
-    pub draft07_payload: Option<Vec<u8>>,
+    pub draft09_payload: Option<Vec<u8>>,
 }
 
 impl ParameterizedEncode<DapVersion> for PrepareInit {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.report_share.encode_with_param(version, bytes);
-        match (version, &self.draft07_payload) {
+        match (version, &self.draft09_payload) {
             (DapVersion::Draft02, None) => (),
-            (DapVersion::Draft07, Some(payload)) => {
+            (DapVersion::Latest, Some(payload)) => {
                 encode_u32_bytes(bytes, payload);
             }
             _ => unreachable!("unhandled version {version:?}"),
@@ -468,14 +468,14 @@ impl ParameterizedDecode<DapVersion> for PrepareInit {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let report_share = ReportShare::decode_with_param(version, bytes)?;
-        let draft07_payload = match version {
+        let draft09_payload = match version {
             DapVersion::Draft02 => None,
-            DapVersion::Draft07 => Some(decode_u32_bytes(bytes)?),
+            DapVersion::Latest => Some(decode_u32_bytes(bytes)?),
         };
 
         Ok(Self {
             report_share,
-            draft07_payload,
+            draft09_payload,
         })
     }
 }
@@ -504,7 +504,7 @@ impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
                     .encode(bytes);
                 encode_u16_bytes(bytes, &self.agg_param);
             }
-            DapVersion::Draft07 => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::Latest => encode_u32_bytes(bytes, &self.agg_param),
         };
         self.part_batch_sel.encode(bytes);
         encode_u32_items(bytes, version, &self.prep_inits);
@@ -522,7 +522,7 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
                 Some(Draft02AggregationJobId::decode(bytes)?),
                 decode_u16_bytes(bytes)?,
             ),
-            DapVersion::Draft07 => (None, None, decode_u32_bytes(bytes)?),
+            DapVersion::Latest => (None, None, decode_u32_bytes(bytes)?),
         };
 
         Ok(Self {
@@ -557,11 +557,8 @@ impl ParameterizedEncode<DapVersion> for AggregationJobContinueReq {
                     .expect("draft02: missing aggregation job ID")
                     .encode(bytes);
             }
-            DapVersion::Draft07 => {
-                self.round
-                    .as_ref()
-                    .expect("draft07: missing round")
-                    .encode(bytes);
+            DapVersion::Latest => {
+                self.round.as_ref().expect("missing round").encode(bytes);
             }
         };
         encode_u32_items(bytes, &(), &self.transitions);
@@ -579,7 +576,7 @@ impl ParameterizedDecode<DapVersion> for AggregationJobContinueReq {
                 Some(Draft02AggregationJobId::decode(bytes)?),
                 None,
             ),
-            DapVersion::Draft07 => (None, None, Some(u16::decode(bytes)?)),
+            DapVersion::Latest => (None, None, Some(u16::decode(bytes)?)),
         };
         Ok(Self {
             draft02_task_id,
@@ -592,8 +589,6 @@ impl ParameterizedDecode<DapVersion> for AggregationJobContinueReq {
 
 /// Transition message. This conveyes a message sent from one Aggregator to another during the
 /// preparation phase of VDAF evaluation.
-//
-// TODO Consider renaming this to `PrepareStep` to align with draft07.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct Transition {
@@ -867,12 +862,12 @@ impl ParameterizedEncode<DapVersion> for CollectionReq {
                     .expect("draft02: missing task ID")
                     .encode(bytes);
             }
-            DapVersion::Draft07 => {}
+            DapVersion::Latest => {}
         }
         self.query.encode_with_param(version, bytes);
         match version {
             DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
-            DapVersion::Draft07 => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::Latest => encode_u32_bytes(bytes, &self.agg_param),
         };
     }
 }
@@ -884,14 +879,14 @@ impl ParameterizedDecode<DapVersion> for CollectionReq {
     ) -> Result<Self, CodecError> {
         let draft02_task_id = match version {
             DapVersion::Draft02 => Some(TaskId::decode(bytes)?),
-            DapVersion::Draft07 => None,
+            DapVersion::Latest => None,
         };
         Ok(Self {
             draft02_task_id,
             query: Query::decode_with_param(version, bytes)?,
             agg_param: match version {
                 DapVersion::Draft02 => decode_u16_bytes(bytes)?,
-                DapVersion::Draft07 => decode_u32_bytes(bytes)?,
+                DapVersion::Latest => decode_u32_bytes(bytes)?,
             },
         })
     }
@@ -905,7 +900,7 @@ impl ParameterizedDecode<DapVersion> for CollectionReq {
 pub struct Collection {
     pub part_batch_sel: PartialBatchSelector,
     pub report_count: u64,
-    pub draft07_interval: Option<Interval>, // Not set in draft02
+    pub draft09_interval: Option<Interval>, // Not set in draft02
     pub encrypted_agg_shares: [HpkeCiphertext; 2],
 }
 
@@ -913,9 +908,9 @@ impl ParameterizedEncode<DapVersion> for Collection {
     fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
         self.part_batch_sel.encode(bytes);
         self.report_count.encode(bytes);
-        match (version, &self.draft07_interval) {
+        match (version, &self.draft09_interval) {
             (DapVersion::Draft02, None) => encode_u32_items(bytes, &(), &self.encrypted_agg_shares),
-            (DapVersion::Draft07, Some(interval)) => {
+            (DapVersion::Latest, Some(interval)) => {
                 interval.encode(bytes);
                 self.encrypted_agg_shares[0].encode(bytes);
                 self.encrypted_agg_shares[1].encode(bytes);
@@ -932,14 +927,14 @@ impl ParameterizedDecode<DapVersion> for Collection {
     ) -> Result<Self, CodecError> {
         let part_batch_sel = PartialBatchSelector::decode(bytes)?;
         let report_count = u64::decode(bytes)?;
-        let (draft07_interval, encrypted_agg_shares) = match version {
+        let (draft09_interval, encrypted_agg_shares) = match version {
             DapVersion::Draft02 => (
                 None,
                 decode_u32_items(&(), bytes)?
                     .try_into()
                     .map_err(|_| CodecError::UnexpectedValue)?,
             ),
-            DapVersion::Draft07 => (
+            DapVersion::Latest => (
                 Some(Interval::decode(bytes)?),
                 [
                     HpkeCiphertext::decode(bytes)?,
@@ -951,7 +946,7 @@ impl ParameterizedDecode<DapVersion> for Collection {
         Ok(Self {
             part_batch_sel,
             report_count,
-            draft07_interval,
+            draft09_interval,
             encrypted_agg_shares,
         })
     }
@@ -980,7 +975,7 @@ impl ParameterizedEncode<DapVersion> for AggregateShareReq {
                 self.batch_sel.encode_with_param(version, bytes);
                 encode_u16_bytes(bytes, &self.agg_param);
             }
-            DapVersion::Draft07 => {
+            DapVersion::Latest => {
                 self.batch_sel.encode_with_param(version, bytes);
                 encode_u32_bytes(bytes, &self.agg_param);
             }
@@ -1001,7 +996,7 @@ impl ParameterizedDecode<DapVersion> for AggregateShareReq {
                 BatchSelector::decode_with_param(version, bytes)?,
                 decode_u16_bytes(bytes)?,
             ),
-            DapVersion::Draft07 => (
+            DapVersion::Latest => (
                 None,
                 BatchSelector::decode_with_param(version, bytes)?,
                 decode_u32_bytes(bytes)?,
@@ -1290,7 +1285,7 @@ fn encode_u16_item_for_version<E: ParameterizedEncode<DapVersion>>(
     item: &E,
 ) {
     match version {
-        DapVersion::Draft07 => encode_u16_item(bytes, version, item),
+        DapVersion::Latest => encode_u16_item(bytes, version, item),
         DapVersion::Draft02 => item.encode_with_param(&version, bytes),
     }
 }
@@ -1300,7 +1295,7 @@ fn decode_u16_item_for_version<D: ParameterizedDecode<DapVersion>>(
     bytes: &mut Cursor<&[u8]>,
 ) -> Result<D, CodecError> {
     match version {
-        DapVersion::Draft07 => decode_u16_item(version, bytes),
+        DapVersion::Latest => decode_u16_item(version, bytes),
         DapVersion::Draft02 => D::decode_with_param(&version, bytes),
     }
 }
@@ -1330,7 +1325,7 @@ mod test {
                 time: 1_637_364_244,
                 draft02_extensions: match version {
                     DapVersion::Draft02 => Some(Vec::new()),
-                    DapVersion::Draft07 => None,
+                    DapVersion::Latest => None,
                 },
             },
             public_share: b"public share".to_vec(),
@@ -1400,7 +1395,7 @@ mod test {
                                 payload: b"ciphertext".to_vec(),
                             },
                         },
-                        draft07_payload: None,
+                        draft09_payload: None,
                     },
                     PrepareInit {
                         report_share: ReportShare {
@@ -1416,7 +1411,7 @@ mod test {
                                 payload: b"ciphertext".to_vec(),
                             },
                         },
-                        draft07_payload: None,
+                        draft09_payload: None,
                     },
                 ],
             },
@@ -1447,7 +1442,7 @@ mod test {
                             payload: b"ciphertext".to_vec(),
                         },
                     },
-                    draft07_payload: None,
+                    draft09_payload: None,
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -1463,7 +1458,7 @@ mod test {
                             payload: b"ciphertext".to_vec(),
                         },
                     },
-                    draft07_payload: None,
+                    draft09_payload: None,
                 },
             ],
         };
@@ -1497,7 +1492,7 @@ mod test {
                             payload: b"ciphertext".to_vec(),
                         },
                     },
-                    draft07_payload: Some(b"prep share".to_vec()),
+                    draft09_payload: Some(b"prep share".to_vec()),
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -1513,14 +1508,14 @@ mod test {
                             payload: b"ciphertext".to_vec(),
                         },
                     },
-                    draft07_payload: Some(b"prep share".to_vec()),
+                    draft09_payload: Some(b"prep share".to_vec()),
                 },
             ],
         };
 
         let got = AggregationJobInitReq::get_decoded_with_param(
-            &DapVersion::Draft07,
-            &want.get_encoded_with_param(&DapVersion::Draft07),
+            &DapVersion::Latest,
+            &want.get_encoded_with_param(&DapVersion::Latest),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1584,8 +1579,8 @@ mod test {
         };
 
         let got = AggregationJobContinueReq::get_decoded_with_param(
-            &DapVersion::Draft07,
-            &want.get_encoded_with_param(&DapVersion::Draft07),
+            &DapVersion::Latest,
+            &want.get_encoded_with_param(&DapVersion::Latest),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1657,8 +1652,8 @@ mod test {
             checksum: [0; 32],
         };
         let got = AggregateShareReq::get_decoded_with_param(
-            &DapVersion::Draft07,
-            &want.get_encoded_with_param(&DapVersion::Draft07),
+            &DapVersion::Latest,
+            &want.get_encoded_with_param(&DapVersion::Latest),
         )
         .unwrap();
         assert_eq!(got, want);
