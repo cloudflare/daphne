@@ -501,7 +501,7 @@ impl AggregationJobTest {
 //
 // and
 //
-//     something_draft07
+//     something_draft09
 //
 // that called something(version) with the appropriate version.
 //
@@ -524,7 +524,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::test_version! { $fname, Draft02 }
-            $crate::test_version! { $fname, Draft07 }
+            $crate::test_version! { $fname, Latest }
         )*
     };
 }
@@ -546,7 +546,7 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::async_test_version! { $fname, Draft02 }
-            $crate::async_test_version! { $fname, Draft07 }
+            $crate::async_test_version! { $fname, Latest }
         )*
     };
 }
@@ -555,14 +555,14 @@ macro_rules! async_test_versions {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub(crate) enum MetaAggregationJobIdOwned {
     Draft02(Draft02AggregationJobId),
-    Draft07(AggregationJobId),
+    Latest(AggregationJobId),
 }
 
 impl From<&MetaAggregationJobId> for MetaAggregationJobIdOwned {
     fn from(agg_job_id: &MetaAggregationJobId) -> Self {
         match agg_job_id {
             MetaAggregationJobId::Draft02(agg_job_id) => Self::Draft02(*agg_job_id),
-            MetaAggregationJobId::Draft07(agg_job_id) => Self::Draft07(*agg_job_id),
+            MetaAggregationJobId::Latest(agg_job_id) => Self::Latest(*agg_job_id),
         }
     }
 }

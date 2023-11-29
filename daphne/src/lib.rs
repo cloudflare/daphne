@@ -24,9 +24,13 @@
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
 //! [VDAFs](https://github.com/cfrg/draft-irtf-cfrg-vdaf).
 //!
-//! Daphne implements draft-ietf-ppm-dap-02 and draft-ietf-ppm-dap-07.
-//!
-//! **WARNING:** draft07 is a work-in-progress. We are not yet compatible.
+//! Daphne implements:
+//! * draft-ietf-ppm-dap-02
+//!    * VDAF: draft-irtf-cfrg-vdaf-03
+//!    * Taskprov extension: draft-wang-ppm-dap-taskprov-02
+//! * draft-ietf-ppm-dap-09
+//!    * VDAF: draft-irtf-cfrg-vdaf-08
+//!    * Taskprov extension: draft-wang-ppm-dap-taskprov-06
 //!
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
@@ -102,9 +106,9 @@ pub enum DapVersion {
     #[serde(rename = "v02")]
     Draft02,
 
-    #[serde(rename = "v07")]
+    #[serde(rename = "v09")]
     #[default]
-    Draft07,
+    Latest,
 }
 
 impl FromStr for DapVersion {
@@ -112,7 +116,7 @@ impl FromStr for DapVersion {
     fn from_str(version: &str) -> Result<Self, Self::Err> {
         match version {
             "v02" => Ok(DapVersion::Draft02),
-            "v07" => Ok(DapVersion::Draft07),
+            "v09" => Ok(DapVersion::Latest),
             _ => Err(DapAbort::version_unknown()),
         }
     }
@@ -122,7 +126,7 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft02 => "v02",
-            DapVersion::Draft07 => "v07",
+            DapVersion::Latest => "v09",
         }
     }
 }
@@ -492,7 +496,7 @@ impl DapTaskParameters {
         .unwrap();
 
         let (taskprov_advertisement, taskprov_report_extension_payload) = match self.version {
-            DapVersion::Draft07 => (Some(encode_base64url(&encoded_taskprov_config)), Vec::new()),
+            DapVersion::Latest => (Some(encode_base64url(&encoded_taskprov_config)), Vec::new()),
             // draft02 compatibility: The taskprov config is advertised in an HTTP header in
             // the latest draft. In draft02, it is carried by a report extension.
             DapVersion::Draft02 => (None, encoded_taskprov_config),
@@ -1120,7 +1124,7 @@ pub struct DapRequest<S> {
 impl<S> Default for DapRequest<S> {
     fn default() -> Self {
         Self {
-            version: DapVersion::Draft07,
+            version: DapVersion::Latest,
             media_type: Default::default(),
             task_id: Default::default(),
             resource: Default::default(),
@@ -1208,13 +1212,13 @@ pub struct DapLeaderProcessTelemetry {
 }
 
 /// draft02 compatibility: A logical aggregation job ID. In the latest draft, this is a 32-byte
-/// string included in the HTTP request payload; in draft07, this is a 16-byte string included in
-/// the HTTP request path. This type unifies these into one type so that any protocol logic that
-/// is agnostic to these details can use the same object.
+/// string included in the HTTP request payload; in the latest draft, this is a 16-byte string
+/// included in the HTTP request path. This type unifies these into one type so that any protocol
+/// logic that is agnostic to these details can use the same object.
 #[derive(Clone, Debug)]
 pub enum MetaAggregationJobId {
     Draft02(Draft02AggregationJobId),
-    Draft07(AggregationJobId),
+    Latest(AggregationJobId),
 }
 
 impl MetaAggregationJobId {
@@ -1223,7 +1227,7 @@ impl MetaAggregationJobId {
         let mut rng = thread_rng();
         match version {
             DapVersion::Draft02 => Self::Draft02(Draft02AggregationJobId(rng.gen())),
-            DapVersion::Draft07 => Self::Draft07(AggregationJobId(rng.gen())),
+            DapVersion::Latest => Self::Latest(AggregationJobId(rng.gen())),
         }
     }
 
@@ -1232,7 +1236,7 @@ impl MetaAggregationJobId {
     pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
         match self {
             Self::Draft02(agg_job_id) => Some(*agg_job_id),
-            Self::Draft07(..) => None,
+            Self::Latest(..) => None,
         }
     }
 
@@ -1242,7 +1246,7 @@ impl MetaAggregationJobId {
         match self {
             // In draft02, the aggregation job ID is not determined until the payload is parsed.
             Self::Draft02(..) => DapResource::Undefined,
-            Self::Draft07(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
+            Self::Latest(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
         }
     }
 
@@ -1250,7 +1254,7 @@ impl MetaAggregationJobId {
     pub fn to_hex(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_hex(),
-            Self::Draft07(agg_job_id) => agg_job_id.to_hex(),
+            Self::Latest(agg_job_id) => agg_job_id.to_hex(),
         }
     }
 
@@ -1258,7 +1262,7 @@ impl MetaAggregationJobId {
     pub fn to_base64url(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_base64url(),
-            Self::Draft07(agg_job_id) => agg_job_id.to_base64url(),
+            Self::Latest(agg_job_id) => agg_job_id.to_base64url(),
         }
     }
 }

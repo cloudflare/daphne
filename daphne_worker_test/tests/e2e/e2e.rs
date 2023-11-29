@@ -73,7 +73,7 @@ async fn leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v07/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v09/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -114,7 +114,7 @@ async fn helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let expected = if want_prefix {
         format!("/{}/", version.as_ref())
     } else {
-        String::from("/v07/") // Must match DAP_DEFAULT_VERSION
+        String::from("/v09/") // Must match DAP_DEFAULT_VERSION
     };
     assert_eq!(res.endpoint.unwrap(), expected);
 }
@@ -301,7 +301,7 @@ async fn leader_upload(version: DapVersion) {
     );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::Draft07 => client.put(url.as_str()),
+        DapVersion::Latest => client.put(url.as_str()),
     };
     let resp = builder
         .body(
@@ -312,7 +312,7 @@ async fn leader_upload(version: DapVersion) {
                     time: t.now,
                     draft02_extensions: match version {
                         DapVersion::Draft02 => Some(Vec::default()),
-                        DapVersion::Draft07 => None,
+                        DapVersion::Latest => None,
                     },
                 },
                 public_share: b"public share".to_vec(),
@@ -665,7 +665,7 @@ async fn leader_collect_ok(version: DapVersion) {
 
     if version != DapVersion::Draft02 {
         // Check that the time interval for the reports is correct.
-        let interval = collection.draft07_interval.as_ref().unwrap();
+        let interval = collection.draft09_interval.as_ref().unwrap();
         let low = t.task_config.quantized_time_lower_bound(time_min);
         let high = t.task_config.quantized_time_upper_bound(time_max);
         assert!(low < high);
@@ -1079,9 +1079,8 @@ async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
 async fn fixed_size(version: DapVersion, use_current: bool) {
     if version == DapVersion::Draft02 && use_current {
-        // draft02 compatibility: The "current batch" isn't a feature in draft02, but we allow it
-        // and immediately return for testing flexibility, as this allows us to not have a test
-        // coverage regression if we add a draft07 in the future.
+        // draft02 compatibility: The "current batch" isn't a feature in draft02, but is in the
+        // latest version.
         return;
     }
     let t = TestRunner::fixed_size(version).await;
@@ -1313,7 +1312,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov {
             draft02_payload: match version {
-                DapVersion::Draft07 => None,
+                DapVersion::Latest => None,
                 DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
             },
         }];

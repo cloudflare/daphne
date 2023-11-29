@@ -728,7 +728,7 @@ mod test {
                 time: rng.gen(),
                 draft02_extensions: match version {
                     DapVersion::Draft02 => Some(Vec::new()),
-                    DapVersion::Draft07 => None,
+                    DapVersion::Latest => None,
                 },
             },
             public_share: Vec::default(),
