@@ -218,15 +218,19 @@ impl DapQueryConfig {
 }
 
 impl VdafConfig {
-    fn try_from_taskprov(task_id: &TaskId, var: VdafTypeVar) -> Result<Self, DapAbort> {
-        match var {
-            VdafTypeVar::Prio2 { dimension } => Ok(VdafConfig::Prio2 {
+    fn try_from_taskprov(
+        task_id: &TaskId,
+        version: DapVersion,
+        var: VdafTypeVar,
+    ) -> Result<Self, DapAbort> {
+        match (version, var) {
+            (.., VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
                 dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
                     detail: "dimension is larger than the system's word size".to_string(),
                     task_id: *task_id,
                 })?,
             }),
-            VdafTypeVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
+            (.., VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
                 task_id: *task_id,
             }),
@@ -264,7 +268,7 @@ impl DapTaskConfig {
             });
         }
 
-        let vdaf = VdafConfig::try_from_taskprov(task_id, task_config.vdaf_config.var)?;
+        let vdaf = VdafConfig::try_from_taskprov(task_id, version, task_config.vdaf_config.var)?;
         let vdaf_verify_key =
             compute_vdaf_verify_key(version, vdaf_verify_key_init, task_id, &vdaf);
         Ok(DapTaskConfig {
