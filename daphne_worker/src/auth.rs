@@ -5,7 +5,25 @@
 
 use daphne::auth::BearerToken;
 use serde::{Deserialize, Serialize};
-use worker::TlsClientAuth;
+
+pub(crate) struct TlsClientAuth {
+    pub verified: String,
+    pub issuer: String,
+    pub subject: String,
+}
+
+impl From<worker::TlsClientAuth> for TlsClientAuth {
+    fn from(value: worker::TlsClientAuth) -> Self {
+        let verified: String = value.cert_verified();
+        let issuer: String = value.cert_issuer_dn_rfc2253();
+        let subject: String = value.cert_subject_dn_rfc2253();
+        Self {
+            verified,
+            issuer,
+            subject,
+        }
+    }
+}
 
 /// HTTP client authorization for Daphne-Worker.
 ///

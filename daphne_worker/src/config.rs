@@ -6,7 +6,7 @@
 //! Daphne-Worker configuration.
 
 use crate::{
-    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod},
+    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod, TlsClientAuth},
     durable::{
         durable_name_report_store, durable_name_task,
         leader_batch_queue::{LeaderBatchQueueResult, DURABLE_LEADER_BATCH_QUEUE_CURRENT},
@@ -1095,7 +1095,8 @@ impl<'srv> DaphneWorker<'srv> {
             cf_tls_client_auth: req
                 .cf()
                 .tls_client_auth()
-                .filter(|auth| auth.cert_presented() == "1"),
+                .filter(|auth| auth.cert_presented() == "1")
+                .map(TlsClientAuth::from),
         });
 
         let content_type = req

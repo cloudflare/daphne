@@ -110,9 +110,11 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
             };
 
             // Check that that the certificate is valid. This is indicated bylLiteral "SUCCESS".
-            let cert_verified = cf_tls_client_auth.cert_verified();
-            if cert_verified != "SUCCESS" {
-                return Ok(Some(format!("Invalid TLS certificate ({cert_verified}).")));
+            if cf_tls_client_auth.verified != "SUCCESS" {
+                return Ok(Some(format!(
+                    "Invalid TLS certificate ({}).",
+                    cf_tls_client_auth.verified
+                )));
             }
 
             // Resolve the trusted certificate issuers and subjects for this request.
@@ -135,13 +137,13 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
                 return Ok(Some(unauthorized_reason));
             };
 
-            let cert_issuer = cf_tls_client_auth.cert_issuer_dn_rfc2253();
-            let cert_subject = cf_tls_client_auth.cert_subject_dn_rfc2253();
             if !trusted_certs.iter().any(|trusted_cert| {
-                trusted_cert.issuer == cert_issuer && trusted_cert.subject == cert_subject
+                trusted_cert.issuer == cf_tls_client_auth.issuer
+                    && trusted_cert.subject == cf_tls_client_auth.subject
             }) {
                 return Ok(Some(format!(
-                    r#"Unexpected issuer "{cert_issuer}" and subject "{cert_subject}"."#
+                    r#"Unexpected issuer "{}" and subject "{}"."#,
+                    cf_tls_client_auth.issuer, cf_tls_client_auth.subject,
                 )));
             }
             authorized = true;
