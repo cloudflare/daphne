@@ -78,6 +78,9 @@ const MAX_CHUNK_SIZE: usize = 128_000;
 /// Key used to store metadata under.
 const METADATA_KEY: &str = "meta";
 
+/// Key used to store where this share has been collected
+const COLLECTED_KEY: &str = "collected";
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum VdafKind {
@@ -168,7 +171,7 @@ impl AggregateStore {
             return Ok(DapAggregateShare::default());
         }
 
-        let meta_key = JsValue::from_str("meta");
+        let meta_key = JsValue::from_str(METADATA_KEY);
         let meta =
             serde_wasm_bindgen::from_value::<DapAggregateShareMetadata>(values.get(&meta_key))
                 .unwrap_or_else(|e| {
@@ -266,6 +269,13 @@ fn shard_bytes_to_object(
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub enum AggregateStoreMergeResp {
+    Ok,
+    ReplaysDetected(HashSet<ReportId>),
+    AlreadyCollected,
+}
+
 #[durable_object]
 impl DurableObject for AggregateStore {
     fn new(state: State, env: Env) -> Self {
@@ -288,6 +298,16 @@ impl DurableObject for AggregateStore {
 }
 
 impl AggregateStore {
+    async fn is_collected(&mut self) -> Result<bool> {
+        Ok(if let Some(collected) = self.collected {
+            collected
+        } else {
+            let collected = state_get_or_default(&self.state, COLLECTED_KEY).await?;
+            self.collected = Some(collected);
+            collected
+        })
+    }
+
     async fn handle(&mut self, req: Request) -> Result<Response> {
         let mut req = match self
             .schedule_for_garbage_collection(req, BINDING_DAP_AGGREGATE_STORE)
@@ -315,15 +335,22 @@ impl AggregateStore {
 
                 let chunks_map = js_sys::Object::default();
 
+                if self.is_collected().await? {
+                    return Response::from_json(&AggregateStoreMergeResp::AlreadyCollected);
+                }
+
                 {
                     // check for replays
                     let mut merged_report_ids = self.load_aggregated_report_ids().await?;
                     let repeat_ids = contained_reports
                         .iter()
                         .filter(|id| merged_report_ids.contains(id))
-                        .collect::<Vec<_>>();
+                        .copied()
+                        .collect::<HashSet<_>>();
                     if !repeat_ids.is_empty() {
-                        return Response::from_json(&repeat_ids);
+                        return Response::from_json(&AggregateStoreMergeResp::ReplaysDetected(
+                            repeat_ids,
+                        ));
                     }
                     merged_report_ids.extend(contained_reports);
                     let mut as_bytes =
@@ -353,7 +380,7 @@ impl AggregateStore {
 
                 self.state.storage().put_multiple_raw(chunks_map).await?;
 
-                Response::from_json::<[ReportId; 0]>(&[])
+                Response::from_json(&AggregateStoreMergeResp::Ok)
             }
 
             // Get the current aggregate share.
@@ -370,7 +397,7 @@ impl AggregateStore {
             // Non-idempotent (do not retry)
             // Output: `()`
             (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
-                self.state.storage().put("collected", true).await?;
+                self.state.storage().put(COLLECTED_KEY, true).await?;
                 self.collected = Some(true);
                 Response::from_json(&())
             }
@@ -380,14 +407,7 @@ impl AggregateStore {
             // Idempotent
             // Output: `bool`
             (DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, Method::Get) => {
-                let collected = if let Some(collected) = self.collected {
-                    collected
-                } else {
-                    let collected = state_get_or_default(&self.state, "collected").await?;
-                    self.collected = Some(collected);
-                    collected
-                };
-                Response::from_json(&collected)
+                Response::from_json(&self.is_collected().await?)
             }
 
             _ => Err(int_err(format!(

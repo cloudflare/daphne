@@ -16,7 +16,10 @@ use crate::{
         TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
-    roles::{DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer},
+    roles::{
+        aggregator::MergeAggShareError, DapAggregator, DapAuthorizedSender, DapHelper, DapLeader,
+        DapReportInitializer,
+    },
     vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationJobUncommitted, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
@@ -1068,7 +1071,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         task_id: &TaskId,
         _task_config: &DapTaskConfig,
         agg_agg_span: DapAggregateSpan<DapAggregateShare>,
-    ) -> DapAggregateSpan<Result<HashSet<ReportId>, DapError>> {
+    ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
         let mut report_store_guard = self
             .report_store
             .lock()
@@ -1079,7 +1082,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
 
         agg_agg_span
             .into_iter()
-            .map(|(bucket, (agg_share, report_metadatas))| {
+            .map(|(bucket, (agg_share_delta, report_metadatas))| {
                 let replayed = report_metadatas
                     .iter()
                     .map(|(id, _)| *id)
@@ -1091,14 +1094,17 @@ impl DapAggregator<BearerToken> for MockAggregator {
                         .processed
                         .extend(report_metadatas.iter().map(|(id, _)| *id));
                     // Add to aggregate share.
-                    agg_store
-                        .entry(bucket.clone())
-                        .or_default()
-                        .agg_share
-                        .merge(agg_share.clone())
-                        .map(|()| HashSet::new())
+                    let agg_share = agg_store.entry(bucket.clone()).or_default();
+                    if agg_share.collected {
+                        Err(MergeAggShareError::AlreadyCollected)
+                    } else {
+                        agg_share
+                            .agg_share
+                            .merge(agg_share_delta.clone())
+                            .map_err(MergeAggShareError::Other)
+                    }
                 } else {
-                    Ok(replayed)
+                    Err(MergeAggShareError::ReplaysDetected(replayed))
                 };
                 (bucket, (result, report_metadatas))
             })
