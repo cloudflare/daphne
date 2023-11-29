@@ -1752,7 +1752,11 @@ mod test {
 
     async_test_versions! { e2e_fixed_size }
 
-    async fn e2e_taskprov(version: DapVersion) {
+    async fn e2e_taskprov(
+        version: DapVersion,
+        vdaf_config: VdafConfig,
+        test_measurement: DapMeasurement,
+    ) {
         let t = Test::new(version);
 
         let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
@@ -1760,6 +1764,7 @@ mod test {
                 version,
                 min_batch_size: 1,
                 query: DapQueryConfig::FixedSize { max_batch_size: 2 },
+                vdaf: vdaf_config,
                 ..Default::default()
             }
             .to_config_with_taskprov(
@@ -1792,7 +1797,7 @@ mod test {
                     &hpke_config_list,
                     t.now,
                     &task_id,
-                    DapMeasurement::U32Vec(vec![1; 10]),
+                    test_measurement.clone(),
                     vec![Extension::Taskprov {
                         draft02_payload: match version {
                             DapVersion::DraftLatest => None,
@@ -1850,7 +1855,31 @@ mod test {
         });
     }
 
-    async_test_versions! { e2e_taskprov }
+    async fn e2e_taskprov_prio2(version: DapVersion) {
+        e2e_taskprov(
+            version,
+            VdafConfig::Prio2 { dimension: 10 },
+            DapMeasurement::U32Vec(vec![1; 10]),
+        )
+        .await;
+    }
+
+    async_test_versions! { e2e_taskprov_prio2 }
+
+    #[tokio::test]
+    async fn e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128_draft09() {
+        e2e_taskprov(
+            DapVersion::DraftLatest,
+            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits: 1,
+                length: 10,
+                chunk_length: 2,
+                num_proofs: 4,
+            }),
+            DapMeasurement::U64Vec(vec![1; 10]),
+        )
+        .await;
+    }
 
     fn early_metadata_checks(version: DapVersion) {
         let t = Test::new(version);

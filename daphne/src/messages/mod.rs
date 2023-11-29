@@ -1288,31 +1288,6 @@ fn decode_u16_prefixed<O>(
     Ok(decoded)
 }
 
-fn encode_u16_item_for_version<E: ParameterizedEncode<DapVersion>>(
-    bytes: &mut Vec<u8>,
-    version: DapVersion,
-    item: &E,
-) {
-    match version {
-        DapVersion::DraftLatest => encode_u16_prefixed(version, bytes, |version, bytes| {
-            item.encode_with_param(&version, bytes);
-        }),
-        DapVersion::Draft02 => item.encode_with_param(&version, bytes),
-    }
-}
-
-fn decode_u16_item_for_version<D: ParameterizedDecode<DapVersion>>(
-    version: DapVersion,
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<D, CodecError> {
-    match version {
-        DapVersion::DraftLatest => decode_u16_prefixed(version, bytes, |version, inner| {
-            D::decode_with_param(&version, inner)
-        }),
-        DapVersion::Draft02 => D::decode_with_param(&version, bytes),
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
