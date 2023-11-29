@@ -33,7 +33,7 @@ use crate::{
     AggregationJobReportState, DapAggregateResult, DapAggregateShare, DapAggregateSpan,
     DapAggregationJobState, DapAggregationJobUncommitted, DapError,
     DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition, DapMeasurement,
-    DapOutputShare, DapTaskConfig, DapVersion, MetaAggregationJobId, VdafConfig,
+    DapOutputShare, DapTaskConfig, DapVersion, MetaAggregationJobId, Prio3Config, VdafConfig,
 };
 #[cfg(any(test, feature = "test-utils"))]
 use prio::field::FieldElement;
@@ -65,9 +65,6 @@ const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
 const CTX_ROLE_HELPER: u8 = 3;
-
-pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO3: usize = 16;
-pub(crate) const VDAF_VERIFY_KEY_SIZE_PRIO2: usize = 32;
 
 // Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
 // implement the "continue" message type because we only support 1-round VDAFs.
@@ -115,15 +112,21 @@ pub(crate) enum VdafError {
     derive(deepsize::DeepSizeOf, PartialEq, Debug)
 )]
 pub enum VdafVerifyKey {
-    Prio3(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO3]),
-    Prio2(#[serde(with = "hex")] [u8; VDAF_VERIFY_KEY_SIZE_PRIO2]),
+    /// Prio3 with the standard XOF.
+    Prio3(#[serde(with = "hex")] [u8; 16]),
+
+    /// Prio3 with XofHmacSha256Aes128.
+    Prio3HmacSha256Aes128(#[serde(with = "hex")] [u8; 32]),
+
+    /// Prio2.
+    Prio2(#[serde(with = "hex")] [u8; 32]),
 }
 
 impl KeyType for VdafVerifyKey {
     fn len(&self) -> usize {
         match self {
-            Self::Prio2(bytes) => bytes.len(),
             Self::Prio3(bytes) => bytes.len(),
+            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => bytes.len(),
         }
     }
 }
@@ -131,8 +134,8 @@ impl KeyType for VdafVerifyKey {
 impl AsRef<[u8]> for VdafVerifyKey {
     fn as_ref(&self) -> &[u8] {
         match self {
-            Self::Prio3(ref bytes) => &bytes[..],
-            Self::Prio2(ref bytes) => &bytes[..],
+            Self::Prio3(bytes) => &bytes[..],
+            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => &bytes[..],
         }
     }
 }
@@ -140,8 +143,8 @@ impl AsRef<[u8]> for VdafVerifyKey {
 impl AsMut<[u8]> for VdafVerifyKey {
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
-            Self::Prio3(ref mut bytes) => &mut bytes[..],
-            Self::Prio2(ref mut bytes) => &mut bytes[..],
+            Self::Prio3(bytes) => &mut bytes[..],
+            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => &mut bytes[..],
         }
     }
 }
@@ -384,28 +387,23 @@ impl<'req> EarlyReportStateInitialized<'req> {
         };
 
         let agg_id = usize::from(!is_leader);
-        let res = match (vdaf_config, vdaf_verify_key) {
-            (VdafConfig::Prio3(ref prio3_config), VdafVerifyKey::Prio3(ref verify_key)) => {
-                prio3_prep_init(
-                    prio3_config,
-                    verify_key,
-                    agg_id,
-                    &metadata.as_ref().id.0,
-                    public_share.as_ref(),
-                    input_share.as_ref(),
-                )
-            }
-            (VdafConfig::Prio2 { dimension }, VdafVerifyKey::Prio2(ref verify_key)) => {
-                prio2_prep_init(
-                    *dimension,
-                    verify_key,
-                    agg_id,
-                    &metadata.as_ref().id.0,
-                    public_share.as_ref(),
-                    input_share.as_ref(),
-                )
-            }
-            _ => return Err(fatal_error!(err = "VDAF verify key does not match config")),
+        let res = match vdaf_config {
+            VdafConfig::Prio3(ref prio3_config) => prio3_prep_init(
+                prio3_config,
+                vdaf_verify_key,
+                agg_id,
+                &metadata.as_ref().id.0,
+                public_share.as_ref(),
+                input_share.as_ref(),
+            ),
+            VdafConfig::Prio2 { dimension } => prio2_prep_init(
+                *dimension,
+                vdaf_verify_key,
+                agg_id,
+                &metadata.as_ref().id.0,
+                public_share.as_ref(),
+                input_share.as_ref(),
+            ),
         };
 
         let early_report_state_initialized = match res {
@@ -462,6 +460,7 @@ pub(crate) enum ReportProcessedStatus {
 pub enum VdafPrepState {
     Prio2(Prio2PrepareState),
     Prio3Field64(Prio3PrepareState<Field64, 16>),
+    Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
 }
 
@@ -475,6 +474,7 @@ impl deepsize::DeepSizeOf for VdafPrepState {
         match self {
             VdafPrepState::Prio2(_)
             | VdafPrepState::Prio3Field64(_)
+            | VdafPrepState::Prio3Field64HmacSha256Aes128(_)
             | VdafPrepState::Prio3Field128(_) => 0,
         }
     }
@@ -484,6 +484,7 @@ impl Encode for VdafPrepState {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
             Self::Prio3Field64(state) => state.encode(bytes),
+            Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
             Self::Prio3Field128(state) => state.encode(bytes),
             Self::Prio2(state) => state.encode(bytes),
         }
@@ -515,6 +516,7 @@ impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPre
 pub enum VdafPrepMessage {
     Prio2Share(Prio2PrepareShare),
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
+    Prio3ShareField64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
 }
 
@@ -529,7 +531,9 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
             // share. The length of the verifier share depends on the Prio3 type, which we don't
             // know at this point. Likewise, whether the XOF seed is present depends on the Prio3
             // type.
-            Self::Prio3ShareField64(..) | Self::Prio3ShareField128(..) => 0,
+            Self::Prio3ShareField64(..)
+            | Self::Prio3ShareField64HmacSha256Aes128(..)
+            | Self::Prio3ShareField128(..) => 0,
         }
     }
 }
@@ -538,6 +542,7 @@ impl Encode for VdafPrepMessage {
     fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
             Self::Prio3ShareField64(share) => share.encode(bytes),
+            Self::Prio3ShareField64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3ShareField128(share) => share.encode(bytes),
             Self::Prio2Share(share) => share.encode(bytes),
         }
@@ -553,6 +558,11 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
             VdafPrepState::Prio3Field64(state) => Ok(VdafPrepMessage::Prio3ShareField64(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
+            VdafPrepState::Prio3Field64HmacSha256Aes128(state) => {
+                Ok(VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(
+                    Prio3PrepareShare::decode_with_param(state, bytes)?,
+                ))
+            }
             VdafPrepState::Prio3Field128(state) => Ok(VdafPrepMessage::Prio3ShareField128(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
@@ -618,16 +628,18 @@ impl VdafConfig {
     /// Generate the Aggregators' shared verification parameters.
     pub fn gen_verify_key(&self) -> VdafVerifyKey {
         let mut rng = thread_rng();
-        match self {
-            Self::Prio3(..) => VdafVerifyKey::Prio3(rng.gen()),
-            Self::Prio2 { .. } => VdafVerifyKey::Prio2(rng.gen()),
-        }
+        let mut verify_key = self.uninitialized_verify_key();
+        rng.fill(verify_key.as_mut());
+        verify_key
     }
 
     pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
         match self {
-            Self::Prio3(..) => VdafVerifyKey::Prio3([0; VDAF_VERIFY_KEY_SIZE_PRIO3]),
-            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; VDAF_VERIFY_KEY_SIZE_PRIO2]),
+            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
+                VdafVerifyKey::Prio3HmacSha256Aes128([0; 32])
+            }
+            Self::Prio3(..) => VdafVerifyKey::Prio3([0; 16]),
+            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; 32]),
         }
     }
 
