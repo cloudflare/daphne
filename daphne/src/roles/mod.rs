@@ -197,7 +197,7 @@ mod test {
     fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
         match version {
             DapVersion::Draft02 => Some(Vec::new()),
-            DapVersion::Latest => None,
+            DapVersion::DraftLatest => None,
         }
     }
 
@@ -1364,7 +1364,7 @@ mod test {
         let collect_resp = Collection {
             part_batch_sel: PartialBatchSelector::TimeInterval,
             report_count: 0,
-            draft09_interval: if version == DapVersion::Draft02 {
+            draft_latest_interval: if version == DapVersion::Draft02 {
                 None
             } else {
                 Some(Interval {
@@ -1692,7 +1692,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::Latest => 1,
+            DapVersion::DraftLatest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -1733,7 +1733,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::Latest => 1,
+            DapVersion::DraftLatest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -1795,7 +1795,7 @@ mod test {
                     DapMeasurement::U32Vec(vec![1; 10]),
                     vec![Extension::Taskprov {
                         draft02_payload: match version {
-                            DapVersion::Latest => None,
+                            DapVersion::DraftLatest => None,
                             DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
                         },
                     }],
@@ -1833,7 +1833,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::Latest => 1,
+            DapVersion::DraftLatest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {

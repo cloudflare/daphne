@@ -38,7 +38,7 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Latest => encode_u16_bytes(bytes, param),
+                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -56,7 +56,7 @@ impl ParameterizedDecode<DapVersion> for VdafTypeVar {
             (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
                 dimension: decode_u16_item_for_version(*version, bytes)?,
             }),
-            (DapVersion::Latest, ..) => Ok(Self::NotImplemented {
+            (DapVersion::DraftLatest, ..) => Ok(Self::NotImplemented {
                 typ: vdaf_type,
                 param: decode_u16_bytes(bytes)?,
             }),
@@ -85,7 +85,7 @@ impl ParameterizedEncode<DapVersion> for DpConfig {
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Latest => encode_u16_bytes(bytes, param),
+                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -104,7 +104,7 @@ impl ParameterizedDecode<DapVersion> for DpConfig {
                 decode_u16_item_for_version::<()>(*version, bytes)?;
                 Ok(Self::None)
             }
-            (DapVersion::Latest, ..) => Ok(Self::NotImplemented {
+            (DapVersion::DraftLatest, ..) => Ok(Self::NotImplemented {
                 typ: dp_mechanism,
                 param: decode_u16_bytes(bytes)?,
             }),
@@ -216,7 +216,7 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
             QueryConfigVar::NotImplemented { typ, param } => {
                 typ.encode(bytes);
                 match version {
-                    DapVersion::Latest => encode_u16_bytes(bytes, param),
+                    DapVersion::DraftLatest => encode_u16_bytes(bytes, param),
                     DapVersion::Draft02 => bytes.extend_from_slice(param),
                 }
             }
@@ -230,7 +230,7 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let query_type = match version {
-            DapVersion::Latest => None,
+            DapVersion::DraftLatest => None,
             DapVersion::Draft02 => Some(u8::decode(bytes)?),
         };
         let time_precision = Duration::decode(bytes)?;
@@ -245,7 +245,7 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
             (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
                 max_batch_size: decode_u16_item_for_version(*version, bytes)?,
             },
-            (DapVersion::Latest, ..) => QueryConfigVar::NotImplemented {
+            (DapVersion::DraftLatest, ..) => QueryConfigVar::NotImplemented {
                 typ: query_type,
                 param: decode_u16_bytes(bytes)?,
             },
@@ -283,7 +283,7 @@ impl ParameterizedEncode<DapVersion> for TaskConfig {
                 &(),
                 &[self.leader_url.clone(), self.helper_url.clone()],
             ),
-            DapVersion::Latest => {
+            DapVersion::DraftLatest => {
                 self.leader_url.encode(bytes);
                 self.helper_url.encode(bytes);
             }
@@ -304,7 +304,7 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             DapVersion::Draft02 => decode_u16_items(&(), bytes)?
                 .try_into()
                 .map_err(|_| CodecError::UnexpectedValue)?, // Expect exactly two Aggregator endpoints.
-            DapVersion::Latest => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
+            DapVersion::DraftLatest => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
         };
 
         Ok(TaskConfig {
@@ -373,8 +373,8 @@ mod tests {
         };
         assert_eq!(
             QueryConfig::get_decoded_with_param(
-                &DapVersion::Latest,
-                &query_config.get_encoded_with_param(&DapVersion::Latest)
+                &DapVersion::DraftLatest,
+                &query_config.get_encoded_with_param(&DapVersion::DraftLatest)
             )
             .unwrap(),
             query_config
@@ -420,8 +420,8 @@ mod tests {
         };
         assert_eq!(
             DpConfig::get_decoded_with_param(
-                &DapVersion::Latest,
-                &dp_config.get_encoded_with_param(&DapVersion::Latest)
+                &DapVersion::DraftLatest,
+                &dp_config.get_encoded_with_param(&DapVersion::DraftLatest)
             )
             .unwrap(),
             dp_config
@@ -472,8 +472,8 @@ mod tests {
 
         assert_eq!(
             VdafConfig::get_decoded_with_param(
-                &DapVersion::Latest,
-                &vdaf_config.get_encoded_with_param(&DapVersion::Latest)
+                &DapVersion::DraftLatest,
+                &vdaf_config.get_encoded_with_param(&DapVersion::DraftLatest)
             )
             .unwrap(),
             vdaf_config

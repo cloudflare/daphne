@@ -283,10 +283,10 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         // from the request path.
         let collect_job_id = match (req.version, &req.resource) {
             (DapVersion::Draft02, DapResource::Undefined) => None,
-            (DapVersion::Latest, DapResource::CollectionJob(ref collect_job_id)) => {
+            (DapVersion::DraftLatest, DapResource::CollectionJob(ref collect_job_id)) => {
                 Some(*collect_job_id)
             }
-            (DapVersion::Latest, DapResource::Undefined) => {
+            (DapVersion::DraftLatest, DapResource::Undefined) => {
                 return Err(DapAbort::BadRequest("undefined resource".into()).into());
             }
             _ => unreachable!("unhandled resource {:?}", req.resource),
@@ -533,9 +533,9 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         // In the latest draft, the Collection message includes the smallest quantized time
         // interval containing all reports in the batch.
-        let draft09_interval = match task_config.version {
+        let draft_latest_interval = match task_config.version {
             DapVersion::Draft02 => None,
-            DapVersion::Latest => {
+            DapVersion::DraftLatest => {
                 let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
                 let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
                 Some(Interval {
@@ -554,7 +554,7 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
         let collection = Collection {
             part_batch_sel: batch_selector.into(),
             report_count: leader_agg_share.report_count,
-            draft09_interval,
+            draft_latest_interval,
             encrypted_agg_shares: [leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
         };
         self.finish_collect_job(task_id, collect_id, &collection)
