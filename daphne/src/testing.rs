@@ -504,12 +504,12 @@ impl AggregationJobTest {
 //
 // and
 //
-//     something_draft09
+//     something_draftlatest
 //
 // that called something(version) with the appropriate version.
 //
 // We use the "paste" crate to get a macro that can paste tokens and also
-// fiddle case.
+// fiddle with the case.
 #[macro_export]
 macro_rules! test_version {
     ($fname:ident, $version:ident) => {
