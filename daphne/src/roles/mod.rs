@@ -170,14 +170,14 @@ mod test {
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
         vdaf::VdafVerifyKey,
-        DapAbort, DapAggregateShare, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
-        DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
-        DapTaskConfig, DapTaskParameters, DapVersion, MetaAggregationJobId, Prio3Config,
-        VdafConfig,
+        DapAbort, DapAggregateShare, DapAggregationJobState, DapBatchBucket, DapCollectJob,
+        DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
+        DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
+        MetaAggregationJobId, Prio3Config, VdafConfig,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
-    use prio::codec::{Decode, ParameterizedEncode};
+    use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
     use rand::{thread_rng, Rng};
     use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
@@ -498,7 +498,7 @@ mod test {
             task_id: &TaskId,
             version: DapVersion,
             reports: Vec<Report>,
-        ) -> DapRequest<BearerToken> {
+        ) -> (DapAggregationJobState, DapRequest<BearerToken>) {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
@@ -510,7 +510,7 @@ mod test {
 
             let agg_job_id = MetaAggregationJobId::gen_for_version(version);
 
-            let DapLeaderAggregationJobTransition::Continued(_leader_state, agg_job_init_req) =
+            let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
                 task_config
                     .vdaf
                     .produce_agg_job_init_req(
@@ -529,15 +529,18 @@ mod test {
                 panic!("unexpected transition");
             };
 
-            self.leader_authorized_req(
-                task_id,
-                &task_config,
-                Some(&agg_job_id),
-                DapMediaType::AggregationJobInitReq,
-                agg_job_init_req,
-                task_config.helper_url.join("aggregate").unwrap(),
+            (
+                leader_state,
+                self.leader_authorized_req(
+                    task_id,
+                    &task_config,
+                    Some(&agg_job_id),
+                    DapMediaType::AggregationJobInitReq,
+                    agg_job_init_req,
+                    task_config.helper_url.join("aggregate").unwrap(),
+                )
+                .await,
             )
-            .await
         }
 
         pub async fn gen_test_agg_job_cont_req_with_round(
@@ -819,7 +822,7 @@ mod test {
     async fn handle_agg_job_init_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
         let report = t.gen_test_report(&t.time_interval_task_id).await;
-        let mut req = t
+        let (_, mut req) = t
             .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report])
             .await;
         req.sender_auth = None;
@@ -1058,7 +1061,7 @@ mod test {
 
         let mut report = t.gen_test_report(task_id).await;
         report.encrypted_input_shares[1].payload[0] ^= 0xff; // Cause decryption to fail
-        let req = t
+        let (_, req) = t
             .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
@@ -1083,7 +1086,7 @@ mod test {
         let task_id = &t.time_interval_task_id;
 
         let report = t.gen_test_report(task_id).await;
-        let req = t
+        let (_, req) = t
             .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
@@ -1100,13 +1103,96 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_transition_continue }
 
+    async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
+        let t = Test::new(version);
+        let task_id = &t.time_interval_task_id;
+
+        let report = t.gen_test_report(task_id).await;
+        let (leader_state, req) = t
+            .gen_test_agg_job_init_req(task_id, version, vec![report.clone()])
+            .await;
+
+        // Add dummy data to report store backend. This is done in a new scope so that the lock on the
+        // report store is released before running the test.
+        {
+            let mut guard = t
+                .helper
+                .report_store
+                .lock()
+                .expect("report_store: failed to lock");
+            let report_store = guard.entry(*task_id).or_default();
+            report_store.processed.insert(report.report_metadata.id);
+        }
+
+        // Get AggregationJobResp and then extract the transition data from inside.
+        let agg_job_resp = AggregationJobResp::get_decoded(
+            &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+        )
+        .unwrap();
+        let transitions = if version == DapVersion::Draft02 {
+            // in version 2 replays are only detected later.
+            let agg_job_id =
+                AggregationJobInitReq::get_decoded_with_param(&DapVersion::Draft02, &req.payload)
+                    .unwrap()
+                    .draft02_agg_job_id
+                    .unwrap();
+            let task_config = t.leader.unchecked_get_task_config(task_id).await;
+            let transition = task_config
+                .vdaf
+                .handle_agg_job_resp(
+                    task_id,
+                    &task_config,
+                    &MetaAggregationJobId::Draft02(agg_job_id),
+                    leader_state,
+                    agg_job_resp,
+                    t.leader.metrics(),
+                )
+                .unwrap();
+            let DapLeaderAggregationJobTransition::Uncommitted(
+                _,
+                AggregationJobContinueReq { transitions, .. },
+            ) = transition
+            else {
+                panic!("expected uncommitted transition, was {transition:?}");
+            };
+            let req = t
+                .gen_test_agg_job_cont_req(
+                    &MetaAggregationJobId::Draft02(agg_job_id),
+                    transitions,
+                    version,
+                )
+                .await;
+            AggregationJobResp::get_decoded(
+                &t.helper.handle_agg_job_req(&req).await.unwrap().payload,
+            )
+            .unwrap()
+            .transitions
+        } else {
+            agg_job_resp.transitions
+        };
+
+        // Expect failure due to report store marked as collected.
+        assert_matches!(
+            transitions[0].var,
+            TransitionVar::Failed(TransitionFailure::ReportReplayed)
+        );
+
+        assert_metrics_include!(t.helper_registry, {
+            r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: if version == DapVersion::Draft02 { 2 } else { 1 },
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+        });
+    }
+
+    async_test_versions! { handle_agg_job_req_failure_report_replayed }
+
     async fn handle_agg_job_req_failure_batch_collected(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
         let report = t.gen_test_report(task_id).await;
-        let req = t
+        let (_, req) = t
             .gen_test_agg_job_init_req(task_id, version, vec![report])
             .await;
 
@@ -1161,7 +1247,7 @@ mod test {
         let task_id = &t.time_interval_task_id;
 
         let report = t.gen_test_report(task_id).await;
-        let req = t
+        let (_, req) = t
             .gen_test_agg_job_init_req(task_id, DapVersion::Draft02, vec![report])
             .await;
 

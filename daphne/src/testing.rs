@@ -723,7 +723,6 @@ impl MockAggregator {
 
     /// Conducts checks on a received report to see whether:
     /// 1) the report falls into a batch that has been already collected, or
-    /// 2) the report has been submitted by the client in the past.
     fn check_report_has_been_collected(
         &self,
         task_id: &TaskId,
