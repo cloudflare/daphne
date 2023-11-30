@@ -1582,7 +1582,7 @@ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 [[package]]
 name = "prio"
 version = "0.15.3"
-source = "git+https://github.com/divviup/libprio-rs?rev=4ca547f35ebedf36fce45108ff8a29e14d51d048#4ca547f35ebedf36fce45108ff8a29e14d51d048"
+source = "git+https://github.com/divviup/libprio-rs?rev=f067f384df127bdbd5e35116bbf437e765238eb2#f067f384df127bdbd5e35116bbf437e765238eb2"
 dependencies = [
  "aes 0.8.3",
  "byteorder",

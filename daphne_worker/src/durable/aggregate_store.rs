@@ -16,7 +16,7 @@ use daphne::{
 use prio::{
     codec::{Decode, Encode},
     field::FieldElement,
-    vdaf::{AggregateShare, OutputShare},
+    vdaf::AggregateShare,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Instrument;
@@ -193,8 +193,7 @@ impl AggregateStore {
                             .expect("string never fails to convert to JsValue"),
                     )
                 })?;
-                // TODO(mendess): this an abuse of this API, this type should not be constructed this way.
-                Ok(AggregateShare::from(OutputShare::from(share)))
+                Ok(AggregateShare::from(share))
             }
 
             let data = match kind {
