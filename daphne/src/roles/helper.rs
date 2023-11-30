@@ -267,12 +267,6 @@ pub trait DapHelper<S>: DapAggregator<S> {
             })
             .await?;
 
-        for transition in &agg_job_resp.transitions {
-            if let TransitionVar::Failed(failure) = &transition.var {
-                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-            }
-        }
-
         let out_shares_count = agg_job_resp
             .transitions
             .iter()
@@ -523,7 +517,7 @@ async fn finish_agg_job_and_aggregate<S>(
                     }));
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }
-                // This bucket belongs to a collected aggregate share.
+                // This bucket is contained by an aggregate share span that has been collected.
                 (Err(MergeAggShareError::AlreadyCollected), reports) => {
                     report_status.extend(reports.into_iter().map(|(report_id, _)| {
                         (
@@ -554,6 +548,12 @@ async fn finish_agg_job_and_aggregate<S>(
                 .try_into()
                 .expect("usize to fit in u64");
             metrics.report_inc_by("aggregated", out_shares_count);
+
+            for transition in &agg_job_resp.transitions {
+                if let TransitionVar::Failed(failure) = &transition.var {
+                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                }
+            }
 
             return Ok(agg_job_resp);
         }
@@ -597,7 +597,7 @@ mod tests {
             .map(|r| r.report_metadata.id)
             .collect::<Vec<_>>();
 
-        let req = test
+        let (_, req) = test
             .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, reports)
             .await;
 

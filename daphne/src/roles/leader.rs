@@ -441,28 +441,36 @@ pub trait DapLeader<S>: DapAuthorizedSender<S> + DapAggregator<S> {
 
         let out_shares_count = agg_span.report_count() as u64;
 
-        // At this point we're committed to aggregating the reports: if we do detect a report was
-        // replayed at this stage, then we may end up with a batch mismatch. However, this should
-        // only happen if there are multiple aggregation jobs in-flight that include the same
-        // report.
-        let replayed = self
+        // At this point we're committed to aggregating the reports: if we do detect an error (a
+        // report was replayed at this stage or the span overlaps with a collected batch), then we
+        // may end up with a batch mismatch. However, this should only happen if there are multiple
+        // aggregation jobs in-flight that include the same report.
+        let (replayed, collected) = self
             .try_put_agg_share_span(task_id, task_config, agg_span)
             .await
             .into_iter()
             .map(|(_bucket, (result, _report_metadata))| match result {
-                Ok(()) => Ok(0),
-                Err(MergeAggShareError::AlreadyCollected) => {
-                    panic!("aggregated to a collected agg share")
-                }
-                Err(MergeAggShareError::ReplaysDetected(replays)) => Ok(replays.len()),
+                Ok(()) => Ok((0, 0)),
+                Err(MergeAggShareError::AlreadyCollected) => Ok((0, 1)),
+                Err(MergeAggShareError::ReplaysDetected(replays)) => Ok((replays.len(), 0)),
                 Err(MergeAggShareError::Other(e)) => Err(e),
             })
-            .sum::<Result<usize, _>>()?;
+            .try_fold((0, 0), |(replayed, collected), rc| {
+                let (r, c) = rc?;
+                Ok::<_, DapError>((replayed + r, collected + c))
+            })?;
 
         if replayed > 0 {
-            tracing::warn!(
+            tracing::error!(
                 replay_count = replayed,
                 "tried to aggregate replayed reports"
+            );
+        }
+
+        if collected > 0 {
+            tracing::error!(
+                collected_count = collected,
+                "tried to aggregate reports belonging to collected spans"
             );
         }
 

@@ -25,8 +25,7 @@ use crate::{
 /// job.
 #[async_trait(?Send)]
 pub trait DapReportInitializer {
-    /// Initialize a sequence of reports that are in the "consumed" state by performing the early
-    /// validation steps (belongs to a batch that has been collected) and initializing VDAF
+    /// Initialize a sequence of reports that are in the "consumed" state by initializing VDAF
     /// preparation.
     async fn initialize_reports<'req>(
         &self,
@@ -124,9 +123,12 @@ pub trait DapAggregator<S>: HpkeDecrypter + DapReportInitializer + Sized {
     ///
     /// A span with the same buckets as the input `agg_share_span` where the value is one of 3
     /// possible sets of values:
-    /// - `Ok(None)` if all went well and no reports were replays.
-    /// - `Ok(Some(set))` if at least one report was a replay. This also means no aggregate shares where merged.
-    /// - `Err(err)` if an error occurred.
+    /// - `Ok(())` if all went well and no reports were replays.
+    /// - `Err(MergeAggShareError::ReplaysDetected)` if at least one report was a replay. This also
+    ///                                              means no aggregate shares where merged.
+    /// - `Err(MergeAggShareError::AlreadyCollected)` This span belong to an aggregate share that
+    ///                                               has been collected.
+    /// - `Err(MergeAggShareError::Other)` if another unrecoverable error occurred.
     async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,

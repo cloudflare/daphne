@@ -1028,7 +1028,6 @@ impl VdafConfig {
                 report_status,
                 initialized_reports,
                 agg_job_init_req,
-                metrics,
             ),
         }
     }
@@ -1098,7 +1097,6 @@ impl VdafConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized<'_>],
         agg_job_init_req: &AggregationJobInitReq,
-        metrics: &DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut agg_span = DapAggregateSpan::default();
@@ -1170,7 +1168,6 @@ impl VdafConfig {
 
                             Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                                 let failure = TransitionFailure::VdafPrepError;
-                                metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                                 TransitionVar::Failed(failure)
                             }
                         }
@@ -1179,10 +1176,7 @@ impl VdafConfig {
                     EarlyReportStateInitialized::Rejected {
                         metadata: _,
                         failure,
-                    } => {
-                        metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                        TransitionVar::Failed(*failure)
-                    }
+                    } => TransitionVar::Failed(*failure),
                 },
             };
 
@@ -2162,10 +2156,6 @@ mod test {
             agg_job_resp.transitions[0].var,
             TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
         );
-
-        assert_metrics_include!(t.helper_registry, {
-            r#"report_counter{env="test_helper",host="helper.org",status="rejected_hpke_decrypt_error"}"#: 1,
-        });
     }
 
     async_test_versions! { handle_agg_job_init_req_hpke_decrypt_err }
@@ -2191,10 +2181,6 @@ mod test {
             agg_job_resp.transitions[0].var,
             TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
         );
-
-        assert_metrics_include!(t.helper_registry, {
-            r#"report_counter{env="test_helper",host="helper.org",status="rejected_hpke_unknown_config_id"}"#: 1,
-        });
     }
 
     async_test_versions! { handle_agg_job_init_req_hpke_unknown_config_id }
@@ -2245,10 +2231,6 @@ mod test {
             agg_job_resp.transitions[1].var,
             TransitionVar::Failed(TransitionFailure::VdafPrepError)
         );
-
-        assert_metrics_include!(t.helper_registry, {
-            r#"report_counter{env="test_helper",host="helper.org",status="rejected_vdaf_prep_error"}"#: 2,
-        });
     }
 
     async_test_versions! { handle_agg_job_init_req_vdaf_prep_error }
