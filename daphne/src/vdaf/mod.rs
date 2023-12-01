@@ -73,6 +73,8 @@ enum PingPongMessageType {
     Finish = 2,
 }
 
+// This is essentially a re-implementation of a method in the `messages` module. However the goal
+// here is to make it zero-copy. See https://github.com/cloudflare/daphne/issues/15.
 fn decode_ping_pong_framed(
     bytes: &[u8],
     expected_type: PingPongMessageType,

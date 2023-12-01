@@ -608,8 +608,11 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
 #[cfg(test)]
 mod test {
 
+    use prio::vdaf::prio3_test::check_test_vec;
+
     use crate::{
-        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest, DapAggregateResult,
+        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest,
+        vdaf::prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, DapAggregateResult,
         DapMeasurement, DapVersion, Prio3Config, VdafConfig,
     };
 
@@ -720,4 +723,28 @@ mod test {
     }
 
     async_test_versions! { roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128 }
+
+    #[test]
+    fn test_vec_sum_vec_field64_multiproof_hmac_sha256_aes128() {
+        for test_vec_json_str in [
+            include_str!("test_vec/Prio3SumVecField64MultiproofHmacSha256Aes128_0.json"),
+            include_str!("test_vec/Prio3SumVecField64MultiproofHmacSha256Aes128_1.json"),
+            include_str!("test_vec/Prio3SumVecField64MultiproofHmacSha256Aes128_2.json"),
+        ] {
+            check_test_vec(test_vec_json_str, |json_params, num_aggregators| {
+                assert_eq!(num_aggregators, 2);
+                new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                    json_params["bits"].as_u64().unwrap().try_into().unwrap(),
+                    json_params["length"].as_u64().unwrap().try_into().unwrap(),
+                    json_params["chunk_length"]
+                        .as_u64()
+                        .unwrap()
+                        .try_into()
+                        .unwrap(),
+                    json_params["proofs"].as_u64().unwrap().try_into().unwrap(),
+                )
+                .unwrap()
+            });
+        }
+    }
 }
