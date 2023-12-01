@@ -44,6 +44,7 @@ matchit.workspace = true
 paste.workspace = true
 rand_core.workspace = true
 regex = "1.10.2"
+prio = { workspace = true, features = ["test-util"] }
 tokio.workspace = true
 
 [features]
