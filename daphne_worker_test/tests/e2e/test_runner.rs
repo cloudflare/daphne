@@ -59,7 +59,7 @@ impl TestRunner {
         Self::with(
             version,
             &DapQueryConfig::FixedSize {
-                max_batch_size: MAX_BATCH_SIZE,
+                max_batch_size: Some(MAX_BATCH_SIZE),
             },
         )
         .await

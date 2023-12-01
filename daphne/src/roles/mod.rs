@@ -307,7 +307,9 @@ mod test {
                     time_precision: Self::TASK_TIME_PRECISION,
                     expiration: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
-                    query: DapQueryConfig::FixedSize { max_batch_size: 2 },
+                    query: DapQueryConfig::FixedSize {
+                        max_batch_size: Some(2),
+                    },
                     vdaf: vdaf_config.clone(),
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
                     method: Default::default(),
@@ -1806,7 +1808,9 @@ mod test {
             DapTaskParameters {
                 version,
                 min_batch_size: 1,
-                query: DapQueryConfig::FixedSize { max_batch_size: 2 },
+                query: DapQueryConfig::FixedSize {
+                    max_batch_size: Some(2),
+                },
                 vdaf: vdaf_config,
                 ..Default::default()
             }

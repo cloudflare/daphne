@@ -996,8 +996,7 @@ impl<'srv> DaphneWorker<'srv> {
         let query = match (cmd.query_type, cmd.max_batch_size) {
             (1, None) => DapQueryConfig::TimeInterval,
             (1, Some(..)) => return Err(int_err("command failed: unexpected max batch size")),
-            (2, Some(max_batch_size)) => DapQueryConfig::FixedSize { max_batch_size },
-            (2, None) => return Err(int_err("command failed: missing max batch size")),
+            (2, max_batch_size) => DapQueryConfig::FixedSize { max_batch_size },
             _ => return Err(int_err("command failed: unrecognized query type")),
         };
 
