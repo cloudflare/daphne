@@ -205,8 +205,11 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
 impl DapQueryConfig {
     fn try_from_taskprov(task_id: &TaskId, var: QueryConfigVar) -> Result<Self, DapAbort> {
         match var {
+            QueryConfigVar::FixedSize { max_batch_size: 0 } => Ok(DapQueryConfig::FixedSize {
+                max_batch_size: None,
+            }),
             QueryConfigVar::FixedSize { max_batch_size } => Ok(DapQueryConfig::FixedSize {
-                max_batch_size: max_batch_size.into(),
+                max_batch_size: Some(max_batch_size.into()),
             }),
             QueryConfigVar::TimeInterval => Ok(DapQueryConfig::TimeInterval),
             QueryConfigVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
@@ -323,7 +326,7 @@ impl TryFrom<&DapQueryConfig> for messages::taskprov::QueryConfigVar {
             DapQueryConfig::TimeInterval => messages::taskprov::QueryConfigVar::TimeInterval,
             DapQueryConfig::FixedSize { max_batch_size } => {
                 messages::taskprov::QueryConfigVar::FixedSize {
-                    max_batch_size: (*max_batch_size).try_into().map_err(|_| {
+                    max_batch_size: max_batch_size.unwrap_or(0).try_into().map_err(|_| {
                         fatal_error!(err = "task max batch size is too large for taskprov")
                     })?,
                 }

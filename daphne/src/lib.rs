@@ -200,8 +200,6 @@ impl DapGlobalConfig {
 }
 
 /// DAP Query configuration.
-//
-// TODO(cjpatton) Once we implement maximum batch lifetime, put the parameter here.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
@@ -210,9 +208,13 @@ pub enum DapQueryConfig {
     /// specified by the query.
     TimeInterval,
 
-    /// The "fixed-size" query type. The Leader partitions the reports into arbitary batches of
-    /// roughly the same size.
-    FixedSize { max_batch_size: u64 },
+    /// The "fixed-size" query type where by the Leader assigns reports to arbitrary batches
+    /// identified by batch IDs. This type includes an optional maximum batch size: if set, then
+    /// Aggregators are meant to stop aggregating reports when this limit is reached.
+    FixedSize {
+        #[serde(default)]
+        max_batch_size: Option<u64>,
+    },
 }
 
 impl DapQueryConfig {
@@ -720,8 +722,9 @@ impl DapTaskConfig {
         report_count: u64,
     ) -> Result<bool, DapAbort> {
         match self.query {
-            DapQueryConfig::TimeInterval => (),
-            DapQueryConfig::FixedSize { max_batch_size } => {
+            DapQueryConfig::FixedSize {
+                max_batch_size: Some(max_batch_size),
+            } => {
                 if report_count > max_batch_size {
                     return Err(DapAbort::InvalidBatchSize {
                         detail: format!(
@@ -731,6 +734,10 @@ impl DapTaskConfig {
                     });
                 }
             }
+            DapQueryConfig::TimeInterval
+            | DapQueryConfig::FixedSize {
+                max_batch_size: None,
+            } => (),
         };
 
         Ok(report_count >= self.min_batch_size)
