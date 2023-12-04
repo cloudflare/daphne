@@ -2,7 +2,7 @@ FROM rust:1.73-alpine AS builder
 WORKDIR /tmp/dap_test
 RUN apk add --update \
     bash \
-    g++ \
+    clang \
     make \
     npm \
     openssl-dev \

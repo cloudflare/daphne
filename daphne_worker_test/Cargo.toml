@@ -27,6 +27,7 @@ cfg-if = "1.0.0"
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne_worker = { path = "../daphne_worker" }
+getrandom = { workspace = true, features = ["js", "std"] }
 tracing.workspace = true
 worker.workspace = true
 
