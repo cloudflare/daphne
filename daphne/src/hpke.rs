@@ -184,7 +184,7 @@ impl HpkeConfig {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
-        let sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
+        let mut sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
         let (enc, mut ctx) = sender.setup_sender(&self.public_key, info, None, None, None)?;
         let ciphertext = ctx.seal(aad, plaintext)?;
         Ok((enc, ciphertext))
@@ -284,7 +284,7 @@ impl HpkeReceiverConfig {
         };
         let kdf = KdfAlgorithm::HkdfSha256;
         let aead = AeadAlgorithm::Aes128Gcm;
-        let generator = Hpke::<ImplHpkeCrypto>::new(Mode::Base, kem, kdf, aead);
+        let mut generator = Hpke::<ImplHpkeCrypto>::new(Mode::Base, kem, kdf, aead);
         match generator.generate_key_pair() {
             Ok(keypair) => {
                 let (private_key, public_key) = keypair.into_keys();

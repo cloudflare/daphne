@@ -25,11 +25,11 @@ cap = "0.1.2"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 deepsize = { version = "0.2.0" }
 futures = "0.3.29"
-getrandom = { version = "0.2.11", features = ["js", "std"] } # Required for prio
+getrandom = "0.2.11"
 hex = { version = "0.4.3", features = ["serde"] }
-hpke-rs = "=0.1.0"
-hpke-rs-crypto = "=0.1.1"
-hpke-rs-rust-crypto = "=0.1.1"
+hpke-rs = "0.2.0"
+hpke-rs-crypto = "0.2.0"
+hpke-rs-rust-crypto = "0.2.0"
 matchit = "0.7.3"
 paste = "1.0.14"
 prio = { git = "https://github.com/divviup/libprio-rs", rev = "d0168336bbad1805231a69181b329e37ee962203" }
@@ -38,11 +38,12 @@ rand = "0.8.5"
 rand_core = "0.6.4"
 reqwest = "0.11.22"
 replace_with = "0.1.7"
-ring = "0.16.20"
-serde = { version = "1.0.192", features = ["derive"] }
+ring = "0.17.6"
+serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
+serde-wasm-bindgen = "0.5.0"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.40"
-url = { version = "2.4.1", features = ["serde"] }
+url = { version = "2.5.0", features = ["serde"] }
 worker = "0.0.18"
