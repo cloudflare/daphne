@@ -1313,7 +1313,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         let extensions = vec![Extension::Taskprov {
             draft02_payload: match version {
                 DapVersion::DraftLatest => None,
-                DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
+                DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
             },
         }];
         let now = rng.gen_range(t.report_interval(&batch_interval));

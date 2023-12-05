@@ -456,13 +456,14 @@ pub struct DapTaskParameters {
 impl DapTaskParameters {
     /// Construct a new task config using the taskprov extension. Return the task ID, the taskprov
     /// advertisement (if applicable), and the payload of the report extension.
+    #[allow(clippy::type_complexity)]
     pub fn to_config_with_taskprov(
         &self,
         task_info: Vec<u8>,
         now: Time,
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
-    ) -> Result<(DapTaskConfig, TaskId, Option<String>, Vec<u8>), DapError> {
+    ) -> Result<(DapTaskConfig, TaskId, Option<String>, Option<Vec<u8>>), DapError> {
         let taskprov_config = messages::taskprov::TaskConfig {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
@@ -498,12 +499,10 @@ impl DapTaskParameters {
         .unwrap();
 
         let (taskprov_advertisement, taskprov_report_extension_payload) = match self.version {
-            DapVersion::DraftLatest => {
-                (Some(encode_base64url(&encoded_taskprov_config)), Vec::new())
-            }
+            DapVersion::DraftLatest => (Some(encode_base64url(&encoded_taskprov_config)), None),
             // draft02 compatibility: The taskprov config is advertised in an HTTP header in
             // the latest draft. In draft02, it is carried by a report extension.
-            DapVersion::Draft02 => (None, encoded_taskprov_config),
+            DapVersion::Draft02 => (None, Some(encoded_taskprov_config)),
         };
 
         Ok((

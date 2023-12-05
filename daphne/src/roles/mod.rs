@@ -1909,7 +1909,7 @@ mod test {
                     vec![Extension::Taskprov {
                         draft02_payload: match version {
                             DapVersion::DraftLatest => None,
-                            DapVersion::Draft02 => Some(taskprov_report_extension_payload.clone()),
+                            DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
                         },
                     }],
                     version,
