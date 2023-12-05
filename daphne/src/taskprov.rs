@@ -423,7 +423,6 @@ impl ReportMetadata {
 #[cfg(test)]
 mod test {
     use prio::codec::ParameterizedEncode;
-    use url::Url;
 
     use super::{compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config};
     use crate::{
@@ -649,7 +648,6 @@ mod test {
                 task_id: Some(task_id),
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
-                url: Url::parse("https://example.com/").unwrap(), // ignored by test
                 sender_auth: None,                // ignored by test
                 taskprov: Some(taskprov_task_config_base64url),
             };

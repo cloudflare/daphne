@@ -490,7 +490,6 @@ mod test {
                 task_id: Some(*task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version),
-                url: task_config.leader_url.join("upload").unwrap(),
                 ..Default::default()
             }
         }
@@ -539,7 +538,6 @@ mod test {
                     Some(&agg_job_id),
                     DapMediaType::AggregationJobInitReq,
                     agg_job_init_req,
-                    task_config.helper_url.join("aggregate").unwrap(),
                 )
                 .await,
             )
@@ -565,7 +563,6 @@ mod test {
                     round,
                     transitions,
                 },
-                task_config.helper_url.join("aggregate").unwrap(),
             )
             .await
         }
@@ -594,12 +591,6 @@ mod test {
             let task_id = &self.time_interval_task_id;
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
-            let url_path = if task_config.version == DapVersion::Draft02 {
-                "aggregate_shares".to_string()
-            } else {
-                format!("tasks/{}/aggregate_shares", task_id.to_base64url())
-            };
-
             self.leader_authorized_req(
                 task_id,
                 &task_config,
@@ -612,7 +603,6 @@ mod test {
                     report_count,
                     checksum,
                 },
-                task_config.helper_url.join(&url_path).unwrap(),
             )
             .await
         }
@@ -682,7 +672,6 @@ mod test {
                     query: query.clone(),
                     agg_param: Vec::default(),
                 },
-                task_config.helper_url.join("collect").unwrap(),
             );
 
             // Leader: Handle request from Collector.
@@ -709,7 +698,6 @@ mod test {
             agg_job_id: Option<&MetaAggregationJobId>,
             media_type: DapMediaType,
             msg: M,
-            url: Url,
         ) -> DapRequest<BearerToken> {
             let payload = msg.get_encoded_with_param(&task_config.version);
             let sender_auth = Some(
@@ -724,7 +712,6 @@ mod test {
                 task_id: Some(*task_id),
                 resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
                 payload,
-                url,
                 sender_auth,
                 ..Default::default()
             }
@@ -736,7 +723,6 @@ mod test {
             task_config: &DapTaskConfig,
             media_type: DapMediaType,
             msg: M,
-            url: Url,
         ) -> DapRequest<BearerToken> {
             let mut rng = thread_rng();
             let collect_job_id = CollectionJobId(rng.gen());
@@ -756,7 +742,6 @@ mod test {
                     DapResource::CollectionJob(collect_job_id)
                 },
                 payload: msg.get_encoded_with_param(&task_config.version),
-                url,
                 sender_auth,
                 ..Default::default()
             }
@@ -787,7 +772,6 @@ mod test {
                     },
                     prep_inits: Vec::default(),
                 },
-                task_config.helper_url.join("aggregate").unwrap(),
             )
             .await;
         assert_matches!(
@@ -868,16 +852,11 @@ mod test {
             payload: Vec::new(),
             task_id: Some(task_id),
             resource: DapResource::Undefined,
-            url: Url::parse(&format!(
-                "http://aggregator.biz/v02/hpke_config?task_id={}",
-                task_id.to_base64url()
-            ))
-            .unwrap(),
             ..Default::default()
         };
 
         assert_matches!(
-            aggregator::handle_hpke_config_req(&*t.leader, &req).await,
+            aggregator::handle_hpke_config_req(&*t.leader, &req, Some(task_id)).await,
             Err(DapError::Abort(DapAbort::UnrecognizedTask))
         );
     }
@@ -892,7 +871,6 @@ mod test {
             task_id: Some(t.time_interval_task_id),
             resource: DapResource::Undefined,
             payload: Vec::new(),
-            url: Url::parse("http://aggregator.biz/v02/hpke_config").unwrap(),
             ..Default::default()
         };
 
@@ -900,7 +878,7 @@ mod test {
         // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
         // used for all tasks.
         assert_matches!(
-            aggregator::handle_hpke_config_req(&*t.leader, &req).await,
+            aggregator::handle_hpke_config_req(&*t.leader, &req, None).await,
             Err(DapError::Abort(DapAbort::MissingTaskId))
         );
     }
@@ -984,7 +962,6 @@ mod test {
                     report_count: 0,
                     checksum: [0; 32],
                 },
-                task_config.helper_url.join("aggregate_share").unwrap(),
             )
             .await;
         assert_matches!(
@@ -1014,7 +991,6 @@ mod test {
                     report_count: 0,
                     checksum: [0; 32],
                 },
-                task_config.helper_url.join("aggregate_share").unwrap(),
             )
             .await;
         assert_matches!(
@@ -1033,15 +1009,6 @@ mod test {
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
         let collect_job_id = CollectionJobId(rng.gen());
-        let url_path = if task_config.version == DapVersion::Draft02 {
-            "collect".to_string()
-        } else {
-            format!(
-                "tasks/{}/collection_jobs/{}",
-                task_id.to_base64url(),
-                collect_job_id.to_base64url()
-            )
-        };
         let mut req = DapRequest {
             version: task_config.version,
             media_type: DapMediaType::CollectReq,
@@ -1057,7 +1024,6 @@ mod test {
                 agg_param: Vec::default(),
             }
             .get_encoded_with_param(&task_config.version),
-            url: task_config.leader_url.join(&url_path).unwrap(),
             ..Default::default() // Unauthorized request.
         };
 
@@ -1348,7 +1314,6 @@ mod test {
             task_id: Some(TaskId([0; 32])),
             resource: DapResource::Undefined,
             payload: report_invalid_task_id.get_encoded_with_param(&task_config.version),
-            url: task_config.leader_url.join("upload").unwrap(),
             ..Default::default()
         };
 
@@ -1374,7 +1339,6 @@ mod test {
             task_id: Some(*task_id),
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version),
-            url: task_config.leader_url.join("upload").unwrap(),
             ..Default::default()
         };
 
@@ -1434,7 +1398,6 @@ mod test {
                 query: task_config.query_for_current_batch_window(t.now),
                 agg_param: Vec::default(),
             },
-            task_config.helper_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1527,7 +1490,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.helper_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1555,7 +1517,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.helper_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1583,7 +1544,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.leader_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1618,7 +1578,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.leader_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1676,7 +1635,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             collector_collect_req.clone(),
-            task_config.leader_url.join("collect").unwrap(),
         );
 
         // Leader: Handle the CollectReq received from Collector.
@@ -1727,7 +1685,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.leader_url.join("collect").unwrap(),
         );
         assert_matches!(
             leader::handle_collect_job_req(&*t.leader, &req)
@@ -1752,7 +1709,6 @@ mod test {
                 },
                 agg_param: Vec::default(),
             },
-            task_config.leader_url.join("collect").unwrap(),
         );
         assert_matches!(
             leader::handle_collect_job_req(&*t.leader, &req)
@@ -1922,7 +1878,6 @@ mod test {
                 task_id: Some(task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version),
-                url: Url::parse("https://leader.com/upload").unwrap(),
                 taskprov: taskprov_advertisement.clone(),
                 ..Default::default()
             };

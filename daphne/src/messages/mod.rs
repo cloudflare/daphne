@@ -1221,9 +1221,7 @@ pub fn encode_base64url<T: AsRef<[u8]>>(input: T) -> String {
 }
 
 /// Decode the input as a URL-safe, base64 encoding of an `OUT_LEN`-length byte string.
-pub(crate) fn decode_base64url<T: AsRef<[u8]>, const OUT_LEN: usize>(
-    input: T,
-) -> Option<[u8; OUT_LEN]> {
+pub fn decode_base64url<T: AsRef<[u8]>, const OUT_LEN: usize>(input: T) -> Option<[u8; OUT_LEN]> {
     let mut bytes = [0; OUT_LEN];
     // NOTE(cjpatton) It would be better to use `decode_slice` here, but this function uses a
     // conservative estimate of the decoded length (`decoded_len_estimate`). See

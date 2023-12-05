@@ -1136,9 +1136,6 @@ pub struct DapRequest<S> {
     /// Request payload.
     pub payload: Vec<u8>,
 
-    /// Requst path (i.e., URL).
-    pub url: Url,
-
     /// Sender authorization, e.g., a bearer token.
     pub sender_auth: Option<S>,
 
@@ -1155,7 +1152,6 @@ impl<S> Default for DapRequest<S> {
             task_id: Default::default(),
             resource: Default::default(),
             payload: Default::default(),
-            url: Url::parse("http://example.com").unwrap(),
             sender_auth: Default::default(),
             taskprov: Default::default(),
         }
@@ -1196,12 +1192,6 @@ impl<S> DapRequest<S> {
                 "missing or malformed collection job ID".into(),
             ))
         }
-    }
-
-    /// Return the hostname of the request URL. The value is "unspecified-host" if the URL does not
-    /// indicate a hostname.
-    pub fn host(&self) -> &str {
-        self.url.host_str().unwrap_or("unspecified-host")
     }
 }
 

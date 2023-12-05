@@ -1162,6 +1162,10 @@ impl DapAggregator<BearerToken> for MockAggregator {
     fn audit_log(&self) -> &dyn AuditLog {
         &self.audit_log
     }
+
+    fn host(&self) -> &str {
+        "unspecified-host"
+    }
 }
 
 #[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
@@ -1435,7 +1439,11 @@ impl DapLeader<BearerToken> for MockAggregator {
         }
     }
 
-    async fn send_http_post(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
+    async fn send_http_post(
+        &self,
+        req: DapRequest<BearerToken>,
+        _url: Url,
+    ) -> Result<DapResponse, DapError> {
         match req.media_type {
             DapMediaType::AggregationJobInitReq | DapMediaType::AggregationJobContinueReq => {
                 Ok(helper::handle_agg_job_req(
@@ -1455,7 +1463,11 @@ impl DapLeader<BearerToken> for MockAggregator {
         }
     }
 
-    async fn send_http_put(&self, req: DapRequest<BearerToken>) -> Result<DapResponse, DapError> {
+    async fn send_http_put(
+        &self,
+        req: DapRequest<BearerToken>,
+        _url: Url,
+    ) -> Result<DapResponse, DapError> {
         if req.media_type == DapMediaType::AggregationJobInitReq {
             Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),

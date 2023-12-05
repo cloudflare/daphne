@@ -208,7 +208,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     };
 
     aggregator.audit_log().on_aggregation_job(
-        req.host(),
+        aggregator.host(),
         task_id,
         task_config,
         agg_job_init_req.prep_inits.len() as u64,
@@ -288,7 +288,7 @@ pub async fn handle_agg_job_cont_req<'req, S: Sync, A: DapHelper<S>>(
         .try_into()
         .expect("usize to fit in u64");
     aggregator.audit_log().on_aggregation_job(
-        req.host(),
+        aggregator.host(),
         task_id,
         task_config,
         out_shares_count,

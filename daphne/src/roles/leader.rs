@@ -66,7 +66,6 @@ async fn leader_send_http_request<S: Sync>(
         media_type: req_media_type.clone(),
         task_id: Some(*task_id),
         resource,
-        url,
         sender_auth: Some(
             role.authorize(task_id, task_config, &req_media_type, &req_data)
                 .await?,
@@ -76,8 +75,8 @@ async fn leader_send_http_request<S: Sync>(
     };
 
     let resp = match method {
-        LeaderHttpRequestMethod::Put => role.send_http_put(req).await?,
-        LeaderHttpRequestMethod::Post => role.send_http_post(req).await?,
+        LeaderHttpRequestMethod::Put => role.send_http_put(req, url).await?,
+        LeaderHttpRequestMethod::Post => role.send_http_post(req, url).await?,
     };
 
     check_response_content_type(&resp, resp_media_type)?;
@@ -147,10 +146,10 @@ pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
     ) -> Result<(), DapError>;
 
     /// Send an HTTP POST request.
-    async fn send_http_post(&self, req: DapRequest<S>) -> Result<DapResponse, DapError>;
+    async fn send_http_post(&self, req: DapRequest<S>, url: Url) -> Result<DapResponse, DapError>;
 
     /// Send an HTTP PUT request.
-    async fn send_http_put(&self, req: DapRequest<S>) -> Result<DapResponse, DapError>;
+    async fn send_http_put(&self, req: DapRequest<S>, url: Url) -> Result<DapResponse, DapError>;
 }
 
 /// Handle a report from a Client.

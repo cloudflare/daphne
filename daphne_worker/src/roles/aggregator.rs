@@ -412,4 +412,8 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
     fn audit_log(&self) -> &dyn AuditLog {
         self.state.audit_log
     }
+
+    fn host(&self) -> &str {
+        &self.state.host
+    }
 }

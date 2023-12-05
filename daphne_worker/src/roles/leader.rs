@@ -42,6 +42,7 @@ use daphne::{
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use std::collections::HashMap;
 use tracing::debug;
+use url::Url;
 
 #[async_trait(?Send)]
 impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
@@ -338,14 +339,16 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
     async fn send_http_post(
         &self,
         req: DapRequest<DaphneWorkerAuth>,
+        url: Url,
     ) -> std::result::Result<DapResponse, DapError> {
-        self.send_http(req, false).await
+        self.send_http(req, false, url).await
     }
 
     async fn send_http_put(
         &self,
         req: DapRequest<DaphneWorkerAuth>,
+        url: Url,
     ) -> std::result::Result<DapResponse, DapError> {
-        self.send_http(req, true).await
+        self.send_http(req, true, url).await
     }
 }
