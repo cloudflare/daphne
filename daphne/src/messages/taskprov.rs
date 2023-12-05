@@ -248,19 +248,19 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         self.time_precision.encode(bytes);
         self.max_batch_query_count.encode(bytes);
         self.min_batch_size.encode(bytes);
+        if *version == DapVersion::DraftLatest {
+            self.encode_query_type(bytes);
+        }
         match &self.var {
             QueryConfigVar::TimeInterval => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes);
                 taskprov_encode_u16_prefixed(*version, bytes, |_, _| ());
             }
             QueryConfigVar::FixedSize { max_batch_size } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes);
                 taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
                     max_batch_size.encode(inner);
                 });
             }
-            QueryConfigVar::NotImplemented { typ, param } => {
-                typ.encode(bytes);
+            QueryConfigVar::NotImplemented { typ: _, param } => {
                 taskprov_encode_u16_prefixed(*version, bytes, |_version, inner| {
                     inner.extend_from_slice(param);
                 });
@@ -276,12 +276,12 @@ impl ParameterizedDecode<DapVersion> for QueryConfig {
     ) -> Result<Self, CodecError> {
         let query_type = match version {
             DapVersion::DraftLatest => None,
-            DapVersion::Draft02 => Some(u8::decode(bytes)?),
+            DapVersion::Draft02 => Some(Ok(u8::decode(bytes)?)),
         };
         let time_precision = Duration::decode(bytes)?;
         let max_batch_query_count = u16::decode(bytes)?;
         let min_batch_size = u32::decode(bytes)?;
-        let query_type = query_type.unwrap_or(u8::decode(bytes)?);
+        let query_type = query_type.unwrap_or_else(|| u8::decode(bytes))?;
         let var = match (version, query_type) {
             (.., QUERY_TYPE_TIME_INTERVAL) => {
                 taskprov_decode_u16_prefixed::<()>(*version, bytes, |_version, inner| {
