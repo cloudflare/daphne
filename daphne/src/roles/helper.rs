@@ -68,7 +68,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     if aggregator.get_global_config().allow_taskprov {
         // draft02 compatibility: We also need to ensure that all of the reports include the task
         // config in the report extensions. (See draft-wang-ppm-dap-taskprov-02, Section 6.)
-        let first_metadata = if req.version == DapVersion::default() {
+        let first_metadata = if req.version == DapVersion::Draft02 {
             let using_taskprov = agg_job_init_req
                 .prep_inits
                 .iter()
