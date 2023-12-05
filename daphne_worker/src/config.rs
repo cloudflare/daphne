@@ -410,7 +410,7 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
     /// Metrics.
     pub(crate) metrics: DaphneWorkerMetrics,
 
-    /// Hostname parsed from the HTTP request URL. Set to "unspecified-daphne-worker-hsot" if the
+    /// Hostname parsed from the HTTP request URL. Set to "unspecified-host" if the
     /// hostname is not part of the URL.
     pub(crate) host: String,
 
@@ -431,7 +431,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         let host = req
             .url()?
             .host_str()
-            .unwrap_or("unspecified-daphne-worker-host")
+            .unwrap_or("unspecified-host")
             .to_string();
 
         let prometheus_registry = Registry::new_custom(
@@ -1160,7 +1160,6 @@ impl<'srv> DaphneWorker<'srv> {
             task_id,
             resource,
             payload,
-            url: req.url().map_err(|e| fatal_error!(err = ?e))?,
             media_type,
             sender_auth,
             taskprov: req
@@ -1183,8 +1182,9 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         req: DapRequest<DaphneWorkerAuth>,
         is_put: bool,
+        url: Url,
     ) -> std::result::Result<DapResponse, DapError> {
-        let (payload, url) = (req.payload, req.url);
+        let payload = req.payload;
 
         let mut headers = reqwest_wasm::header::HeaderMap::new();
 

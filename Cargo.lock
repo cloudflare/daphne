@@ -613,6 +613,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-subscriber",
+ "url",
  "worker",
 ]
 

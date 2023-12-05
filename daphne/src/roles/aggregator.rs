@@ -12,8 +12,7 @@ use crate::{
     error::DapAbort,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
-        decode_base64url, BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId,
-        TaskId, Time,
+        BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId, TaskId, Time,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -159,12 +158,17 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
 
     /// Access the audit log.
     fn audit_log(&self) -> &dyn AuditLog;
+
+    /// Return the hostname of the request URL. The value is "unspecified-host" if the URL does not
+    /// indicate a hostname.
+    fn host(&self) -> &str;
 }
 
 /// Handle request for the Aggregator's HPKE configuration.
 pub async fn handle_hpke_config_req<S, A>(
     aggregator: &A,
     req: &DapRequest<S>,
+    task_id: Option<TaskId>,
 ) -> Result<DapResponse, DapError>
 where
     S: Sync,
@@ -172,25 +176,11 @@ where
 {
     let metrics = aggregator.metrics();
 
-    // Parse the task ID from the query string, ensuring that it is the only query parameter.
-    let mut id = None;
-    for (k, v) in req.url.query_pairs() {
-        if k != "task_id" {
-            return Err(DapAbort::BadRequest("unexpected query parameter".into()).into());
-        }
-
-        let bytes = decode_base64url(v.as_bytes()).ok_or(DapAbort::BadRequest(
-            "failed to parse query parameter as URL-safe Base64".into(),
-        ))?;
-
-        id = Some(TaskId(bytes));
-    }
-
     let hpke_config = aggregator
-        .get_hpke_config_for(req.version, id.as_ref())
+        .get_hpke_config_for(req.version, task_id.as_ref())
         .await?;
 
-    if let Some(task_id) = id {
+    if let Some(task_id) = task_id {
         let task_config = aggregator
             .get_task_config_for(&task_id)
             .await?
