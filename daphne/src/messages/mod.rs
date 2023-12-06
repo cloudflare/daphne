@@ -34,6 +34,16 @@ const FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
 // Known extension types.
 const EXTENSION_TASKPROV: u16 = 0xff00;
 
+pub trait Base64Encode {
+    /// Encode to URL-safe base64.
+    fn to_base64url(&self) -> String;
+
+    /// Decode from URL-safe, base64.
+    fn try_from_base64url<T: AsRef<str>>(id_base64url: T) -> Option<Self>
+    where
+        Self: Sized;
+}
+
 // Serde doesn't support derivations from const generics properly, so we have to use a macro.
 macro_rules! id_struct {
     ($sname:ident, $len:expr, $doc:expr) => {
@@ -45,18 +55,20 @@ macro_rules! id_struct {
         pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
 
         impl $sname {
-            /// Return the URL-safe, base64 encoding of the ID.
-            pub fn to_base64url(&self) -> String {
-                encode_base64url(self.0)
-            }
-
             /// Return the ID encoded as a hex string.
             pub fn to_hex(&self) -> String {
                 hex::encode(self.0)
             }
+        }
+
+        impl $crate::messages::Base64Encode for $sname {
+            /// Return the URL-safe, base64 encoding of the ID.
+            fn to_base64url(&self) -> String {
+                encode_base64url(self.0)
+            }
 
             /// Decode from URL-safe, base64.
-            pub fn try_from_base64url<T: AsRef<str>>(id_base64url: T) -> Option<Self> {
+            fn try_from_base64url<T: AsRef<str>>(id_base64url: T) -> Option<Self> {
                 Some($sname(decode_base64url(id_base64url.as_ref())?))
             }
         }

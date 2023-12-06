@@ -10,9 +10,9 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchId,
-        BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext, Interval,
-        PartialBatchSelector, Report, ReportId, TaskId, Time, TransitionFailure,
+        AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, Base64Encode,
+        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
+        Interval, PartialBatchSelector, Report, ReportId, TaskId, Time, TransitionFailure,
     },
     metrics::DaphneMetrics,
     roles::{

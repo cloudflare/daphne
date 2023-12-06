@@ -83,7 +83,7 @@ use crate::{
 use constants::DapMediaType;
 pub use error::DapError;
 use hpke::{HpkeConfig, HpkeKemId};
-use messages::encode_base64url;
+use messages::{encode_base64url, Base64Encode};
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,

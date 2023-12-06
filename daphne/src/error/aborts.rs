@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{BatchSelector, TaskId, TransitionFailure},
+    messages::{Base64Encode, BatchSelector, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;

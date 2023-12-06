@@ -4,7 +4,7 @@
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
-    messages::{CollectionJobId, TaskId},
+    messages::{Base64Encode, CollectionJobId, TaskId},
     roles::{leader, DapLeader},
     DapCollectJob, DapRequest, DapResponse, DapVersion,
 };

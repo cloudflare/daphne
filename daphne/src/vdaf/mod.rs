@@ -14,9 +14,9 @@ use crate::{
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
         encode_u32_bytes, AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp,
-        BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector, PlaintextInputShare,
-        PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId, Time, Transition,
-        TransitionFailure, TransitionVar,
+        Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
+        PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
+        Time, Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,

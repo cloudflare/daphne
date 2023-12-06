@@ -7,7 +7,7 @@ use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
-    messages::{BatchSelector, Collection, CollectionReq, Query, TaskId},
+    messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
     DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};

@@ -4,7 +4,7 @@
 use daphne::{
     error::DapAbort,
     hpke::HpkeReceiverConfig,
-    messages::{Duration, TaskId, Time},
+    messages::{Base64Encode, Duration, TaskId, Time},
     roles::leader,
 };
 use serde::Deserialize;

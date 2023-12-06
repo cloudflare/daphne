@@ -12,7 +12,7 @@ use crate::{
     initialize_tracing, int_err,
 };
 use daphne::{
-    messages::{Collection, CollectionJobId, CollectionReq, TaskId},
+    messages::{Base64Encode, Collection, CollectionJobId, CollectionReq, TaskId},
     DapCollectJob, DapVersion,
 };
 use prio::codec::ParameterizedEncode;
