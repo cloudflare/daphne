@@ -138,7 +138,7 @@ impl std::fmt::Display for DapVersion {
 }
 
 /// Global DAP parameters common across tasks.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapGlobalConfig {
     /// Maximum interval duration permitted in CollectReq.

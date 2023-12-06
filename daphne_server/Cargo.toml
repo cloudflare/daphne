@@ -21,6 +21,9 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+clap = { version = "4.4.11", features = ["derive"] }
+config = "0.13.4"
 daphne = { path = "../daphne", features = ["send-traits", "test-utils"] }
 rand.workspace = true
 tower = "0.4.13"
+tracing-subscriber.workspace = true
