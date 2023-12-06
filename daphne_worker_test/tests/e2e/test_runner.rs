@@ -112,8 +112,6 @@ impl TestRunner {
 
         // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
         let global_config = DapGlobalConfig {
-            report_storage_epoch_duration: 604800,
-            report_storage_max_future_time_skew: 300,
             max_batch_duration: 360000,
             min_batch_interval_start: 259200,
             max_batch_interval_end: 259200,
@@ -277,9 +275,10 @@ impl TestRunner {
     }
 
     pub fn report_interval(&self, interval: &Interval) -> Range<u64> {
+        const REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: u64 = 300;
         // This is a portion of the interval which is guaranteed to be a valid report time
         // provided that the interval start time is valid.
-        interval.start..interval.start + self.global_config.report_storage_max_future_time_skew
+        interval.start..interval.start + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
     }
 
     pub async fn get_hpke_configs(

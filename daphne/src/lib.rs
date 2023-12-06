@@ -141,17 +141,6 @@ impl std::fmt::Display for DapVersion {
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapGlobalConfig {
-    /// The report storage epoch duration. This value is used to control the period of time for
-    /// which an Aggregator guarantees storage of reports and/or report metadata.
-    ///
-    /// A report will be accepted if its timestamp is no more than the specified number of seconds
-    /// before the current time.
-    pub report_storage_epoch_duration: Duration,
-
-    /// The report storage maximum future time skew. Reports with timestamps greater than the
-    /// current time plus this value will be rejected.
-    pub report_storage_max_future_time_skew: Duration,
-
     /// Maximum interval duration permitted in CollectReq.
     /// Prevents Collectors from requesting wide range or reports.
     pub max_batch_duration: Duration,

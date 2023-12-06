@@ -27,9 +27,9 @@ DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
 DAP_COLLECTION_JOB_ID_KEY = "12da249b0e3b1a9b5936d6ff6cdd2fa09964e2e11f5450e04eef11dc5e64daf1" # SECRET
 DAP_REPORT_SHARD_KEY = "b6e5736df46d9dd7dc087cad1cd4f03c1ff399160a8eb30c5e7841aa696e737f" # SECRET
 DAP_REPORT_SHARD_COUNT = "2"
+DAP_REPORT_STORAGE_EPOCH_DURATION = "604800"
+DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
 DAP_GLOBAL_CONFIG = """{
-     "report_storage_epoch_duration": 604800,
-     "report_storage_max_future_time_skew": 300,
      "max_batch_duration": 360000,
      "min_batch_interval_start": 259200,
      "max_batch_interval_end": 259200,
@@ -105,9 +105,9 @@ DAP_ISSUE73_DISABLE_AGG_JOB_QUEUE_GARBAGE_COLLECTION = "true"
 DAP_REPORT_SHARD_KEY = "896eccc5e89474dd656d490408226fdd4ce5b34d2d1349147c6fcbb1741ddb2d" # SECRET
 DAP_REPORT_SHARD_COUNT = "2"
 DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
+DAP_REPORT_STORAGE_EPOCH_DURATION = "604800"
+DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
 DAP_GLOBAL_CONFIG = """{
-  "report_storage_epoch_duration": 604800,
-  "report_storage_max_future_time_skew": 300,
   "max_batch_duration": 360000,
   "min_batch_interval_start": 259200,
   "max_batch_interval_end": 259200,
