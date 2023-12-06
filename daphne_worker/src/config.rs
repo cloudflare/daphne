@@ -123,6 +123,17 @@ pub(crate) struct DaphneWorkerConfig {
 
     /// Metrics push configuration.
     metrics_push_config: Option<MetricsPushConfig>,
+
+    /// The report storage epoch duration. This value is used to control the period of time for
+    /// which an Aggregator guarantees storage of reports and/or report metadata.
+    ///
+    /// A report will be accepted if its timestamp is no more than the specified number of seconds
+    /// before the current time.
+    pub report_storage_epoch_duration: daphne::messages::Duration,
+
+    /// The report storage maximum future time skew. Reports with timestamps greater than the
+    /// current time plus this value will be rejected.
+    pub report_storage_max_future_time_skew: daphne::messages::Duration,
 }
 
 impl DaphneWorkerConfig {
@@ -154,6 +165,26 @@ impl DaphneWorkerConfig {
             env.var("DAP_GLOBAL_CONFIG")?.to_string().as_ref(),
         )
         .map_err(|e| worker::Error::RustError(format!("Failed to parse DAP_GLOBAL_CONFIG: {e}")))?;
+
+        let report_storage_epoch_duration = env
+            .var("DAP_REPORT_STORAGE_EPOCH_DURATION")?
+            .to_string()
+            .parse()
+            .map_err(|e| {
+                worker::Error::RustError(format!(
+                    "failed to parse DAP_REPORT_STORAGE_EPOCH_DURATION: {e:?}"
+                ))
+            })?;
+
+        let report_storage_max_future_time_skew = env
+            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
+            .to_string()
+            .parse()
+            .map_err(|e| {
+                worker::Error::RustError(format!(
+                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
+                ))
+            })?;
 
         let default_version: DapVersion = env
             .var("DAP_DEFAULT_VERSION")?
@@ -317,6 +348,8 @@ impl DaphneWorkerConfig {
             default_version,
             helper_state_store_garbage_collect_after_secs,
             metrics_push_config,
+            report_storage_epoch_duration,
+            report_storage_max_future_time_skew,
         })
     }
 
@@ -335,7 +368,7 @@ impl DaphneWorkerConfig {
                 .try_into()
                 .unwrap(),
         ) % self.report_shard_count;
-        let epoch = report_time - (report_time % self.global.report_storage_epoch_duration);
+        let epoch = report_time - (report_time % self.report_storage_epoch_duration);
         durable_name_report_store(task_config.version, task_id_hex, epoch, shard)
     }
 }
@@ -1170,11 +1203,11 @@ impl<'srv> DaphneWorker<'srv> {
     }
 
     pub(crate) fn least_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_sub(self.config().global.report_storage_epoch_duration)
+        now.saturating_sub(self.config().report_storage_epoch_duration)
     }
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_add(self.config().global.report_storage_max_future_time_skew)
+        now.saturating_add(self.config().report_storage_max_future_time_skew)
     }
 
     // Generic HTTP POST/PUT
