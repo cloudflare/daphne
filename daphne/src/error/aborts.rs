@@ -143,7 +143,7 @@ impl DapAbort {
 
         ProblemDetails {
             typ,
-            title,
+            title: title.to_string(),
             task_id: task_id.map(|id| id.to_base64url()),
             agg_job_id: agg_job_id_base64url,
             instance: None, // TODO interop: Implement as specified.
@@ -223,7 +223,7 @@ impl DapAbort {
         })
     }
 
-    fn title_and_type(&self) -> (String, Option<String>) {
+    fn title_and_type(&self) -> (&'static str, Option<String>) {
         let (title, dap_abort_type) = match self {
             Self::BatchInvalid { .. } => ("Batch boundary check failed", Some(self.to_string())),
             Self::BatchMismatch { .. } => (
@@ -267,7 +267,7 @@ impl DapAbort {
         };
 
         (
-            title.to_string(),
+            title,
             dap_abort_type.map(|t| format!("urn:ietf:params:ppm:dap:error:{t}")),
         )
     }
