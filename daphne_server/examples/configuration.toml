@@ -1,0 +1,9 @@
+port = 3000
+#role = "helper"
+
+[global]
+max_batch_duration = 360000
+min_batch_interval_start = 259200
+max_batch_interval_end = 259200
+supported_hpke_kems = ["x25519_hkdf_sha256"]
+allow_taskprov = true

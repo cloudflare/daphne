@@ -21,6 +21,14 @@
 
 use daphne::{DapError, DapGlobalConfig};
 use daphne_service_utils::metrics;
+// there is a bug in cargo where if a dependency is only used in tests/examples but not in the
+// library you get unused_crate_dependencies warnings when compiling the them.
+#[cfg(test)]
+mod silence_unused_crate_warning {
+    use clap as _;
+    use config as _;
+    use tracing_subscriber as _;
+}
 use url::Url;
 
 mod roles;
