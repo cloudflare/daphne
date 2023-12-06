@@ -1080,7 +1080,7 @@ pub enum DapSender {
 }
 
 /// Types of resources associated with DAP tasks.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum DapResource {
     /// Aggregation job resource.
     AggregationJob(AggregationJobId),
