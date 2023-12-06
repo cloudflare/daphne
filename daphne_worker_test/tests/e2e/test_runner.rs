@@ -14,7 +14,7 @@ use daphne::{
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,
 };
-use daphne_worker::DaphneWorkerReportSelector;
+use daphne_service_utils::DaphneServiceReportSelector;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
@@ -601,7 +601,7 @@ impl TestRunner {
     pub async fn internal_process(
         &self,
         client: &reqwest::Client,
-        report_sel: &DaphneWorkerReportSelector,
+        report_sel: &DaphneServiceReportSelector,
     ) -> DapLeaderProcessTelemetry {
         // Replace path "/v09" with "/internal/process".
         let mut url = self.leader_url.clone();

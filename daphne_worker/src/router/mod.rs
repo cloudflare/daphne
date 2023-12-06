@@ -6,51 +6,17 @@ mod helper;
 mod leader;
 pub mod test_routes;
 
-use std::str::FromStr;
-
 use daphne::DapResponse;
-use serde::Deserialize;
+use daphne_service_utils::DapRole;
 use worker::{Error, Headers, Response, Result, Router};
 
 use crate::{config::DaphneWorkerRequestState, DEFAULT_RESPONSE_HTML};
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Leader,
-    Helper,
-}
-
-impl Role {
-    pub fn is_leader(self) -> bool {
-        self == Self::Leader
-    }
-
-    #[allow(dead_code)]
-    pub fn is_helper(self) -> bool {
-        self == Self::Helper
-    }
-}
-
-impl FromStr for Role {
-    type Err = worker::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "leader" => Ok(Self::Leader),
-            "helper" => Ok(Self::Helper),
-            role => Err(worker::Error::RustError(format!(
-                "Unhandled DAP role: {role}"
-            ))),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct RouterOptions {
     pub enable_default_response: bool,
     pub enable_internal_test: bool,
-    pub role: Role,
+    pub role: DapRole,
 }
 
 pub(super) type DapRouter<'s> = Router<'s, &'s DaphneWorkerRequestState<'s>>;
@@ -64,8 +30,8 @@ pub(super) fn create_router<'s>(
     let router = aggregator::add_aggregator_routes(router);
 
     let router = match opts.role {
-        Role::Leader => leader::add_leader_routes(router),
-        Role::Helper => helper::add_helper_routes(router),
+        DapRole::Leader => leader::add_leader_routes(router),
+        DapRole::Helper => helper::add_helper_routes(router),
     };
 
     let router = if opts.enable_internal_test {

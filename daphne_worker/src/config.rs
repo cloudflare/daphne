@@ -6,7 +6,6 @@
 //! Daphne-Worker configuration.
 
 use crate::{
-    auth::{DaphneWorkerAuth, DaphneWorkerAuthMethod, TlsClientAuth},
     durable::{
         durable_name_report_store, durable_name_task,
         leader_batch_queue::{LeaderBatchQueueResult, DURABLE_LEADER_BATCH_QUEUE_CURRENT},
@@ -15,11 +14,6 @@ use crate::{
     },
     error_reporting::ErrorReporter,
     int_err,
-    metrics::DaphneWorkerMetrics,
-    router::{
-        test_routes::{InternalTestAddTask, InternalTestEndpointForTask},
-        Role,
-    },
 };
 use daphne::{
     audit_log::AuditLog,
@@ -34,6 +28,12 @@ use daphne::{
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,
+};
+use daphne_service_utils::{
+    auth::{DaphneAuth, DaphneWorkerAuthMethod, TlsClientAuth},
+    metrics::DaphneServiceMetrics,
+    test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
+    DapRole,
 };
 use futures::TryFutureExt;
 use prio::codec::Decode;
@@ -442,7 +442,7 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
     pub(crate) prometheus_registry: Registry,
 
     /// Metrics.
-    pub(crate) metrics: DaphneWorkerMetrics,
+    pub(crate) metrics: DaphneServiceMetrics,
 
     /// Hostname parsed from the HTTP request URL. Set to "unspecified-host" if the
     /// hostname is not part of the URL.
@@ -476,7 +476,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             ])),
         )
         .unwrap();
-        let metrics = DaphneWorkerMetrics::register(&prometheus_registry)
+        let metrics = DaphneServiceMetrics::register(&prometheus_registry)
             .map_err(|e| worker::Error::RustError(format!("failed to register metrics: {e}")))?;
 
         crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
@@ -909,8 +909,8 @@ impl<'srv> DaphneWorker<'srv> {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response, worker::Error> {
-        if self.config().is_leader && !matches!(cmd.role, Role::Leader)
-            || !self.config().is_leader && !matches!(cmd.role, Role::Helper)
+        if self.config().is_leader && !matches!(cmd.role, DapRole::Leader)
+            || !self.config().is_leader && !matches!(cmd.role, DapRole::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -942,8 +942,7 @@ impl<'srv> DaphneWorker<'srv> {
         cmd: InternalTestAddTask,
     ) -> Result<(), worker::Error> {
         // Task ID.
-        let task_id = TaskId::try_from_base64url(&cmd.task_id)
-            .ok_or_else(|| int_err("task ID is not valid URL-safe base64"))?;
+        let task_id = cmd.task_id;
 
         // VDAF config.
         let vdaf = match (
@@ -1000,7 +999,7 @@ impl<'srv> DaphneWorker<'srv> {
 
         // Collector authentication token.
         match (cmd.role, cmd.collector_authentication_token) {
-            (Role::Leader, Some(token_string)) => {
+            (DapRole::Leader, Some(token_string)) => {
                 let token = BearerToken::from(token_string);
                 if self
                     .kv_set_if_not_exists(KV_KEY_PREFIX_BEARER_TOKEN_COLLECTOR, &task_id, token)
@@ -1013,13 +1012,13 @@ impl<'srv> DaphneWorker<'srv> {
                     )));
                 }
             }
-            (Role::Leader, None) => {
+            (DapRole::Leader, None) => {
                 return Err(int_err(
                     "command failed: missing collector authentication token",
                 ))
             }
-            (Role::Helper, None) => (),
-            (Role::Helper, Some(..)) => {
+            (DapRole::Helper, None) => (),
+            (DapRole::Helper, Some(..)) => {
                 return Err(int_err(
                     "command failed: unexpected collector authentication token",
                 ));
@@ -1112,11 +1111,11 @@ impl<'srv> DaphneWorker<'srv> {
         &self,
         mut req: Request,
         ctx: &RouteContext<D>,
-    ) -> Result<DapRequest<DaphneWorkerAuth>, DapError> {
+    ) -> Result<DapRequest<DaphneAuth>, DapError> {
         let version: DapVersion = DaphneWorker::parse_version_param(ctx)?;
 
         // Determine the authorization method used by the sender.
-        let sender_auth = Some(DaphneWorkerAuth {
+        let sender_auth = Some(DaphneAuth {
             bearer_token: req
                 .headers()
                 .get("DAP-Auth-Token")
@@ -1130,7 +1129,16 @@ impl<'srv> DaphneWorker<'srv> {
                 .cf()
                 .tls_client_auth()
                 .filter(|auth| auth.cert_presented() == "1")
-                .map(TlsClientAuth::from),
+                .map(|cert| {
+                    let verified = cert.cert_verified();
+                    let issuer = cert.cert_issuer_dn_rfc2253();
+                    let subject = cert.cert_subject_dn_rfc2253();
+                    TlsClientAuth {
+                        verified,
+                        issuer,
+                        subject,
+                    }
+                }),
         });
 
         let content_type = req
@@ -1214,7 +1222,7 @@ impl<'srv> DaphneWorker<'srv> {
     // Generic HTTP POST/PUT
     pub(crate) async fn send_http(
         &self,
-        req: DapRequest<DaphneWorkerAuth>,
+        req: DapRequest<DaphneAuth>,
         is_put: bool,
         url: Url,
     ) -> std::result::Result<DapResponse, DapError> {

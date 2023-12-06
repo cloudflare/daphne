@@ -1,0 +1,16 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
+[package]
+name = "daphne_service_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+daphne = { path = "../daphne", default-features = false }
+serde.workspace = true
+prometheus.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

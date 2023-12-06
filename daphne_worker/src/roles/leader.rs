@@ -4,7 +4,6 @@
 //! Implementation of the leader side of the protocol
 
 use crate::{
-    auth::DaphneWorkerAuth,
     config::DaphneWorker,
     durable::{
         durable_name_queue, durable_name_task,
@@ -24,7 +23,6 @@ use crate::{
         BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_LEADER_BATCH_QUEUE,
         BINDING_DAP_LEADER_COL_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
     },
-    DaphneWorkerReportSelector,
 };
 use async_trait::async_trait;
 use daphne::{
@@ -39,21 +37,22 @@ use daphne::{
     roles::{DapAuthorizedSender, DapLeader},
     DapCollectJob, DapError, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
 };
+use daphne_service_utils::{auth::DaphneAuth, DaphneServiceReportSelector};
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use std::collections::HashMap;
 use tracing::debug;
 use url::Url;
 
 #[async_trait(?Send)]
-impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
+impl DapAuthorizedSender<DaphneAuth> for DaphneWorker<'_> {
     async fn authorize(
         &self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         media_type: &DapMediaType,
         _payload: &[u8],
-    ) -> std::result::Result<DaphneWorkerAuth, DapError> {
-        Ok(DaphneWorkerAuth {
+    ) -> std::result::Result<DaphneAuth, DapError> {
+        Ok(DaphneAuth {
             bearer_token: Some(
                 self.authorize_with_bearer_token(task_id, task_config, media_type)
                     .await?
@@ -68,8 +67,8 @@ impl DapAuthorizedSender<DaphneWorkerAuth> for DaphneWorker<'_> {
 }
 
 #[async_trait(?Send)]
-impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
-    type ReportSelector = DaphneWorkerReportSelector;
+impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
+    type ReportSelector = DaphneServiceReportSelector;
 
     async fn put_report(
         &self,
@@ -115,7 +114,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     async fn get_reports(
         &self,
-        report_sel: &DaphneWorkerReportSelector,
+        report_sel: &Self::ReportSelector,
     ) -> std::result::Result<HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>>, DapError>
     {
         let durable = self.durable();
@@ -338,7 +337,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     async fn send_http_post(
         &self,
-        req: DapRequest<DaphneWorkerAuth>,
+        req: DapRequest<DaphneAuth>,
         url: Url,
     ) -> std::result::Result<DapResponse, DapError> {
         self.send_http(req, false, url).await
@@ -346,7 +345,7 @@ impl<'srv> DapLeader<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     async fn send_http_put(
         &self,
-        req: DapRequest<DaphneWorkerAuth>,
+        req: DapRequest<DaphneAuth>,
         url: Url,
     ) -> std::result::Result<DapResponse, DapError> {
         self.send_http(req, true, url).await

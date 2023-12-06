@@ -98,7 +98,7 @@
 //!
 //! Aggregation jobs are driven by the Leader's main processing loop (see
 //! [`DapLeader::process()`](daphne::roles::DapLeader::process)). The report selector for
-//! Daphne-Worker, [`DaphneWorkerReportSelector`], indicates the number of jobs to fetch at once
+//! Daphne-Worker, [`DaphneServiceReportSelector`], indicates the number of jobs to fetch at once
 //! (`max_agg_jobs`) and the number of reports to drain per job (`max_reports`).
 //!
 //! Jobs are handled roughly in order of creation (oldest jobs are handled first). The time at
@@ -170,11 +170,9 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 
-mod auth;
 mod config;
 mod durable;
 mod error_reporting;
-mod metrics;
 mod roles;
 mod router;
 mod tracing_utils;
@@ -183,24 +181,13 @@ use crate::config::{DaphneWorkerIsolateState, DaphneWorkerRequestState};
 pub use crate::tracing_utils::initialize_tracing;
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
-    DapError, DapRequest,
+    DapRequest,
 };
 pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
 use std::str;
 use tracing::{debug, error};
 use worker::{Date, Env, Error, Request, Response, Result};
-
-/// Parameters used by the Leader to select a set of reports for aggregation.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DaphneWorkerReportSelector {
-    /// Maximum number of aggregation jobs to process at once.
-    pub max_agg_jobs: u64,
-
-    /// Maximum number of reports to drain for each aggregation job.
-    pub max_reports: u64,
-}
 
 /// HTTP request handler for Daphne-Worker.
 pub struct DaphneWorkerRouter<'srv> {
@@ -276,7 +263,13 @@ impl DaphneWorkerRouter<'_> {
             router::RouterOptions {
                 enable_internal_test: self.enable_internal_test,
                 enable_default_response: self.enable_default_response,
-                role: env.var("DAP_AGGREGATOR_ROLE")?.to_string().parse()?,
+                role: env
+                    .var("DAP_AGGREGATOR_ROLE")?
+                    .to_string()
+                    .parse()
+                    .map_err(|role| {
+                        worker::Error::RustError(format!("Unhandled DAP role: {role}"))
+                    })?,
             },
         );
 

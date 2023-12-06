@@ -34,7 +34,8 @@ worker.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 assert_matches.workspace = true
-daphne = { path = "../daphne" }
+daphne = { path = "../daphne", features = ["test-utils"] }
+daphne_service_utils = { path = "../daphne_service_utils" }
 hex.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true

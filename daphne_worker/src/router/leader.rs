@@ -8,11 +8,12 @@ use daphne::{
     roles::{leader, DapLeader},
     DapCollectJob, DapRequest, DapResponse, DapVersion,
 };
+use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::ParameterizedEncode;
 use tracing::{info_span, Instrument};
 use worker::{Headers, Response, Result};
 
-use crate::{auth::DaphneWorkerAuth, config::DaphneWorker, info_span_from_dap_request};
+use crate::{config::DaphneWorker, info_span_from_dap_request};
 
 use super::{dap_response_to_worker, DapRouter};
 
@@ -188,7 +189,7 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
 }
 
 async fn put_report_into_task(
-    req: DapRequest<DaphneWorkerAuth>,
+    req: DapRequest<DaphneAuth>,
     daph: DaphneWorker<'_>,
 ) -> Result<Response> {
     let span = info_span_from_dap_request!("upload", req);

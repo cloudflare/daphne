@@ -4,7 +4,6 @@
 //! Implementation of the helper side of the protocol
 
 use crate::{
-    auth::DaphneWorkerAuth,
     config::DaphneWorker,
     durable::{
         helper_state_store::{
@@ -19,10 +18,11 @@ use daphne::{
     error::DapAbort, fatal_error, messages::TaskId, roles::DapHelper, DapAggregationJobState,
     DapError, MetaAggregationJobId,
 };
+use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::Encode;
 
 #[async_trait(?Send)]
-impl<'srv> DapHelper<DaphneWorkerAuth> for DaphneWorker<'srv> {
+impl<'srv> DapHelper<DaphneAuth> for DaphneWorker<'srv> {
     async fn put_helper_state_if_not_exists<Id>(
         &self,
         task_id: &TaskId,

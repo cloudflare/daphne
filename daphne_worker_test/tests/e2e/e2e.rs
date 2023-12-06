@@ -17,7 +17,7 @@ use daphne::{
     DapAggregateResult, DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters,
     DapVersion,
 };
-use daphne_worker::DaphneWorkerReportSelector;
+use daphne_service_utils::DaphneServiceReportSelector;
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
@@ -457,7 +457,7 @@ async fn internal_leader_process(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
-    let report_sel = DaphneWorkerReportSelector {
+    let report_sel = DaphneServiceReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: t.task_config.min_batch_size,
     };
@@ -543,7 +543,7 @@ async fn leader_process_min_agg_rate(version: DapVersion) {
     }
 
     // One bucket and one report/bucket equal an aggregation rate of one report.
-    let report_sel = DaphneWorkerReportSelector {
+    let report_sel = DaphneServiceReportSelector {
         max_agg_jobs: 1,
         max_reports: 1,
     };
@@ -617,7 +617,7 @@ async fn leader_collect_ok(version: DapVersion) {
     let agg_telem = t
         .internal_process(
             &client,
-            &DaphneWorkerReportSelector {
+            &DaphneServiceReportSelector {
                 max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
@@ -738,7 +738,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
         .await;
     }
 
-    let report_sel = DaphneWorkerReportSelector {
+    let report_sel = DaphneServiceReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: 100,
     };
@@ -820,7 +820,7 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let agg_telem = t
         .internal_process(
             &client,
-            &DaphneWorkerReportSelector {
+            &DaphneServiceReportSelector {
                 max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
@@ -1015,7 +1015,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
     let agg_telem = t
         .internal_process(
             &client,
-            &DaphneWorkerReportSelector {
+            &DaphneServiceReportSelector {
                 max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },
@@ -1054,7 +1054,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         t.leader_post_expect_abort(
             &client,
             Some(&t.collector_bearer_token),
-            &path,
+            path,
             DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
@@ -1065,7 +1065,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         t.leader_put_expect_abort(
             &client,
             Some(&t.collector_bearer_token),
-            &path,
+            path,
             DapMediaType::CollectReq,
             collect_req.get_encoded_with_param(&t.version),
             400,
@@ -1085,7 +1085,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
     }
     let t = TestRunner::fixed_size(version).await;
     let path = t.upload_path();
-    let report_sel = DaphneWorkerReportSelector {
+    let report_sel = DaphneServiceReportSelector {
         max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
         max_reports: 100,
     };
@@ -1365,7 +1365,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let agg_telem = t
         .internal_process(
             &client,
-            &DaphneWorkerReportSelector {
+            &DaphneServiceReportSelector {
                 max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
                 max_reports: 100,
             },

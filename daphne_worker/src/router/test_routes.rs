@@ -4,23 +4,26 @@
 use daphne::{
     error::DapAbort,
     hpke::HpkeReceiverConfig,
-    messages::{Base64Encode, Duration, TaskId, Time},
+    messages::{Base64Encode, TaskId},
     roles::leader,
 };
-use serde::Deserialize;
+use daphne_service_utils::{
+    test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
+    DaphneServiceReportSelector,
+};
 use tracing::{debug, info_span, Instrument};
-use worker::{Response, Url};
+use worker::Response;
 
-use crate::{config::DaphneWorker, DaphneWorkerReportSelector};
+use crate::config::DaphneWorker;
 
-use super::{DapRouter, Role};
+use super::{DapRole, DapRouter};
 
-pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> DapRouter<'_> {
+pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: DapRole) -> DapRouter<'_> {
     let router = if role.is_leader() {
         router
             .post_async("/internal/process", |mut req, ctx| async move {
                 let daph = ctx.data.handler(&ctx.env);
-                let report_sel: DaphneWorkerReportSelector = req.json().await?;
+                let report_sel: DaphneServiceReportSelector = req.json().await?;
                 match leader::process(&daph, &report_sel, &daph.state.host)
                     .instrument(info_span!("process"))
                     .await
@@ -138,43 +141,4 @@ pub(super) fn add_internal_test_routes(router: DapRouter<'_>, role: Role) -> Dap
                 }))
             },
         )
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct InternalTestEndpointForTask {
-    pub role: super::Role,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct InternalTestVdaf {
-    #[serde(rename = "type")]
-    pub typ: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bits: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub length: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chunk_length: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct InternalTestAddTask {
-    pub task_id: String, // base64url
-    pub leader: Url,
-    pub helper: Url,
-    pub vdaf: InternalTestVdaf,
-    pub leader_authentication_token: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub collector_authentication_token: Option<String>,
-    pub role: super::Role,
-    pub vdaf_verify_key: String, // base64url
-    pub query_type: u8,
-    pub min_batch_size: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_batch_size: Option<u64>,
-    pub time_precision: Duration,
-    pub collector_hpke_config: String, // base64url
-    pub task_expiration: Time,
 }

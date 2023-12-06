@@ -4,7 +4,6 @@
 //! Implementation of common requirments for both helpers and leaders
 
 use crate::{
-    auth::DaphneWorkerAuth,
     config::{DapTaskConfigKvPair, DaphneWorker},
     durable::{
         aggregate_store::{
@@ -29,6 +28,7 @@ use daphne::{
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapRequest,
     DapSender, DapTaskConfig,
 };
+use daphne_service_utils::auth::DaphneAuth;
 use futures::{future::try_join_all, StreamExt};
 
 #[async_trait(?Send)]
@@ -74,14 +74,14 @@ impl DapReportInitializer for DaphneWorker<'_> {
 }
 
 #[async_trait(?Send)]
-impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
+impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
     type WrappedDapTaskConfig<'a> = DapTaskConfigKvPair<'a>
         where Self: 'a;
 
     async fn unauthorized_reason(
         &self,
         task_config: &DapTaskConfig,
-        req: &DapRequest<DaphneWorkerAuth>,
+        req: &DapRequest<DaphneAuth>,
     ) -> std::result::Result<Option<String>, DapError> {
         let mut authorized = false;
 
@@ -184,7 +184,7 @@ impl<'srv> DapAggregator<DaphneWorkerAuth> for DaphneWorker<'srv> {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequest<DaphneWorkerAuth>,
+        req: &DapRequest<DaphneAuth>,
         task_config: DapTaskConfig,
     ) -> std::result::Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
