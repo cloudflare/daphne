@@ -3,23 +3,22 @@
 
 //! Daphne-Worker metrics.
 
-use crate::DapError;
-use daphne::{fatal_error, metrics::DaphneMetrics};
+use daphne::{fatal_error, metrics::DaphneMetrics, DapError};
 use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
-pub struct DaphneWorkerMetrics {
+pub struct DaphneServiceMetrics {
     /// Daphne metrics.
-    pub(crate) daphne: DaphneMetrics,
+    pub daphne: DaphneMetrics,
 
     /// HTTP response status.
-    pub(crate) http_status_code_counter: IntCounterVec,
+    pub http_status_code_counter: IntCounterVec,
 
     /// DAP aborts.
-    pub(crate) dap_abort_counter: IntCounterVec,
+    pub dap_abort_counter: IntCounterVec,
 }
 
-impl DaphneWorkerMetrics {
-    pub(crate) fn register(registry: &Registry) -> Result<Self, DapError> {
+impl DaphneServiceMetrics {
+    pub fn register(registry: &Registry) -> Result<Self, DapError> {
         let http_status_code_counter = register_int_counter_vec_with_registry!(
             "http_status_code",
             "HTTP response status code.",

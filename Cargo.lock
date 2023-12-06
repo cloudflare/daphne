@@ -532,6 +532,7 @@ dependencies = [
  "cfg-if",
  "console_error_panic_hook",
  "daphne",
+ "daphne_service_utils",
  "daphne_worker",
  "getrandom",
  "hex",
@@ -551,6 +552,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "daphne_service_utils"
+version = "0.1.0"
+dependencies = [
+ "daphne",
+ "prometheus",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "daphne_worker"
 version = "0.3.0"
 dependencies = [
@@ -559,6 +571,7 @@ dependencies = [
  "bincode",
  "chrono",
  "daphne",
+ "daphne_service_utils",
  "futures",
  "hex",
  "once_cell",

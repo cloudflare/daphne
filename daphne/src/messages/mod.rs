@@ -114,6 +114,58 @@ id_struct!(Draft02AggregationJobId, 32, "Aggregation Job ID");
 id_struct!(ReportId, 16, "Report ID (draft02)");
 id_struct!(TaskId, 32, "Task ID");
 
+/// serde module for base64url-encoded serialization of ids
+pub mod base64url {
+    use serde::{de, Deserialize, Deserializer};
+
+    use super::Base64Encode;
+
+    pub fn deserialize<'de, I, D>(deserializer: D) -> Result<I, D::Error>
+    where
+        D: de::Deserializer<'de>,
+        D::Error: de::Error,
+        I: Base64Encode,
+    {
+        struct Visitor<I>(std::marker::PhantomData<I>);
+        impl<'de, I> de::Visitor<'de> for Visitor<I>
+        where
+            I: Base64Encode,
+        {
+            type Value = I;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a base64 encoded value")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                I::try_from_base64url(v).ok_or_else(|| E::custom("invalid base64"))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                I::try_from_base64url(v).ok_or_else(|| E::custom("invalid base64"))
+            }
+        }
+        deserializer.deserialize_str(Visitor::<I>(std::marker::PhantomData))
+    }
+
+    pub fn deserialize_opt<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        T: Base64Encode,
+        D: Deserializer<'de>,
+        D::Error: de::Error,
+    {
+        let opt: Option<&str> = Option::deserialize(deserializer)?;
+        opt.map(|s| {
+            T::try_from_base64url(s).ok_or_else(|| <D::Error as de::Error>::custom("invalid"))
+        })
+        .transpose()
+    }
+}
+
 impl TaskId {
     /// draft02 compatibility: Convert the task ID to the field that would be added to the DAP
     /// request for the given version. In draft02, the task ID is generally included in the HTTP
