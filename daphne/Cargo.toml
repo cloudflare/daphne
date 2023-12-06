@@ -39,6 +39,7 @@ url.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+deepsize.workspace = true
 futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
