@@ -139,17 +139,17 @@ macro_rules! fatal_error {
 macro_rules! __fatal_error_impl {
     (@@ err = ?$e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
-        ::tracing::error!(?error, $($($rest)*)*);
+        $crate::error::tracing::error!(?error, $($($rest)*)*);
         $crate::__fatal_error_impl!(@@@ error)
     }};
     (@@ err = %$e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
-        ::tracing::error!(%error, $($($rest)*)*);
+        $crate::error::tracing::error!(%error, $($($rest)*)*);
         $crate::__fatal_error_impl!(@@@ error)
     }};
     (@@ err = $e:expr $(, $($rest:tt)*)?) => {{
         let error = &$e;
-        ::tracing::error!(error, $($($rest)*)*);
+        $crate::error::tracing::error!(error, $($($rest)*)*);
         $crate::__fatal_error_impl!(@@@ error)
     }};
     (@@@ $error:expr) => {{
@@ -159,3 +159,8 @@ macro_rules! __fatal_error_impl {
         )
     }}
 }
+
+// re-export tracing to make sure users of the macro can call it even if they don't depend on
+// tracing directly
+#[doc(hidden)]
+pub use tracing;
