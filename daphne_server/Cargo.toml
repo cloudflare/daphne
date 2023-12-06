@@ -1,0 +1,26 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
+[package]
+name = "daphne_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+daphne = { path = "../daphne", features = ["send-traits"] }
+daphne_service_utils = { path = "../daphne_service_utils" }
+futures.workspace = true
+prio.workspace = true
+prometheus.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower = "0.4.13"
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+daphne = { path = "../daphne", features = ["send-traits", "test-utils"] }
+rand.workspace = true
+tower = "0.4.13"

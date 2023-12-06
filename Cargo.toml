@@ -10,6 +10,7 @@ members = [
     "daphne/dapf",
     "daphne_worker",
     "daphne_worker_test",
+    "daphne_server",
     "daphne_service_utils",
 ]
 
