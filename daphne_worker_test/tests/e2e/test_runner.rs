@@ -8,7 +8,8 @@ use daphne::{
     constants::DapMediaType,
     hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        encode_base64url, BatchId, CollectionJobId, Duration, HpkeConfigList, Interval, TaskId,
+        encode_base64url, Base64Encode, BatchId, CollectionJobId, Duration, HpkeConfigList,
+        Interval, TaskId,
     },
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
     Prio3Config, VdafConfig,

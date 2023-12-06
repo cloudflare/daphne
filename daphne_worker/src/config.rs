@@ -29,7 +29,8 @@ use daphne::{
     fatal_error,
     hpke::{HpkeConfig, HpkeReceiverConfig},
     messages::{
-        decode_base64url_vec, AggregationJobId, BatchId, CollectionJobId, ReportId, TaskId, Time,
+        decode_base64url_vec, AggregationJobId, Base64Encode, BatchId, CollectionJobId, ReportId,
+        TaskId, Time,
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,

@@ -9,7 +9,7 @@ pub mod leader;
 
 use crate::{
     constants::DapMediaType,
-    messages::{BatchSelector, ReportMetadata, TaskId, Time},
+    messages::{Base64Encode, BatchSelector, ReportMetadata, TaskId, Time},
     taskprov, DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
 use tracing::warn;
@@ -163,9 +163,10 @@ mod test {
         hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
         messages::{
             AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
-            AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportId,
-            ReportMetadata, TaskId, Time, Transition, TransitionFailure, TransitionVar,
+            AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
+            CollectionReq, Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query,
+            Report, ReportId, ReportMetadata, TaskId, Time, Transition, TransitionFailure,
+            TransitionVar,
         },
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},

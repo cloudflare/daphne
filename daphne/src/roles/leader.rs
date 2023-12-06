@@ -17,8 +17,9 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        AggregateShare, AggregateShareReq, AggregationJobResp, BatchSelector, Collection,
-        CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
+        AggregateShare, AggregateShareReq, AggregationJobResp, Base64Encode, BatchSelector,
+        Collection, CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report,
+        TaskId,
     },
     metrics::DaphneRequestType,
     DapCollectJob, DapError, DapLeaderAggregationJobTransition, DapLeaderProcessTelemetry,

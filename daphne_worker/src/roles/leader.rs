@@ -33,8 +33,8 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        Collection, CollectionJobId, CollectionReq, PartialBatchSelector, Report, TaskId,
-        TransitionFailure,
+        Base64Encode, Collection, CollectionJobId, CollectionReq, PartialBatchSelector, Report,
+        TaskId, TransitionFailure,
     },
     roles::{DapAuthorizedSender, DapLeader},
     DapCollectJob, DapError, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
