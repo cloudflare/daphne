@@ -22,14 +22,12 @@ jobs:
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v1
-      - name: Linting
-        run: cargo clippy --all-targets -- -D warnings
       - name: Format
         run: cargo fmt --all --check
-      - name: Building
-        run: cargo build --release
+      - name: Linting
+        run: ./check-all.sh
       - name: Testing
-        run: cargo test -- --nocapture
+        run: ./check-all.sh test
   e2e:
     runs-on: ubuntu-latest
     steps:
