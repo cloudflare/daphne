@@ -16,7 +16,9 @@ RUN rustup target add wasm32-unknown-unknown
 COPY Cargo.toml Cargo.lock ./
 COPY daphne_worker_test ./daphne_worker_test
 COPY daphne_worker ./daphne_worker
+COPY daphne_service_utils ./daphne_service_utils
 COPY daphne ./daphne
+RUN cargo new --lib daphne_server
 WORKDIR /tmp/dap_test/daphne_worker_test
 COPY docker/wrangler.toml ./daphne_worker_test/wrangler.toml
 RUN wrangler publish --dry-run
