@@ -33,8 +33,8 @@ pub trait DapReportInitializer {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
-        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError>;
+        consumed_reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;
 }
 
 #[derive(Debug)]

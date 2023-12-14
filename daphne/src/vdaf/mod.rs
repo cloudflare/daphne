@@ -52,7 +52,6 @@ use replace_with::replace_with_or_abort;
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     io::Cursor,
 };
@@ -161,31 +160,31 @@ pub trait EarlyReportState {
 /// decryption as well a few validation steps.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EarlyReportStateConsumed<'req> {
+pub enum EarlyReportStateConsumed {
     Ready {
-        metadata: Cow<'req, ReportMetadata>,
+        metadata: ReportMetadata,
         #[serde(with = "serialize_bytes")]
-        public_share: Cow<'req, [u8]>,
+        public_share: Vec<u8>,
         #[serde(with = "serialize_bytes")]
         input_share: Vec<u8>,
     },
     Rejected {
-        metadata: Cow<'req, ReportMetadata>,
+        metadata: ReportMetadata,
         failure: TransitionFailure,
     },
 }
 
-impl<'req> EarlyReportStateConsumed<'req> {
+impl EarlyReportStateConsumed {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn consume(
         decrypter: &impl HpkeDecrypter,
         is_leader: bool,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        metadata: Cow<'req, ReportMetadata>,
-        public_share: Cow<'req, [u8]>,
+        metadata: ReportMetadata,
+        public_share: Vec<u8>,
         encrypted_input_share: &HpkeCiphertext,
-    ) -> Result<EarlyReportStateConsumed<'req>, DapError> {
+    ) -> Result<EarlyReportStateConsumed, DapError> {
         if metadata.time >= task_config.expiration {
             return Ok(Self::Rejected {
                 metadata,
@@ -245,7 +244,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
         {
             let extensions = match task_config.version {
                 DapVersion::DraftLatest => draft_latest_extensions.as_ref().unwrap(),
-                DapVersion::Draft02 => metadata.as_ref().draft02_extensions.as_ref().unwrap(),
+                DapVersion::Draft02 => metadata.draft02_extensions.as_ref().unwrap(),
             };
 
             let mut taskprov_indicated = false;
@@ -300,7 +299,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
     pub fn into_initialized_rejected_due_to(
         self,
         failure: TransitionFailure,
-    ) -> EarlyReportStateInitialized<'req> {
+    ) -> EarlyReportStateInitialized {
         let metadata = match self {
             Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         };
@@ -308,7 +307,7 @@ impl<'req> EarlyReportStateConsumed<'req> {
     }
 }
 
-impl EarlyReportState for EarlyReportStateConsumed<'_> {
+impl EarlyReportState for EarlyReportStateConsumed {
     fn metadata(&self) -> &ReportMetadata {
         match self {
             Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
@@ -323,18 +322,18 @@ impl EarlyReportState for EarlyReportStateConsumed<'_> {
 /// Report state during aggregation initialization after the VDAF preparation step.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EarlyReportStateInitialized<'req> {
+pub enum EarlyReportStateInitialized {
     Ready {
-        metadata: Cow<'req, ReportMetadata>,
+        metadata: ReportMetadata,
         #[serde(with = "serialize_bytes")]
-        public_share: Cow<'req, [u8]>,
+        public_share: Vec<u8>,
         #[serde(serialize_with = "serialize_encodable")]
         state: VdafPrepState,
         #[serde(serialize_with = "serialize_encodable")]
         message: VdafPrepMessage,
     },
     Rejected {
-        metadata: Cow<'req, ReportMetadata>,
+        metadata: ReportMetadata,
         failure: TransitionFailure,
     },
 }
@@ -368,14 +367,14 @@ where
     s.serialize_str(&hex::encode(x.get_encoded()))
 }
 
-impl<'req> EarlyReportStateInitialized<'req> {
+impl EarlyReportStateInitialized {
     /// Initialize VDAF preparation for a report. This method is meant to be called by
     /// [`DapReportInitializer`].
     pub fn initialize(
         is_leader: bool,
         vdaf_verify_key: &VdafVerifyKey,
         vdaf_config: &VdafConfig,
-        early_report_state_consumed: EarlyReportStateConsumed<'req>,
+        early_report_state_consumed: EarlyReportStateConsumed,
     ) -> Result<Self, DapError> {
         let (metadata, public_share, input_share) = match early_report_state_consumed {
             EarlyReportStateConsumed::Ready {
@@ -394,7 +393,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
                 prio3_config,
                 vdaf_verify_key,
                 agg_id,
-                &metadata.as_ref().id.0,
+                &metadata.id.0,
                 public_share.as_ref(),
                 input_share.as_ref(),
             ),
@@ -402,7 +401,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
                 *dimension,
                 vdaf_verify_key,
                 agg_id,
-                &metadata.as_ref().id.0,
+                &metadata.id.0,
                 public_share.as_ref(),
                 input_share.as_ref(),
             ),
@@ -435,7 +434,7 @@ impl<'req> EarlyReportStateInitialized<'req> {
     }
 }
 
-impl EarlyReportState for EarlyReportStateInitialized<'_> {
+impl EarlyReportState for EarlyReportStateInitialized {
     fn metadata(&self) -> &ReportMetadata {
         match self {
             Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
@@ -865,8 +864,8 @@ impl VdafConfig {
                     true,
                     task_id,
                     task_config,
-                    Cow::Owned(report.report_metadata),
-                    Cow::Owned(report.public_share),
+                    report.report_metadata,
+                    report.public_share,
                     &leader_share,
                 )
                 .await?,
@@ -917,8 +916,8 @@ impl VdafConfig {
                     });
                     prep_inits.push(PrepareInit {
                         report_share: ReportShare {
-                            report_metadata: metadata.into_owned(),
-                            public_share: public_share.into_owned(),
+                            report_metadata: metadata,
+                            public_share,
                             encrypted_input_share: helper_share,
                         },
                         draft_latest_payload,
@@ -961,7 +960,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         agg_job_init_req: &'req AggregationJobInitReq,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut processed = HashSet::with_capacity(num_reports);
         let mut consumed_reports = Vec::with_capacity(num_reports);
@@ -984,8 +983,9 @@ impl VdafConfig {
                     false,
                     task_id,
                     task_config,
-                    Cow::Borrowed(&prep_init.report_share.report_metadata),
-                    Cow::Borrowed(&prep_init.report_share.public_share),
+                    // TODO: remove clones
+                    prep_init.report_share.report_metadata.clone(),
+                    prep_init.report_share.public_share.clone(),
                     &prep_init.report_share.encrypted_input_share,
                 )
                 .await?,
@@ -1013,7 +1013,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        initialized_reports: &[EarlyReportStateInitialized<'_>],
+        initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
@@ -1036,7 +1036,7 @@ impl VdafConfig {
 
     fn draft02_handle_agg_job_init_req(
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        initialized_reports: &[EarlyReportStateInitialized<'_>],
+        initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &DaphneMetrics,
     ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
@@ -1097,7 +1097,7 @@ impl VdafConfig {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        initialized_reports: &[EarlyReportStateInitialized<'_>],
+        initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
@@ -1847,7 +1847,7 @@ mod test {
         },
     };
     use rand::prelude::*;
-    use std::{borrow::Cow, fmt::Debug};
+    use std::fmt::Debug;
 
     impl<M: Debug> DapLeaderAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
@@ -1916,8 +1916,8 @@ mod test {
             true, // is_leader
             &t.task_id,
             &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
+            report.report_metadata.clone(),
+            report.public_share.clone(),
             &report.encrypted_input_shares[0],
         )
         .await
@@ -1942,8 +1942,8 @@ mod test {
             false, // is_helper
             &t.task_id,
             &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
+            report.report_metadata,
+            report.public_share,
             &report.encrypted_input_shares[1],
         )
         .await
@@ -2650,19 +2650,20 @@ mod test {
             )
             .unwrap();
 
+        let report_metadata = report.report_metadata.clone();
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
             true,
             &t.task_id,
             &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
+            report.report_metadata,
+            report.public_share,
             &report.encrypted_input_shares[0],
         )
         .await
         .unwrap();
 
-        assert_eq!(consumed_report.metadata(), &report.report_metadata);
+        assert_eq!(consumed_report.metadata(), &report_metadata);
 
         let expect_ready = match version {
             // In draft02 we're meant to ignore extensions we don't recognize.
@@ -2700,19 +2701,20 @@ mod test {
             )
             .unwrap();
 
+        let report_metadata = report.report_metadata.clone();
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
             true,
             &t.task_id,
             &t.task_config,
-            Cow::Borrowed(&report.report_metadata),
-            Cow::Borrowed(&report.public_share),
+            report.report_metadata,
+            report.public_share,
             &report.encrypted_input_shares[0],
         )
         .await
         .unwrap();
 
-        assert_eq!(consumed_report.metadata(), &report.report_metadata);
+        assert_eq!(consumed_report.metadata(), &report_metadata);
         assert!(!consumed_report.is_ready());
     }
 

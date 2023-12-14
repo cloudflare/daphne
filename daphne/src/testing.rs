@@ -83,8 +83,8 @@ impl DapReportInitializer for AggregationJobTest {
         _task_id: &TaskId,
         task_config: &DapTaskConfig,
         _part_batch_sel: &PartialBatchSelector,
-        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        consumed_reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let mut reports_processed = if is_leader {
             self.leader_reports_processed.lock().unwrap()
         } else {
@@ -916,8 +916,8 @@ impl DapReportInitializer for MockAggregator {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
-        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        consumed_reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let span = task_config.batch_span_for_meta(
             part_batch_sel,
             consumed_reports.iter().filter(|report| report.is_ready()),
