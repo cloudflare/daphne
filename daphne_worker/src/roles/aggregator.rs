@@ -39,8 +39,8 @@ impl DapReportInitializer for DaphneWorker<'_> {
         _task_id: &TaskId,
         task_config: &DapTaskConfig,
         _part_batch_sel: &PartialBatchSelector,
-        consumed_reports: Vec<EarlyReportStateConsumed<'req>>,
-    ) -> Result<Vec<EarlyReportStateInitialized<'req>>, DapError> {
+        consumed_reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let min_time = self.least_valid_report_time(self.get_current_time());
         let max_time = self.greatest_valid_report_time(self.get_current_time());
 

@@ -671,7 +671,7 @@ impl DapTaskConfig {
     pub fn batch_span_for_meta<'sel, 'rep>(
         &self,
         part_batch_sel: &'sel PartialBatchSelector,
-        consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed<'rep>>,
+        consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed>,
     ) -> Result<DapAggregateSpan<()>, DapError> {
         if !self.query.is_valid_part_batch_sel(part_batch_sel) {
             return Err(fatal_error!(
