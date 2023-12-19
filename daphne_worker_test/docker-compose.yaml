@@ -1,0 +1,23 @@
+# Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+---
+version: "3.3"
+services:
+  leader_storage:
+    ports:
+      - 4000:4000
+    build:
+      context: ..
+      dockerfile: daphne_worker_test/docker/storage_proxy.Dockerfile
+    command:
+      - "--port=4000"
+      - "--global-random"
+  helper_storage:
+    ports:
+      - 4001:4001
+    build:
+      context: ..
+      dockerfile: daphne_worker_test/docker/storage_proxy.Dockerfile
+    command:
+      - "--port=4001"
+      - "--global-random"

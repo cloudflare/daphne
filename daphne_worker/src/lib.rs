@@ -170,11 +170,12 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 
-mod config;
+pub mod config;
 mod durable;
 mod error_reporting;
 mod roles;
 mod router;
+pub mod storage_proxy;
 mod tracing_utils;
 
 use crate::config::{DaphneWorkerIsolateState, DaphneWorkerRequestState};
