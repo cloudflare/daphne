@@ -681,6 +681,7 @@ dependencies = [
  "capnp",
  "capnpc",
  "daphne",
+ "hex",
  "http 1.0.0",
  "prometheus",
  "ring",

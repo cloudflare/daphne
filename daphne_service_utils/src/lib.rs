@@ -6,6 +6,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 pub mod auth;
+pub mod config;
 pub mod durable_requests;
 pub mod metrics;
 pub mod test_route_types;
@@ -29,7 +30,7 @@ pub struct DaphneServiceReportSelector {
     pub max_reports: u64,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DapRole {
     Leader,

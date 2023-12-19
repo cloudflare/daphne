@@ -14,7 +14,10 @@ use crate::{
     tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
 };
 use daphne::messages::TaskId;
-use daphne_service_utils::durable_requests::bindings::{self, DurableMethod, GarbageCollector};
+use daphne_service_utils::{
+    config::DaphneWorkerDeployment,
+    durable_requests::bindings::{self, DurableMethod, GarbageCollector},
+};
 use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
@@ -247,7 +250,7 @@ trait DapDurableObject {
 
     fn state(&self) -> &State;
 
-    fn deployment(&self) -> crate::config::DaphneWorkerDeployment;
+    fn deployment(&self) -> DaphneWorkerDeployment;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -265,10 +268,7 @@ trait Alarmed: DapDurableObject {
                 }
                 Ok(Some(_)) => { /* alarm already setup */ }
                 Err(e) => {
-                    if matches!(
-                        self.deployment(),
-                        crate::config::DaphneWorkerDeployment::Dev
-                    ) {
+                    if matches!(self.deployment(), DaphneWorkerDeployment::Dev) {
                         warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}");
                     } else {
                         // We only return an error if not in the "dev" deployment as
@@ -311,10 +311,7 @@ trait GarbageCollectable: DapDurableObject {
                 // The GarbageCollector should only be used when running tests. In production, the DO->DO
                 // communication overhead adds unacceptable latency, and there's no need to do the
                 // bulk deletes of state that test suites require.
-                if matches!(
-                    self.deployment(),
-                    crate::config::DaphneWorkerDeployment::Dev
-                ) {
+                if matches!(self.deployment(), DaphneWorkerDeployment::Dev) {
                     let touched = state_set_if_not_exists(self.state(), "touched", &true)
                         .await?
                         .unwrap_or(false);

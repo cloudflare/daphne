@@ -4,11 +4,14 @@
 use std::ops::ControlFlow;
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, req_parse, DurableOrdered},
     initialize_tracing, int_err,
 };
-use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
+use daphne_service_utils::{
+    config::DaphneWorkerDeployment,
+    durable_requests::bindings::{self, DurableMethod},
+};
 use tracing::{debug, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
@@ -41,7 +44,7 @@ pub struct LeaderAggregationJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
-    config: DaphneWorkerConfig,
+    config: DaphneWorkerDurableConfig,
     touched: bool,
 }
 
@@ -50,7 +53,7 @@ impl DurableObject for LeaderAggregationJobQueue {
     fn new(state: State, env: Env) -> Self {
         initialize_tracing(&env);
         let config =
-            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
+            DaphneWorkerDurableConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
@@ -133,7 +136,7 @@ impl DapDurableObject for LeaderAggregationJobQueue {
     }
 
     #[inline(always)]
-    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+    fn deployment(&self) -> DaphneWorkerDeployment {
         self.config.deployment
     }
 }

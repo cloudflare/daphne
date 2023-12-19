@@ -4,16 +4,14 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use daphne::DapGlobalConfig;
 use daphne_server::{router, App};
-use daphne_service_utils::DapRole;
+use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    global: DapGlobalConfig,
+    service: DaphneServiceConfig,
     port: u16,
-    role: DapRole,
 }
 
 impl TryFrom<Args> for Config {
@@ -32,7 +30,7 @@ impl TryFrom<Args> for Config {
                 None => config::File::with_name("configuration"),
             })
             .set_override_option(
-                "role",
+                "service.role",
                 role.map(|role| {
                     config::Value::new(
                         Some(&String::from("args.role")),
@@ -76,15 +74,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     // Create a new prometheus registry where metrics will be registered and measured
     let registry = prometheus::Registry::new();
 
+    let role = config.service.role;
     // Configure the application
     let app = App::new(
         "https://example.com".parse().unwrap(),
         &registry,
-        config.global,
+        config.service,
     )?;
 
     // create the router that will handle the protocol's http requests
-    let router = router::new(config.role, app);
+    let router = router::new(role, app);
 
     // initialize tracing in a very default way.
     tracing_subscriber::fmt().pretty().init();

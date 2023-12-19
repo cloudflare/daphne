@@ -2,15 +2,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::DaphneWorkerDurableConfig,
     durable::{
         create_span_from_request, req_parse, state_get, state_set_if_not_exists, DurableConnector,
         DurableOrdered, MAX_KEYS,
     },
     initialize_tracing, int_err,
 };
-use daphne_service_utils::durable_requests::bindings::{
-    self, DurableMethod, LeaderAggJobQueue, PendingReport, ReportsPendingResult,
+use daphne_service_utils::{
+    config::DaphneWorkerDeployment,
+    durable_requests::bindings::{
+        self, DurableMethod, LeaderAggJobQueue, PendingReport, ReportsPendingResult,
+    },
 };
 use std::{cmp::min, ops::ControlFlow};
 use tracing::{debug, Instrument};
@@ -49,7 +52,7 @@ pub struct ReportsPending {
     #[allow(dead_code)]
     state: State,
     env: Env,
-    config: DaphneWorkerConfig,
+    config: DaphneWorkerDurableConfig,
     touched: bool,
 }
 
@@ -58,7 +61,7 @@ impl DurableObject for ReportsPending {
     fn new(state: State, env: Env) -> Self {
         initialize_tracing(&env);
         let config =
-            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
+            DaphneWorkerDurableConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
@@ -214,7 +217,7 @@ impl DapDurableObject for ReportsPending {
     }
 
     #[inline(always)]
-    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+    fn deployment(&self) -> DaphneWorkerDeployment {
         self.config.deployment
     }
 }

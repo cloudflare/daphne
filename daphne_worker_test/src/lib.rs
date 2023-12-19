@@ -18,7 +18,7 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::inline_always)]
 
-use daphne_worker::{initialize_tracing, DaphneWorkerRouter};
+use daphne_worker::{config, initialize_tracing, DaphneWorkerRouter};
 use tracing::info;
 use worker::{event, Env, Request, Response, Result};
 
@@ -47,7 +47,7 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> Result<Respon
 
     log_request(&req);
 
-    if matches!(env.var("DAP_PROXY").map(|v| v.to_string()), Ok(v) if v == "true") {
+    if config::is_running_as_storage_proxy(&env) {
         info!("starting storage proxy");
         daphne_worker::storage_proxy::handle_request(req, env, ctx).await
     } else {

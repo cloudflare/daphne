@@ -20,7 +20,8 @@ use daphne::{
     DapVersion, Prio3Config, VdafConfig,
 };
 use daphne_service_utils::{
-    auth::{DaphneAuth, DaphneWorkerAuthMethod, TlsClientAuth},
+    auth::{DaphneAuth, TlsClientAuth},
+    config::{DaphneServiceConfig, DaphneWorkerDeployment, HpkeRecieverConfigList, TaskprovConfig},
     durable_requests::bindings::{
         DurableMethod, GarbageCollector, LeaderBatchQueue, LeaderBatchQueueResult,
     },
@@ -36,6 +37,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     io::Cursor,
+    ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -53,21 +55,6 @@ const DAP_BASE_URL: &str = "DAP_BASE_URL";
 const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
 const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
-/// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension.
-pub(crate) struct TaskprovConfig {
-    /// HPKE collector configuration for all taskprov tasks.
-    pub(crate) hpke_collector_config: HpkeConfig,
-
-    /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.
-    pub(crate) vdaf_verify_key_init: [u8; 32],
-
-    /// Leader, Helper: Method for authorizing Leader requests.
-    pub(crate) leader_auth: DaphneWorkerAuthMethod,
-
-    /// Leader: Method for authorizing Collector requests.
-    pub(crate) collector_auth: Option<DaphneWorkerAuthMethod>,
-}
-
 /// Parameters required for pushing Prometheus metrics.
 struct MetricsPushConfig {
     /// URL of the server to push metrics to.
@@ -77,57 +64,130 @@ struct MetricsPushConfig {
     bearer_token: BearerToken,
 }
 
-/// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
-pub(crate) struct DaphneWorkerConfig {
-    pub(crate) env: String,
-
-    /// Indicates if DaphneWorker is used as the Leader.
-    pub(crate) is_leader: bool,
-
-    /// Global DAP configuration.
-    pub(crate) global: DapGlobalConfig,
-
+pub(crate) struct DaphneWorkerDurableConfig {
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
-    pub(crate) deployment: DaphneWorkerDeployment,
+    pub deployment: DaphneWorkerDeployment,
 
     /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
-    pub(crate) collection_job_id_key: Option<[u8; 32]>,
-
-    /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
-    /// to (based on the report ID).
-    pub(crate) report_shard_key: [u8; 32],
-
-    /// Shard count, the number of report storage shards. This should be a power of 2.
-    pub(crate) report_shard_count: u64,
-
-    /// draft-dcook-ppm-dap-interop-test-design: Base URL of the Aggregator (unversioned). If set,
-    /// this field is used for endpoint configuration for interop testing.
-    base_url: Option<Url>,
-
-    /// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension. If not set,
-    /// then taskprov will be disabled.
-    pub(crate) taskprov: Option<TaskprovConfig>,
-
-    /// Default DAP version to use if not specified by the API URL
-    pub(crate) default_version: DapVersion,
+    pub collection_job_id_key: Option<[u8; 32]>,
 
     /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
     /// configured by the Leader.
-    pub(crate) helper_state_store_garbage_collect_after_secs: Option<Duration>,
-
-    /// Metrics push configuration.
-    metrics_push_config: Option<MetricsPushConfig>,
-
-    /// The report storage epoch duration. This value is used to control the period of time for
-    /// which an Aggregator guarantees storage of reports and/or report metadata.
-    ///
-    /// A report will be accepted if its timestamp is no more than the specified number of seconds
-    /// before the current time.
-    pub report_storage_epoch_duration: daphne::messages::Duration,
+    pub helper_state_store_garbage_collect_after_secs: Option<Duration>,
 
     /// The report storage maximum future time skew. Reports with timestamps greater than the
     /// current time plus this value will be rejected.
     pub report_storage_max_future_time_skew: daphne::messages::Duration,
+}
+
+/// Daphne-Worker configuration, including long-lived parameters used across DAP tasks.
+pub(crate) struct DaphneWorkerConfig {
+    service_config: DaphneServiceConfig,
+    pub durable_object_proxy: DaphneWorkerDurableConfig,
+    /// Metrics push configuration.
+    metrics_push_config: Option<MetricsPushConfig>,
+}
+
+impl Deref for DaphneWorkerConfig {
+    type Target = DaphneServiceConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.service_config
+    }
+}
+
+impl DerefMut for DaphneWorkerConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.service_config
+    }
+}
+
+pub fn is_running_as_storage_proxy(env: &Env) -> bool {
+    matches!(env.var("DAP_PROXY").map(|v| v.to_string()), Ok(v) if v == "true")
+}
+
+impl DaphneWorkerDurableConfig {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self, worker::Error> {
+        let load_key = |name| {
+            let key = env
+                .secret(name)
+                .map_err(|e| format!("failed to load {name}: {e}"))?
+                .to_string();
+            let key = hex::decode(key)
+                .map_err(|e| format!("failed to load {name}: error while parsing hex: {e}"))?;
+            key.try_into()
+                .map_err(|_| format!("failed to load {name}: unexpected length"))
+        };
+
+        let is_do_proxy = is_running_as_storage_proxy(env);
+
+        let is_leader = match env.var("DAP_AGGREGATOR_ROLE").map(|s| s.to_string()) {
+            Ok(r) if r == "leader" => Some(true),
+            Ok(r) if r == "helper" => Some(false),
+            Err(_) if is_do_proxy => None,
+            other => {
+                let other = other?;
+                return Err(worker::Error::RustError(format!(
+                    "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
+                )));
+            }
+        };
+
+        let report_storage_max_future_time_skew = env
+            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
+            .to_string()
+            .parse()
+            .map_err(|e| {
+                worker::Error::RustError(format!(
+                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
+                ))
+            })?;
+
+        let collection_job_id_key = if let Some(true) | None = is_leader {
+            Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
+        } else {
+            None
+        };
+
+        let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
+            match deployment.to_string().as_str() {
+                "prod" => DaphneWorkerDeployment::Prod,
+                "dev" => DaphneWorkerDeployment::Dev,
+                s => {
+                    return Err(worker::Error::RustError(format!(
+                        "Invalid value for DAP_DEPLOYMENT: {s}",
+                    )))
+                }
+            }
+        } else {
+            DaphneWorkerDeployment::default()
+        };
+        if !matches!(deployment, DaphneWorkerDeployment::Prod) {
+            trace!("DAP deployment override applied: {deployment:?}");
+        }
+
+        let helper_state_store_garbage_collect_after_secs = if let Some(false) | None = is_leader {
+            Some(Duration::from_secs(
+                env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
+                    .to_string()
+                    .parse()
+                    .map_err(|err| {
+                        worker::Error::RustError(format!(
+                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
+                        ))
+                    })?,
+            ))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            deployment,
+            collection_job_id_key,
+            helper_state_store_garbage_collect_after_secs,
+            report_storage_max_future_time_skew,
+        })
+    }
 }
 
 impl DaphneWorkerConfig {
@@ -170,16 +230,6 @@ impl DaphneWorkerConfig {
                 ))
             })?;
 
-        let report_storage_max_future_time_skew = env
-            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
-            .to_string()
-            .parse()
-            .map_err(|e| {
-                worker::Error::RustError(format!(
-                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
-                ))
-            })?;
-
         let default_version: DapVersion = env
             .var("DAP_DEFAULT_VERSION")?
             .to_string()
@@ -193,12 +243,6 @@ impl DaphneWorkerConfig {
                 worker::Error::RustError(format!("failed to parse {DAP_BASE_URL}: {e}"))
             })?;
             Some(base_url)
-        } else {
-            None
-        };
-
-        let collection_job_id_key = if is_leader {
-            Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
         } else {
             None
         };
@@ -287,21 +331,6 @@ impl DaphneWorkerConfig {
             None
         };
 
-        let helper_state_store_garbage_collect_after_secs = if !is_leader {
-            Some(Duration::from_secs(
-                env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
-                    .to_string()
-                    .parse()
-                    .map_err(|err| {
-                        worker::Error::RustError(format!(
-                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
-                        ))
-                    })?,
-            ))
-        } else {
-            None
-        };
-
         const DAP_METRICS_PUSH_SERVER_URL: &str = "DAP_METRICS_PUSH_SERVER_URL";
         const DAP_METRICS_PUSH_BEARER_TOKEN: &str = "DAP_METRICS_PUSH_BEARER_TOKEN";
         let metrics_push_config = match (
@@ -330,25 +359,26 @@ impl DaphneWorkerConfig {
         };
 
         Ok(Self {
-            env: env_label,
-            global,
-            deployment,
-            collection_job_id_key,
-            report_shard_key,
-            report_shard_count,
-            base_url,
-            is_leader,
-            taskprov,
-            default_version,
-            helper_state_store_garbage_collect_after_secs,
+            service_config: DaphneServiceConfig {
+                env: env_label,
+                global,
+                report_shard_key,
+                report_shard_count,
+                base_url,
+                role: if is_leader {
+                    DapRole::Leader
+                } else {
+                    DapRole::Helper
+                },
+                taskprov,
+                default_version,
+                report_storage_epoch_duration,
+            },
+            durable_object_proxy: DaphneWorkerDurableConfig::from_worker_env(env)?,
             metrics_push_config,
-            report_storage_epoch_duration,
-            report_storage_max_future_time_skew,
         })
     }
 }
-
-pub(crate) type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;
 
 /// Daphne-Worker per-isolate state, which may be used by multiple requests. Includes long-lived configuration,
 /// cached responses from KV, etc.
@@ -886,8 +916,8 @@ impl<'srv> DaphneWorker<'srv> {
         version: DapVersion,
         cmd: InternalTestEndpointForTask,
     ) -> Result<Response, worker::Error> {
-        if self.config().is_leader && !matches!(cmd.role, DapRole::Leader)
-            || !self.config().is_leader && !matches!(cmd.role, DapRole::Helper)
+        if self.config().role.is_leader() && !matches!(cmd.role, DapRole::Leader)
+            || !self.config().role.is_leader() && !matches!(cmd.role, DapRole::Helper)
         {
             return Response::from_json(&serde_json::json!({
                 "status": "error",
@@ -1195,7 +1225,11 @@ impl<'srv> DaphneWorker<'srv> {
     }
 
     pub(crate) fn greatest_valid_report_time(&self, now: u64) -> u64 {
-        now.saturating_add(self.config().report_storage_max_future_time_skew)
+        now.saturating_add(
+            self.config()
+                .durable_object_proxy
+                .report_storage_max_future_time_skew,
+        )
     }
 
     // Generic HTTP POST/PUT
@@ -1345,17 +1379,4 @@ impl AsRef<DapTaskConfig> for DapTaskConfigKvPair<'_> {
     fn as_ref(&self) -> &DapTaskConfig {
         self.value()
     }
-}
-
-/// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator
-/// communication.
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) enum DaphneWorkerDeployment {
-    /// Daphne-Worker is running in a production environment. No behavior overrides are applied.
-    #[default]
-    Prod,
-    /// Daphne-Worker is running in a development environment. Any durable objects that are created
-    /// will be registered by the garbage collector so that they can be deleted manually using the
-    /// internal test API.
-    Dev,
 }
