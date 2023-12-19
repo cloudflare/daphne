@@ -1,11 +1,12 @@
-FROM rust:1.73-bullseye
+FROM rust:1.73-bookworm
 
 WORKDIR /tmp/dap_test
 
 RUN apt-get update && \
     apt-get install -y \
         libssl-dev \
-        pkg-config
+        pkg-config \
+        capnproto
 
 RUN rustup component add clippy-preview
 

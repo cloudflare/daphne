@@ -13,7 +13,8 @@ use crate::{
     int_err, now,
     tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
 };
-use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
+use daphne::messages::TaskId;
+use daphne_service_utils::durable_requests::bindings::{self, DurableMethod, GarbageCollector};
 use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
@@ -22,17 +23,6 @@ use worker::{
     async_trait, js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request,
     RequestInit, Result, ScheduledTime, State, Stub,
 };
-
-pub(crate) const DURABLE_DELETE_ALL: &str = "/internal/do/delete_all";
-
-pub(crate) const BINDING_DAP_REPORTS_PENDING: &str = "DAP_REPORTS_PENDING";
-pub(crate) const BINDING_DAP_REPORTS_PROCESSED: &str = "DAP_REPORTS_PROCESSED";
-pub(crate) const BINDING_DAP_AGGREGATE_STORE: &str = "DAP_AGGREGATE_STORE";
-pub(crate) const BINDING_DAP_LEADER_AGG_JOB_QUEUE: &str = "DAP_LEADER_AGG_JOB_QUEUE";
-pub(crate) const BINDING_DAP_LEADER_BATCH_QUEUE: &str = "DAP_LEADER_BATCH_QUEUE";
-pub(crate) const BINDING_DAP_LEADER_COL_JOB_QUEUE: &str = "DAP_LEADER_COL_JOB_QUEUE";
-pub(crate) const BINDING_DAP_HELPER_STATE_STORE: &str = "DAP_HELPER_STATE_STORE";
-pub(crate) const BINDING_DAP_GARBAGE_COLLECTOR: &str = "DAP_GARBAGE_COLLECTOR";
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
@@ -253,6 +243,8 @@ impl<'srv> DurableConnector<'srv> {
 }
 
 trait DapDurableObject {
+    type DurableMethod: DurableMethod;
+
     fn state(&self) -> &State;
 
     fn deployment(&self) -> crate::config::DaphneWorkerDeployment;
@@ -308,10 +300,9 @@ trait GarbageCollectable: DapDurableObject {
     async fn schedule_for_garbage_collection(
         &mut self,
         req: Request,
-        binding: &'static str,
     ) -> Result<std::ops::ControlFlow<(), Request>> {
-        match (req.path().as_str(), req.method()) {
-            (DURABLE_DELETE_ALL, Method::Post) => {
+        match GarbageCollector::try_from_uri(&req.path()) {
+            Some(GarbageCollector::DeleteAll) => {
                 self.state().storage().delete_all().await?;
                 *self.touched() = false;
                 return Ok(std::ops::ControlFlow::Break(()));
@@ -331,11 +322,11 @@ trait GarbageCollectable: DapDurableObject {
                         let durable = crate::durable::DurableConnector::new(self.env());
                         durable
                             .post(
-                                crate::durable::BINDING_DAP_GARBAGE_COLLECTOR,
-                                crate::durable::garbage_collector::DURABLE_GARBAGE_COLLECTOR_PUT,
-                                "garbage_collector".to_string(),
+                                bindings::GarbageCollector::BINDING,
+                                bindings::GarbageCollector::Put.to_uri(),
+                                bindings::GarbageCollector::name(()).unwrap_from_name(),
                                 &crate::durable::DurableReference {
-                                    binding: binding.to_string(),
+                                    binding: Self::DurableMethod::BINDING.to_string(),
                                     id_hex: self.state().id().to_string(),
                                     task_id: None,
                                 },
@@ -393,51 +384,6 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 
     state.storage().put(key, val).await?;
     Ok(None)
-}
-
-pub(crate) fn durable_name_queue(shard: u64) -> String {
-    format!("queue/{shard}")
-}
-
-pub(crate) fn durable_name_report_store(
-    version: DapVersion,
-    task_id_hex: &str,
-    epoch: u64,
-    shard: u64,
-) -> String {
-    format!(
-        "{}/epoch/{:020}/shard/{}",
-        durable_name_task(version, task_id_hex),
-        epoch,
-        shard
-    )
-}
-
-pub(crate) fn durable_name_agg_store(
-    version: DapVersion,
-    task_id_hex: &str,
-    bucket: &DapBatchBucket,
-) -> String {
-    format!(
-        "{}/{}",
-        durable_name_task(version, task_id_hex),
-        durable_name_bucket(bucket),
-    )
-}
-
-pub(crate) fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
-    format!("{}/task/{}", version.as_ref(), task_id_hex)
-}
-
-fn durable_name_bucket(bucket: &DapBatchBucket) -> String {
-    match bucket {
-        DapBatchBucket::TimeInterval { batch_window } => {
-            format!("window/{batch_window}")
-        }
-        DapBatchBucket::FixedSize { batch_id } => {
-            format!("batch/{}", batch_id.to_hex())
-        }
-    }
 }
 
 /// Reference to a DO instance, used by the garbage collector.
@@ -678,41 +624,13 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
 
 #[cfg(test)]
 mod test {
-    use super::{
-        durable_name_agg_store, durable_name_queue, durable_name_report_store,
-        reports_pending::PendingReport,
-    };
     use daphne::{
-        messages::{BatchId, HpkeCiphertext, Report, ReportId, ReportMetadata, TaskId},
-        test_versions, DapBatchBucket, DapVersion,
+        messages::{HpkeCiphertext, Report, ReportId, ReportMetadata, TaskId},
+        test_versions, DapVersion,
     };
+    use daphne_service_utils::durable_requests::bindings::PendingReport;
     use prio::codec::{ParameterizedDecode, ParameterizedEncode};
     use rand::prelude::*;
-
-    #[test]
-    fn durable_name() {
-        let time = 1_664_850_074;
-        let id1 = TaskId([17; 32]);
-        let id2 = BatchId([34; 32]);
-        let shard = 1234;
-
-        assert_eq!(durable_name_queue(shard), "queue/1234");
-
-        assert_eq!(
-        durable_name_report_store(DapVersion::Draft02, &id1.to_hex(), time, shard),
-        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/epoch/00000000001664850074/shard/1234",
-    );
-
-        assert_eq!(
-        durable_name_agg_store(DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::FixedSize{ batch_id: id2 }),
-        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/batch/2222222222222222222222222222222222222222222222222222222222222222",
-    );
-
-        assert_eq!(
-        durable_name_agg_store(DapVersion::Draft02, &id1.to_hex(), &DapBatchBucket::TimeInterval{ batch_window: time }),
-        "v02/task/1111111111111111111111111111111111111111111111111111111111111111/window/1664850074",
-    );
-    }
 
     // Test that the `PendingReport.report_id_hex()` method properly extracts the report ID from the
     // hex-encoded report. This helps ensure that changes to the `Report` wire format don't cause any

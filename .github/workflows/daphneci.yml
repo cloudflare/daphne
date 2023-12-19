@@ -20,6 +20,8 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
           override: true
+      - name: Cap'n'proto
+        run: sudo apt install capnproto
       - name: Rust cache
         uses: Swatinem/rust-cache@v1
       - name: Format

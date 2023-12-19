@@ -16,10 +16,17 @@ repository = "https://github.com/cloudflare/daphne"
 readme = "../README.md"
 
 [dependencies]
+capnp.workspace = true
 daphne = { path = "../daphne", default-features = false }
-serde.workspace = true
+http.workspace = true
 prometheus.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 url.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
+[build-dependencies]
+capnpc = "0.18.0"
+
+[features]
+test-utils = []

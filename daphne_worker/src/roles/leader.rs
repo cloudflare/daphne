@@ -3,27 +3,7 @@
 
 //! Implementation of the leader side of the protocol
 
-use crate::{
-    config::DaphneWorker,
-    durable::{
-        durable_name_queue, durable_name_task,
-        leader_agg_job_queue::DURABLE_LEADER_AGG_JOB_QUEUE_GET,
-        leader_batch_queue::{
-            BatchCount, DURABLE_LEADER_BATCH_QUEUE_ASSIGN, DURABLE_LEADER_BATCH_QUEUE_REMOVE,
-        },
-        leader_col_job_queue::{
-            CollectQueueRequest, DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
-            DURABLE_LEADER_COL_JOB_QUEUE_GET, DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
-            DURABLE_LEADER_COL_JOB_QUEUE_PUT,
-        },
-        reports_pending::{
-            PendingReport, ReportsPendingResult, DURABLE_REPORTS_PENDING_GET,
-            DURABLE_REPORTS_PENDING_PUT,
-        },
-        BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_LEADER_BATCH_QUEUE,
-        BINDING_DAP_LEADER_COL_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING,
-    },
-};
+use crate::config::DaphneWorker;
 use async_trait::async_trait;
 use daphne::{
     auth::BearerTokenProvider,
@@ -36,6 +16,10 @@ use daphne::{
     },
     roles::{DapAuthorizedSender, DapLeader},
     DapCollectJob, DapError, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+};
+use daphne_service_utils::durable_requests::bindings::{
+    BatchCount, CollectQueueRequest, DurableMethod, LeaderAggJobQueue, LeaderBatchQueue,
+    LeaderColJobQueue, PendingReport, ReportsPending, ReportsPendingResult,
 };
 use daphne_service_utils::{auth::DaphneAuth, DaphneServiceReportSelector};
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
@@ -83,17 +67,23 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
             task_id: *task_id,
             report_hex: hex::encode(report.get_encoded_with_param(&version)),
         };
+        let config = self.config();
+        let durable_name = ReportsPending::name((
+            task_config.as_ref(),
+            &task_id_hex,
+            &report.report_metadata.id,
+            report.report_metadata.time,
+            &config.report_shard_key,
+            config.report_shard_count,
+            config.report_storage_epoch_duration,
+        ))
+        .unwrap_from_name();
         let res: ReportsPendingResult = self
             .durable()
             .post(
-                BINDING_DAP_REPORTS_PENDING,
-                DURABLE_REPORTS_PENDING_PUT,
-                self.config().durable_name_report_store(
-                    task_config.as_ref(),
-                    &task_id_hex,
-                    &report.report_metadata.id,
-                    report.report_metadata.time,
-                ),
+                ReportsPending::BINDING,
+                ReportsPending::Put.to_uri(),
+                durable_name,
                 &pending_report,
             )
             .await
@@ -123,11 +113,12 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
         //
         // NOTE There is only one agg job queue for now (`queue_num == 0`). In the future, work
         // will be sharded across multiple queues.
+        let durable_name = LeaderAggJobQueue::name(0).unwrap_from_name();
         let res: Vec<String> = durable
             .post(
-                BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-                DURABLE_LEADER_AGG_JOB_QUEUE_GET,
-                durable_name_queue(0),
+                LeaderAggJobQueue::BINDING,
+                LeaderAggJobQueue::Get.to_uri(),
+                durable_name,
                 &report_sel.max_agg_jobs,
             )
             .await
@@ -141,8 +132,8 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
         for reports_pending_id_hex in res {
             let reports_from_durable: Vec<PendingReport> = durable
                 .post_by_id_hex(
-                    BINDING_DAP_REPORTS_PENDING,
-                    DURABLE_REPORTS_PENDING_GET,
+                    ReportsPending::BINDING,
+                    ReportsPending::Get.to_uri(),
                     reports_pending_id_hex,
                     &report_sel.max_reports,
                 )
@@ -184,11 +175,14 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
                 }
                 DapQueryConfig::FixedSize { .. } => {
                     let num_unassigned = reports.len();
+                    let durable_name =
+                        LeaderBatchQueue::name((task_config.as_ref().version, &task_id_hex))
+                            .unwrap_from_name();
                     let batch_assignments: Vec<BatchCount> = durable
                         .post(
-                            BINDING_DAP_LEADER_BATCH_QUEUE,
-                            DURABLE_LEADER_BATCH_QUEUE_ASSIGN,
-                            durable_name_task(task_config.as_ref().version, &task_id_hex),
+                            LeaderBatchQueue::BINDING,
+                            LeaderBatchQueue::Assign.to_uri(),
+                            durable_name,
                             &(task_config.as_ref().min_batch_size, num_unassigned),
                         )
                         .await
@@ -242,12 +236,13 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
             task_id: *task_id,
             collect_job_id: *collect_job_id,
         };
+        let durable_name = LeaderColJobQueue::name(0).unwrap_from_name();
         let collect_id: CollectionJobId = self
             .durable()
             .post(
-                BINDING_DAP_LEADER_COL_JOB_QUEUE,
-                DURABLE_LEADER_COL_JOB_QUEUE_PUT,
-                durable_name_queue(0),
+                LeaderColJobQueue::BINDING,
+                LeaderColJobQueue::Put.to_uri(),
+                durable_name,
                 &collect_queue_req,
             )
             .await
@@ -273,12 +268,13 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
         task_id: &TaskId,
         collect_id: &CollectionJobId,
     ) -> std::result::Result<DapCollectJob, DapError> {
+        let durable_name = LeaderColJobQueue::name(0).unwrap_from_name();
         let res: DapCollectJob = self
             .durable()
             .post(
-                BINDING_DAP_LEADER_COL_JOB_QUEUE,
-                DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT,
-                durable_name_queue(0),
+                LeaderColJobQueue::BINDING,
+                LeaderColJobQueue::GetResult.to_uri(),
+                durable_name,
                 (&task_id, &collect_id),
             )
             .await
@@ -289,12 +285,13 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
     async fn get_pending_collect_jobs(
         &self,
     ) -> std::result::Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError> {
+        let durable_name = LeaderColJobQueue::name(0).unwrap_from_name();
         let res: Vec<(TaskId, CollectionJobId, CollectionReq)> = self
             .durable()
             .get(
-                BINDING_DAP_LEADER_COL_JOB_QUEUE,
-                DURABLE_LEADER_COL_JOB_QUEUE_GET,
-                durable_name_queue(0),
+                LeaderColJobQueue::BINDING,
+                LeaderColJobQueue::Get.to_uri(),
+                durable_name,
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
@@ -312,22 +309,26 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
         if let PartialBatchSelector::FixedSizeByBatchId { ref batch_id } =
             collect_resp.part_batch_sel
         {
+            let durable_name =
+                LeaderBatchQueue::name((task_config.as_ref().version, &task_id.to_hex()))
+                    .unwrap_from_name();
             durable
                 .post(
-                    BINDING_DAP_LEADER_BATCH_QUEUE,
-                    DURABLE_LEADER_BATCH_QUEUE_REMOVE,
-                    durable_name_task(task_config.as_ref().version, &task_id.to_hex()),
+                    LeaderBatchQueue::BINDING,
+                    LeaderBatchQueue::Remove.to_uri(),
+                    durable_name,
                     batch_id.to_hex(),
                 )
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?;
         }
 
+        let durable_name = LeaderColJobQueue::name(0).unwrap_from_name();
         durable
             .post(
-                BINDING_DAP_LEADER_COL_JOB_QUEUE,
-                DURABLE_LEADER_COL_JOB_QUEUE_FINISH,
-                durable_name_queue(0),
+                LeaderColJobQueue::BINDING,
+                LeaderColJobQueue::Finish.to_uri(),
+                durable_name,
                 (task_id, collect_id, collect_resp),
             )
             .await

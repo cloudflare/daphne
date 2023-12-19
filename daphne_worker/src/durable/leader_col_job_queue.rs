@@ -5,43 +5,25 @@ use std::ops::ControlFlow;
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{
-        create_span_from_request, state_get, state_get_or_default, DurableOrdered,
-        BINDING_DAP_LEADER_COL_JOB_QUEUE,
-    },
+    durable::{create_span_from_request, state_get, state_get_or_default, DurableOrdered},
     initialize_tracing, int_err,
 };
 use daphne::{
     messages::{Base64Encode, Collection, CollectionJobId, CollectionReq, TaskId},
     DapCollectJob, DapVersion,
 };
+use daphne_service_utils::durable_requests::bindings::{self, CollectQueueRequest, DurableMethod};
 use prio::codec::ParameterizedEncode;
-use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    Error, Method, Request, Response, Result, State,
+    Error, Request, Response, Result, State,
 };
 
 use super::{req_parse, DapDurableObject, GarbageCollectable};
 
 const PENDING_PREFIX: &str = "pending";
 const PROCESSED_PREFIX: &str = "processed";
-
-pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_PUT: &str = "/internal/do/leader_col_job_queue/put";
-pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET: &str = "/internal/do/leader_col_job_queue/get";
-pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_FINISH: &str =
-    "/internal/do/leader_col_job_queue/finish";
-pub(crate) const DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT: &str =
-    "/internal/do/leader_col_job_queue/get_result";
-
-#[derive(Clone, Deserialize, Serialize, Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct CollectQueueRequest {
-    pub collect_req: CollectionReq,
-    pub task_id: TaskId,
-    pub collect_job_id: Option<CollectionJobId>,
-}
 
 /// Durable Object (DO) for storing the Leader's state for a given task.
 ///
@@ -96,20 +78,17 @@ impl DurableObject for LeaderCollectionJobQueue {
 
 impl LeaderCollectionJobQueue {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let mut req = match self
-            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_COL_JOB_QUEUE)
-            .await?
-        {
+        let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
             ControlFlow::Break(_) => return Response::from_json(&()),
         };
-        match (req.path().as_ref(), req.method()) {
+        match bindings::LeaderColJobQueue::try_from_uri(&req.path()) {
             // Create a collect job for a collect request issued by the Collector.
             //
             // Input: `collect_req: CollectReq`
             // Output: `Id` (collect job ID)
-            (DURABLE_LEADER_COL_JOB_QUEUE_PUT, Method::Post) => {
+            Some(bindings::LeaderColJobQueue::Put) => {
                 let collect_queue_req: CollectQueueRequest = req_parse(&mut req).await?;
                 let collection_job_id: CollectionJobId =
                     if let Some(cid) = &collect_queue_req.collect_job_id {
@@ -169,7 +148,7 @@ impl LeaderCollectionJobQueue {
             // Get the list of pending collection jobs (oldest jobs first).
             //
             // Output: `Vec<(Id, CollectReq)>`
-            (DURABLE_LEADER_COL_JOB_QUEUE_GET, Method::Get) => {
+            Some(bindings::LeaderColJobQueue::Get) => {
                 let queue: Vec<(TaskId, CollectionJobId, CollectionReq)> =
                     DurableOrdered::get_all(&self.state, PENDING_PREFIX)
                         .await?
@@ -182,7 +161,7 @@ impl LeaderCollectionJobQueue {
             // Remove a collection job from the pending queue and store the CollectResp.
             //
             // Input: `(collection_job_id, collect_resp): (Id, CollectResp)`
-            (DURABLE_LEADER_COL_JOB_QUEUE_FINISH, Method::Post) => {
+            Some(bindings::LeaderColJobQueue::Finish) => {
                 let (task_id, collection_job_id, collect_resp): (
                     TaskId,
                     CollectionJobId,
@@ -220,7 +199,7 @@ impl LeaderCollectionJobQueue {
             //
             // Input: `collection_job_id: Id`
             // Output: `DapCollectionJob`
-            (DURABLE_LEADER_COL_JOB_QUEUE_GET_RESULT, Method::Post) => {
+            Some(bindings::LeaderColJobQueue::GetResult) => {
                 let (task_id, collection_job_id): (TaskId, CollectionJobId) =
                     req_parse(&mut req).await?;
                 let pending_key = pending_key(&task_id, &collection_job_id);
@@ -267,6 +246,8 @@ fn processed_key(task_id: &TaskId, collection_job_id: &CollectionJobId) -> Strin
 }
 
 impl DapDurableObject for LeaderCollectionJobQueue {
+    type DurableMethod = bindings::LeaderColJobQueue;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state

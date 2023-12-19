@@ -4,58 +4,22 @@
 use crate::{
     config::DaphneWorkerConfig,
     durable::{
-        create_span_from_request, durable_name_queue,
-        leader_agg_job_queue::{
-            DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
-        },
-        req_parse, state_get, state_set_if_not_exists, DurableConnector, DurableOrdered,
-        BINDING_DAP_LEADER_AGG_JOB_QUEUE, BINDING_DAP_REPORTS_PENDING, MAX_KEYS,
+        create_span_from_request, req_parse, state_get, state_set_if_not_exists, DurableConnector,
+        DurableOrdered, MAX_KEYS,
     },
     initialize_tracing, int_err,
 };
-use daphne::{messages::TaskId, DapVersion};
-use serde::{Deserialize, Serialize};
+use daphne_service_utils::durable_requests::bindings::{
+    self, DurableMethod, LeaderAggJobQueue, PendingReport, ReportsPendingResult,
+};
 use std::{cmp::min, ops::ControlFlow};
 use tracing::{debug, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    ListOptions, Method, Request, Response, Result, State,
+    ListOptions, Request, Response, Result, State,
 };
 
 use super::{DapDurableObject, GarbageCollectable};
-
-pub(crate) const DURABLE_REPORTS_PENDING_GET: &str = "/internal/do/reports_pending/get";
-pub(crate) const DURABLE_REPORTS_PENDING_PUT: &str = "/internal/do/reports_pending/put";
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ReportsPendingResult {
-    Ok,
-    ErrReportExists,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct PendingReport {
-    pub(crate) task_id: TaskId,
-    pub(crate) version: DapVersion,
-
-    /// Hex-encdoed, serialized report.
-    //
-    // TODO(cjpatton) Consider changing the type to `Report`. If I recall correctly, this triggers
-    // the serde-wasm-bindgen bug we saw in workers-rs 0.0.12, which should be fixed as of 0.0.15.
-    pub(crate) report_hex: String,
-}
-
-impl PendingReport {
-    pub(crate) fn report_id_hex(&self) -> Option<&str> {
-        match self.version {
-            DapVersion::Draft02 if self.report_hex.len() >= 96 => Some(&self.report_hex[64..96]),
-            DapVersion::DraftLatest if self.report_hex.len() >= 32 => Some(&self.report_hex[..32]),
-            _ => None,
-        }
-    }
-}
 
 /// Durable Object (DO) for storing reports waiting to be processed.
 ///
@@ -113,10 +77,7 @@ impl ReportsPending {
     async fn handle(&mut self, req: Request) -> Result<Response> {
         let id_hex = self.state.id().to_string();
 
-        let mut req = match self
-            .schedule_for_garbage_collection(req, BINDING_DAP_REPORTS_PENDING)
-            .await?
-        {
+        let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
             ControlFlow::Break(_) => return Response::from_json(&()),
@@ -124,12 +85,12 @@ impl ReportsPending {
 
         let durable = DurableConnector::new(&self.env);
 
-        match (req.path().as_ref(), req.method()) {
+        match bindings::ReportsPending::try_from_uri(&req.path()) {
             // Drain the requested number of reports from storage.
             //
             // Input: `reports_requested: usize`
             // Output: `Vec<PendingReport>`
-            (DURABLE_REPORTS_PENDING_GET, Method::Post) => {
+            Some(bindings::ReportsPending::Get) => {
                 let reports_requested: usize = req_parse(&mut req).await?;
                 // Note we impose an upper limit on the user's specified limit.
                 let opt = ListOptions::new()
@@ -175,11 +136,12 @@ impl ReportsPending {
                         self.state.storage().delete("agg_job").await?;
                         // NOTE There is only one agg job queue for now. In the future, work will
                         // be sharded across multiple queues.
+                        let durable_name = LeaderAggJobQueue::name(0).unwrap_from_name();
                         durable
                             .post(
-                                BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-                                DURABLE_LEADER_AGG_JOB_QUEUE_FINISH,
-                                durable_name_queue(0),
+                                LeaderAggJobQueue::BINDING,
+                                LeaderAggJobQueue::Finish.to_uri(),
+                                durable_name,
                                 &agg_job,
                             )
                             .await?;
@@ -198,7 +160,7 @@ impl ReportsPending {
             //
             // Input: `pending_report: PendingReport`
             // Output: `ReportsPendingResult`
-            (DURABLE_REPORTS_PENDING_PUT, Method::Post) => {
+            Some(bindings::ReportsPending::Put) => {
                 let pending_report: PendingReport = req_parse(&mut req).await?;
                 let report_id_hex = pending_report
                     .report_id_hex()
@@ -222,9 +184,9 @@ impl ReportsPending {
                     // issue #25.) For now there is jsut one job queue.
                     durable
                         .post(
-                            BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-                            DURABLE_LEADER_AGG_JOB_QUEUE_PUT,
-                            durable_name_queue(0),
+                            LeaderAggJobQueue::BINDING,
+                            LeaderAggJobQueue::Put.to_uri(),
+                            LeaderAggJobQueue::name(0).unwrap_from_name(),
                             &agg_job,
                         )
                         .await?;
@@ -244,6 +206,8 @@ impl ReportsPending {
 }
 
 impl DapDurableObject for ReportsPending {
+    type DurableMethod = bindings::ReportsPending;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state

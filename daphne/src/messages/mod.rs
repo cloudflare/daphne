@@ -1239,7 +1239,7 @@ impl ParameterizedDecode<DapVersion> for PlaintextInputShare {
 
 // NOTE ring provides a similar function, but as of version 0.16.20, it doesn't compile to
 // wasm32-unknown-unknown.
-pub(crate) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }

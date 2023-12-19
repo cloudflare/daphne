@@ -2,19 +2,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    durable,
     durable::{
         create_span_from_request, req_parse, DurableConnector, DurableOrdered, DurableReference,
     },
     initialize_tracing, int_err,
 };
+use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use tracing::{error, trace, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    Method, Request, Response, Result, State,
+    Request, Response, Result, State,
 };
-
-pub(crate) const DURABLE_GARBAGE_COLLECTOR_PUT: &str = "/internal/do/garbage_collector/put";
 
 /// Durable Object (DO) for keeping track of all persistent DO storage.
 #[durable_object]
@@ -40,18 +38,17 @@ impl DurableObject for GarbageCollector {
 impl GarbageCollector {
     async fn handle(&mut self, mut req: Request) -> Result<Response> {
         let durable = DurableConnector::new(&self.env);
-        match (req.path().as_ref(), req.method()) {
+        match bindings::GarbageCollector::try_from_uri(&req.path()) {
             // Schedule a durable object (DO) instance for deletion.
-            (DURABLE_GARBAGE_COLLECTOR_PUT, Method::Post) => {
+            Some(bindings::GarbageCollector::Put) => {
                 let durable_ref: DurableReference = req_parse(&mut req).await?;
                 match durable_ref.binding.as_ref() {
-                    durable::BINDING_DAP_REPORTS_PENDING
-                    | durable::BINDING_DAP_REPORTS_PROCESSED
-                    | durable::BINDING_DAP_AGGREGATE_STORE
-                    | durable::BINDING_DAP_LEADER_AGG_JOB_QUEUE
-                    | durable::BINDING_DAP_LEADER_BATCH_QUEUE
-                    | durable::BINDING_DAP_LEADER_COL_JOB_QUEUE
-                    | durable::BINDING_DAP_HELPER_STATE_STORE => (),
+                    bindings::ReportsPending::BINDING
+                    | bindings::AggregateStore::BINDING
+                    | bindings::LeaderAggJobQueue::BINDING
+                    | bindings::LeaderBatchQueue::BINDING
+                    | bindings::LeaderColJobQueue::BINDING
+                    | bindings::HelperState::BINDING => (),
                     s => {
                         let message = format!("GarbageCollector: unrecognized binding: {s}");
                         error!("{}", message);
@@ -80,14 +77,14 @@ impl GarbageCollector {
             //   will allow us to prune storage we're not likely to need anymore, e.g., for
             //   replay protection. However, for replay protection in particular, it'll be
             //   important to make sure the Leader rejects reports with old timestamps.
-            (durable::DURABLE_DELETE_ALL, Method::Post) => {
+            Some(bindings::GarbageCollector::DeleteAll) => {
                 let queued: Vec<DurableOrdered<DurableReference>> =
                     DurableOrdered::get_all(&self.state, "object").await?;
                 for durable_ref in queued.iter().map(|queued| queued.as_ref()) {
                     durable
                         .post_by_id_hex(
                             &durable_ref.binding,
-                            durable::DURABLE_DELETE_ALL,
+                            bindings::GarbageCollector::DeleteAll.to_uri(),
                             durable_ref.id_hex.clone(),
                             &(),
                         )

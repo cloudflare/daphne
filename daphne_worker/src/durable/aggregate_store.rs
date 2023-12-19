@@ -5,13 +5,16 @@ use std::{collections::HashSet, mem::size_of, ops::ControlFlow};
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{create_span_from_request, state_get_or_default, BINDING_DAP_AGGREGATE_STORE},
+    durable::{create_span_from_request, state_get_or_default},
     initialize_tracing, int_err,
 };
 use daphne::{
     messages::{ReportId, Time},
     vdaf::VdafAggregateShare,
     DapAggregateShare,
+};
+use daphne_service_utils::durable_requests::bindings::{
+    self, AggregateStoreMergeReq, AggregateStoreMergeResp, DurableMethod,
 };
 use prio::{
     codec::{Decode, Encode},
@@ -22,19 +25,10 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Instrument;
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures,
-    worker_sys, Env, Error, Method, Request, Response, Result, State,
+    worker_sys, Env, Error, Request, Response, Result, State,
 };
 
 use super::{req_parse, DapDurableObject, GarbageCollectable};
-
-pub(crate) const DURABLE_AGGREGATE_STORE_GET_MERGED: &str =
-    "/internal/do/aggregate_store/get_merged";
-pub(crate) const DURABLE_AGGREGATE_STORE_GET: &str = "/internal/do/aggregate_store/get";
-pub(crate) const DURABLE_AGGREGATE_STORE_MERGE: &str = "/internal/do/aggregate_store/merge";
-pub(crate) const DURABLE_AGGREGATE_STORE_MARK_COLLECTED: &str =
-    "/internal/do/aggregate_store/mark_collected";
-pub(crate) const DURABLE_AGGREGATE_STORE_CHECK_COLLECTED: &str =
-    "/internal/do/aggregate_store/check_collected";
 
 /// Durable Object (DO) for storing aggregate shares for a bucket of reports.
 ///
@@ -268,13 +262,6 @@ fn shard_bytes_to_object(
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AggregateStoreMergeResp {
-    Ok,
-    ReplaysDetected(HashSet<ReportId>),
-    AlreadyCollected,
-}
-
 #[durable_object]
 impl DurableObject for AggregateStore {
     fn new(state: State, env: Env) -> Self {
@@ -308,17 +295,14 @@ impl AggregateStore {
     }
 
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let mut req = match self
-            .schedule_for_garbage_collection(req, BINDING_DAP_AGGREGATE_STORE)
-            .await?
-        {
+        let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
             ControlFlow::Break(_) => return Response::from_json(&()),
         };
 
-        match (req.path().as_ref(), req.method()) {
-            (DURABLE_AGGREGATE_STORE_GET_MERGED, Method::Get) => {
+        match bindings::AggregateStore::try_from_uri(&req.path()) {
+            Some(bindings::AggregateStore::GetMerged) => {
                 Response::from_json(&self.load_aggregated_report_ids().await?)
             }
             // Merge an aggregate share into the stored aggregate.
@@ -326,7 +310,7 @@ impl AggregateStore {
             // Non-idempotent (do not retry)
             // Input: `agg_share_dellta: DapAggregateShare`
             // Output: `()`
-            (DURABLE_AGGREGATE_STORE_MERGE, Method::Post) => {
+            Some(bindings::AggregateStore::Merge) => {
                 let AggregateStoreMergeReq {
                     contained_reports,
                     agg_share_delta,
@@ -386,7 +370,7 @@ impl AggregateStore {
             //
             // Idempotent
             // Output: `DapAggregateShare`
-            (DURABLE_AGGREGATE_STORE_GET, Method::Get) => {
+            Some(bindings::AggregateStore::Get) => {
                 let agg_share = self.get_agg_share(&Self::agg_share_shard_keys()).await?;
                 Response::from_json(&agg_share)
             }
@@ -395,7 +379,7 @@ impl AggregateStore {
             //
             // Non-idempotent (do not retry)
             // Output: `()`
-            (DURABLE_AGGREGATE_STORE_MARK_COLLECTED, Method::Post) => {
+            Some(bindings::AggregateStore::MarkCollected) => {
                 self.state.storage().put(COLLECTED_KEY, true).await?;
                 self.collected = Some(true);
                 Response::from_json(&())
@@ -405,7 +389,7 @@ impl AggregateStore {
             //
             // Idempotent
             // Output: `bool`
-            (DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, Method::Get) => {
+            Some(bindings::AggregateStore::CheckCollected) => {
                 Response::from_json(&self.is_collected().await?)
             }
 
@@ -419,6 +403,8 @@ impl AggregateStore {
 }
 
 impl DapDurableObject for AggregateStore {
+    type DurableMethod = bindings::AggregateStore;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state
@@ -441,10 +427,4 @@ impl GarbageCollectable for AggregateStore {
     fn env(&self) -> &Env {
         &self.env
     }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AggregateStoreMergeReq {
-    pub contained_reports: Vec<ReportId>,
-    pub agg_share_delta: DapAggregateShare,
 }

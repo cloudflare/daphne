@@ -311,6 +311,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f125eb85b84a24c36b02ed1d22c9dd8632f53b3cde6e4d23512f94021030003"
 
 [[package]]
+name = "capnp"
+version = "0.18.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e78424967d6d4c8e295a3b5114ae6d849052e9dbbed3e62589a76acda54e3f0"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5067f3c8ee94d993d03150153e9a57a6ff330127b1c1ad76475051e1cef79c2d"
+dependencies = [
+ "capnp",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -636,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "daphne_server"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "clap",
@@ -658,10 +676,14 @@ dependencies = [
 
 [[package]]
 name = "daphne_service_utils"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
+ "capnp",
+ "capnpc",
  "daphne",
+ "http 1.0.0",
  "prometheus",
+ "ring",
  "serde",
  "serde_json",
  "url",
@@ -761,6 +783,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "embedded-io"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
 
 [[package]]
 name = "encoding_rs"
