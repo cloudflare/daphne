@@ -22,8 +22,10 @@ bincode.workspace = true
 daphne = { path = "../daphne", features = ["send-traits"] }
 daphne_service_utils = { path = "../daphne_service_utils" }
 futures.workspace = true
+hex.workspace = true
 prio.workspace = true
 prometheus.workspace = true
+rayon.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
