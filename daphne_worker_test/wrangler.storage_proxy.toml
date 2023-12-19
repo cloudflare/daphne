@@ -1,0 +1,65 @@
+name = "daphne_storage_proxy"
+main = "build/worker/shim.mjs"
+compatibility_date = "2023-12-21"
+
+[build]
+command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build --dev"
+
+[[rules]]
+globs = ["**/*.wasm"]
+type = "CompiledWasm"
+fallthrough = false
+
+# NOTE: Variables marked as SECRET need to be provisioned securely in
+# production. In particular, they will not be passed as environment variables
+# as they are here. See
+# https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+[vars]
+DAP_PROXY = "true"
+DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
+DAP_DEPLOYMENT = "dev"
+DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
+DAP_COLLECTION_JOB_ID_KEY = "12da249b0e3b1a9b5936d6ff6cdd2fa09964e2e11f5450e04eef11dc5e64daf1" # SECRET
+
+[durable_objects]
+bindings = [
+    { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+    { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+    { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
+    { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
+    { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
+    { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
+    { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
+]
+
+
+[[kv_namespaces]]
+binding = "DAP_CONFIG"
+# KV bindings are in a looked up in a namespace identified by a 16-byte id number.
+# This number is assigned by calling
+#
+#    wrangler kv:namespace create <NAME>
+#
+# for some unique name you specify, and it returns a unique id number to use.
+# Here we should use something like "leader" for the <NAME>.
+id = "<assign-one-for-the-leader>"
+# A "preview id" is an id used when running in "wrangler dev" mode locally, and
+# can just be made up.  We generated the number below with the following python
+# code:
+#
+#    import secrets
+#    print(secrets.token_hex(16))
+#
+preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
+
+[[migrations]]
+tag = "v1"
+new_classes = [
+    "AggregateStore",
+    "HelperStateStore",
+    "LeaderAggregationJobQueue",
+    "LeaderBatchQueue",
+    "LeaderCollectionJobQueue",
+    "GarbageCollector",
+    "ReportsPending",
+]
