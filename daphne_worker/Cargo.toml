@@ -45,3 +45,6 @@ worker.workspace = true
 [dev-dependencies]
 daphne = { path = "../daphne", features = ["test-utils"] }
 paste.workspace = true
+
+[features]
+test-utils = ["daphne_service_utils/test-utils"]

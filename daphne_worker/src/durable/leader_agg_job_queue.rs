@@ -5,22 +5,17 @@ use std::ops::ControlFlow;
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{
-        create_span_from_request, req_parse, DurableOrdered, BINDING_DAP_LEADER_AGG_JOB_QUEUE,
-    },
+    durable::{create_span_from_request, req_parse, DurableOrdered},
     initialize_tracing, int_err,
 };
+use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use tracing::{debug, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    Method, Request, Response, Result, State,
+    Request, Response, Result, State,
 };
 
 use super::{DapDurableObject, GarbageCollectable};
-
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_PUT: &str = "/internal/do/agg_job_queue/put";
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_GET: &str = "/internal/do/agg_job_queue/get";
-pub(crate) const DURABLE_LEADER_AGG_JOB_QUEUE_FINISH: &str = "/internal/do/agg_job_queue/finish";
 
 /// Durable Object (DO) representing an aggregation job queue.
 ///
@@ -72,20 +67,17 @@ impl DurableObject for LeaderAggregationJobQueue {
 
 impl LeaderAggregationJobQueue {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let mut req = match self
-            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_AGG_JOB_QUEUE)
-            .await?
-        {
+        let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
             ControlFlow::Break(_) => return Response::from_json(&()),
         };
-        match (req.path().as_ref(), req.method()) {
+        match bindings::LeaderAggJobQueue::try_from_uri(&req.path()) {
             // Put a job (near) the back of the queue.
             //
             // Input: `agg_job: DurableOrdered<String>` (the `String` is the name of the
             // `ReportsPending` instance)
-            (DURABLE_LEADER_AGG_JOB_QUEUE_PUT, Method::Post) => {
+            Some(bindings::LeaderAggJobQueue::Put) => {
                 let agg_job: DurableOrdered<String> = req_parse(&mut req).await?;
                 agg_job.put(&self.state).await?;
                 debug!(
@@ -100,7 +92,7 @@ impl LeaderAggregationJobQueue {
             // Input: `max_agg_jobs: usize`,
             // Output: `Vec<String>` (the names of the `ReportsPending` instances from which to
             // drain reports)
-            (DURABLE_LEADER_AGG_JOB_QUEUE_GET, Method::Post) => {
+            Some(bindings::LeaderAggJobQueue::Get) => {
                 let max_agg_jobs: usize = req_parse(&mut req).await?;
                 let res: Vec<String> =
                     DurableOrdered::get_front(&self.state, "agg_job", max_agg_jobs)
@@ -117,7 +109,7 @@ impl LeaderAggregationJobQueue {
             //
             // Input: `agg_job: DurableOrdered<String>` (the `String` is the name of the
             // `ReportsPending` instance that has become empty)
-            (DURABLE_LEADER_AGG_JOB_QUEUE_FINISH, Method::Post) => {
+            Some(bindings::LeaderAggJobQueue::Finish) => {
                 let agg_job: DurableOrdered<String> = req_parse(&mut req).await?;
                 agg_job.delete(&self.state).await?;
                 Response::from_json(&())
@@ -133,6 +125,8 @@ impl LeaderAggregationJobQueue {
 }
 
 impl DapDurableObject for LeaderAggregationJobQueue {
+    type DurableMethod = bindings::LeaderAggJobQueue;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state

@@ -5,42 +5,24 @@ use std::ops::ControlFlow;
 
 use crate::{
     config::DaphneWorkerConfig,
-    durable::{
-        create_span_from_request, state_get, DurableOrdered, BINDING_DAP_LEADER_BATCH_QUEUE,
-    },
+    durable::{create_span_from_request, state_get, DurableOrdered},
     initialize_tracing, int_err,
 };
 use daphne::messages::BatchId;
+use daphne_service_utils::durable_requests::bindings::{
+    self, BatchCount, DurableMethod, LeaderBatchQueueResult,
+};
 use rand::prelude::*;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    Method, Request, Response, Result, State,
+    Request, Response, Result, State,
 };
 
 use super::{req_parse, DapDurableObject, GarbageCollectable};
 
-pub(crate) const DURABLE_LEADER_BATCH_QUEUE_ASSIGN: &str = "/internal/do/leader_batch_queue/assign";
-pub(crate) const DURABLE_LEADER_BATCH_QUEUE_CURRENT: &str =
-    "/internal/do/leader_batch_queue/current";
-pub(crate) const DURABLE_LEADER_BATCH_QUEUE_REMOVE: &str = "/internal/do/leader_batch_queue/remove";
-
 const CURRENT: &str = "current";
 const PENDING_PREFIX: &str = "pending";
-
-#[derive(Clone, Deserialize, Serialize)]
-pub(crate) struct BatchCount {
-    pub(crate) batch_id: BatchId,
-    pub(crate) report_count: usize,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum LeaderBatchQueueResult {
-    Ok(BatchId),
-    EmptyQueue,
-}
 
 /// Durable Object (DO) for assigning reports to batches (applicable to fixed-size tasks only).
 ///
@@ -119,20 +101,17 @@ impl DurableObject for LeaderBatchQueue {
 
 impl LeaderBatchQueue {
     async fn handle(&mut self, req: Request) -> Result<Response> {
-        let mut req = match self
-            .schedule_for_garbage_collection(req, BINDING_DAP_LEADER_BATCH_QUEUE)
-            .await?
-        {
+        let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
             ControlFlow::Break(_) => return Response::from_json(&()),
         };
 
-        match (req.path().as_ref(), req.method()) {
+        match bindings::LeaderBatchQueue::try_from_uri(&req.path()) {
             // Return the ID of the oldest, not-yet-collected batch.
             //
             // Output: `LeaderBatchQueueResult`
-            (DURABLE_LEADER_BATCH_QUEUE_CURRENT, Method::Get) => {
+            Some(bindings::LeaderBatchQueue::Current) => {
                 let mut queued: Vec<DurableOrdered<BatchCount>> =
                     DurableOrdered::get_front(&self.state, PENDING_PREFIX, 1).await?;
                 if queued.is_empty() {
@@ -149,7 +128,7 @@ impl LeaderBatchQueue {
             //
             // Input: `(batch_size, num_unassigned): (usize, usize)`
             // Output: `Vec<BatchCount>`
-            (DURABLE_LEADER_BATCH_QUEUE_ASSIGN, Method::Post) => {
+            Some(bindings::LeaderBatchQueue::Assign) => {
                 let (batch_size, mut num_unassigned): (usize, usize) = req_parse(&mut req).await?;
                 if batch_size == 0 {
                     return Err(int_err("LeaderBatchQueue: called with batch_size is 0"));
@@ -192,7 +171,7 @@ impl LeaderBatchQueue {
             // done after the corresponding collect job is finished.
             //
             // Input: `batch_id_hex: String`
-            (DURABLE_LEADER_BATCH_QUEUE_REMOVE, Method::Post) => {
+            Some(bindings::LeaderBatchQueue::Remove) => {
                 let batch_id_hex: String = req_parse(&mut req).await?;
                 let lookup_key = lookup_key(&batch_id_hex);
                 if let Some(lookup_val) = state_get::<String>(&self.state, &lookup_key).await? {
@@ -218,6 +197,8 @@ fn lookup_key(batch_id_hex: &str) -> String {
 }
 
 impl DapDurableObject for LeaderBatchQueue {
+    type DurableMethod = bindings::LeaderBatchQueue;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state

@@ -3,22 +3,14 @@
 
 //! Implementation of the helper side of the protocol
 
-use crate::{
-    config::DaphneWorker,
-    durable::{
-        helper_state_store::{
-            durable_helper_state_name, DURABLE_HELPER_STATE_GET,
-            DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
-        },
-        BINDING_DAP_HELPER_STATE_STORE,
-    },
-};
+use crate::config::DaphneWorker;
 use async_trait::async_trait;
 use daphne::{
     error::DapAbort, fatal_error, messages::TaskId, roles::DapHelper, DapAggregationJobState,
     DapError, MetaAggregationJobId,
 };
 use daphne_service_utils::auth::DaphneAuth;
+use daphne_service_utils::durable_requests::bindings::{DurableMethod, HelperState};
 use prio::codec::Encode;
 
 #[async_trait(?Send)]
@@ -34,17 +26,16 @@ impl<'srv> DapHelper<DaphneAuth> for DaphneWorker<'srv> {
     {
         let task_config = self.try_get_task_config(task_id).await?;
         let helper_state_hex = hex::encode(helper_state.get_encoded());
+        let durable_name =
+            HelperState::name((task_config.as_ref().version, task_id, &agg_job_id.into()))
+                .unwrap_from_name();
         Ok(self
             .durable()
             .with_retry()
             .post(
-                BINDING_DAP_HELPER_STATE_STORE,
-                DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS,
-                durable_helper_state_name(
-                    task_config.as_ref().version,
-                    task_id,
-                    &agg_job_id.into(),
-                ),
+                HelperState::BINDING,
+                HelperState::PutIfNotExists.to_uri(),
+                durable_name,
                 helper_state_hex,
             )
             .await
@@ -60,19 +51,18 @@ impl<'srv> DapHelper<DaphneAuth> for DaphneWorker<'srv> {
         Id: Into<MetaAggregationJobId> + Send,
     {
         let task_config = self.try_get_task_config(task_id).await?;
+        let durable_name =
+            HelperState::name((task_config.as_ref().version, task_id, &agg_job_id.into()))
+                .unwrap_from_name();
         // TODO(cjpatton) Figure out if retry is safe, since the request is not actually
         // idempotent. (It removes the helper's state from storage if it exists.)
         let res: Option<String> = self
             .durable()
             .with_retry()
             .get(
-                BINDING_DAP_HELPER_STATE_STORE,
-                DURABLE_HELPER_STATE_GET,
-                durable_helper_state_name(
-                    task_config.as_ref().version,
-                    task_id,
-                    &agg_job_id.into(),
-                ),
+                HelperState::BINDING,
+                HelperState::Get.to_uri(),
+                durable_name,
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;

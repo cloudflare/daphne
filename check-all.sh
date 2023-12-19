@@ -27,6 +27,7 @@ case "$mode" in
     test)
         r cargo test -p daphne
         r cargo test -p daphne --features send-traits
+        r cargo test -p daphne_service_utils
         r cargo test -p daphne_worker
         r cargo test -p daphne-worker-test
         r cargo test -p daphne_server

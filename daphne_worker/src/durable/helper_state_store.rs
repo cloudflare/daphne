@@ -6,31 +6,14 @@ use crate::{
     durable::{create_span_from_request, state_get, state_set_if_not_exists},
     initialize_tracing, int_err,
 };
-use daphne::{messages::TaskId, DapVersion, MetaAggregationJobId};
+use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use tracing::{trace, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    Method, Request, Response, Result, State,
+    Request, Response, Result, State,
 };
 
 use super::{req_parse, Alarmed, DapDurableObject};
-
-pub(crate) fn durable_helper_state_name(
-    version: DapVersion,
-    task_id: &TaskId,
-    agg_job_id: &MetaAggregationJobId,
-) -> String {
-    format!(
-        "{}/task/{}/agg_job/{}",
-        version.as_ref(),
-        task_id.to_hex(),
-        agg_job_id.to_hex()
-    )
-}
-
-pub(crate) const DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS: &str =
-    "/internal/do/helper_state/put_if_not_exists";
-pub(crate) const DURABLE_HELPER_STATE_GET: &str = "/internal/do/helper_state/get";
 
 /// Durable Object (DO) for storing the Helper's state for a given aggregation job.
 ///
@@ -87,13 +70,13 @@ impl DurableObject for HelperStateStore {
 
 impl HelperStateStore {
     async fn handle(&mut self, mut req: Request) -> Result<Response> {
-        match (req.path().as_ref(), req.method()) {
+        match bindings::HelperState::try_from_uri(&req.path()) {
             // Store the Helper's state.
             //
             // Non-idempotent
             // Input: `helper_state_hex: String` (hex-encoded state)
             // Output: `bool`
-            (DURABLE_HELPER_STATE_PUT_IF_NOT_EXISTS, Method::Post) => {
+            Some(bindings::HelperState::PutIfNotExists) => {
                 let helper_state_hex: String = req_parse(&mut req).await?;
                 let success =
                     state_set_if_not_exists(&self.state, "helper_state", &helper_state_hex)
@@ -106,7 +89,7 @@ impl HelperStateStore {
             //
             // Idempotent
             // Output: `String` (hex-encoded state)
-            (DURABLE_HELPER_STATE_GET, Method::Get) => {
+            Some(bindings::HelperState::Get) => {
                 let helper_state: Option<String> = state_get(&self.state, "helper_state").await?;
                 Response::from_json(&helper_state)
             }
@@ -121,6 +104,8 @@ impl HelperStateStore {
 }
 
 impl DapDurableObject for HelperStateStore {
+    type DurableMethod = bindings::HelperState;
+
     #[inline(always)]
     fn state(&self) -> &State {
         &self.state

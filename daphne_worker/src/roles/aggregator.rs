@@ -5,14 +5,6 @@
 
 use crate::{
     config::{DapTaskConfigKvPair, DaphneWorker},
-    durable::{
-        aggregate_store::{
-            AggregateStoreMergeReq, AggregateStoreMergeResp,
-            DURABLE_AGGREGATE_STORE_CHECK_COLLECTED, DURABLE_AGGREGATE_STORE_GET,
-            DURABLE_AGGREGATE_STORE_MARK_COLLECTED, DURABLE_AGGREGATE_STORE_MERGE,
-        },
-        durable_name_agg_store, BINDING_DAP_AGGREGATE_STORE,
-    },
     now,
 };
 use async_trait::async_trait;
@@ -28,7 +20,11 @@ use daphne::{
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapRequest,
     DapSender, DapTaskConfig,
 };
-use daphne_service_utils::auth::DaphneAuth;
+use daphne_service_utils::durable_requests::bindings::{AggregateStore, DurableMethod};
+use daphne_service_utils::{
+    auth::DaphneAuth,
+    durable_requests::bindings::{AggregateStoreMergeReq, AggregateStoreMergeResp},
+};
 use futures::{future::try_join_all, StreamExt};
 
 #[async_trait(?Send)]
@@ -256,10 +252,11 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
             let durable_name =
-                durable_name_agg_store(task_config.as_ref().version, &task_id.to_hex(), &bucket);
+                AggregateStore::name((task_config.as_ref().version, &task_id.to_hex(), &bucket))
+                    .unwrap_from_name();
             requests.push(durable.get(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_CHECK_COLLECTED,
+                AggregateStore::BINDING,
+                AggregateStore::CheckCollected.to_uri(),
                 durable_name,
             ));
         }
@@ -284,19 +281,21 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
     ) -> std::result::Result<bool, DapError> {
         let task_config = self.try_get_task_config(task_id).await?;
 
+        let durable_name = AggregateStore::name((
+            task_config.as_ref().version,
+            &task_id.to_hex(),
+            &DapBatchBucket::FixedSize {
+                batch_id: *batch_id,
+            },
+        ))
+        .unwrap_from_name();
         let agg_share: DapAggregateShare = self
             .durable()
             .with_retry()
             .get(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_GET,
-                durable_name_agg_store(
-                    task_config.as_ref().version,
-                    &task_id.to_hex(),
-                    &DapBatchBucket::FixedSize {
-                        batch_id: *batch_id,
-                    },
-                ),
+                AggregateStore::BINDING,
+                AggregateStore::Get.to_uri(),
+                durable_name,
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
@@ -316,11 +315,12 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
         futures::stream::iter(agg_share_span)
             .map(|(bucket, (agg_share, report_metadatas))| async {
                 let agg_store_name =
-                    durable_name_agg_store(task_config.version, &task_id_hex, &bucket);
+                    AggregateStore::name((task_config.version, &task_id_hex, &bucket))
+                        .unwrap_from_name();
                 let result = durable
                     .post::<_, AggregateStoreMergeResp>(
-                        BINDING_DAP_AGGREGATE_STORE,
-                        DURABLE_AGGREGATE_STORE_MERGE,
+                        AggregateStore::BINDING,
+                        AggregateStore::Merge.to_uri(),
                         agg_store_name,
                         AggregateStoreMergeReq {
                             contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
@@ -357,10 +357,11 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
             let durable_name =
-                durable_name_agg_store(task_config.as_ref().version, &task_id.to_hex(), &bucket);
+                AggregateStore::name((task_config.as_ref().version, &task_id.to_hex(), &bucket))
+                    .unwrap_from_name();
             requests.push(durable.get(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_GET,
+                AggregateStore::BINDING,
+                AggregateStore::Get.to_uri(),
                 durable_name,
             ));
         }
@@ -386,10 +387,11 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
             let durable_name =
-                durable_name_agg_store(task_config.as_ref().version, &task_id.to_hex(), &bucket);
+                AggregateStore::name((task_config.as_ref().version, &task_id.to_hex(), &bucket))
+                    .unwrap_from_name();
             requests.push(durable.post::<_, ()>(
-                BINDING_DAP_AGGREGATE_STORE,
-                DURABLE_AGGREGATE_STORE_MARK_COLLECTED,
+                AggregateStore::BINDING,
+                AggregateStore::MarkCollected.to_uri(),
                 durable_name,
                 &(),
             ));

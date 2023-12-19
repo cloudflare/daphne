@@ -1,12 +1,12 @@
-FROM rust:1.73-alpine AS builder
+FROM rust:1.73-bookworm AS builder
 WORKDIR /tmp/dap_test
-RUN apk add --update \
-    bash \
+RUN apt update && \
+    apt install -y \
     clang \
     make \
     npm \
-    openssl-dev \
-    wasm-pack
+    capnproto
+
 RUN npm install -g wrangler@2.19.0
 
 # Pre-install worker-build and Rust's wasm32 target to speed up our custom build command
@@ -21,6 +21,7 @@ COPY daphne ./daphne
 RUN cargo new --lib daphne_server
 WORKDIR /tmp/dap_test/daphne_worker_test
 COPY docker/wrangler.toml ./daphne_worker_test/wrangler.toml
+RUN capnp --version
 RUN wrangler publish --dry-run
 
 FROM alpine:3.16 AS test

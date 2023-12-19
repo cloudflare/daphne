@@ -24,6 +24,7 @@ assert_matches = "1.5.0"
 async-trait = "0.1.74"
 base64 = "0.21.5"
 cap = "0.1.2"
+capnp = "0.18.10"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 deepsize = { version = "0.2.0" }
 futures = "0.3.29"
@@ -32,6 +33,7 @@ hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "0.2.0"
 hpke-rs-crypto = "0.2.0"
 hpke-rs-rust-crypto = "0.2.0"
+http = "1.0.0"
 matchit = "0.7.3"
 paste = "1.0.14"
 prio = { git = "https://github.com/divviup/libprio-rs", rev = "d0168336bbad1805231a69181b329e37ee962203" }

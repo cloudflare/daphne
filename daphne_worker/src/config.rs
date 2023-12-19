@@ -5,16 +5,7 @@
 
 //! Daphne-Worker configuration.
 
-use crate::{
-    durable::{
-        durable_name_report_store, durable_name_task,
-        leader_batch_queue::{LeaderBatchQueueResult, DURABLE_LEADER_BATCH_QUEUE_CURRENT},
-        DurableConnector, BINDING_DAP_GARBAGE_COLLECTOR, BINDING_DAP_LEADER_BATCH_QUEUE,
-        DURABLE_DELETE_ALL,
-    },
-    error_reporting::ErrorReporter,
-    int_err,
-};
+use crate::{durable::DurableConnector, error_reporting::ErrorReporter, int_err};
 use daphne::{
     audit_log::AuditLog,
     auth::BearerToken,
@@ -23,14 +14,16 @@ use daphne::{
     fatal_error,
     hpke::{HpkeConfig, HpkeReceiverConfig},
     messages::{
-        decode_base64url_vec, AggregationJobId, Base64Encode, BatchId, CollectionJobId, ReportId,
-        TaskId, Time,
+        decode_base64url_vec, AggregationJobId, Base64Encode, BatchId, CollectionJobId, TaskId,
     },
     DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, Prio3Config, VdafConfig,
 };
 use daphne_service_utils::{
     auth::{DaphneAuth, DaphneWorkerAuthMethod, TlsClientAuth},
+    durable_requests::bindings::{
+        DurableMethod, GarbageCollector, LeaderBatchQueue, LeaderBatchQueueResult,
+    },
     metrics::DaphneServiceMetrics,
     test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
     DapRole,
@@ -102,10 +95,10 @@ pub(crate) struct DaphneWorkerConfig {
 
     /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
     /// to (based on the report ID).
-    report_shard_key: [u8; 32],
+    pub(crate) report_shard_key: [u8; 32],
 
     /// Shard count, the number of report storage shards. This should be a power of 2.
-    report_shard_count: u64,
+    pub(crate) report_shard_count: u64,
 
     /// draft-dcook-ppm-dap-interop-test-design: Base URL of the Aggregator (unversioned). If set,
     /// this field is used for endpoint configuration for interop testing.
@@ -352,25 +345,6 @@ impl DaphneWorkerConfig {
             report_storage_epoch_duration,
             report_storage_max_future_time_skew,
         })
-    }
-
-    /// Derive the batch name for a report for the given task and with the given report ID.
-    pub(crate) fn durable_name_report_store(
-        &self,
-        task_config: &DapTaskConfig,
-        task_id_hex: &str,
-        report_id: &ReportId,
-        report_time: Time,
-    ) -> String {
-        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &self.report_shard_key);
-        let tag = ring::hmac::sign(&key, report_id.as_ref());
-        let shard = u64::from_be_bytes(
-            tag.as_ref()[..std::mem::size_of::<u64>()]
-                .try_into()
-                .unwrap(),
-        ) % self.report_shard_count;
-        let epoch = report_time - (report_time % self.report_storage_epoch_duration);
-        durable_name_report_store(task_config.version, task_id_hex, epoch, shard)
     }
 }
 
@@ -856,9 +830,9 @@ impl<'srv> DaphneWorker<'srv> {
 
         let future_delete_durable = durable
             .post::<_, ()>(
-                BINDING_DAP_GARBAGE_COLLECTOR,
-                DURABLE_DELETE_ALL,
-                "garbage_collector".to_string(),
+                GarbageCollector::BINDING,
+                GarbageCollector::DeleteAll.to_uri(),
+                GarbageCollector::name(()).unwrap_from_name(),
                 &(),
             )
             .map_err(|e| fatal_error!(err = ?e));
@@ -882,12 +856,15 @@ impl<'srv> DaphneWorker<'srv> {
             return Err(fatal_error!(err = "query type mismatch"));
         }
 
+        let durable_name =
+            LeaderBatchQueue::name((task_config.as_ref().version, &task_id.to_hex()))
+                .unwrap_from_name();
         let res: LeaderBatchQueueResult = self
             .durable()
             .get(
-                BINDING_DAP_LEADER_BATCH_QUEUE,
-                DURABLE_LEADER_BATCH_QUEUE_CURRENT,
-                durable_name_task(task_config.as_ref().version, &task_id.to_hex()),
+                LeaderBatchQueue::BINDING,
+                LeaderBatchQueue::Current.to_uri(),
+                durable_name,
             )
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
