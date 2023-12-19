@@ -20,8 +20,11 @@ use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::ops::Range;
 use std::time::SystemTime;
+use std::{
+    any::{self, Any},
+    ops::Range,
+};
 use url::Url;
 
 const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
@@ -609,7 +612,7 @@ impl TestRunner {
 
         let resp = client
             .post(url.as_str())
-            .body(serde_json::to_string(&report_sel).unwrap())
+            .json(&report_sel)
             .send()
             .await
             .expect("request failed");
@@ -622,7 +625,7 @@ impl TestRunner {
         resp.json().await.unwrap()
     }
 
-    async fn post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+    async fn post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
         &self,
         is_leader: bool,
         path: &str,
@@ -644,10 +647,28 @@ impl TestRunner {
         if resp.status() != 200 {
             panic!("request to {} failed: response: {:?}", url, resp);
         }
-        resp.json().await.expect("failed to parse result")
+        let t = resp.text().await.expect("failed to extract text");
+        // This is needed so we can have tests that call this expecting nothing and have it work
+        // for empty bodies.
+        if t.is_empty() && any::TypeId::of::<O>() == any::TypeId::of::<()>() {
+            unsafe {
+                // SAFETY: we have checked that O is unit, therefore we can transmute a unit into O
+                std::mem::transmute_copy(&())
+            }
+        } else {
+            serde_json::from_str(&t)
+                .map_err(|e| {
+                    println!(
+                        "failed to Deserialize {t:?} into {}",
+                        std::any::type_name::<O>()
+                    );
+                    e
+                })
+                .expect("failed to parse result")
+        }
     }
 
-    pub async fn leader_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+    pub async fn leader_post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
         &self,
         path: &str,
         data: &I,
@@ -655,7 +676,7 @@ impl TestRunner {
         self.post_internal(true /* is_leader */, path, data).await
     }
 
-    pub async fn helper_post_internal<I: Serialize, O: for<'a> Deserialize<'a>>(
+    pub async fn helper_post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
         &self,
         path: &str,
         data: &I,
@@ -766,7 +787,12 @@ async fn get_raw_hpke_config(
                     println!("{} is up.", svc);
                     return resp.bytes().await.unwrap().to_vec();
                 } else {
-                    panic!("request to {} failed: response: {:?}", url, resp);
+                    panic!(
+                        "request to {} failed: status = {}, body = {}",
+                        url,
+                        resp.status(),
+                        resp.text().await.unwrap()
+                    );
                 }
             }
             Err(e) => {
