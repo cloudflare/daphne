@@ -657,6 +657,7 @@ name = "daphne_server"
 version = "0.3.0"
 dependencies = [
  "axum",
+ "bincode",
  "clap",
  "config",
  "daphne",
@@ -665,8 +666,10 @@ dependencies = [
  "prio",
  "prometheus",
  "rand",
+ "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",

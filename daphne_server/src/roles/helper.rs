@@ -17,10 +17,7 @@ impl<S: Sync> DapHelper<S> for crate::App {
     where
         Id: Into<MetaAggregationJobId> + Send,
     {
-        self.worker
-            .durable_objects()
-            .put_helper_state_if_not_exits(task_id, &agg_job_id.into(), helper_state)
-            .await
+        todo!()
     }
 
     async fn get_helper_state<Id>(
@@ -31,9 +28,6 @@ impl<S: Sync> DapHelper<S> for crate::App {
     where
         Id: Into<MetaAggregationJobId> + Send,
     {
-        self.worker
-            .durable_objects()
-            .get_helper_state(task_id, &agg_job_id.into())
-            .await
+        todo!()
     }
 }

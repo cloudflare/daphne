@@ -25,16 +25,7 @@ impl<S: Sync> DapAggregator<S> for crate::App {
         task_config: &DapTaskConfig,
         agg_share_span: DapAggregateSpan<DapAggregateShare>,
     ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
-        let r = self
-            .worker
-            .durable_objects()
-            .try_put_agg_share_span(task_id, task_config, &agg_share_span)
-            .await;
-
-        match r {
-            Ok(span) => span,
-            Err(e) => todo!(),
-        }
+        todo!()
     }
 
     async fn get_agg_share(
@@ -42,10 +33,7 @@ impl<S: Sync> DapAggregator<S> for crate::App {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
-        self.worker
-            .durable_objects()
-            .get_agg_share(task_id, batch_sel)
-            .await
+        todo!()
     }
 
     async fn mark_collected(
@@ -53,10 +41,7 @@ impl<S: Sync> DapAggregator<S> for crate::App {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
-        self.worker
-            .durable_objects()
-            .mark_collected(task_id, batch_sel)
-            .await
+        todo!()
     }
 
     type WrappedDapTaskConfig<'a> = DapTaskConfig
@@ -118,10 +103,7 @@ impl<S: Sync> DapAggregator<S> for crate::App {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
-        self.worker
-            .durable_objects()
-            .is_batch_overlapping(task_id, batch_sel)
-            .await
+        todo!()
     }
 
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
