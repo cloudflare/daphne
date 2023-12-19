@@ -4,7 +4,7 @@
 use std::ops::ControlFlow;
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, state_get, state_get_or_default, DurableOrdered},
     initialize_tracing, int_err,
 };
@@ -12,7 +12,10 @@ use daphne::{
     messages::{Base64Encode, Collection, CollectionJobId, CollectionReq, TaskId},
     DapCollectJob, DapVersion,
 };
-use daphne_service_utils::durable_requests::bindings::{self, CollectQueueRequest, DurableMethod};
+use daphne_service_utils::{
+    config::DaphneWorkerDeployment,
+    durable_requests::bindings::{self, CollectQueueRequest, DurableMethod},
+};
 use prio::codec::ParameterizedEncode;
 use tracing::Instrument;
 use worker::{
@@ -52,7 +55,7 @@ pub struct LeaderCollectionJobQueue {
     #[allow(dead_code)]
     state: State,
     env: Env,
-    config: DaphneWorkerConfig,
+    config: DaphneWorkerDurableConfig,
     touched: bool,
 }
 
@@ -61,7 +64,7 @@ impl DurableObject for LeaderCollectionJobQueue {
     fn new(state: State, env: Env) -> Self {
         initialize_tracing(&env);
         let config =
-            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
+            DaphneWorkerDurableConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             env,
@@ -254,7 +257,7 @@ impl DapDurableObject for LeaderCollectionJobQueue {
     }
 
     #[inline(always)]
-    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+    fn deployment(&self) -> DaphneWorkerDeployment {
         self.config.deployment
     }
 }

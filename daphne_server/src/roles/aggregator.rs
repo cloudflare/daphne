@@ -72,7 +72,7 @@ impl<S: Sync> DapAggregator<S> for crate::App {
     }
 
     fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.global_config
+        &self.service_config.global
     }
 
     fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {

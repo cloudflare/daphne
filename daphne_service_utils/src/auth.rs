@@ -90,7 +90,7 @@ impl AsRef<BearerToken> for DaphneAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(try_from = "SerializedDaphneWorkerAuthMethod")]
 pub struct DaphneWorkerAuthMethod {
     /// Expected bearer token.

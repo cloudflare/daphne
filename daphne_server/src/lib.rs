@@ -19,8 +19,8 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::inline_always)]
 
-use daphne::{DapError, DapGlobalConfig};
-use daphne_service_utils::metrics;
+use daphne::DapError;
+use daphne_service_utils::{config::DaphneServiceConfig, metrics};
 // there is a bug in cargo where if a dependency is only used in tests/examples but not in the
 // library you get unused_crate_dependencies warnings when compiling the them.
 #[cfg(test)]
@@ -45,25 +45,36 @@ mod worker_connection;
 /// - a `url` that points to a cloudflare worker which serves as proxy for the storage
 /// implementation.
 /// - a prometheus registry to register metrics.
-/// - a [`DapGlobalConfig`].
+/// - a [`DaphneServiceConfig`].
 ///
 /// # Examples
 /// ```
 /// use url::Url;
-/// use daphne::{DapGlobalConfig, hpke::HpkeKemId};
-/// use daphne_service_utils::DapRole;
+/// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
+/// use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
 /// use daphne_server::{App, router};
 ///
 /// let worker_url = Url::parse("http://example.com").unwrap();
 /// let registry = prometheus::Registry::new();
-/// let global_config = DapGlobalConfig {
+/// let global = DapGlobalConfig {
 ///     max_batch_duration: 360_00,
 ///     min_batch_interval_start: 259_200,
 ///     max_batch_interval_end: 259_200,
 ///     supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
 ///     allow_taskprov: true,
 /// };
-/// let app = App::new(worker_url, &registry, global_config)?;
+/// let service_config = DaphneServiceConfig {
+///     env: "some-machine-identifier".into(),
+///     role: DapRole::Helper,
+///     global,
+///     report_shard_key: [1; 32],
+///     report_shard_count: 4,
+///     base_url: None,
+///     taskprov: None,
+///     default_version: DapVersion::DraftLatest,
+///     report_storage_epoch_duration: 300,
+/// };
+/// let app = App::new(worker_url, &registry, service_config)?;
 ///
 /// let router = router::new(DapRole::Helper, app);
 ///
@@ -72,7 +83,7 @@ mod worker_connection;
 pub struct App {
     worker: worker_connection::WorkerConn,
     metrics: metrics::DaphneServiceMetrics,
-    global_config: DapGlobalConfig,
+    service_config: DaphneServiceConfig,
 }
 
 impl router::DaphneService for App {
@@ -86,12 +97,12 @@ impl App {
     pub fn new(
         url: Url,
         registry: &prometheus::Registry,
-        global_config: DapGlobalConfig,
+        service_config: DaphneServiceConfig,
     ) -> Result<Self, DapError> {
         Ok(Self {
             worker: worker_connection::WorkerConn::new(url),
             metrics: metrics::DaphneServiceMetrics::register(registry)?,
-            global_config,
+            service_config,
         })
     }
 }

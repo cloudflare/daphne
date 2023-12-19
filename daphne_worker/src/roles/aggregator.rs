@@ -190,7 +190,7 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
             .as_ref()
             .ok_or_else(|| fatal_error!(err = "taskprov configuration not found"))?;
 
-        if !self.config().is_leader && req.taskprov.is_some() {
+        if !self.config().role.is_leader() && req.taskprov.is_some() {
             // Store the task config in Worker memory, but don't write it through to KV.
             let mut guarded_tasks = self
                 .isolate_state()

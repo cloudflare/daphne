@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    config::DaphneWorkerConfig,
+    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, state_get, state_set_if_not_exists},
     initialize_tracing, int_err,
 };
-use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
+use daphne_service_utils::{
+    config::DaphneWorkerDeployment,
+    durable_requests::bindings::{self, DurableMethod},
+};
 use tracing::{trace, Instrument};
 use worker::{
     async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
@@ -27,7 +30,7 @@ use super::{req_parse, Alarmed, DapDurableObject};
 #[durable_object]
 pub struct HelperStateStore {
     state: State,
-    config: DaphneWorkerConfig,
+    config: DaphneWorkerDurableConfig,
     alarmed: bool,
 }
 
@@ -36,7 +39,7 @@ impl DurableObject for HelperStateStore {
     fn new(state: State, env: Env) -> Self {
         initialize_tracing(&env);
         let config =
-            DaphneWorkerConfig::from_worker_env(&env).expect("failed to load configuration");
+            DaphneWorkerDurableConfig::from_worker_env(&env).expect("failed to load configuration");
         Self {
             state,
             config,
@@ -112,7 +115,7 @@ impl DapDurableObject for HelperStateStore {
     }
 
     #[inline(always)]
-    fn deployment(&self) -> crate::config::DaphneWorkerDeployment {
+    fn deployment(&self) -> DaphneWorkerDeployment {
         self.config.deployment
     }
 }
