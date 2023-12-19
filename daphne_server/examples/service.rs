@@ -7,11 +7,14 @@ use clap::Parser;
 use daphne_server::{router, App};
 use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
 use serde::Deserialize;
+use tracing_subscriber::EnvFilter;
+use url::Url;
 
 #[derive(Debug, Deserialize)]
 struct Config {
     service: DaphneServiceConfig,
     port: u16,
+    storage: Url,
 }
 
 impl TryFrom<Args> for Config {
@@ -21,6 +24,7 @@ impl TryFrom<Args> for Config {
             configuration,
             role,
             port,
+            storage,
         }: Args,
     ) -> Result<Self, Self::Error> {
         config::Config::builder()
@@ -45,6 +49,12 @@ impl TryFrom<Args> for Config {
                 "port",
                 port.map(|port| config::Value::new(Some(&String::from("args.port")), port)),
             )?
+            .set_override_option(
+                "storage",
+                storage.map(|storage| {
+                    config::Value::new(Some(&String::from("args.storage")), storage.to_string())
+                }),
+            )?
             .add_source(config::Environment::with_prefix("DAP"))
             .build()?
             .try_deserialize()
@@ -57,12 +67,17 @@ struct Args {
     /// A configuration file, can be in json, yaml or toml.
     #[arg(short, long)]
     configuration: Option<PathBuf>,
+
+    // --- command line overridable parameters ---
     /// One of `leader` or `helper`.
     #[arg(short, long)]
     role: Option<DapRole>,
     /// The port to listen on.
     #[arg(short, long)]
     port: Option<u16>,
+    /// The storage url.
+    #[arg(short, long)]
+    storage: Option<Url>,
 }
 
 #[tokio::main]
@@ -76,17 +91,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let role = config.service.role;
     // Configure the application
-    let app = App::new(
-        "https://example.com".parse().unwrap(),
-        &registry,
-        config.service,
-    )?;
+    let app = App::new(config.storage, &registry, config.service)?;
 
     // create the router that will handle the protocol's http requests
     let router = router::new(role, app);
 
     // initialize tracing in a very default way.
-    tracing_subscriber::fmt().pretty().init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     // hand the router to axum for it to run
     axum::serve(

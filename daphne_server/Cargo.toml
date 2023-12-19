@@ -18,13 +18,16 @@ readme = "../README.md"
 
 [dependencies]
 axum = "0.7"
+bincode.workspace = true
 daphne = { path = "../daphne", features = ["send-traits"] }
 daphne_service_utils = { path = "../daphne_service_utils" }
 futures.workspace = true
 prio.workspace = true
 prometheus.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tower = "0.4.13"
 tracing.workspace = true
@@ -36,4 +39,4 @@ config = "0.13.4"
 daphne = { path = "../daphne", features = ["send-traits", "test-utils"] }
 rand.workspace = true
 tower = "0.4.13"
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

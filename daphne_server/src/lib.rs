@@ -29,11 +29,13 @@ mod silence_unused_crate_warning {
     use config as _;
     use tracing_subscriber as _;
 }
+use storage_proxy_connection::{cache::Cache, Do, Kv};
+use tokio::sync::RwLock;
 use url::Url;
 
 mod roles;
 pub mod router;
-mod worker_connection;
+mod storage_proxy_connection;
 
 /// Entrypoint to the server implementation. This struct implements
 /// [`DapLeader`](daphne::roles::DapLeader) and [`DapHelper`](daphne::roles::DapHelper) and can be
@@ -81,7 +83,9 @@ mod worker_connection;
 /// # Ok::<(), daphne::DapError>(())
 /// ```
 pub struct App {
-    worker: worker_connection::WorkerConn,
+    worker_url: Url,
+    http: reqwest::Client,
+    cache: RwLock<Cache>,
     metrics: metrics::DaphneServiceMetrics,
     service_config: DaphneServiceConfig,
 }
@@ -95,14 +99,24 @@ impl router::DaphneService for App {
 impl App {
     /// Create a new configured app. See [`App`] for details.
     pub fn new(
-        url: Url,
+        worker_url: Url,
         registry: &prometheus::Registry,
         service_config: DaphneServiceConfig,
     ) -> Result<Self, DapError> {
         Ok(Self {
-            worker: worker_connection::WorkerConn::new(url),
+            worker_url,
+            http: reqwest::Client::new(),
+            cache: Default::default(),
             metrics: metrics::DaphneServiceMetrics::register(registry)?,
             service_config,
         })
+    }
+
+    pub(crate) fn durable(&self) -> Do<'_> {
+        Do::new(&self.worker_url, &self.http)
+    }
+
+    pub(crate) fn kv(&self) -> Kv<'_> {
+        Kv::new(&self.worker_url, &self.http, &self.cache)
     }
 }
