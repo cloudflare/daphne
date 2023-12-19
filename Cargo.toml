@@ -41,6 +41,7 @@ prio = { git = "https://github.com/divviup/libprio-rs", rev = "d0168336bbad18052
 prometheus = "0.13.3"
 rand = "0.8.5"
 rand_core = "0.6.4"
+rayon = "1.8.0"
 reqwest = "0.11.22"
 replace_with = "0.1.7"
 ring = "0.17.6"
