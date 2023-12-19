@@ -12,8 +12,8 @@ use axum::{
 };
 use daphne::{
     hpke::HpkeReceiverConfig,
-    messages::TaskId,
-    roles::{leader, DapLeader},
+    messages::{Base64Encode, TaskId},
+    roles::{leader, DapAggregator, DapLeader},
     DapVersion,
 };
 use daphne_service_utils::{
@@ -30,36 +30,37 @@ use super::{AxumDapResponse, DaphneService};
 pub fn add_test_routes(router: super::Router<App>, role: DapRole) -> super::Router<App> {
     let router = if role == DapRole::Leader {
         router
-            .route("/internal/process", post(handle_leader_process))
+            .route("/internal/process", post(leader_process))
             .route(
                 "/internal/current_batch/task/:task_id",
-                get(handle_leader_current_batch),
+                get(leader_current_batch),
             )
     } else {
         router
     };
 
     router
-        .route("/internal/delete_all", post(handle_delete_all))
+        .route("/internal/delete_all", post(delete_all))
         .route("/internal/test/ready", post(StatusCode::OK))
         .route(
             "/internal/test/endpoint_for_task",
-            post(handle_endpoint_for_task_default),
+            post(endpoint_for_task_default),
         )
         .route(
             "/:version/internal/test/endpoint_for_task",
-            post(handle_endpoint_for_task),
+            post(endpoint_for_task),
         )
         // TODO: could be removed after we add the divviup api
-        .route("/internal/test/add_task", post(handle_add_task))
-        .route("/:version/internal/test/add_task", post(handle_add_task))
+        .route("/internal/test/add_task", post(add_task))
+        .route("/:version/internal/test/add_task", post(add_task))
         .route(
             "/:version/internal/test/add_hpke_config",
-            post(handle_add_hpke_config),
+            post(add_hpke_config),
         )
 }
 
-async fn handle_leader_process(
+#[tracing::instrument(skip(app))]
+async fn leader_process(
     State(app): State<Arc<App>>,
     Json(report_sel): Json<<App as DapLeader<DaphneAuth>>::ReportSelector>,
 ) -> Response {
@@ -75,40 +76,77 @@ struct PathTaskId {
     task_id: TaskId,
 }
 
-async fn handle_leader_current_batch(
-    State(_app): State<Arc<App>>,
-    #[allow(unused_variables)] Path(PathTaskId { task_id }): Path<PathTaskId>,
+#[tracing::instrument(skip(app))]
+async fn leader_current_batch(
+    State(app): State<Arc<App>>,
+    Path(PathTaskId { task_id }): Path<PathTaskId>,
 ) -> impl IntoResponse {
-    StatusCode::INTERNAL_SERVER_ERROR
+    match app.current_batch(&task_id).await {
+        Ok(batch_id) => (StatusCode::OK, batch_id.to_base64url().into_bytes()).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+    }
 }
 
-async fn handle_delete_all(State(_app): State<Arc<App>>) -> impl IntoResponse {}
+#[tracing::instrument(skip(app))]
+async fn delete_all(State(app): State<Arc<App>>) -> impl IntoResponse {
+    match app.internal_delete_all().await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+    }
+}
 
-async fn handle_endpoint_for_task_default(
+async fn endpoint_for_task_default(
     state: State<Arc<App>>,
     cmd: Json<InternalTestEndpointForTask>,
 ) -> impl IntoResponse {
-    handle_endpoint_for_task(state, Path(DapVersion::DraftLatest), cmd).await
+    let version = state.0.service_config.default_version;
+    endpoint_for_task(state, Path(version), cmd).await
 }
 
-async fn handle_endpoint_for_task(
-    State(_app): State<Arc<App>>,
-    Path(_version): Path<DapVersion>,
-    Json(_cmd): Json<InternalTestEndpointForTask>,
+#[tracing::instrument(skip(app, cmd))]
+async fn endpoint_for_task(
+    State(app): State<Arc<App>>,
+    Path(version): Path<DapVersion>,
+    Json(cmd): Json<InternalTestEndpointForTask>,
 ) -> impl IntoResponse {
-    StatusCode::INTERNAL_SERVER_ERROR
+    match app.internal_endpoint_for_task(version, cmd) {
+        Ok(path) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success", "endpoint": path })),
+        )
+            .into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+    }
 }
 
-async fn handle_add_task(
-    State(_app): State<Arc<App>>,
-    Json(_cmd): Json<InternalTestAddTask>,
+#[tracing::instrument(skip(app, cmd))]
+async fn add_task(
+    State(app): State<Arc<App>>,
+    Path(version): Path<DapVersion>,
+    Json(cmd): Json<InternalTestAddTask>,
 ) -> impl IntoResponse {
-    StatusCode::INTERNAL_SERVER_ERROR
+    match app.internal_add_task(version, cmd).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success" })),
+        )
+            .into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+    }
 }
 
-async fn handle_add_hpke_config(
-    State(_app): State<Arc<App>>,
-    Json(_cmd): Json<HpkeReceiverConfig>,
+#[tracing::instrument(skip(app, hpke))]
+async fn add_hpke_config(
+    State(app): State<Arc<App>>,
+    Path(version): Path<DapVersion>,
+    Json(hpke): Json<HpkeReceiverConfig>,
 ) -> impl IntoResponse {
-    StatusCode::INTERNAL_SERVER_ERROR
+    match app.internal_add_hpke_config(version, hpke).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success" })),
+        )
+            .into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+    }
 }

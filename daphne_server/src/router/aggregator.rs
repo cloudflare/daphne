@@ -32,6 +32,7 @@ struct QueryTaskId {
     task_id: Option<TaskId>,
 }
 
+#[tracing::instrument(skip(app, req), fields(version = ?req.version))]
 async fn hpke_config<A>(
     State(app): State<Arc<A>>,
     Query(QueryTaskId { task_id }): Query<QueryTaskId>,
