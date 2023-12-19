@@ -20,8 +20,8 @@ case "$mode" in
         r cargo clippy -p daphne_worker --tests
         r cargo clippy -p daphne-worker-test --tests
         r cargo clippy -p daphne-worker-test --tests --features test_e2e
-        r cargo clippy -p daphne_server --tests
-        r cargo clippy --example service
+        r cargo clippy -p daphne_server --tests --features test-utils
+        r cargo clippy -p daphne_server --example service
         ;;
 
     test)
@@ -30,7 +30,7 @@ case "$mode" in
         r cargo test -p daphne_service_utils
         r cargo test -p daphne_worker
         r cargo test -p daphne-worker-test
-        r cargo test -p daphne_server
+        r cargo test -p daphne_server --features test-utils
         ;;
 esac
 

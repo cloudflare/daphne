@@ -47,21 +47,33 @@ where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync + 'static,
 {
     router
-        .route("/:version/upload", post(handle_upload_req))
-        .route("/:version/collect", post(handle_get_collect_uri))
+        .route(
+            "/:version/upload",
+            post(upload).layer(middleware::from_fn(require_draft02)),
+        )
+        .route(
+            "/:version/collect",
+            post(get_collect_uri).layer(middleware::from_fn(require_draft02)),
+        )
         .route(
             "/:version/collect/task/:task_id/req/:collect_job_id",
-            get(handle_collect_req),
+            get(collect).layer(middleware::from_fn(require_draft02)),
         )
-        .layer(middleware::from_fn(require_draft02)) // applies to routes above this layer
-        .route("/:version/tasks/:task_id/reports", put(handle_upload_req))
+        .route("/:version/tasks/:task_id/reports", put(upload))
         .route(
-            "/:version/tasks/:task_id/collections_jobs/:collect_job_id",
-            post(handle_get_collect_uri).put(handle_collect_req),
+            "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
+            put(get_collect_uri).post(collect),
         )
 }
 
-async fn handle_upload_req<A>(
+#[tracing::instrument(
+    skip_all,
+    fields(
+        task_id = ?req.task_id().ok(),
+        version = ?req.version
+    )
+)]
+async fn upload<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> Response
@@ -74,33 +86,48 @@ where
     }
 }
 
-async fn handle_get_collect_uri<A>(
+#[tracing::instrument(
+    skip_all,
+    fields(
+        task_id = ?req.task_id().ok(),
+        version = ?req.version
+    )
+)]
+async fn get_collect_uri<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> Response
 where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
 {
-    match leader::handle_collect_job_req(&*app, &req).await {
-        Ok(uri) => (
+    match (
+        leader::handle_collect_job_req(&*app, &req).await,
+        req.version,
+    ) {
+        (Ok(uri), DapVersion::Draft02) => (
             StatusCode::SEE_OTHER,
             AppendHeaders([(header::LOCATION, uri.as_str())]),
         )
             .into_response(),
-        Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
+        (Ok(_), DapVersion::DraftLatest) => StatusCode::CREATED.into_response(),
+        (Err(e), _) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }
 
-async fn handle_collect_req<A>(
+#[tracing::instrument(
+    skip_all,
+    fields(
+        task_id = ?req.task_id().ok(),
+        version = ?req.version
+    )
+)]
+async fn collect<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> Response
 where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
 {
-    if req.version != DapVersion::Draft02 {
-        return StatusCode::NOT_FOUND.into_response();
-    }
     let task_id = match req.task_id() {
         Ok(id) => id,
         Err(e) => return AxumDapResponse::new_error(e, app.server_metrics()).into_response(),

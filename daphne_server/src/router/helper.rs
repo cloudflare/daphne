@@ -20,19 +20,24 @@ where
     A: DapHelper<DaphneAuth> + DaphneService + Send + Sync + 'static,
 {
     router
-        .route("/:version/aggregate", post(handle_agg_job))
-        .route("/:version/aggregate_share", post(handle_agg_share_req))
+        .route("/:version/aggregate", post(agg_job))
+        .route("/:version/aggregate_share", post(agg_share))
         .route(
             "/:version/tasks/:task_id/aggregation_jobs/:agg_job_id",
-            post(handle_agg_job).put(handle_agg_job),
+            post(agg_job).put(agg_job),
         )
-        .route(
-            "/:version/tasks/:task_id/aggregate_shares",
-            post(handle_agg_share_req),
-        )
+        .route("/:version/tasks/:task_id/aggregate_shares", post(agg_share))
 }
 
-async fn handle_agg_job<A>(
+#[tracing::instrument(
+    skip_all,
+    fields(
+        media_type = ?req.media_type,
+        task_id = ?req.task_id().ok(),
+        version = ?req.version
+    )
+)]
+async fn agg_job<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> AxumDapResponse
@@ -53,7 +58,15 @@ where
     )
 }
 
-async fn handle_agg_share_req<A>(
+#[tracing::instrument(
+    skip_all,
+    fields(
+        media_type = ?req.media_type,
+        task_id = ?req.task_id().ok(),
+        version = ?req.version
+    )
+)]
+async fn agg_share<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> AxumDapResponse

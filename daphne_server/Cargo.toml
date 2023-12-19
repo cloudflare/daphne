@@ -42,3 +42,6 @@ daphne = { path = "../daphne", features = ["send-traits", "test-utils"] }
 rand.workspace = true
 tower = "0.4.13"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[features]
+test-utils = ["daphne/test-utils", "daphne_service_utils/test-utils"]

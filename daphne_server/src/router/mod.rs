@@ -4,31 +4,33 @@
 mod aggregator;
 mod helper;
 mod leader;
+#[cfg(feature = "test-utils")]
 pub mod test_routes;
 
 use std::{io::Cursor, sync::Arc};
 
 use axum::{
     async_trait,
-    extract::{FromRequest, FromRequestParts, Path},
-    http::{header::CONTENT_TYPE, HeaderValue, Request, StatusCode},
+    extract::{FromRequest, FromRequestParts, Path, Request},
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     middleware::Next,
-    response::{AppendHeaders, IntoResponse},
-    routing::IntoMakeService,
+    response::IntoResponse,
     Json,
 };
 use daphne::{
     auth::BearerToken,
     constants::DapMediaType,
+    error::DapAbort,
     fatal_error,
     messages::{AggregationJobId, CollectionJobId, TaskId},
-    roles::{DapHelper, DapLeader},
     DapError, DapRequest, DapResource, DapResponse, DapVersion,
 };
 use daphne_service_utils::{auth::DaphneAuth, metrics::DaphneServiceMetrics, DapRole};
 use futures::TryStreamExt;
 use prio::codec::Decode;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::Deserialize;
+
+use crate::App;
 
 type Router<A> = axum::Router<Arc<A>>;
 
@@ -38,11 +40,7 @@ pub trait DaphneService {
     fn server_metrics(&self) -> &DaphneServiceMetrics;
 }
 
-pub fn new<A>(role: DapRole, aggregator: A) -> IntoMakeService<axum::Router>
-where
-    A: DapLeader<DaphneAuth> + DapHelper<DaphneAuth> + DaphneService + Send + Sync + 'static,
-    A::ReportSelector: Send + Sync + DeserializeOwned,
-{
+pub fn new(role: DapRole, aggregator: App) -> axum::Router {
     let router = axum::Router::new();
 
     let router = aggregator::add_aggregator_routes(router);
@@ -52,27 +50,39 @@ where
         DapRole::Helper => helper::add_helper_routes(router),
     };
 
+    #[cfg(feature = "test-utils")]
+    let router = test_routes::add_test_routes(router, role);
+
     let app = Arc::new(aggregator);
     router
         .with_state(app.clone())
-        .fallback(StatusCode::NOT_FOUND)
         .layer(
             tower::ServiceBuilder::new().layer(axum::middleware::from_fn({
                 let app = app.clone();
-                move |req, next: Next| {
+                move |req: Request, next: Next| {
                     let app = app.clone();
                     async move {
+                        tracing::info!(
+                            method = %req.method(),
+                            uri = %req.uri(),
+                            headers = ?req.headers(),
+                            "received request",
+                        );
                         let resp = next.run(req).await;
                         app.server_metrics()
                             .http_status_code_counter
                             .with_label_values(&[&format!("{}", resp.status())])
                             .inc();
+                        tracing::info!(
+                            status_code = %resp.status(),
+                            headers = ?resp.headers(),
+                            "request finished"
+                        );
                         resp
                     }
                 }
             })),
         )
-        .into_make_service()
 }
 
 struct AxumDapResponse(axum::response::Response);
@@ -99,28 +109,37 @@ impl AxumDapResponse {
             }
         };
 
-        let headers = AppendHeaders([(CONTENT_TYPE, media_type)]);
+        let headers = [(CONTENT_TYPE, media_type)];
 
         Self((StatusCode::OK, headers, response.payload).into_response())
     }
 
     pub fn new_error<E: Into<DapError>>(error: E, metrics: &DaphneServiceMetrics) -> Self {
-        let error = error.into();
-        let status = if matches!(error, DapError::Fatal(_)) {
+        // trigger abort if transition failures reach this point.
+        let error = match error.into() {
+            DapError::Transition(failure) => DapAbort::report_rejected(failure),
+            e @ DapError::Fatal(..) => Err(e),
+            DapError::Abort(abort) => Ok(abort),
+        };
+        let status = if let Err(_e) = &error {
+            // TODO(mendess)
             // self.error_reporter.report_abort(&e);
             StatusCode::INTERNAL_SERVER_ERROR
         } else {
             StatusCode::BAD_REQUEST
         };
-        tracing::error!(error = ?error, "request aborted");
-        let problem_details = error.into_problem_details();
+        tracing::error!(?error, "request aborted");
+        let problem_details = match error {
+            Ok(x) => x.into_problem_details(),
+            Err(x) => x.into_problem_details(),
+        };
         metrics
             .dap_abort_counter
             // this to string is bounded by the
             // number of variants in the enum
             .with_label_values(&[&problem_details.title])
             .inc();
-        let headers = AppendHeaders([(CONTENT_TYPE, "application/problem+json")]);
+        let headers = [(CONTENT_TYPE, "application/problem+json")];
 
         Self((status, headers, Json(problem_details)).into_response())
     }
@@ -230,7 +249,7 @@ where
         let (task_id, resource) = match version {
             DapVersion::Draft02 => {
                 let mut r = Cursor::new(payload.as_ref());
-                let task_id = TaskId::decode(&mut r).ok();
+                let task_id = task_id.or_else(|| TaskId::decode(&mut r).ok());
 
                 // If the collection job ID was found in the request path, then this must be a
                 // request for a collection job result from the Collector.
