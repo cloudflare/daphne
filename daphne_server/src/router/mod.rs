@@ -204,7 +204,8 @@ where
                 .headers
                 .get(CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok()),
-        );
+        )
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?;
 
         let taskprov = parts
             .headers

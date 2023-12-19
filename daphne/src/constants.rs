@@ -24,7 +24,7 @@ const MEDIA_TYPE_HPKE_CONFIG_LIST: &str = "application/dap-hpke-config-list";
 const MEDIA_TYPE_REPORT: &str = "application/dap-report";
 
 /// Media type for each DAP request. This is included in the "content-type" HTTP header.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DapMediaType {
     AggregationJobInitReq,
     AggregationJobResp,
@@ -38,8 +38,6 @@ pub enum DapMediaType {
     Collection,
     HpkeConfigList,
     Report,
-    /// The content-type does not match a known media type.
-    Invalid(String),
     /// No content-type header found.
     #[default]
     Missing,
@@ -60,13 +58,13 @@ impl DapMediaType {
             | Self::AggregateShare => Some(DapSender::Helper),
             Self::Report => Some(DapSender::Client),
             Self::CollectReq => Some(DapSender::Collector),
-            Self::Invalid(..) | Self::Missing => None,
+            Self::Missing => None,
         }
     }
 
     /// Parse the media type from the content-type HTTP header.
-    pub fn from_str_for_version(version: DapVersion, content_type: Option<&str>) -> Self {
-        match (version, content_type) {
+    pub fn from_str_for_version(version: DapVersion, content_type: Option<&str>) -> Option<Self> {
+        let media_type = match (version, content_type) {
             (DapVersion::Draft02, Some(DRAFT02_MEDIA_TYPE_AGG_CONT_REQ))
             | (DapVersion::DraftLatest, Some(MEDIA_TYPE_AGG_JOB_CONT_REQ)) => {
                 Self::AggregationJobContinueReq
@@ -95,9 +93,10 @@ impl DapMediaType {
             (DapVersion::Draft02 | DapVersion::DraftLatest, Some(MEDIA_TYPE_REPORT)) => {
                 Self::Report
             }
-            (_, Some(content_type)) => Self::Invalid(content_type.to_string()),
+            (_, Some(_)) => return None,
             (_, None) => Self::Missing,
-        }
+        };
+        Some(media_type)
     }
 
     /// Get the content-type representation of the media type.
@@ -138,7 +137,6 @@ impl DapMediaType {
                 Some(MEDIA_TYPE_REPORT)
             }
             (_, Self::Draft02AggregateContinueResp | Self::Missing) => None,
-            (_, Self::Invalid(ref content_type)) => Some(content_type),
         }
     }
 
@@ -165,63 +163,63 @@ mod test {
                 DapVersion::Draft02,
                 Some("application/dap-hpke-config")
             ),
-            DapMediaType::HpkeConfigList
+            Some(DapMediaType::HpkeConfigList)
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-initialize-req")
             ),
-            DapMediaType::AggregationJobInitReq,
+            Some(DapMediaType::AggregationJobInitReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-initialize-resp")
             ),
-            DapMediaType::AggregationJobResp,
+            Some(DapMediaType::AggregationJobResp),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-continue-req")
             ),
-            DapMediaType::AggregationJobContinueReq,
+            Some(DapMediaType::AggregationJobContinueReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-continue-resp")
             ),
-            DapMediaType::Draft02AggregateContinueResp,
+            Some(DapMediaType::Draft02AggregateContinueResp),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-share-req")
             ),
-            DapMediaType::AggregateShareReq,
+            Some(DapMediaType::AggregateShareReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-aggregate-share-resp")
             ),
-            DapMediaType::AggregateShare,
+            Some(DapMediaType::AggregateShare),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-collect-req")
             ),
-            DapMediaType::CollectReq,
+            Some(DapMediaType::CollectReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::Draft02,
                 Some("application/dap-collect-resp")
             ),
-            DapMediaType::Collection,
+            Some(DapMediaType::Collection),
         );
 
         assert_eq!(
@@ -229,68 +227,68 @@ mod test {
                 DapVersion::DraftLatest,
                 Some("application/dap-hpke-config-list")
             ),
-            DapMediaType::HpkeConfigList
+            Some(DapMediaType::HpkeConfigList)
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-aggregation-job-init-req")
             ),
-            DapMediaType::AggregationJobInitReq,
+            Some(DapMediaType::AggregationJobInitReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-aggregation-job-resp")
             ),
-            DapMediaType::AggregationJobResp,
+            Some(DapMediaType::AggregationJobResp),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-aggregation-job-continue-req")
             ),
-            DapMediaType::AggregationJobContinueReq,
+            Some(DapMediaType::AggregationJobContinueReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-aggregate-share-req")
             ),
-            DapMediaType::AggregateShareReq,
+            Some(DapMediaType::AggregateShareReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-aggregate-share")
             ),
-            DapMediaType::AggregateShare,
+            Some(DapMediaType::AggregateShare),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-collect-req")
             ),
-            DapMediaType::CollectReq,
+            Some(DapMediaType::CollectReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(
                 DapVersion::DraftLatest,
                 Some("application/dap-collection")
             ),
-            DapMediaType::Collection,
+            Some(DapMediaType::Collection),
         );
 
         // Invalid media type
         assert_eq!(
             DapMediaType::from_str_for_version(DapVersion::DraftLatest, Some("blah-blah-blah")),
-            DapMediaType::Invalid("blah-blah-blah".into()),
+            None,
         );
 
         // Missing media type
         assert_eq!(
             DapMediaType::from_str_for_version(DapVersion::DraftLatest, None),
-            DapMediaType::Missing,
+            Some(DapMediaType::Missing),
         );
     }
 
@@ -325,7 +323,7 @@ mod test {
         ] {
             assert_eq!(
                 DapMediaType::from_str_for_version(version, media_type.as_str_for_version(version)),
-                media_type,
+                Some(media_type),
                 "round trip test failed for {version:?} and {media_type:?}"
             );
         }
