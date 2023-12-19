@@ -1145,7 +1145,8 @@ impl<'srv> DaphneWorker<'srv> {
             .headers()
             .get("Content-Type")
             .map_err(|e| fatal_error!(err = ?e))?;
-        let media_type = DapMediaType::from_str_for_version(version, content_type.as_deref());
+        let media_type = DapMediaType::from_str_for_version(version, content_type.as_deref())
+            .unwrap_or(DapMediaType::Missing);
 
         let payload = req.bytes().await.map_err(|e| fatal_error!(err = ?e))?;
 
@@ -1290,7 +1291,8 @@ impl<'srv> DaphneWorker<'srv> {
                 .ok_or_else(|| fatal_error!(err = INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?
                 .to_str()
                 .map_err(|e| fatal_error!(err = ?e))?;
-            let media_type = DapMediaType::from_str_for_version(req.version, Some(content_type));
+            let media_type = DapMediaType::from_str_for_version(req.version, Some(content_type))
+                .ok_or_else(|| fatal_error!(err = "invalid media type"))?;
 
             let payload = reqwest_resp
                 .bytes()
