@@ -1099,8 +1099,10 @@ pub enum DapResource {
     /// The resource of a DAP request is undetermined if its identifier could not be parsed from
     /// request path.
     ///
-    /// draft02 compatibility: In draft02, the resource of a DAP request is undetermined until the
-    /// request payload is parsed. Defer detrmination of the resource until then.
+    /// draft02 compatibility: In draft02, the resource of a DAP request is usually undetermined
+    /// until the request payload is parsed, so defer determination of the resource until then. The
+    /// exception is the GET request to the collection URI. The format of this endpoint is
+    /// unspecified, but we use a version that matches the latest draft.
     #[default]
     Undefined,
 }
@@ -1173,7 +1175,7 @@ impl<S> DapRequest<S> {
     /// the version in use is not draft02. If the caller is not the Collector, or draft02 is in
     /// use, we exepct the collection job ID to be missing.
     pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
-        if let DapResource::CollectionJob(ref collection_job_id) = self.resource {
+        if let DapResource::CollectionJob(collection_job_id) = &self.resource {
             Ok(collection_job_id)
         } else {
             Err(DapAbort::BadRequest(
