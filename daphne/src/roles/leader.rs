@@ -295,10 +295,12 @@ pub async fn handle_collect_job_req<S: Sync, A: DapLeader<S>>(
         (DapVersion::DraftLatest, DapResource::CollectionJob(ref collect_job_id)) => {
             Some(*collect_job_id)
         }
-        (DapVersion::DraftLatest, DapResource::Undefined) => {
-            return Err(DapAbort::BadRequest("undefined resource".into()).into());
+        (_, DapResource::Undefined) => {
+            return Err(DapAbort::BadRequest("missing collection ID".into()).into())
         }
-        _ => unreachable!("unhandled resource {:?}", req.resource),
+        (_, resource) => {
+            return Err(DapAbort::BadRequest(format!("unexpected resource {resource:?}")).into())
+        }
     };
 
     let collect_job_uri = aggregator

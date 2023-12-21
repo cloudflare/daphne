@@ -230,7 +230,13 @@ where
         let (task_id, resource) = match version {
             DapVersion::Draft02 => {
                 let mut r = Cursor::new(payload.as_ref());
-                (TaskId::decode(&mut r).ok(), DapResource::Undefined)
+                let task_id = TaskId::decode(&mut r).ok();
+
+                // If the collection job ID was found in the request path, then this must be a
+                // request for a collection job result from the Collector.
+                let resource =
+                    collect_job_id.map_or(DapResource::Undefined, DapResource::CollectionJob);
+                (task_id, resource)
             }
             DapVersion::DraftLatest => {
                 let resource = match media_type {

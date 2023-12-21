@@ -1150,18 +1150,22 @@ impl<'srv> DaphneWorker<'srv> {
 
         let payload = req.bytes().await.map_err(|e| fatal_error!(err = ?e))?;
 
+        let collection_job_id = ctx
+            .param("collect_job_id")
+            .and_then(CollectionJobId::try_from_base64url);
+
         let (task_id, resource) = match version {
             DapVersion::Draft02 => {
                 // Parse the task ID from the front of the request payload and use it to look up the
                 // expected bearer token.
-                //
-                // TODO(cjpatton) Add regression tests that ensure each protocol message is prefixed by the
-                // task ID.
-                //
-                // TODO spec: Consider moving the task ID out of the payload. Right now we're parsing it
-                // twice so that we have a reference to the task ID before parsing the entire message.
                 let mut r = Cursor::new(payload.as_ref());
-                (TaskId::decode(&mut r).ok(), DapResource::Undefined)
+                let task_id = TaskId::decode(&mut r).ok();
+
+                // If the collection job ID was found in the request path, then this must be a
+                // request for a collection job result from the Collector.
+                let resource =
+                    collection_job_id.map_or(DapResource::Undefined, DapResource::CollectionJob);
+                (task_id, resource)
             }
             DapVersion::DraftLatest => {
                 let task_id = ctx.param("task_id").and_then(TaskId::try_from_base64url);
@@ -1180,14 +1184,11 @@ impl<'srv> DaphneWorker<'srv> {
                         }
                     }
                     DapMediaType::CollectReq => {
-                        if let Some(collect_job_id) = ctx
-                            .param("collect_job_id")
-                            .and_then(CollectionJobId::try_from_base64url)
-                        {
+                        if let Some(collect_job_id) = collection_job_id {
                             DapResource::CollectionJob(collect_job_id)
                         } else {
-                            // Missing or invalid agg job ID. This should be handled as a bad
-                            // request (undefined resource) by the caller.
+                            // Missing or invalid collection job ID. This should be handled as a
+                            // bad request (undefined resource) by the caller.
                             DapResource::Undefined
                         }
                     }
