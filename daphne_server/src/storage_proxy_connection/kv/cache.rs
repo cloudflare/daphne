@@ -3,10 +3,13 @@
 
 use std::{any::Any, collections::HashMap};
 
-use super::kv::KvPrefix;
+use super::KvPrefix;
 
 #[derive(Default, Debug)]
 pub struct Cache {
+    /// This map follows the same structure of KV queries.
+    /// The first key (&'static str) is a KvPrefix::PREFIX
+    /// The second key (String) is the key that is associated with this value
     kv: HashMap<&'static str, HashMap<String, Box<dyn Any + Send + Sync + 'static>>>,
 }
 
@@ -17,7 +20,7 @@ pub enum GetResult<T> {
 }
 
 impl Cache {
-    pub fn kv_get<'s, P>(&'s self, key: &str) -> GetResult<&'s P::Value>
+    pub fn get<'s, P>(&'s self, key: &str) -> GetResult<&'s P::Value>
     where
         P: KvPrefix,
     {
@@ -31,7 +34,7 @@ impl Cache {
         }
     }
 
-    pub fn kv_put<P>(&mut self, key: String, value: P::Value)
+    pub fn put<P>(&mut self, key: String, value: P::Value)
     where
         P: KvPrefix,
     {
@@ -41,7 +44,7 @@ impl Cache {
             .insert(key, Box::new(value));
     }
 
-    pub fn kv_delete<P>(&mut self, key: &str) -> GetResult<P::Value>
+    pub fn delete<P>(&mut self, key: &str) -> GetResult<P::Value>
     where
         P: KvPrefix,
     {

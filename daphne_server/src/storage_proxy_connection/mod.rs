@@ -5,7 +5,6 @@
 #![allow(clippy::unused_async)]
 #![allow(dead_code)]
 
-pub(crate) mod cache;
 pub(crate) mod kv;
 
 use std::fmt::Debug;
@@ -93,7 +92,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
 }
 
 impl<'d, B: DurableMethod> RequestBuilder<'d, B, [u8; 0]> {
-    pub fn bin_encoding<T: Serialize>(self, payload: T) -> RequestBuilder<'d, B, Vec<u8>> {
+    pub fn encode_bincode<T: Serialize>(self, payload: T) -> RequestBuilder<'d, B, Vec<u8>> {
         self.with_body(bincode::serialize(&payload).unwrap())
     }
 

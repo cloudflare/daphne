@@ -1,6 +1,8 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub(super) mod cache;
+
 use std::{any::Any, fmt::Display};
 
 use axum::http::StatusCode;
@@ -9,10 +11,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::RwLock;
 use url::Url;
 
-use super::{
-    cache::{self, Cache},
-    status_http_1_0_to_reqwest_0_11, Error,
-};
+use super::{status_http_1_0_to_reqwest_0_11, Error};
+pub(crate) use cache::Cache;
 
 pub(crate) struct Kv<'h> {
     url: &'h Url,
@@ -91,7 +91,7 @@ impl<'h> Kv<'h> {
     {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "GET");
-        match self.cache.read().await.kv_get::<P>(&key) {
+        match self.cache.read().await.get::<P>(&key) {
             cache::GetResult::NoFound => {}
             cache::GetResult::Found(t) => return Ok(mapper(t)),
             cache::GetResult::MismatchedType => {
@@ -108,7 +108,7 @@ impl<'h> Kv<'h> {
             let resp = resp.error_for_status()?;
             let t = resp.json().await?;
             let r = mapper(&t);
-            self.cache.write().await.kv_put::<P>(key, t);
+            self.cache.write().await.put::<P>(key, t);
             Ok(r)
         }
     }
@@ -125,7 +125,7 @@ impl<'h> Kv<'h> {
             .send()
             .await?
             .error_for_status()?;
-        self.cache.write().await.kv_put::<P>(key, value);
+        self.cache.write().await.put::<P>(key, value);
         Ok(())
     }
 
@@ -154,7 +154,7 @@ impl<'h> Kv<'h> {
             Ok(Some(value))
         } else {
             response.error_for_status()?;
-            self.cache.write().await.kv_put::<P>(key, value);
+            self.cache.write().await.put::<P>(key, value);
             Ok(None)
         }
     }
@@ -164,7 +164,7 @@ impl<'h> Kv<'h> {
         P: KvPrefix,
     {
         let key = Self::to_key::<P>(key);
-        self.cache.write().await.kv_put::<P>(key, value);
+        self.cache.write().await.put::<P>(key, value);
     }
 
     fn to_key<P: KvPrefix>(key: &P::Key) -> String {

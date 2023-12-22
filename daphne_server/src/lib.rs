@@ -29,7 +29,7 @@ mod silence_unused_crate_warning {
     use config as _;
     use tracing_subscriber as _;
 }
-use storage_proxy_connection::{cache::Cache, Do, Kv};
+use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -85,7 +85,7 @@ mod storage_proxy_connection;
 pub struct App {
     worker_url: Url,
     http: reqwest::Client,
-    cache: RwLock<Cache>,
+    cache: RwLock<kv::Cache>,
     metrics: metrics::DaphneServiceMetrics,
     service_config: DaphneServiceConfig,
 }
