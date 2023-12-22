@@ -14,7 +14,7 @@ use url::Url;
 struct Config {
     service: DaphneServiceConfig,
     port: u16,
-    storage: Url,
+    storage_proxy: Url,
 }
 
 impl TryFrom<Args> for Config {
@@ -24,7 +24,7 @@ impl TryFrom<Args> for Config {
             configuration,
             role,
             port,
-            storage,
+            storage_proxy,
         }: Args,
     ) -> Result<Self, Self::Error> {
         config::Config::builder()
@@ -51,8 +51,11 @@ impl TryFrom<Args> for Config {
             )?
             .set_override_option(
                 "storage",
-                storage.map(|storage| {
-                    config::Value::new(Some(&String::from("args.storage")), storage.to_string())
+                storage_proxy.map(|storage_proxy| {
+                    config::Value::new(
+                        Some(&String::from("args.storage")),
+                        storage_proxy.to_string(),
+                    )
                 }),
             )?
             .add_source(config::Environment::with_prefix("DAP"))
@@ -77,7 +80,7 @@ struct Args {
     port: Option<u16>,
     /// The storage url.
     #[arg(short, long)]
-    storage: Option<Url>,
+    storage_proxy: Option<Url>,
 }
 
 #[tokio::main]
@@ -91,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let role = config.service.role;
     // Configure the application
-    let app = App::new(config.storage, &registry, config.service)?;
+    let app = App::new(config.storage_proxy, &registry, config.service)?;
 
     // create the router that will handle the protocol's http requests
     let router = router::new(role, app);

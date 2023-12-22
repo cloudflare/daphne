@@ -122,7 +122,7 @@ impl AxumDapResponse {
             DapError::Abort(abort) => Ok(abort),
         };
         let status = if let Err(_e) = &error {
-            // TODO(mendess)
+            // TODO(mendess) uncomment the line below
             // self.error_reporter.report_abort(&e);
             StatusCode::INTERNAL_SERVER_ERROR
         } else {

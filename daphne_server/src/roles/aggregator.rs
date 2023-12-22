@@ -1,8 +1,6 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![allow(unused_variables)]
-
 use std::{borrow::Cow, time::SystemTime};
 
 use axum::async_trait;
@@ -51,7 +49,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                         bindings::AggregateStore::Merge,
                         (task_config.version, &task_id_hex, &bucket),
                     )
-                    .bin_encoding(AggregateStoreMergeReq {
+                    .encode_bincode(AggregateStoreMergeReq {
                         contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
                         agg_share_delta: agg_share,
                     })
@@ -121,7 +119,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let durable = self.durable();
         let mut requests = Vec::new();
         for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
-            let durable_name = requests.push(
+            requests.push(
                 durable
                     .request(
                         bindings::AggregateStore::MarkCollected,
@@ -172,7 +170,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                 ));
             };
 
-            // Check that that the certificate is valid. This is indicated bylLiteral "SUCCESS".
+            // Check that that the certificate is valid. This is indicated by literal "SUCCESS".
             if cf_tls_client_auth.verified != "SUCCESS" {
                 return Ok(Some(format!(
                     "Invalid TLS certificate ({}).",
@@ -369,9 +367,8 @@ impl DapAggregator<DaphneAuth> for crate::App {
         match res {
             LeaderBatchQueueResult::Ok(batch_id) => Ok(batch_id),
 
-            // TODO spec: If we end up taking the current batch semantics of
-            // https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/pull/313, then we'll need to
-            // define an error type for this case.
+            // TODO Return 400 Bad Request (with problem detail "empty batch queue") here instead
+            // 500 Internal Error
             LeaderBatchQueueResult::EmptyQueue => Err(fatal_error!(err = "empty batch queue")),
         }
     }
@@ -394,9 +391,9 @@ impl DapReportInitializer for crate::App {
     async fn initialize_reports<'req>(
         &self,
         is_leader: bool,
-        task_id: &TaskId,
+        _task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
+        _part_batch_sel: &PartialBatchSelector,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         tokio::task::spawn_blocking({

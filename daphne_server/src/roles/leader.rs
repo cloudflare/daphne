@@ -94,7 +94,7 @@ impl DapLeader<DaphneAuth> for crate::App {
                     self.service_config.report_storage_epoch_duration,
                 ),
             )
-            .bin_encoding(pending_report)
+            .encode_bincode(pending_report)
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
@@ -124,7 +124,7 @@ impl DapLeader<DaphneAuth> for crate::App {
         let res: Vec<String> = self
             .durable()
             .request(bindings::LeaderAggJobQueue::Get, 0)
-            .bin_encoding(report_sel.max_agg_jobs)
+            .encode_bincode(report_sel.max_agg_jobs)
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
@@ -137,7 +137,7 @@ impl DapLeader<DaphneAuth> for crate::App {
             let reports_from_durable: Vec<PendingReport> = self
                 .durable()
                 .request_with_id(bindings::ReportsPending::Get, reports_pending_id_hex)
-                .bin_encoding(report_sel.max_reports)
+                .encode_bincode(report_sel.max_reports)
                 .send()
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?;
@@ -184,7 +184,7 @@ impl DapLeader<DaphneAuth> for crate::App {
                             bindings::LeaderBatchQueue::Assign,
                             (task_config.as_ref().version, &task_id_hex),
                         )
-                        .bin_encoding((task_config.as_ref().min_batch_size, num_unassigned))
+                        .encode_bincode((task_config.as_ref().min_batch_size, num_unassigned))
                         .send()
                         .await
                         .map_err(|e| fatal_error!(err = ?e))?;
@@ -243,7 +243,7 @@ impl DapLeader<DaphneAuth> for crate::App {
         let collect_id: CollectionJobId = self
             .durable()
             .request(bindings::LeaderColJobQueue::Put, 0)
-            .bin_encoding(collect_queue_req)
+            .encode_bincode(collect_queue_req)
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))?;
@@ -270,7 +270,7 @@ impl DapLeader<DaphneAuth> for crate::App {
     ) -> Result<DapCollectJob, DapError> {
         self.durable()
             .request(bindings::LeaderColJobQueue::GetResult, 0)
-            .bin_encoding((&task_id, &collect_id))
+            .encode_bincode((&task_id, &collect_id))
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))
@@ -304,14 +304,14 @@ impl DapLeader<DaphneAuth> for crate::App {
                     bindings::LeaderBatchQueue::Remove,
                     (task_config.as_ref().version, &task_id.to_hex()),
                 )
-                .bin_encoding(batch_id.to_hex())
+                .encode_bincode(batch_id.to_hex())
                 .send()
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?;
         }
         self.durable()
             .request(bindings::LeaderColJobQueue::Finish, 0)
-            .bin_encoding((task_id, collect_id, collect_resp))
+            .encode_bincode((task_id, collect_id, collect_resp))
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))

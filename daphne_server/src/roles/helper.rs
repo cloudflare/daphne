@@ -35,7 +35,7 @@ impl DapHelper<DaphneAuth> for crate::App {
                 bindings::HelperState::PutIfNotExists,
                 (task_config.as_ref().version, task_id, &agg_job_id.into()),
             )
-            .bin_encoding(helper_state_hex)
+            .encode_bincode(helper_state_hex)
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e))?)
