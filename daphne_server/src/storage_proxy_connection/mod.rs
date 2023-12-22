@@ -28,6 +28,7 @@ pub(crate) enum Error {
     Http { status: StatusCode, body: String },
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct Do<'h> {
     url: &'h Url,
     http: &'h reqwest::Client,
@@ -115,7 +116,11 @@ impl<'w> Do<'w> {
         RequestBuilder {
             durable: self,
             path,
-            request,
+            request: if self.retry {
+                request.with_retry()
+            } else {
+                request
+            },
         }
     }
 
@@ -128,7 +133,11 @@ impl<'w> Do<'w> {
         RequestBuilder {
             durable: self,
             path,
-            request,
+            request: if self.retry {
+                request.with_retry()
+            } else {
+                request
+            },
         }
     }
 }
