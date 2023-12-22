@@ -14,6 +14,7 @@
 //! The metadata is encoded using capnproto as the binary protocol, it contains:
 //! - The `binding` which identifies the durable object implementation to target.
 //! - The `id` which identifies the specific instance of the durable object.
+//! - A `retry` flag which tells the proxy whether it should retry durable object requests that fail.
 //!
 //! # Body encoding
 //!
@@ -29,9 +30,9 @@
 //! | Native Service |                 | Storage Proxy |            | Durable Object |
 //! +----------------+                 +---------------+            +----------------+
 //!    | Http Request:                         |                            |
-//!    | POST /v1/`DO_PATH_PREFIX`/path/to/call   |                            |
+//!    | POST /v1/`DO_PATH_PREFIX`/path/to/call|                            |
 //!    | DurableRequest:                       |                            |
-//!    |   {binding, id}[body]                 |                            |
+//!    |   {binding, id, retry}[body]          |                            |
 //!    |-------------------------------------->| use `binding` and `id`     |
 //!    |                                       | to locate the durable      |
 //!    |                                       | object.                    |
@@ -45,6 +46,8 @@
 //!    |                                       | POST `/path/to/call`       | do some
 //!    |                                       | `body`                     | storage work
 //!    |                                       |--------------------------> |---------+
+//!    |                                       | retry this request if      |         |
+//!    |                                       | `retry` was set            |         |
 //!    |                                       |                            |         |
 //!    |                                       |              Http Response |         |
 //!    |<--------------------------------------|<---------------------------|<--------+
@@ -123,6 +126,10 @@ pub struct DurableRequest<P: AsRef<[u8]>> {
     /// [see also](https://developers.cloudflare.com/durable-objects/get-started/#4-instantiate-and-communicate-with-a-durable-object)
     pub id: ObjectIdFrom,
 
+    /// Whether this request should be retried if the Durable Object crashes when resolving the
+    /// request.
+    pub retry: bool,
+
     /// The body of the request.
     body: P,
 }
@@ -134,9 +141,15 @@ where
     U: AsRef<[u8]>,
 {
     fn eq(&self, other: &DurableRequest<U>) -> bool {
-        let Self { binding, id, body } = self;
+        let Self {
+            binding,
+            id,
+            retry,
+            body,
+        } = self;
         *binding == other.binding
             && *id == other.id
+            && *retry == other.retry
             && constant_time_eq(body.as_ref(), other.body.as_ref())
     }
 }
@@ -151,6 +164,7 @@ impl DurableRequest<[u8; 0]> {
             Self {
                 binding: B::BINDING.to_owned(),
                 id: B::name(params),
+                retry: false,
                 body: [],
             },
             durable_method.to_uri(),
@@ -166,6 +180,7 @@ impl DurableRequest<[u8; 0]> {
             Self {
                 binding: B::BINDING.to_owned(),
                 id: obj_id_from,
+                retry: false,
                 body: [],
             },
             durable_method.to_uri(),
@@ -177,6 +192,7 @@ impl DurableRequest<[u8; 0]> {
         DurableRequest {
             binding: self.binding,
             id: self.id,
+            retry: self.retry,
             body,
         }
     }
@@ -195,7 +211,7 @@ impl<'s> TryFrom<&'s [u8]> for DurableRequest<&'s [u8]> {
 
     fn try_from(bytes: &'s [u8]) -> Result<Self, Self::Error> {
         let mut cursor = io::Cursor::new(bytes);
-        let (binding, id) = {
+        let (binding, id, retry) = {
             let message_reader = capnp::serialize_packed::read_message(
                 &mut cursor,
                 capnp::message::ReaderOptions::new(),
@@ -208,12 +224,14 @@ impl<'s> TryFrom<&'s [u8]> for DurableRequest<&'s [u8]> {
                 durable_request::id::Which::Name(name) => ObjectIdFrom::Name(name?.to_string()?),
                 durable_request::id::Which::Hex(hex) => ObjectIdFrom::Hex(hex?.to_string()?),
             };
-            (binding, id)
+            let retry = request.get_retry();
+            (binding, id, retry)
         };
 
         Ok(Self {
             binding,
             id,
+            retry,
             body: &bytes[cursor.position() as usize..],
         })
     }
@@ -223,17 +241,30 @@ impl<P> DurableRequest<P>
 where
     P: AsRef<[u8]>,
 {
+    pub fn with_retry(self) -> Self {
+        Self {
+            retry: true,
+            ..self
+        }
+    }
+
     /// Return a reference to the body.
     pub fn body(&self) -> &[u8] {
         self.body.as_ref()
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
-        let Self { binding, id, body } = self;
+        let Self {
+            binding,
+            id,
+            retry,
+            body,
+        } = self;
         let mut message = capnp::message::Builder::new_default();
         {
             let mut request = message.init_root::<durable_request::Builder>();
             request.set_binding(binding.as_str().into());
+            request.set_retry(retry);
             {
                 let mut id_builder = request.init_id();
                 match id {

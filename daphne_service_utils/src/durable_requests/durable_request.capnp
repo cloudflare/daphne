@@ -18,4 +18,5 @@ struct DurableRequest @0xfbd55b93d47690b9 {
         name @1 :Text;
         hex @2 :Text;
     }
+    retry @3 :Bool;
 }

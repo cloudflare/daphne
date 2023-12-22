@@ -71,11 +71,14 @@
 //!
 //! [to_uri]: daphne_service_utils::durable_requests::bindings::DurableMethod::to_uri
 
+use std::time::Duration;
+
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
+use tracing::warn;
 use url::Url;
-use worker::{js_sys::Uint8Array, Env, Request, RequestInit, Response};
+use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
@@ -179,6 +182,13 @@ async fn handle_kv_request(mut req: Request, env: Env, key: &str) -> worker::Res
 
 /// Handle a durable object request
 async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Result<Response> {
+    const RETRY_DELAYS: &[Duration] = &[
+        Duration::from_millis(100),
+        Duration::from_millis(500),
+        Duration::from_millis(1_000),
+        Duration::from_millis(3_000),
+    ];
+
     let buf = req.bytes().await.map_err(|e| {
         tracing::error!(error = ?e, "failed to get bytes");
         e
@@ -209,5 +219,30 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
 
     let stub = obj.get_stub()?;
 
-    stub.fetch_with_request(do_req).await
+    let attempts = if parsed_req.retry {
+        RETRY_DELAYS.len() + 1
+    } else {
+        1
+    };
+    let mut attempt = 1;
+    loop {
+        match stub.fetch_with_request(do_req.clone()?).await {
+            Ok(ok) => return Ok(ok),
+            Err(error) => {
+                if attempt < attempts {
+                    warn!(
+                        binding = parsed_req.binding,
+                        path = uri,
+                        attempt,
+                        error = ?error,
+                        "DO request failed"
+                    );
+                    Delay::from(RETRY_DELAYS[attempt - 1]).await;
+                    attempt += 1;
+                } else {
+                    return Err(error);
+                }
+            }
+        }
+    }
 }
