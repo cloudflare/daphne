@@ -24,8 +24,8 @@ pub(crate) enum Error {
     Serde(#[from] serde_json::Error),
     #[error("network error: {0}")]
     Reqwest(#[from] reqwest::Error),
-    #[error("http error. request returned status code was {status} with the body {body}")]
-    HttpError { status: StatusCode, body: String },
+    #[error("http error. request returned status code {status} with the body {body}")]
+    Http { status: StatusCode, body: String },
 }
 
 pub(crate) struct Do<'h> {
@@ -83,7 +83,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
         if resp.status().is_success() {
             Ok(resp.json().await?)
         } else {
-            Err(Error::HttpError {
+            Err(Error::Http {
                 status: status_reqwest_0_11_to_http_1_0(resp.status()),
                 body: resp.text().await?,
             })
