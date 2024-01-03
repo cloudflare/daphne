@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, routing::post};
+use axum::{body::HttpBody, extract::State, routing::post};
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
@@ -13,11 +13,14 @@ use daphne_service_utils::auth::DaphneAuth;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
 
-pub(super) fn add_helper_routes<A: DapHelper<DaphneAuth>>(
-    router: super::Router<A>,
-) -> super::Router<A>
+pub(super) fn add_helper_routes<A: DapHelper<DaphneAuth>, B>(
+    router: super::Router<A, B>,
+) -> super::Router<A, B>
 where
     A: DapHelper<DaphneAuth> + DaphneService + Send + Sync + 'static,
+    B: Send + HttpBody + 'static,
+    B::Data: Send,
+    B::Error: Send + Sync,
 {
     router
         .route("/:version/aggregate", post(agg_job))

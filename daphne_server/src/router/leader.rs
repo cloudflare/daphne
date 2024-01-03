@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Request, State},
-    http::{header, StatusCode},
+    body::HttpBody,
+    extract::{Path, State},
+    http::{header, Request, StatusCode},
     middleware::{self, Next},
     response::{AppendHeaders, IntoResponse, Response},
     routing::{get, post, put},
@@ -27,10 +28,10 @@ struct PathVersion {
     version: DapVersion,
 }
 
-async fn require_draft02(
+async fn require_draft02<B>(
     Path(PathVersion { version }): Path<PathVersion>,
-    request: Request,
-    next: Next,
+    request: Request<B>,
+    next: Next<B>,
 ) -> Response {
     if version != DapVersion::Draft02 {
         return (
@@ -42,9 +43,12 @@ async fn require_draft02(
     next.run(request).await
 }
 
-pub(super) fn add_leader_routes<A>(router: super::Router<A>) -> super::Router<A>
+pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync + 'static,
+    B: Send + HttpBody + 'static,
+    B::Data: Send,
+    B::Error: Send + Sync,
 {
     router
         .route(

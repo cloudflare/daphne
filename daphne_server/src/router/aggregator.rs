@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use axum::{
+    body::HttpBody,
     extract::{Query, State},
     routing::get,
 };
@@ -16,9 +17,12 @@ use serde::Deserialize;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
 
-pub fn add_aggregator_routes<A>(router: super::Router<A>) -> super::Router<A>
+pub fn add_aggregator_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
     A: DapAggregator<DaphneAuth> + DaphneService + Send + Sync + 'static,
+    B: Send + HttpBody + 'static,
+    B::Data: Send,
+    B::Error: Send + Sync,
 {
     router.route("/:version/hpke_config", get(hpke_config))
 }
@@ -73,7 +77,6 @@ mod test {
         );
 
         let status = router
-            .into_service()
             .oneshot(
                 Request::builder()
                     .uri(format!("/?task_id={}", task_id.to_base64url()))
@@ -97,7 +100,6 @@ mod test {
         );
 
         let status = router
-            .into_service()
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap()
