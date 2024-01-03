@@ -105,12 +105,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         .init();
 
     // hand the router to axum for it to run
-    axum::serve(
-        tokio::net::TcpListener::bind(("0.0.0.0", config.port))
-            .await
-            .unwrap(),
-        router,
-    )
+    axum::Server::bind(&std::net::SocketAddr::new(
+        "0.0.0.0".parse().unwrap(),
+        config.port,
+    ))
+    .serve(router.into_make_service())
     .await?;
 
     Ok(())

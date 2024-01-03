@@ -17,7 +17,9 @@ repository = "https://github.com/cloudflare/daphne"
 readme = "../README.md"
 
 [dependencies]
-axum = "0.7"
+axum = "0.6"
+http.workspace = true
+hyper = "0.14.27"
 bincode.workspace = true
 daphne = { path = "../daphne", features = ["send-traits"] }
 daphne_service_utils = { path = "../daphne_service_utils" }

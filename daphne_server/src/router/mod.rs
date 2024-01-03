@@ -11,7 +11,8 @@ use std::{io::Cursor, sync::Arc};
 
 use axum::{
     async_trait,
-    extract::{FromRequest, FromRequestParts, Path, Request},
+    body::HttpBody,
+    extract::{FromRequest, FromRequestParts, Path, State},
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     middleware::Next,
     response::IntoResponse,
@@ -26,13 +27,13 @@ use daphne::{
     DapError, DapRequest, DapResource, DapResponse, DapVersion,
 };
 use daphne_service_utils::{auth::DaphneAuth, metrics::DaphneServiceMetrics, DapRole};
-use futures::TryStreamExt;
+use http::Request;
 use prio::codec::Decode;
 use serde::Deserialize;
 
 use crate::App;
 
-type Router<A> = axum::Router<Arc<A>>;
+type Router<A, B> = axum::Router<Arc<A>, B>;
 
 /// Capabilities necessary when running a native daphne service.
 pub trait DaphneService {
@@ -40,7 +41,12 @@ pub trait DaphneService {
     fn server_metrics(&self) -> &DaphneServiceMetrics;
 }
 
-pub fn new(role: DapRole, aggregator: App) -> axum::Router {
+pub fn new<B>(role: DapRole, aggregator: App) -> axum::Router<(), B>
+where
+    B: Send + HttpBody + 'static,
+    B::Data: Send,
+    B::Error: Send + Sync + Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let router = axum::Router::new();
 
     let router = aggregator::add_aggregator_routes(router);
@@ -53,35 +59,38 @@ pub fn new(role: DapRole, aggregator: App) -> axum::Router {
     #[cfg(feature = "test-utils")]
     let router = test_routes::add_test_routes(router, role);
 
+    async fn request_metrics<B>(
+        State(app): State<Arc<App>>,
+        req: Request<B>,
+        next: Next<B>,
+    ) -> impl IntoResponse {
+        tracing::info!(
+            method = %req.method(),
+            uri = %req.uri(),
+            headers = ?req.headers(),
+            "received request",
+        );
+        let resp = next.run(req).await;
+        app.server_metrics()
+            .http_status_code_counter
+            .with_label_values(&[&format!("{}", resp.status())])
+            .inc();
+        tracing::info!(
+            status_code = %resp.status(),
+            headers = ?resp.headers(),
+            "request finished"
+        );
+        resp
+    }
+
     let app = Arc::new(aggregator);
     router
         .with_state(app.clone())
         .layer(
-            tower::ServiceBuilder::new().layer(axum::middleware::from_fn({
-                let app = app.clone();
-                move |req: Request, next: Next| {
-                    let app = app.clone();
-                    async move {
-                        tracing::info!(
-                            method = %req.method(),
-                            uri = %req.uri(),
-                            headers = ?req.headers(),
-                            "received request",
-                        );
-                        let resp = next.run(req).await;
-                        app.server_metrics()
-                            .http_status_code_counter
-                            .with_label_values(&[&format!("{}", resp.status())])
-                            .inc();
-                        tracing::info!(
-                            status_code = %resp.status(),
-                            headers = ?resp.headers(),
-                            "request finished"
-                        );
-                        resp
-                    }
-                }
-            })),
+            tower::ServiceBuilder::new().layer(axum::middleware::from_fn_with_state(
+                app.clone(),
+                request_metrics,
+            )),
         )
 }
 
@@ -166,16 +175,15 @@ impl IntoResponse for AxumDapResponse {
 struct DapRequestExtractor(pub DapRequest<DaphneAuth>);
 
 #[async_trait]
-impl<S> FromRequest<S, axum::body::Body> for DapRequestExtractor
+impl<S, B> FromRequest<S, B> for DapRequestExtractor
 where
     S: Send + Sync,
+    B: HttpBody + Send + 'static,
+    <B as HttpBody>::Data: Send,
 {
     type Rejection = (StatusCode, String);
 
-    async fn from_request(
-        req: Request<axum::body::Body>,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
         #[derive(Debug, Deserialize)]
         #[serde(deny_unknown_fields)]
         struct PathParams {
@@ -234,16 +242,13 @@ where
 
         // TODO(mendess): this is very eager, we could redesign DapResponse later to allow for
         // streaming of data.
-        let payload = body
-            .into_data_stream()
-            .try_fold(Vec::new(), |mut buf, bytes| async move {
-                buf.extend_from_slice(&bytes);
-                Ok(buf)
-            })
-            .await;
-        let payload = match payload {
-            Ok(payload) => payload,
-            Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        let payload = hyper::body::to_bytes(body).await;
+
+        let Ok(payload) = payload else {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to get payload".into(),
+            ));
         };
 
         let (task_id, resource) = match version {
@@ -289,7 +294,7 @@ where
             version,
             task_id,
             resource,
-            payload,
+            payload: payload.to_vec(),
             media_type,
             sender_auth: Some(sender_auth),
             taskprov,
@@ -302,7 +307,7 @@ mod test {
     use std::sync::Arc;
 
     use axum::{
-        body::Body,
+        body::{Body, HttpBody},
         extract::State,
         http::{header::CONTENT_TYPE, Request, StatusCode},
         response::IntoResponse,
@@ -314,7 +319,7 @@ mod test {
         DapRequest, DapResource, DapVersion,
     };
     use daphne_service_utils::auth::DaphneAuth;
-    use futures::{future::BoxFuture, TryStreamExt};
+    use futures::future::BoxFuture;
     use prio::codec::Encode;
     use rand::{thread_rng, Rng};
     use tokio::sync::mpsc::{self, Sender};
@@ -330,7 +335,12 @@ mod test {
     ///  - `/:version/:task_id/parse-task-id`
     ///  - `/:version/:agg_job_id/parse-agg-job-id`
     ///  - `/:version/:collect_job_id/parse-collect-job-id`
-    fn test_router() -> impl FnOnce(Request<Body>) -> BoxFuture<'static, DapRequest<DaphneAuth>> {
+    fn test_router<B>() -> impl FnOnce(Request<B>) -> BoxFuture<'static, DapRequest<DaphneAuth>>
+    where
+        B: Send + Sync + 'static + HttpBody,
+        B::Data: Send,
+        B::Error: Send + Sync + std::error::Error,
+    {
         type Channel = Sender<DapRequest<DaphneAuth>>;
 
         async fn handler(
@@ -364,16 +374,9 @@ mod test {
                     StatusCode::BAD_REQUEST => {
                         panic!(
                             "parsing failed: {}",
-                            resp.into_body()
-                                .into_data_stream()
-                                .try_fold(String::new(), |mut buf, bytes| async move {
-                                    let part = std::str::from_utf8(&bytes)
-                                        .expect("error message to be valid utf8");
-                                    buf.push_str(part);
-                                    Ok(buf)
-                                })
-                                .await
-                                .unwrap()
+                            String::from_utf8_lossy(
+                                &hyper::body::to_bytes(resp.into_body()).await.unwrap()
+                            )
                         )
                     }
                     code => assert_eq!(code, StatusCode::OK),
@@ -406,7 +409,7 @@ mod test {
         let req = test(
             Request::builder()
                 .uri("/v02/parse-version")
-                .body(Body::new("1".repeat(32)))
+                .body("1".repeat(32))
                 .unwrap(),
         )
         .await;

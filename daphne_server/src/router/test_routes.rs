@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use axum::{
+    body::HttpBody,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -27,7 +28,12 @@ use crate::App;
 
 use super::{AxumDapResponse, DaphneService};
 
-pub fn add_test_routes(router: super::Router<App>, role: DapRole) -> super::Router<App> {
+pub fn add_test_routes<B>(router: super::Router<App, B>, role: DapRole) -> super::Router<App, B>
+where
+    B: Send + HttpBody + 'static,
+    B::Data: Send,
+    B::Error: Send + Sync + Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let router = if role == DapRole::Leader {
         router
             .route("/internal/process", post(leader_process))
