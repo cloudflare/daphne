@@ -17,7 +17,7 @@ repository = "https://github.com/cloudflare/daphne"
 readme = "../README.md"
 
 [dependencies]
-axum = "0.6"
+axum.workspace = true
 http.workspace = true
 hyper = "0.14.27"
 bincode.workspace = true
