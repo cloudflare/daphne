@@ -1,13 +1,12 @@
-FROM rust:1.73-alpine AS builder
+FROM rust:1.73-bookworm AS builder
 WORKDIR /tmp/dap_test
-RUN apk add --update \
-    bash \
-    g++ \
+RUN apt update && \
+    apt install -y \
+    clang \
     make \
     npm \
-    openssl-dev \
-    wasm-pack \
     capnproto
+
 RUN npm install -g wrangler@2.19.0
 
 # Pre-install worker-build and Rust's wasm32 target to speed up our custom build command
