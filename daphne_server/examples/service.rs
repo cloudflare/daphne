@@ -50,10 +50,10 @@ impl TryFrom<Args> for Config {
                 port.map(|port| config::Value::new(Some(&String::from("args.port")), port)),
             )?
             .set_override_option(
-                "storage",
+                "storage_proxy",
                 storage_proxy.map(|storage_proxy| {
                     config::Value::new(
-                        Some(&String::from("args.storage")),
+                        Some(&String::from("args.storage_proxy")),
                         storage_proxy.to_string(),
                     )
                 }),
