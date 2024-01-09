@@ -1,0 +1,57 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+---
+version: "3.9"
+
+networks:
+  dap_network:
+    driver: bridge
+
+services:
+  leader_storage:
+    networks:
+      - dap_network
+    ports:
+      - "4000"
+    extends:
+      file: ../daphne_worker_test/docker-compose-storage-proxy.yaml
+      service: leader_storage
+  helper_storage:
+    networks:
+      - dap_network
+    ports:
+      - "4001"
+    extends:
+      file: ../daphne_worker_test/docker-compose-storage-proxy.yaml
+      service: helper_storage
+  leader:
+    networks:
+      - dap_network
+    ports:
+      - "8787"
+    build:
+      context: ..
+      dockerfile: daphne_server/docker/example-service.Dockerfile
+      target: leader
+    depends_on:
+      - leader_storage
+  helper:
+    networks:
+      - dap_network
+    ports:
+      - "8788"
+    build:
+      context: ..
+      dockerfile: daphne_server/docker/example-service.Dockerfile
+      target: helper
+    depends_on:
+      - helper_storage
+  test:
+    networks:
+      - dap_network
+    build:
+      context: ..
+      dockerfile: daphne_worker_test/docker/runtests.Dockerfile
+    depends_on:
+      - leader
+      - helper
