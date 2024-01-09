@@ -40,6 +40,16 @@ jobs:
         with:
           compose-file: "./docker-compose.yaml"
           up-flags: "--build --abort-on-container-exit --exit-code-from test"
+  e2e-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checking out
+        uses: actions/checkout@v3
+      - name: Run integration tests
+        uses: isbang/compose-action@v1.4.1
+        with:
+          compose-file: "./daphne_server/docker-compose-e2e.yaml"
+          up-flags: "--build --abort-on-container-exit --exit-code-from test"
   docker:
     runs-on: ubuntu-latest
     steps:
