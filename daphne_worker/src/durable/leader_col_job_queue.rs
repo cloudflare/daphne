@@ -93,35 +93,39 @@ impl LeaderCollectionJobQueue {
             // Output: `Id` (collect job ID)
             Some(bindings::LeaderColJobQueue::Put) => {
                 let collect_queue_req: CollectQueueRequest = req_parse(&mut req).await?;
-                let collection_job_id: CollectionJobId =
-                    if let Some(cid) = &collect_queue_req.collect_job_id {
-                        *cid
-                    } else {
-                        // draft02 legacy: Compute the collect job ID, used to derive the collect
-                        // URI for this request. This value is computed by applying a pseudorandom
-                        // function to the request. This has two desirable properties. First, it
-                        // makes the collect URI unpredictable, which prevents clients from
-                        // enumerating collect URIs. Second, it provides a stable map from requests
-                        // to URIs, which prevents us from processing the same collect request more
-                        // than once.
-                        let collection_job_id_bytes = {
-                            let collect_req_bytes = collect_queue_req
-                                .collect_req
-                                .get_encoded_with_param(&DapVersion::Draft02);
+                let collection_job_id: CollectionJobId = if let Some(cid) =
+                    &collect_queue_req.collect_job_id
+                {
+                    *cid
+                } else {
+                    // draft02 legacy: Compute the collect job ID, used to derive the collect
+                    // URI for this request. This value is computed by applying a pseudorandom
+                    // function to the request. This has two desirable properties. First, it
+                    // makes the collect URI unpredictable, which prevents clients from
+                    // enumerating collect URIs. Second, it provides a stable map from requests
+                    // to URIs, which prevents us from processing the same collect request more
+                    // than once.
+                    let collection_job_id_bytes = {
+                        let collect_req_bytes = collect_queue_req
+                            .collect_req
+                            .get_encoded_with_param(&DapVersion::Draft02)
+                            .map_err(|e| {
+                                Error::RustError(format!("failed to encode collect request: {e}"))
+                            })?;
 
-                            let mut buf = [0; 16];
-                            let key = ring::hmac::Key::new(
-                                ring::hmac::HMAC_SHA256,
-                                self.config.collection_job_id_key.as_ref().ok_or_else(|| {
-                                    Error::RustError("missing collection job ID key".into())
-                                })?,
-                            );
-                            let tag = ring::hmac::sign(&key, &collect_req_bytes);
-                            buf.copy_from_slice(&tag.as_ref()[..16]);
-                            buf
-                        };
-                        CollectionJobId(collection_job_id_bytes)
+                        let mut buf = [0; 16];
+                        let key = ring::hmac::Key::new(
+                            ring::hmac::HMAC_SHA256,
+                            self.config.collection_job_id_key.as_ref().ok_or_else(|| {
+                                Error::RustError("missing collection job ID key".into())
+                            })?,
+                        );
+                        let tag = ring::hmac::sign(&key, &collect_req_bytes);
+                        buf.copy_from_slice(&tag.as_ref()[..16]);
+                        buf
                     };
+                    CollectionJobId(collection_job_id_bytes)
+                };
 
                 // If the the request is new, then put it in the job queue.
                 let pending_key = pending_key(&collect_queue_req.task_id, &collection_job_id);

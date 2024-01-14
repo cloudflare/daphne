@@ -663,7 +663,7 @@ mod test {
         let pending_report = PendingReport {
             task_id,
             version,
-            report_hex: hex::encode(report.get_encoded_with_param(&version)),
+            report_hex: hex::encode(report.get_encoded_with_param(&version).unwrap()),
         };
 
         let got = ReportId::get_decoded_with_param(

@@ -187,7 +187,7 @@ async fn leader_upload(version: DapVersion) {
         &path,
         DapMediaType::Report,
         None,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
     )
     .await;
 
@@ -197,7 +197,7 @@ async fn leader_upload(version: DapVersion) {
         None, // dap_auth_token
         &path,
         DapMediaType::Report,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
         400,
         "reportRejected",
     )
@@ -221,7 +221,8 @@ async fn leader_upload(version: DapVersion) {
                 version,
             )
             .unwrap()
-            .get_encoded_with_param(&version),
+            .get_encoded_with_param(&version)
+            .unwrap(),
         400,
         "unrecognizedTask",
     )
@@ -245,7 +246,7 @@ async fn leader_upload(version: DapVersion) {
         None, // dap_auth_token
         &path,
         DapMediaType::Report,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
         400,
         "reportRejected",
     )
@@ -280,7 +281,7 @@ async fn leader_upload(version: DapVersion) {
         None, // dap_auth_token
         &path,
         DapMediaType::Report,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
         400,
         "reportTooLate",
     )
@@ -329,7 +330,8 @@ async fn leader_upload(version: DapVersion) {
                     },
                 ],
             }
-            .get_encoded_with_param(&version),
+            .get_encoded_with_param(&version)
+            .unwrap(),
         )
         .headers(headers)
         .send()
@@ -385,7 +387,9 @@ async fn leader_upload_taskprov() {
         };
         let task_id = compute_task_id(
             version,
-            &taskprov_task_config.get_encoded_with_param(&version),
+            &taskprov_task_config
+                .get_encoded_with_param(&version)
+                .unwrap(),
         );
         let task_config = DapTaskConfig::try_from_taskprov(
             version,
@@ -406,7 +410,11 @@ async fn leader_upload_taskprov() {
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
             vec![Extension::Taskprov {
-                draft02_payload: Some(taskprov_task_config.get_encoded_with_param(&version)),
+                draft02_payload: Some(
+                    taskprov_task_config
+                        .get_encoded_with_param(&version)
+                        .unwrap(),
+                ),
             }],
             version,
         )
@@ -415,12 +423,14 @@ async fn leader_upload_taskprov() {
         &client,
         path,
         DapMediaType::Report,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
     )
     .await;
 
     // Generate and upload a report with taskprov but with the wrong id
-    let payload = taskprov_task_config.get_encoded_with_param(&version);
+    let payload = taskprov_task_config
+        .get_encoded_with_param(&version)
+        .unwrap();
     let mut bad_payload = payload.clone();
     bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
     let task_id = compute_task_id(DapVersion::Draft02, &bad_payload);
@@ -443,7 +453,7 @@ async fn leader_upload_taskprov() {
         None, // dap_auth_token
         path,
         DapMediaType::Report,
-        report.get_encoded_with_param(&version),
+        report.get_encoded_with_param(&version).unwrap(),
         400,
         "unrecognizedTask",
     )
@@ -483,7 +493,8 @@ async fn internal_leader_process(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -537,7 +548,8 @@ async fn leader_process_min_agg_rate(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -591,7 +603,8 @@ async fn leader_collect_ok(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -605,7 +618,10 @@ async fn leader_collect_ok(version: DapVersion) {
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -679,7 +695,7 @@ async fn leader_collect_ok(version: DapVersion) {
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.bytes().await.unwrap(),
-        collection.get_encoded_with_param(&version)
+        collection.get_encoded_with_param(&version).unwrap()
     );
 
     // NOTE Our Leader doesn't check if a report is stale until it is ready to process it. As such,
@@ -733,7 +749,8 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -759,7 +776,10 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
 
     // ... then the collect job gets completed.
@@ -798,7 +818,8 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -812,7 +833,10 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -883,7 +907,10 @@ async fn leader_collect_accept_global_config_max_batch_duration(version: DapVers
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
 }
 
@@ -912,7 +939,7 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchInvalid",
         )
@@ -923,7 +950,7 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchInvalid",
         )
@@ -947,7 +974,7 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchInvalid",
         )
@@ -958,7 +985,7 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchInvalid",
         )
@@ -994,7 +1021,8 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -1008,7 +1036,10 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         agg_param: Vec::new(),
     };
     let _collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
 
     // The reports are aggregated in the background.
@@ -1056,7 +1087,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchOverlap",
         )
@@ -1067,7 +1098,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
             Some(&t.collector_bearer_token),
             path,
             DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
             400,
             "batchOverlap",
         )
@@ -1110,7 +1141,8 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -1144,7 +1176,10 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         agg_param: Vec::new(),
     };
     let collect_uri = t
-        .leader_post_collect(&client, collect_req.get_encoded_with_param(&t.version))
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
         .await;
     println!("collect_uri: {}", collect_uri);
 
@@ -1192,7 +1227,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.bytes().await.unwrap(),
-        collection.get_encoded_with_param(&t.version)
+        collection.get_encoded_with_param(&t.version).unwrap()
     );
 
     // Clients: Upload reports.
@@ -1212,7 +1247,8 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -1243,7 +1279,8 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
                 },
                 agg_param: Vec::new(),
             }
-            .get_encoded_with_param(&t.version),
+            .get_encoded_with_param(&t.version)
+            .unwrap(),
             400,
             "batchOverlap",
         )
@@ -1261,7 +1298,8 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
                 },
                 agg_param: Vec::new(),
             }
-            .get_encoded_with_param(&t.version),
+            .get_encoded_with_param(&t.version)
+            .unwrap(),
             400,
             "batchOverlap",
         )
@@ -1333,7 +1371,8 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                     version,
                 )
                 .unwrap()
-                .get_encoded_with_param(&version),
+                .get_encoded_with_param(&version)
+                .unwrap(),
         )
         .await;
     }
@@ -1352,7 +1391,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
             "I am the collector!", // DAP_TASKPROV_COLLECTOR_AUTH
             taskprov_advertisement.as_deref(),
             Some(&task_id),
-            collect_req.get_encoded_with_param(&t.version),
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
     println!("collect_uri: {}", collect_uri);
@@ -1416,7 +1455,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.bytes().await.unwrap(),
-        collection.get_encoded_with_param(&t.version)
+        collection.get_encoded_with_param(&t.version).unwrap()
     );
 }
 

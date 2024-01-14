@@ -31,11 +31,11 @@ pub(crate) fn prio2_shard(
     };
 
     Ok((
-        public_share.get_encoded(),
+        public_share.get_encoded()?,
         input_shares
             .iter()
             .map(|input_share| input_share.get_encoded())
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
     ))
 }
 

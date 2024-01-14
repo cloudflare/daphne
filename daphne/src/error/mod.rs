@@ -7,6 +7,7 @@ use std::fmt::{Debug, Display};
 
 use crate::{messages::TransitionFailure, vdaf::VdafError};
 pub use aborts::DapAbort;
+use prio::codec::CodecError;
 
 use self::aborts::ProblemDetails;
 
@@ -45,6 +46,13 @@ impl DapError {
             detail: None,
         }
     }
+
+    /// Construct a fatal encoding error.
+    pub fn encoding(e: CodecError) -> DapError {
+        DapError::Fatal(FatalDapError(format!(
+            "encountered fatal error during encoding: {e}"
+        )))
+    }
 }
 
 impl FatalDapError {
@@ -57,7 +65,7 @@ impl FatalDapError {
 impl From<VdafError> for DapError {
     fn from(e: VdafError) -> Self {
         match e {
-            VdafError::Codec(..) | VdafError::Vdaf(..) => {
+            VdafError::Codec(..) | VdafError::Vdaf(..) | VdafError::Uncategorized(..) => {
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
         }
@@ -65,7 +73,7 @@ impl From<VdafError> for DapError {
 }
 
 #[derive(PartialEq, Eq)]
-pub struct FatalDapError(String);
+pub struct FatalDapError(pub(crate) String);
 
 impl std::error::Error for FatalDapError {}
 

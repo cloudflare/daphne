@@ -25,7 +25,7 @@ impl<'srv> DapHelper<DaphneAuth> for DaphneWorker<'srv> {
         Id: Into<MetaAggregationJobId> + Send,
     {
         let task_config = self.try_get_task_config(task_id).await?;
-        let helper_state_hex = hex::encode(helper_state.get_encoded());
+        let helper_state_hex = hex::encode(helper_state.get_encoded().map_err(DapError::encoding)?);
         let durable_name =
             HelperState::name((task_config.as_ref().version, task_id, &agg_job_id.into()))
                 .unwrap_from_name();

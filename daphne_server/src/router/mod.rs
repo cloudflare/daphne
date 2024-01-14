@@ -445,7 +445,7 @@ mod test {
                 .uri("/v02/parse-version")
                 .body({
                     let mut v = Vec::new();
-                    task_id.encode(&mut v);
+                    task_id.encode(&mut v).unwrap();
                     Body::from(v)
                 })
                 .unwrap(),

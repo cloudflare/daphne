@@ -157,7 +157,7 @@ impl TestRunner {
         let vdaf_verify_key_base64url = encode_base64url(t.task_config.vdaf_verify_key.as_ref());
 
         let collector_hpke_config_base64url =
-            encode_base64url(t.collector_hpke_receiver.config.get_encoded());
+            encode_base64url(t.collector_hpke_receiver.config.get_encoded().unwrap());
 
         let vdaf = json!({
             "type": "Prio3Sum",

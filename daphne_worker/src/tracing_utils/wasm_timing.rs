@@ -38,6 +38,7 @@ impl TryFrom<&str> for MeasuredSpanName {
     }
 }
 
+#[allow(clippy::pedantic)] // Same postfix for all field names
 struct RequestTimeHistograms {
     /// Helper: Aggregate request times
     pub aggregation_init_request_times: Histogram,

@@ -15,7 +15,7 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     roles::leader::{self, DapLeader},
-    DapVersion,
+    DapError, DapVersion,
 };
 use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::ParameterizedEncode;
@@ -145,7 +145,16 @@ where
             daphne::DapResponse {
                 version: req.version,
                 media_type: DapMediaType::Collection,
-                payload: collect_resp.get_encoded_with_param(&req.version),
+                payload: match collect_resp.get_encoded_with_param(&req.version) {
+                    Ok(payload) => payload,
+                    Err(e) => {
+                        return AxumDapResponse::new_error(
+                            DapError::encoding(e),
+                            app.server_metrics(),
+                        )
+                        .into_response()
+                    }
+                },
             },
             app.server_metrics(),
         )

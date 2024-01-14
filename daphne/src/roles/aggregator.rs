@@ -195,12 +195,15 @@ where
     }
 
     let payload = match req.version {
-        DapVersion::Draft02 => hpke_config.as_ref().get_encoded(),
+        DapVersion::Draft02 => hpke_config
+            .as_ref()
+            .get_encoded()
+            .map_err(DapError::encoding)?,
         DapVersion::DraftLatest => {
             let hpke_config_list = HpkeConfigList {
                 hpke_configs: vec![hpke_config.as_ref().clone()],
             };
-            hpke_config_list.get_encoded()
+            hpke_config_list.get_encoded().map_err(DapError::encoding)?
         }
     };
 
