@@ -9,7 +9,7 @@ pub mod prio3;
 pub(crate) mod xof;
 
 use crate::{
-    error::DapAbort,
+    error::{DapAbort, FatalDapError},
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
@@ -50,7 +50,7 @@ use prio::{
 use rand::prelude::*;
 use replace_with::replace_with_or_abort;
 use ring::hkdf::KeyType;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
@@ -103,6 +103,8 @@ pub(crate) enum VdafError {
     Codec(#[from] CodecError),
     #[error("{0}")]
     Vdaf(#[from] prio::vdaf::VdafError),
+    #[error("{0}")]
+    Uncategorized(String),
 }
 
 /// A VDAF verification key.
@@ -207,9 +209,11 @@ impl EarlyReportStateConsumed {
         }); // Receiver role
 
         let mut aad = Vec::with_capacity(58);
-        task_id.encode(&mut aad);
-        metadata.encode_with_param(&task_config.version, &mut aad);
-        encode_u32_bytes(&mut aad, public_share.as_ref());
+        task_id.encode(&mut aad).map_err(DapError::encoding)?;
+        metadata
+            .encode_with_param(&task_config.version, &mut aad)
+            .map_err(DapError::encoding)?;
+        encode_u32_bytes(&mut aad, public_share.as_ref()).map_err(DapError::encoding)?;
 
         let encoded_input_share = match decrypter
             .hpke_decrypt(task_id, &info, &aad, encrypted_input_share)
@@ -364,7 +368,7 @@ where
     S: Serializer,
     T: Encode,
 {
-    s.serialize_str(&hex::encode(x.get_encoded()))
+    s.serialize_str(&hex::encode(x.get_encoded().map_err(S::Error::custom)?))
 }
 
 impl EarlyReportStateInitialized {
@@ -482,7 +486,7 @@ impl deepsize::DeepSizeOf for VdafPrepState {
 }
 
 impl Encode for VdafPrepState {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             Self::Prio3Field64(state) => state.encode(bytes),
             Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
@@ -540,7 +544,7 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
 }
 
 impl Encode for VdafPrepMessage {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             Self::Prio3ShareField64(share) => share.encode(bytes),
             Self::Prio3ShareField64HmacSha256Aes128(share) => share.encode(bytes),
@@ -594,7 +598,7 @@ impl deepsize::DeepSizeOf for VdafAggregateShare {
 }
 
 impl Encode for VdafAggregateShare {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
@@ -728,7 +732,7 @@ impl VdafConfig {
                 plaintext_input_share.payload = input_share;
                 plaintext_input_share.get_encoded_with_param(&version)
             } else {
-                input_share
+                Ok(input_share)
             }
         });
 
@@ -743,13 +747,15 @@ impl VdafConfig {
         info.push(CTX_ROLE_LEADER); // Receiver role placeholder; updated below.
 
         let mut aad = Vec::with_capacity(58);
-        task_id.encode(&mut aad);
-        metadata.encode_with_param(&version, &mut aad);
+        task_id.encode(&mut aad).map_err(DapError::encoding)?;
+        metadata
+            .encode_with_param(&version, &mut aad)
+            .map_err(DapError::encoding)?;
         // draft02 compatibility: In draft02, the tag-length prefix is not specified. However, the
         // intent was to include the prefix, and it is specified unambiguoiusly in the latest
         // version. All of our partners for interop have agreed to include the prefix for draft02,
         // so we have hard-coded it here.
-        encode_u32_bytes(&mut aad, &public_share);
+        encode_u32_bytes(&mut aad, &public_share).map_err(DapError::encoding)?;
 
         let mut encrypted_input_shares = Vec::with_capacity(2);
         for (i, (hpke_config, encoded_input_share)) in
@@ -760,7 +766,11 @@ impl VdafConfig {
             } else {
                 CTX_ROLE_HELPER
             }; // Receiver role
-            let (enc, payload) = hpke_config.encrypt(&info, &aad, &encoded_input_share)?;
+            let (enc, payload) = hpke_config.encrypt(
+                &info,
+                &aad,
+                &encoded_input_share.map_err(DapError::encoding)?,
+            )?;
 
             encrypted_input_shares.push(HpkeCiphertext {
                 config_id: hpke_config.id,
@@ -903,7 +913,8 @@ impl VdafConfig {
                             // Add the ping-pong "initialize" message framing
                             // (draft-irtf-cfrg-vdaf-08, Section 5.8).
                             outbound.push(PingPongMessageType::Initialize as u8);
-                            encode_u32_items(&mut outbound, &task_config.version, &[prep_share]);
+                            encode_u32_items(&mut outbound, &task_config.version, &[prep_share])
+                                .map_err(DapError::encoding)?;
                             (None, Some(outbound))
                         }
                     };
@@ -1064,7 +1075,10 @@ impl VdafConfig {
                             time: metadata.time,
                             report_id: metadata.id,
                         });
-                        TransitionVar::Continued(helper_prep_share.get_encoded())
+                        helper_prep_share
+                            .get_encoded()
+                            .map(TransitionVar::Continued)
+                            .expect("failed to encode prep share")
                     }
 
                     EarlyReportStateInitialized::Rejected {
@@ -1164,13 +1178,18 @@ impl VdafConfig {
                                 // Add ping-pong "finish" message framing (draft-irtf-cfrg-vdaf-08,
                                 // Section 5.8).
                                 outbound.push(PingPongMessageType::Finish as u8);
-                                encode_u32_bytes(&mut outbound, &prep_msg);
+                                encode_u32_bytes(&mut outbound, &prep_msg)
+                                    .map_err(DapError::encoding)?;
                                 TransitionVar::Continued(outbound)
                             }
 
                             Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                                 let failure = TransitionFailure::VdafPrepError;
                                 TransitionVar::Failed(failure)
+                            }
+
+                            Err(VdafError::Uncategorized(e)) => {
+                                return Err(DapError::Fatal(FatalDapError(e)))
                             }
                         }
                     }
@@ -1271,7 +1290,6 @@ impl VdafConfig {
                     continue;
                 }
 
-                // TODO Log the fact that the helper sent an unexpected message.
                 TransitionVar::Finished => {
                     return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
@@ -1314,6 +1332,10 @@ impl VdafConfig {
                 Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                     let failure = TransitionFailure::VdafPrepError;
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                }
+
+                Err(VdafError::Uncategorized(e)) => {
+                    unreachable!("encountered unhandled, fatal error: {e}")
                 }
             }
         }
@@ -1433,6 +1455,8 @@ impl VdafConfig {
                     let failure = TransitionFailure::VdafPrepError;
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
+
+                Err(VdafError::Uncategorized(e)) => return Err(DapError::Fatal(FatalDapError(e))),
             }
         }
 
@@ -1573,6 +1597,10 @@ impl VdafConfig {
                         Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                             let failure = TransitionFailure::VdafPrepError;
                             TransitionVar::Failed(failure)
+                        }
+
+                        Err(VdafError::Uncategorized(e)) => {
+                            return Err(DapError::Fatal(FatalDapError(e)))
                         }
                     }
                 }
@@ -1735,11 +1763,11 @@ impl VdafConfig {
         info.push(CTX_ROLE_COLLECTOR); // Receiver role
 
         let mut aad = Vec::with_capacity(40);
-        task_id.encode(&mut aad);
+        task_id.encode(&mut aad).map_err(DapError::encoding)?;
         if version != DapVersion::Draft02 {
-            encode_u32_bytes(&mut aad, agg_param);
+            encode_u32_bytes(&mut aad, agg_param).map_err(DapError::encoding)?;
         }
-        batch_sel.encode(&mut aad);
+        batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
@@ -1786,7 +1814,8 @@ fn produce_encrypted_agg_share(
         .data
         .as_ref()
         .ok_or_else(|| fatal_error!(err = "empty aggregate share"))?
-        .get_encoded();
+        .get_encoded()
+        .map_err(DapError::encoding)?;
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
@@ -1803,11 +1832,11 @@ fn produce_encrypted_agg_share(
     info.push(CTX_ROLE_COLLECTOR); // Receiver role
 
     let mut aad = Vec::with_capacity(40);
-    task_id.encode(&mut aad);
+    task_id.encode(&mut aad).map_err(DapError::encoding)?;
     if version != DapVersion::Draft02 {
-        encode_u32_bytes(&mut aad, agg_param);
+        encode_u32_bytes(&mut aad, agg_param).map_err(DapError::encoding)?;
     }
-    batch_sel.encode(&mut aad);
+    batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
     let (enc, payload) = hpke_config.encrypt(&info, &aad, &agg_share_data)?;
     Ok(HpkeCiphertext {
@@ -2626,8 +2655,9 @@ mod test {
             .await
             .unwrap_continued();
 
-        let got = DapAggregationJobState::get_decoded(TEST_VDAF, &want.get_encoded()).unwrap();
-        assert_eq!(got.get_encoded(), want.get_encoded());
+        let got =
+            DapAggregationJobState::get_decoded(TEST_VDAF, &want.get_encoded().unwrap()).unwrap();
+        assert_eq!(got.get_encoded().unwrap(), want.get_encoded().unwrap());
 
         assert!(DapAggregationJobState::get_decoded(TEST_VDAF, b"invalid helper state").is_err());
     }

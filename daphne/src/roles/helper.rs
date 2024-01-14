@@ -219,7 +219,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     Ok(DapResponse {
         version: req.version,
         media_type: DapMediaType::AggregationJobResp,
-        payload: agg_job_resp.get_encoded(),
+        payload: agg_job_resp.get_encoded().map_err(DapError::encoding)?,
     })
 }
 
@@ -300,7 +300,7 @@ pub async fn handle_agg_job_cont_req<'req, S: Sync, A: DapHelper<S>>(
     Ok(DapResponse {
         version: req.version,
         media_type: DapMediaType::agg_job_cont_resp_for_version(task_config.version),
-        payload: agg_job_resp.get_encoded(),
+        payload: agg_job_resp.get_encoded().map_err(DapError::encoding)?,
     })
 }
 
@@ -424,7 +424,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
     Ok(DapResponse {
         version: req.version,
         media_type: DapMediaType::AggregateShare,
-        payload: agg_share_resp.get_encoded(),
+        payload: agg_share_resp.get_encoded().map_err(DapError::encoding)?,
     })
 }
 

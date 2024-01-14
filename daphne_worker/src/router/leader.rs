@@ -6,7 +6,7 @@ use daphne::{
     error::DapAbort,
     messages::{Base64Encode, CollectionJobId, TaskId},
     roles::{leader, DapLeader},
-    DapCollectJob, DapRequest, DapResponse, DapVersion,
+    DapCollectJob, DapError, DapRequest, DapResponse, DapVersion,
 };
 use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::ParameterizedEncode;
@@ -97,7 +97,14 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                     Ok(DapCollectJob::Done(collect_resp)) => dap_response_to_worker(DapResponse {
                         version: DapVersion::Draft02,
                         media_type: DapMediaType::Collection,
-                        payload: collect_resp.get_encoded_with_param(&version),
+                        payload: match collect_resp.get_encoded_with_param(&version) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                return daph
+                                    .state
+                                    .dap_abort_to_worker_response(DapError::encoding(e))
+                            }
+                        },
                     }),
                     Ok(DapCollectJob::Pending) => Ok(Response::empty().unwrap().with_status(202)),
                     // TODO spec: Decide whether to define this behavior.
@@ -172,7 +179,14 @@ pub(super) fn add_leader_routes(router: DapRouter<'_>) -> DapRouter<'_> {
                     Ok(DapCollectJob::Done(collect_resp)) => dap_response_to_worker(DapResponse {
                         version: req.version,
                         media_type: DapMediaType::Collection,
-                        payload: collect_resp.get_encoded_with_param(&req.version),
+                        payload: match collect_resp.get_encoded_with_param(&req.version) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                return daph
+                                    .state
+                                    .dap_abort_to_worker_response(DapError::encoding(e))
+                            }
+                        },
                     }),
                     Ok(DapCollectJob::Pending) => Ok(Response::empty().unwrap().with_status(202)),
                     // TODO spec: Decide whether to define this behavior.

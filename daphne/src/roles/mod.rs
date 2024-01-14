@@ -409,7 +409,6 @@ mod test {
                 self.tasks.clone(),
                 self.global_config
                     .gen_hpke_receiver_config_list(thread_rng().gen())
-                    .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
                     .expect("failed to generate HPKE receiver config"),
                 self.global_config.clone(),
                 self.leader_token.clone(),
@@ -425,7 +424,6 @@ mod test {
                 self.tasks,
                 self.global_config
                     .gen_hpke_receiver_config_list(thread_rng().gen())
-                    .collect::<Result<Vec<HpkeReceiverConfig>, _>>()
                     .expect("failed to generate HPKE receiver config"),
                 self.global_config,
                 self.leader_token,
@@ -488,7 +486,7 @@ mod test {
                 media_type: DapMediaType::Report,
                 task_id: Some(*task_id),
                 resource: DapResource::Undefined,
-                payload: report.get_encoded_with_param(&version),
+                payload: report.get_encoded_with_param(&version).unwrap(),
                 ..Default::default()
             }
         }
@@ -698,7 +696,7 @@ mod test {
             media_type: DapMediaType,
             msg: M,
         ) -> DapRequest<BearerToken> {
-            let payload = msg.get_encoded_with_param(&task_config.version);
+            let payload = msg.get_encoded_with_param(&task_config.version).unwrap();
             let sender_auth = Some(
                 self.leader
                     .authorize(task_id, task_config, &media_type, &payload)
@@ -740,7 +738,7 @@ mod test {
                 } else {
                     DapResource::CollectionJob(collect_job_id)
                 },
-                payload: msg.get_encoded_with_param(&task_config.version),
+                payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
                 sender_auth,
                 ..Default::default()
             }
@@ -1022,7 +1020,8 @@ mod test {
                 query: Query::default(),
                 agg_param: Vec::default(),
             }
-            .get_encoded_with_param(&task_config.version),
+            .get_encoded_with_param(&task_config.version)
+            .unwrap(),
             ..Default::default() // Unauthorized request.
         };
 
@@ -1312,7 +1311,9 @@ mod test {
             media_type: DapMediaType::Report,
             task_id: Some(TaskId([0; 32])),
             resource: DapResource::Undefined,
-            payload: report_invalid_task_id.get_encoded_with_param(&task_config.version),
+            payload: report_invalid_task_id
+                .get_encoded_with_param(&task_config.version)
+                .unwrap(),
             ..Default::default()
         };
 
@@ -1337,7 +1338,7 @@ mod test {
             media_type: DapMediaType::Report,
             task_id: Some(*task_id),
             resource: DapResource::Undefined,
-            payload: report.get_encoded_with_param(&version),
+            payload: report.get_encoded_with_param(&version).unwrap(),
             ..Default::default()
         };
 
@@ -1876,7 +1877,7 @@ mod test {
                 media_type: DapMediaType::Report,
                 task_id: Some(task_id),
                 resource: DapResource::Undefined,
-                payload: report.get_encoded_with_param(&version),
+                payload: report.get_encoded_with_param(&version).unwrap(),
                 taskprov: taskprov_advertisement.clone(),
                 ..Default::default()
             };

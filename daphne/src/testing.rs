@@ -441,10 +441,13 @@ impl AggregationJobTest {
                 DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
                     let got = DapAggregationJobState::get_decoded(
                         &self.task_config.vdaf,
-                        &helper_state.get_encoded(),
+                        &helper_state.get_encoded().unwrap(),
                     )
                     .expect("failed to decode helper state");
-                    assert_eq!(got.get_encoded(), helper_state.get_encoded());
+                    assert_eq!(
+                        got.get_encoded().unwrap(),
+                        helper_state.get_encoded().unwrap()
+                    );
 
                     let DapLeaderAggregationJobTransition::Uncommitted(uncommitted, agg_cont) =
                         self.handle_agg_job_resp(leader_state, agg_job_resp)

@@ -82,10 +82,11 @@ use crate::{
 };
 use constants::DapMediaType;
 pub use error::DapError;
+use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::{encode_base64url, Base64Encode};
 use prio::{
-    codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+    codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 use rand::prelude::*;
@@ -175,16 +176,25 @@ impl DapGlobalConfig {
     pub fn gen_hpke_receiver_config_list(
         &self,
         first_config_id: u8,
-    ) -> impl Iterator<Item = Result<HpkeReceiverConfig, DapError>> {
-        assert!(self.supported_hpke_kems.len() <= u8::MAX.into());
-        let kem_ids = self.supported_hpke_kems.clone();
-        kem_ids.into_iter().enumerate().map(move |(i, kem_id)| {
-            let (config_id, _overflowed) = first_config_id.overflowing_add(
-                i.try_into()
-                    .expect("there shouldn't be more than 256 KEM ids"),
-            );
-            HpkeReceiverConfig::gen(config_id, kem_id)
-        })
+    ) -> Result<Vec<HpkeReceiverConfig>, DapError> {
+        if u8::try_from(self.supported_hpke_kems.len()).is_err() {
+            return Err(DapError::Fatal(FatalDapError(format!(
+                "maximum config list length is 256: got {}",
+                self.supported_hpke_kems.len()
+            ))));
+        }
+
+        self.supported_hpke_kems
+            .iter()
+            .enumerate()
+            .map(move |(i, kem_id)| {
+                let (config_id, _overflowed) = first_config_id.overflowing_add(
+                    i.try_into()
+                        .expect("there shouldn't be more than 256 KEM ids"),
+                );
+                HpkeReceiverConfig::gen(config_id, *kem_id)
+            })
+            .collect()
     }
 }
 
@@ -474,7 +484,9 @@ impl DapTaskParameters {
             },
         };
 
-        let encoded_taskprov_config = taskprov_config.get_encoded_with_param(&self.version);
+        let encoded_taskprov_config = taskprov_config
+            .get_encoded_with_param(&self.version)
+            .map_err(DapError::encoding)?;
         let task_id = taskprov::compute_task_id(self.version, &encoded_taskprov_config);
 
         // Compute the DAP task config.
@@ -745,7 +757,8 @@ impl DapTaskConfig {
             }
 
             let encoded_taskprov_config = messages::taskprov::TaskConfig::try_from(self)?
-                .get_encoded_with_param(&self.version);
+                .get_encoded_with_param(&self.version)
+                .map_err(DapError::encoding)?;
             Ok(Some(encode_base64url(encoded_taskprov_config)))
         } else {
             Ok(None)
@@ -812,19 +825,22 @@ pub struct DapAggregationJobUncommitted {
 }
 
 impl Encode for DapAggregationJobState {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.part_batch_sel.encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.part_batch_sel.encode(bytes)?;
         for report_state in &self.seq {
             if report_state.draft02_prep_share.is_some() {
                 // draft02 compatibility: The prep share is kept in this data structure for
                 // backwards compatibility. It's only used by the Leader, so we don't ever expect
                 // to encode it.
-                unreachable!("Tried to encode DapAggregationJobState with leader prep share");
+                return Err(CodecError::Other(
+                    "Tried to encode DapAggregationJobState with leader prep share".into(),
+                ));
             }
-            report_state.prep_state.encode(bytes);
-            report_state.time.encode(bytes);
-            report_state.report_id.encode(bytes);
+            report_state.prep_state.encode(bytes)?;
+            report_state.time.encode(bytes)?;
+            report_state.report_id.encode(bytes)?;
         }
+        Ok(())
     }
 }
 

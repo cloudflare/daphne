@@ -65,7 +65,11 @@ impl<'srv> DapLeader<DaphneAuth> for DaphneWorker<'srv> {
         let pending_report = PendingReport {
             version,
             task_id: *task_id,
-            report_hex: hex::encode(report.get_encoded_with_param(&version)),
+            report_hex: hex::encode(
+                report
+                    .get_encoded_with_param(&version)
+                    .map_err(DapError::encoding)?,
+            ),
         };
         let config = self.config();
         let durable_name = ReportsPending::name((

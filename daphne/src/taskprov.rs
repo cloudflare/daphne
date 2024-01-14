@@ -459,7 +459,10 @@ mod test {
             },
         };
 
-        let task_id = compute_task_id(version, &taskprov_config.get_encoded_with_param(&version));
+        let task_id = compute_task_id(
+            version,
+            &taskprov_config.get_encoded_with_param(&version).unwrap(),
+        );
 
         let task_config = DapTaskConfig::try_from_taskprov(
             version,
@@ -536,7 +539,9 @@ mod test {
             },
         };
 
-        let taskprov_task_config_data = taskprov_task_config.get_encoded_with_param(&version);
+        let taskprov_task_config_data = taskprov_task_config
+            .get_encoded_with_param(&version)
+            .unwrap();
         let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_data);
         let task_id = compute_task_id(version, &taskprov_task_config_data);
         let collector_hpke_config = HpkeReceiverConfig::gen(1, HpkeKemId::X25519HkdfSha256)
@@ -638,7 +643,8 @@ mod test {
                     },
                 },
             }
-            .get_encoded_with_param(&version);
+            .get_encoded_with_param(&version)
+            .unwrap();
             let task_id = compute_task_id(version, &taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 

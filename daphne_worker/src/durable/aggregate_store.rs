@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, mem::size_of, ops::ControlFlow};
+use std::{collections::HashSet, io::Cursor, mem::size_of, ops::ControlFlow};
 
 use crate::{
     config::DaphneWorkerDurableConfig,
@@ -183,13 +183,30 @@ impl AggregateStore {
         } else {
             let kind = meta.kind.expect("if there is data there should be a type");
 
-            fn from_slice<T: FieldElement>(chunks: &[u8]) -> Result<AggregateShare<T>> {
-                let share = T::byte_slice_into_vec(chunks).map_err(|e| {
-                    worker::Error::Internal(
-                        serde_wasm_bindgen::to_value(&e.to_string())
+            fn from_slice<F: FieldElement>(chunks: &[u8]) -> Result<AggregateShare<F>> {
+                let mut share = Vec::new();
+                let mut bytes = Cursor::new(chunks);
+                let l = u64::try_from(chunks.len()).unwrap();
+                while bytes.position() < l {
+                    let x = F::decode(&mut bytes).map_err(|e| {
+                        worker::Error::Internal(
+                            serde_wasm_bindgen::to_value(&format!(
+                                "failed to decode aggregate share: {e}"
+                            ))
                             .expect("string never fails to convert to JsValue"),
-                    )
-                })?;
+                        )
+                    })?;
+                    share.push(x);
+                }
+                if bytes.position() < l {
+                    return Err(worker::Error::Internal(
+                        serde_wasm_bindgen::to_value(
+                            "failed to decode aggregate share: bytes remaining in buffer",
+                        )
+                        .expect("string never fails to convert to JsValue"),
+                    ));
+                }
+
                 Ok(AggregateShare::from(share))
             }
 
@@ -341,9 +358,11 @@ impl AggregateStore {
                     merged_report_ids.extend(contained_reports);
                     let mut as_bytes =
                         Vec::with_capacity(merged_report_ids.len() * size_of::<ReportId>());
-                    merged_report_ids
-                        .into_iter()
-                        .for_each(|id| id.encode(&mut as_bytes));
+                    merged_report_ids.into_iter().try_for_each(|id| {
+                        id.encode(&mut as_bytes).map_err(|e| {
+                            Error::RustError(format!("failed to encode report ID: {e}"))
+                        })
+                    })?;
                     shard_bytes_to_object(&Self::aggregated_reports_keys(), as_bytes, &chunks_map)?;
                 };
 
@@ -354,7 +373,15 @@ impl AggregateStore {
                 let (meta, data) = DapAggregateShareMetadata::from_agg_share(agg_share);
 
                 data.as_ref()
-                    .map(|data| shard_bytes_to_object(&keys, data.get_encoded(), &chunks_map))
+                    .map(|data| {
+                        shard_bytes_to_object(
+                            &keys,
+                            data.get_encoded().map_err(|e| {
+                                Error::RustError(format!("failed to encode agg share: {e}"))
+                            })?,
+                            &chunks_map,
+                        )
+                    })
                     .transpose()? // Option<Result> -> Result<Option> -> Option
                     .unwrap_or_default();
 

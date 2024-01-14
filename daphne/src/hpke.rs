@@ -362,9 +362,10 @@ impl HpkeDecrypter for HpkeReceiverConfig {
 }
 
 impl Encode for HpkeReceiverConfig {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.config.encode(bytes);
-        encode_u16_bytes(bytes, self.private_key.as_slice());
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.config.encode(bytes)?;
+        encode_u16_bytes(bytes, self.private_key.as_slice())?;
+        Ok(())
     }
 }
 

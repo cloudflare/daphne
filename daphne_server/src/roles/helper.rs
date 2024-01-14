@@ -27,7 +27,7 @@ impl DapHelper<DaphneAuth> for crate::App {
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-        let helper_state_hex = hex::encode(helper_state.get_encoded());
+        let helper_state_hex = hex::encode(helper_state.get_encoded().map_err(DapError::encoding)?);
         Ok(self
             .durable()
             .with_retry()

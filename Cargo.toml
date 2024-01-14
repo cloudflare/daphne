@@ -38,7 +38,7 @@ hpke-rs-rust-crypto = "0.2.0"
 http = "0.2"
 matchit = "0.7.3"
 paste = "1.0.14"
-prio = { git = "https://github.com/divviup/libprio-rs", rev = "d0168336bbad1805231a69181b329e37ee962203" }
+prio = "0.16.0"
 prometheus = "0.13.3"
 rand = "0.8.5"
 rand_core = "0.6.4"

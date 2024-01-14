@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
             );
             let resp = http_client
                 .post(Url::parse(leader_url)?.join("upload")?)
-                .body(report.get_encoded_with_param(&version))
+                .body(report.get_encoded_with_param(&version)?)
                 .headers(headers)
                 .send()
                 .await?;
@@ -217,7 +217,7 @@ async fn main() -> Result<()> {
 
             let resp = http_client
                 .post(Url::parse(leader_url)?.join("collect")?)
-                .body(collect_req.get_encoded_with_param(&version))
+                .body(collect_req.get_encoded_with_param(&version)?)
                 .headers(headers)
                 .send()
                 .await?;

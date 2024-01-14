@@ -384,7 +384,9 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
             req_media_type: DapMediaType::AggregationJobInitReq,
             resp_media_type: DapMediaType::AggregationJobResp,
             resource: agg_job_id.for_request_path(),
-            req_data: agg_job_init_req.get_encoded_with_param(&task_config.version),
+            req_data: agg_job_init_req
+                .get_encoded_with_param(&task_config.version)
+                .map_err(DapError::encoding)?,
             method,
             taskprov: taskprov.clone(),
         },
@@ -416,7 +418,9 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
                         task_config.version,
                     ),
                     resource: agg_job_id.for_request_path(),
-                    req_data: agg_job_cont_req.get_encoded_with_param(&task_config.version),
+                    req_data: agg_job_cont_req
+                        .get_encoded_with_param(&task_config.version)
+                        .map_err(DapError::encoding)?,
                     method: LeaderHttpRequestMethod::Post,
                     taskprov,
                 },
@@ -546,7 +550,9 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
             req_media_type: DapMediaType::AggregateShareReq,
             resp_media_type: DapMediaType::AggregateShare,
             resource: DapResource::Undefined,
-            req_data: agg_share_req.get_encoded_with_param(&task_config.version),
+            req_data: agg_share_req
+                .get_encoded_with_param(&task_config.version)
+                .map_err(DapError::encoding)?,
             method: LeaderHttpRequestMethod::Post,
             taskprov,
         },

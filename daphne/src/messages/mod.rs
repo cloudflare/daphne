@@ -74,8 +74,9 @@ macro_rules! id_struct {
         }
 
         impl Encode for $sname {
-            fn encode(&self, bytes: &mut Vec<u8>) {
+            fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
                 bytes.extend_from_slice(&self.0);
+                Ok(())
             }
         }
 
@@ -214,23 +215,28 @@ impl Extension {
 }
 
 impl ParameterizedEncode<DapVersion> for Extension {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match self {
             Self::Taskprov { draft02_payload } => {
-                EXTENSION_TASKPROV.encode(bytes);
+                EXTENSION_TASKPROV.encode(bytes)?;
                 match (version, draft02_payload) {
                     (DapVersion::DraftLatest, None) => {
-                        encode_u16_prefixed(*version, bytes, |_, _| ());
+                        encode_u16_prefixed(*version, bytes, |_, _| Ok(()))?;
                     }
-                    (DapVersion::Draft02, Some(payload)) => encode_u16_bytes(bytes, payload),
+                    (DapVersion::Draft02, Some(payload)) => encode_u16_bytes(bytes, payload)?,
                     _ => unreachable!("unhandled version {version:?}"),
                 }
             }
             Self::NotImplemented { typ, payload } => {
-                typ.encode(bytes);
-                encode_u16_bytes(bytes, payload);
+                typ.encode(bytes)?;
+                encode_u16_bytes(bytes, payload)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -270,14 +276,21 @@ pub struct ReportMetadata {
 }
 
 impl ParameterizedEncode<DapVersion> for ReportMetadata {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.id.encode(bytes);
-        self.time.encode(bytes);
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        self.id.encode(bytes)?;
+        self.time.encode(bytes)?;
         match (version, &self.draft02_extensions) {
             (DapVersion::DraftLatest, None) => (),
-            (DapVersion::Draft02, Some(extensions)) => encode_u16_items(bytes, version, extensions),
+            (DapVersion::Draft02, Some(extensions)) => {
+                encode_u16_items(bytes, version, extensions)?;
+            }
             _ => unreachable!("extensions should be set in (and only in) draft02"),
-        }
+        };
+        Ok(())
     }
 }
 
@@ -310,23 +323,28 @@ pub struct Report {
 }
 
 impl ParameterizedEncode<DapVersion> for Report {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         if *version == DapVersion::Draft02 {
             if let Some(id) = &self.draft02_task_id {
-                id.encode(bytes);
+                id.encode(bytes)?;
             } else {
                 unreachable!("draft02: tried to serialize Report with missing task ID");
             }
         }
-        self.report_metadata.encode_with_param(version, bytes);
-        encode_u32_bytes(bytes, &self.public_share);
+        self.report_metadata.encode_with_param(version, bytes)?;
+        encode_u32_bytes(bytes, &self.public_share)?;
         match version {
-            DapVersion::Draft02 => encode_u32_items(bytes, &(), &self.encrypted_input_shares),
+            DapVersion::Draft02 => encode_u32_items(bytes, &(), &self.encrypted_input_shares)?,
             DapVersion::DraftLatest => {
-                self.encrypted_input_shares[0].encode(bytes);
-                self.encrypted_input_shares[1].encode(bytes);
+                self.encrypted_input_shares[0].encode(bytes)?;
+                self.encrypted_input_shares[1].encode(bytes)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -368,10 +386,15 @@ pub struct ReportShare {
 }
 
 impl ParameterizedEncode<DapVersion> for ReportShare {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.report_metadata.encode_with_param(version, bytes);
-        encode_u32_bytes(bytes, &self.public_share);
-        self.encrypted_input_share.encode(bytes);
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        self.report_metadata.encode_with_param(version, bytes)?;
+        encode_u32_bytes(bytes, &self.public_share)?;
+        self.encrypted_input_share.encode(bytes)?;
+        Ok(())
     }
 }
 
@@ -417,14 +440,15 @@ impl From<BatchSelector> for PartialBatchSelector {
 }
 
 impl Encode for PartialBatchSelector {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
-            Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes),
+            Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes)?,
             Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes);
-                batch_id.encode(bytes);
+                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                batch_id.encode(bytes)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -458,17 +482,18 @@ impl std::fmt::Display for BatchSelector {
 }
 
 impl Encode for BatchSelector {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             Self::TimeInterval { batch_interval } => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes);
-                batch_interval.encode(bytes);
+                QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                batch_interval.encode(bytes)?;
             }
             Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes);
-                batch_id.encode(bytes);
+                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                batch_id.encode(bytes)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -516,15 +541,20 @@ pub struct PrepareInit {
 }
 
 impl ParameterizedEncode<DapVersion> for PrepareInit {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.report_share.encode_with_param(version, bytes);
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        self.report_share.encode_with_param(version, bytes)?;
         match (version, &self.draft_latest_payload) {
             (DapVersion::Draft02, None) => (),
             (DapVersion::DraftLatest, Some(payload)) => {
-                encode_u32_bytes(bytes, payload);
+                encode_u32_bytes(bytes, payload)?;
             }
             _ => unreachable!("unhandled version {version:?}"),
-        }
+        };
+        Ok(())
     }
 }
 
@@ -557,23 +587,28 @@ pub struct AggregationJobInitReq {
 }
 
 impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match version {
             DapVersion::Draft02 => {
                 self.draft02_task_id
                     .as_ref()
-                    .expect("draft02: missing task ID")
-                    .encode(bytes);
+                    .ok_or_else(|| CodecError::Other("draft02: missing task ID".into()))?
+                    .encode(bytes)?;
                 self.draft02_agg_job_id
                     .as_ref()
-                    .expect("draft02: missing aggregation job ID")
-                    .encode(bytes);
-                encode_u16_bytes(bytes, &self.agg_param);
+                    .ok_or_else(|| CodecError::Other("draft02: missing aggregation job ID".into()))?
+                    .encode(bytes)?;
+                encode_u16_bytes(bytes, &self.agg_param)?;
             }
-            DapVersion::DraftLatest => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::DraftLatest => encode_u32_bytes(bytes, &self.agg_param)?,
         };
-        self.part_batch_sel.encode(bytes);
-        encode_u32_items(bytes, version, &self.prep_inits);
+        self.part_batch_sel.encode(bytes)?;
+        encode_u32_items(bytes, version, &self.prep_inits)?;
+        Ok(())
     }
 }
 
@@ -611,23 +646,31 @@ pub struct AggregationJobContinueReq {
 }
 
 impl ParameterizedEncode<DapVersion> for AggregationJobContinueReq {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match version {
             DapVersion::Draft02 => {
                 self.draft02_task_id
                     .as_ref()
-                    .expect("draft02: missing task ID")
-                    .encode(bytes);
+                    .ok_or_else(|| CodecError::Other("draft02: missing task ID".into()))?
+                    .encode(bytes)?;
                 self.draft02_agg_job_id
                     .as_ref()
-                    .expect("draft02: missing aggregation job ID")
-                    .encode(bytes);
+                    .ok_or_else(|| CodecError::Other("draft02: missing task ID".into()))?
+                    .encode(bytes)?;
             }
             DapVersion::DraftLatest => {
-                self.round.as_ref().expect("missing round").encode(bytes);
+                self.round
+                    .as_ref()
+                    .ok_or_else(|| CodecError::Other("missing round".into()))?
+                    .encode(bytes)?;
             }
         };
-        encode_u32_items(bytes, &(), &self.transitions);
+        encode_u32_items(bytes, &(), &self.transitions)?;
+        Ok(())
     }
 }
 
@@ -663,9 +706,10 @@ pub struct Transition {
 }
 
 impl Encode for Transition {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.report_id.encode(bytes);
-        self.var.encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.report_id.encode(bytes)?;
+        self.var.encode(bytes)?;
+        Ok(())
     }
 }
 
@@ -688,20 +732,21 @@ pub enum TransitionVar {
 }
 
 impl Encode for TransitionVar {
-    fn encode(&self, bytes: &mut Vec<u8>) {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             TransitionVar::Continued(vdaf_message) => {
-                0_u8.encode(bytes);
-                encode_u32_bytes(bytes, vdaf_message);
+                0_u8.encode(bytes)?;
+                encode_u32_bytes(bytes, vdaf_message)?;
             }
             TransitionVar::Finished => {
-                1_u8.encode(bytes);
+                1_u8.encode(bytes)?;
             }
             TransitionVar::Failed(err) => {
-                2_u8.encode(bytes);
-                err.encode(bytes);
+                2_u8.encode(bytes)?;
+                err.encode(bytes)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -754,8 +799,8 @@ impl TryFrom<u8> for TransitionFailure {
 }
 
 impl Encode for TransitionFailure {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        (*self as u8).encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        (*self as u8).encode(bytes)
     }
 }
 
@@ -790,8 +835,8 @@ pub struct AggregationJobResp {
 }
 
 impl Encode for AggregationJobResp {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_u32_items(bytes, &(), &self.transitions);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        encode_u32_items(bytes, &(), &self.transitions)
     }
 }
 
@@ -819,9 +864,10 @@ impl Interval {
 }
 
 impl Encode for Interval {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.start.encode(bytes);
-        self.duration.encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.start.encode(bytes)?;
+        self.duration.encode(bytes)?;
+        Ok(())
     }
 }
 
@@ -845,28 +891,33 @@ pub enum Query {
 }
 
 impl ParameterizedEncode<DapVersion> for Query {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match self {
             Self::TimeInterval { batch_interval } => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes);
-                batch_interval.encode(bytes);
+                QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                batch_interval.encode(bytes)?;
             }
             Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes);
+                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
                 if *version != DapVersion::Draft02 {
-                    FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes);
+                    FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
                 }
-                batch_id.encode(bytes);
+                batch_id.encode(bytes)?;
             }
             Self::FixedSizeCurrentBatch => {
-                assert!(
-                    !(*version == DapVersion::Draft02),
-                    "tried to encode a Query or BatchSelector fixed size current batch in DAP 02"
-                );
-                QUERY_TYPE_FIXED_SIZE.encode(bytes);
-                FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes);
+                if matches!(version, DapVersion::Draft02) {
+                    return Err(CodecError::Other(
+                    "tried to encode a Query or BatchSelector fixed size current batch in DAP 02".into()));
+                }
+                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -909,8 +960,6 @@ impl Default for Query {
 }
 
 /// A collect request.
-//
-// TODO Add serialization tests.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct CollectionReq {
@@ -920,21 +969,26 @@ pub struct CollectionReq {
 }
 
 impl ParameterizedEncode<DapVersion> for CollectionReq {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match version {
             DapVersion::Draft02 => {
                 self.draft02_task_id
                     .as_ref()
-                    .expect("draft02: missing task ID")
-                    .encode(bytes);
+                    .ok_or_else(|| CodecError::Other("draft02: missing task ID".into()))?
+                    .encode(bytes)?;
             }
             DapVersion::DraftLatest => {}
         }
-        self.query.encode_with_param(version, bytes);
+        self.query.encode_with_param(version, bytes)?;
         match version {
-            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param),
-            DapVersion::DraftLatest => encode_u32_bytes(bytes, &self.agg_param),
+            DapVersion::Draft02 => encode_u16_bytes(bytes, &self.agg_param)?,
+            DapVersion::DraftLatest => encode_u32_bytes(bytes, &self.agg_param)?,
         };
+        Ok(())
     }
 }
 
@@ -971,18 +1025,25 @@ pub struct Collection {
 }
 
 impl ParameterizedEncode<DapVersion> for Collection {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        self.part_batch_sel.encode(bytes);
-        self.report_count.encode(bytes);
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        self.part_batch_sel.encode(bytes)?;
+        self.report_count.encode(bytes)?;
         match (version, &self.draft_latest_interval) {
-            (DapVersion::Draft02, None) => encode_u32_items(bytes, &(), &self.encrypted_agg_shares),
+            (DapVersion::Draft02, None) => {
+                encode_u32_items(bytes, &(), &self.encrypted_agg_shares)?;
+            }
             (DapVersion::DraftLatest, Some(interval)) => {
-                interval.encode(bytes);
-                self.encrypted_agg_shares[0].encode(bytes);
-                self.encrypted_agg_shares[1].encode(bytes);
+                interval.encode(bytes)?;
+                self.encrypted_agg_shares[0].encode(bytes)?;
+                self.encrypted_agg_shares[1].encode(bytes)?;
             }
             _ => unreachable!("unhandled variant for version {version:?}"),
         };
+        Ok(())
     }
 }
 
@@ -1031,23 +1092,28 @@ pub struct AggregateShareReq {
 }
 
 impl ParameterizedEncode<DapVersion> for AggregateShareReq {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match version {
             DapVersion::Draft02 => {
                 self.draft02_task_id
                     .as_ref()
-                    .expect("draft02: missing task ID")
-                    .encode(bytes);
-                self.batch_sel.encode_with_param(version, bytes);
-                encode_u16_bytes(bytes, &self.agg_param);
+                    .ok_or_else(|| CodecError::Other("draft02: missing task ID".into()))?
+                    .encode(bytes)?;
+                self.batch_sel.encode_with_param(version, bytes)?;
+                encode_u16_bytes(bytes, &self.agg_param)?;
             }
             DapVersion::DraftLatest => {
-                self.batch_sel.encode_with_param(version, bytes);
-                encode_u32_bytes(bytes, &self.agg_param);
+                self.batch_sel.encode_with_param(version, bytes)?;
+                encode_u32_bytes(bytes, &self.agg_param)?;
             }
         };
-        self.report_count.encode(bytes);
+        self.report_count.encode(bytes)?;
         bytes.extend_from_slice(&self.checksum);
+        Ok(())
     }
 }
 
@@ -1089,8 +1155,8 @@ pub struct AggregateShare {
 }
 
 impl Encode for AggregateShare {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.encrypted_agg_share.encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.encrypted_agg_share.encode(bytes)
     }
 }
 
@@ -1109,8 +1175,8 @@ pub struct HpkeConfigList {
 }
 
 impl Encode for HpkeKemId {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        u16::from(*self).encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        u16::from(*self).encode(bytes)
     }
 }
 
@@ -1121,8 +1187,8 @@ impl Decode for HpkeKemId {
 }
 
 impl Encode for HpkeKdfId {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        u16::from(*self).encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        u16::from(*self).encode(bytes)
     }
 }
 
@@ -1133,8 +1199,8 @@ impl Decode for HpkeKdfId {
 }
 
 impl Encode for HpkeAeadId {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        u16::from(*self).encode(bytes);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        u16::from(*self).encode(bytes)
     }
 }
 
@@ -1145,12 +1211,13 @@ impl Decode for HpkeAeadId {
 }
 
 impl Encode for HpkeConfig {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.id.encode(bytes);
-        self.kem_id.encode(bytes);
-        self.kdf_id.encode(bytes);
-        self.aead_id.encode(bytes);
-        encode_u16_bytes(bytes, self.public_key.as_slice());
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.id.encode(bytes)?;
+        self.kem_id.encode(bytes)?;
+        self.kdf_id.encode(bytes)?;
+        self.aead_id.encode(bytes)?;
+        encode_u16_bytes(bytes, self.public_key.as_slice())?;
+        Ok(())
     }
 }
 
@@ -1167,8 +1234,8 @@ impl Decode for HpkeConfig {
 }
 
 impl Encode for HpkeConfigList {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        encode_u16_items(bytes, &(), &self.hpke_configs);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        encode_u16_items(bytes, &(), &self.hpke_configs)
     }
 }
 
@@ -1193,10 +1260,11 @@ pub struct HpkeCiphertext {
 }
 
 impl Encode for HpkeCiphertext {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.config_id.encode(bytes);
-        encode_u16_bytes(bytes, &self.enc);
-        encode_u32_bytes(bytes, &self.payload);
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.config_id.encode(bytes)?;
+        encode_u16_bytes(bytes, &self.enc)?;
+        encode_u32_bytes(bytes, &self.payload)?;
+        Ok(())
     }
 }
 
@@ -1219,9 +1287,14 @@ pub struct PlaintextInputShare {
 }
 
 impl ParameterizedEncode<DapVersion> for PlaintextInputShare {
-    fn encode_with_param(&self, version: &DapVersion, bytes: &mut Vec<u8>) {
-        encode_u16_items(bytes, version, &self.extensions);
-        encode_u32_bytes(bytes, &self.payload);
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        encode_u16_items(bytes, version, &self.extensions)?;
+        encode_u32_bytes(bytes, &self.payload)?;
+        Ok(())
     }
 }
 
@@ -1251,11 +1324,12 @@ pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     r == 0
 }
 
-pub(crate) fn encode_u16_bytes(bytes: &mut Vec<u8>, input: &[u8]) {
+pub(crate) fn encode_u16_bytes(bytes: &mut Vec<u8>, input: &[u8]) -> Result<(), CodecError> {
     u16::try_from(input.len())
-        .expect("length too large for u16")
-        .encode(bytes);
+        .map_err(|_| CodecError::LengthPrefixTooBig(input.len()))?
+        .encode(bytes)?;
     bytes.extend_from_slice(input);
+    Ok(())
 }
 
 pub(crate) fn decode_u16_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
@@ -1265,11 +1339,12 @@ pub(crate) fn decode_u16_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, Cod
     Ok(out)
 }
 
-pub(crate) fn encode_u32_bytes(bytes: &mut Vec<u8>, input: &[u8]) {
+pub(crate) fn encode_u32_bytes(bytes: &mut Vec<u8>, input: &[u8]) -> Result<(), CodecError> {
     u32::try_from(input.len())
-        .expect("length too large for u32")
-        .encode(bytes);
+        .map_err(|_| CodecError::LengthPrefixTooBig(input.len()))?
+        .encode(bytes)?;
     bytes.extend_from_slice(input);
+    Ok(())
 }
 
 pub(crate) fn decode_u32_bytes(bytes: &mut Cursor<&[u8]>) -> Result<Vec<u8>, CodecError> {
@@ -1307,17 +1382,18 @@ pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
 fn encode_u16_prefixed(
     version: DapVersion,
     bytes: &mut Vec<u8>,
-    e: impl Fn(DapVersion, &mut Vec<u8>),
-) {
+    e: impl Fn(DapVersion, &mut Vec<u8>) -> Result<(), CodecError>,
+) -> Result<(), CodecError> {
     // Reserve space for the length prefix.
     let len_offset = bytes.len();
-    0_u16.encode(bytes);
+    0_u16.encode(bytes)?;
 
-    e(version, bytes);
+    e(version, bytes)?;
     let len_bytes = std::mem::size_of::<u16>();
     let len = bytes.len() - len_offset - len_bytes;
     bytes[len_offset..len_offset + len_bytes]
         .copy_from_slice(&u16::to_be_bytes(len.try_into().unwrap()));
+    Ok(())
 }
 
 // Cribbed from `decode_u16_items()` from libprio.
@@ -1393,8 +1469,11 @@ mod test {
             ],
         };
         assert_eq!(
-            Report::get_decoded_with_param(&version, &report.get_encoded_with_param(&version))
-                .unwrap(),
+            Report::get_decoded_with_param(
+                &version,
+                &report.get_encoded_with_param(&version).unwrap()
+            )
+            .unwrap(),
             report
         );
     }
@@ -1514,8 +1593,8 @@ mod test {
         };
 
         let got = AggregationJobInitReq::get_decoded_with_param(
-            &crate::DapVersion::Draft02,
-            &want.get_encoded_with_param(&crate::DapVersion::Draft02),
+            &DapVersion::Draft02,
+            &want.get_encoded_with_param(&DapVersion::Draft02).unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1565,7 +1644,9 @@ mod test {
 
         let got = AggregationJobInitReq::get_decoded_with_param(
             &DapVersion::DraftLatest,
-            &want.get_encoded_with_param(&DapVersion::DraftLatest),
+            &want
+                .get_encoded_with_param(&DapVersion::DraftLatest)
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1601,7 +1682,7 @@ mod test {
 
         let got = AggregationJobContinueReq::get_decoded_with_param(
             &DapVersion::Draft02,
-            &want.get_encoded_with_param(&DapVersion::Draft02),
+            &want.get_encoded_with_param(&DapVersion::Draft02).unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1630,7 +1711,9 @@ mod test {
 
         let got = AggregationJobContinueReq::get_decoded_with_param(
             &DapVersion::DraftLatest,
-            &want.get_encoded_with_param(&DapVersion::DraftLatest),
+            &want
+                .get_encoded_with_param(&DapVersion::DraftLatest)
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1687,7 +1770,7 @@ mod test {
 
         let got = AggregateShareReq::get_decoded_with_param(
             &DapVersion::Draft02,
-            &want.get_encoded_with_param(&DapVersion::Draft02),
+            &want.get_encoded_with_param(&DapVersion::Draft02).unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1703,7 +1786,9 @@ mod test {
         };
         let got = AggregateShareReq::get_decoded_with_param(
             &DapVersion::DraftLatest,
-            &want.get_encoded_with_param(&DapVersion::DraftLatest),
+            &want
+                .get_encoded_with_param(&DapVersion::DraftLatest)
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
@@ -1726,7 +1811,7 @@ mod test {
             ],
         };
 
-        let got = AggregationJobResp::get_decoded(&want.get_encoded()).unwrap();
+        let got = AggregationJobResp::get_decoded(&want.get_encoded().unwrap()).unwrap();
         assert_eq!(got, want);
     }
 

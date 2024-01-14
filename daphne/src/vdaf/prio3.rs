@@ -56,6 +56,16 @@ pub(crate) fn prio3_shard(
     return match (&config, measurement) {
         (Prio3Config::Count, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_count(2)?;
+            // TODO(cjpatton) Make this constant time.
+            let measurement = match measurement {
+                0 => false,
+                1 => true,
+                _ => {
+                    return Err(VdafError::Uncategorized(
+                        "cannot represent measurement as a 0 or 1".into(),
+                    ))
+                }
+            };
             shard(vdaf, &measurement, nonce)
         }
         (
@@ -117,11 +127,11 @@ pub(crate) fn prio3_shard(
         let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
 
         Ok((
-            public_share.get_encoded(),
+            public_share.get_encoded()?,
             input_shares
                 .iter()
                 .map(|input_share| input_share.get_encoded())
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         ))
     }
 }
@@ -378,7 +388,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
                 [peer_share, host_share]
             },
         )?;
-        let message_data = message.get_encoded();
+        let message_data = message.get_encoded()?;
 
         // Compute the host's output share.
         match vdaf.prepare_next(host_state, message)? {
