@@ -6,7 +6,6 @@
 
 pub mod prio2;
 pub mod prio3;
-pub(crate) mod xof;
 
 use crate::{
     error::{DapAbort, FatalDapError},

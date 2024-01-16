@@ -5,7 +5,7 @@
 
 use crate::{
     messages::taskprov::VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
-    vdaf::{xof::XofHmacSha256Aes128, VdafError, VdafVerifyKey},
+    vdaf::{VdafError, VdafVerifyKey},
     DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepMessage,
     VdafPrepState,
 };
@@ -22,6 +22,7 @@ use prio::{
             Prio3, Prio3InputShare, Prio3PrepareMessage, Prio3PrepareShare, Prio3PrepareState,
             Prio3PublicShare,
         },
+        xof::XofHmacSha256Aes128,
         AggregateShare, Aggregator, Client, Collector, OutputShare, PrepareTransition, Vdaf,
     },
 };

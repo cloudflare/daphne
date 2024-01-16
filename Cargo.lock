@@ -669,7 +669,6 @@ dependencies = [
  "prio",
  "prometheus",
  "rand",
- "rand_core",
  "regex",
  "replace_with",
  "ring",
