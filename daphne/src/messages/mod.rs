@@ -248,7 +248,7 @@ impl ParameterizedDecode<DapVersion> for Extension {
         let typ = u16::decode(bytes)?;
         match (version, typ) {
             (DapVersion::DraftLatest, EXTENSION_TASKPROV) => {
-                decode_u16_prefixed(*version, bytes, |_version, inner| <()>::decode(inner))?;
+                decode_u16_prefixed(*version, bytes, |_version, inner, _len| <()>::decode(inner))?;
                 Ok(Self::Taskprov {
                     draft02_payload: None,
                 })
@@ -1400,7 +1400,7 @@ fn encode_u16_prefixed(
 fn decode_u16_prefixed<O>(
     version: DapVersion,
     bytes: &mut Cursor<&[u8]>,
-    d: impl Fn(DapVersion, &mut Cursor<&[u8]>) -> Result<O, CodecError>,
+    d: impl Fn(DapVersion, &mut Cursor<&[u8]>, Option<usize>) -> Result<O, CodecError>,
 ) -> Result<O, CodecError> {
     // Read the length prefix.
     let len = usize::from(u16::decode(bytes)?);
@@ -1413,7 +1413,7 @@ fn decode_u16_prefixed<O>(
         .ok_or_else(|| CodecError::LengthPrefixTooBig(len))?;
 
     let mut inner = Cursor::new(&bytes.get_ref()[item_start..item_end]);
-    let decoded = d(version, &mut inner)?;
+    let decoded = d(version, &mut inner, Some(len))?;
 
     let num_bytes_left_over = item_end - item_start - usize::try_from(inner.position()).unwrap();
     if num_bytes_left_over > 0 {
