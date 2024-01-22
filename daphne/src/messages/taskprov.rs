@@ -430,6 +430,43 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn regression_task_config_draft02() {
+        let want = TaskConfig {
+            task_info: b"this is a cool task!".to_vec(),
+            leader_url: UrlBytes {
+                bytes: b"http://exmaple.com/v02".to_vec(),
+            },
+            helper_url: UrlBytes {
+                bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
+            },
+            query_config: QueryConfig {
+                time_precision: 12_341_234,
+                max_batch_query_count: 1337,
+                min_batch_size: 55,
+                var: QueryConfigVar::FixedSize { max_batch_size: 57 },
+            },
+            task_expiration: 23_232_232_232,
+            vdaf_config: VdafConfig {
+                dp_config: DpConfig::None,
+                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            },
+        };
+
+        let task_config_bytes = [
+            20, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 99, 111, 111, 108, 32, 116, 97, 115,
+            107, 33, 0, 68, 0, 22, 104, 116, 116, 112, 58, 47, 47, 101, 120, 109, 97, 112, 108,
+            101, 46, 99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47,
+            115, 111, 109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100, 102,
+            108, 97, 114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 2, 0, 0, 0,
+            0, 0, 188, 79, 242, 5, 57, 0, 0, 0, 55, 0, 0, 0, 57, 0, 0, 0, 5, 104, 191, 187, 40, 1,
+            255, 255, 0, 0, 0, 1, 134, 159,
+        ];
+        let got =
+            TaskConfig::get_decoded_with_param(&DapVersion::Draft02, &task_config_bytes).unwrap();
+        assert_eq!(got, want);
+    }
+
     fn roundtrip_query_config(version: DapVersion) {
         let query_config = QueryConfig {
             time_precision: 12_345_678,
