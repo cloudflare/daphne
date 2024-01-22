@@ -21,9 +21,11 @@ pub struct TaskprovConfig {
     pub vdaf_verify_key_init: [u8; 32],
 
     /// Leader, Helper: Method for authorizing Leader requests.
+    #[serde(with = "from_raw_string")]
     pub leader_auth: DaphneWorkerAuthMethod,
 
     /// Leader: Method for authorizing Collector requests.
+    #[serde(with = "from_raw_string")]
     pub collector_auth: Option<DaphneWorkerAuthMethod>,
 }
 
@@ -80,4 +82,35 @@ pub enum DaphneWorkerDeployment {
     /// will be registered by the garbage collector so that they can be deleted manually using the
     /// internal test API.
     Dev,
+}
+
+mod from_raw_string {
+    //! This is used to deserialize secrets, which are stored in as raw strings. As such they need
+    //! a custom deserializer.
+
+    use serde::{
+        de::{self, DeserializeOwned},
+        ser, Deserialize, Deserializer, Serialize, Serializer,
+    };
+
+    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        S::Error: ser::Error,
+        T: Serialize,
+    {
+        serde_json::to_string(value)
+            .map_err(<S::Error as ser::Error>::custom)
+            .and_then(|s| serializer.serialize_str(&s))
+    }
+
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        D::Error: de::Error,
+        T: DeserializeOwned,
+    {
+        let s = String::deserialize(deserializer)?;
+        serde_json::from_str(&s).map_err(<D::Error as de::Error>::custom)
+    }
 }
