@@ -1,7 +1,6 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![warn(unused_crate_dependencies)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
@@ -20,7 +19,10 @@
 #![allow(clippy::inline_always)]
 
 use daphne::DapError;
-use daphne_service_utils::{config::DaphneServiceConfig, metrics};
+use daphne_service_utils::{
+    config::DaphneServiceConfig,
+    metrics::{self, DaphneServiceMetrics},
+};
 // there is a bug in cargo where if a dependency is only used in tests/examples but not in the
 // library you get unused_crate_dependencies warnings when compiling the them.
 #[cfg(test)]
@@ -53,11 +55,12 @@ mod storage_proxy_connection;
 /// ```
 /// use url::Url;
 /// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
-/// use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
+/// use daphne_service_utils::{config::DaphneServiceConfig, DapRole, metrics::DaphneServiceMetrics};
 /// use daphne_server::{App, router};
 ///
 /// let worker_url = Url::parse("http://example.com").unwrap();
 /// let registry = prometheus::Registry::new();
+/// let daphne_service_metrics = DaphneServiceMetrics::register(&registry).unwrap();
 /// let global = DapGlobalConfig {
 ///     max_batch_duration: 360_00,
 ///     min_batch_interval_start: 259_200,
@@ -76,7 +79,7 @@ mod storage_proxy_connection;
 ///     default_version: DapVersion::DraftLatest,
 ///     report_storage_epoch_duration: 300,
 /// };
-/// let app = App::new(worker_url, &registry, service_config)?;
+/// let app = App::new(worker_url, daphne_service_metrics, service_config)?;
 ///
 /// let router = router::new(DapRole::Helper, app);
 ///
@@ -102,14 +105,14 @@ impl App {
     /// Create a new configured app. See [`App`] for details.
     pub fn new(
         worker_url: Url,
-        registry: &prometheus::Registry,
+        daphne_service_metrics: DaphneServiceMetrics,
         service_config: DaphneServiceConfig,
     ) -> Result<Self, DapError> {
         Ok(Self {
             worker_url,
             http: reqwest::Client::new(),
             cache: Default::default(),
-            metrics: metrics::DaphneServiceMetrics::register(registry)?,
+            metrics: daphne_service_metrics,
             service_config,
         })
     }

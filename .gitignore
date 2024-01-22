@@ -6,3 +6,7 @@ wasm-pack.log
 build/
 dist
 .wrangler
+.idea
+.secrets
+.vscode
+.rusty-hook.toml

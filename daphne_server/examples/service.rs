@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use daphne_server::{router, App};
-use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
+use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics, DapRole};
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
 use url::Url;
@@ -91,10 +91,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     // Create a new prometheus registry where metrics will be registered and measured
     let registry = prometheus::Registry::new();
+    let daphne_service_metrics = DaphneServiceMetrics::register(&registry)?;
 
     let role = config.service.role;
     // Configure the application
-    let app = App::new(config.storage_proxy, &registry, config.service)?;
+    let app = App::new(config.storage_proxy, daphne_service_metrics, config.service)?;
 
     // create the router that will handle the protocol's http requests
     let router = router::new(role, app);
