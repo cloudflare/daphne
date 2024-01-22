@@ -14,6 +14,7 @@ use crate::{auth::DaphneWorkerAuthMethod, DapRole};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TaskprovConfig {
     /// HPKE collector configuration for all taskprov tasks.
+    #[serde(with = "from_raw_string")]
     pub hpke_collector_config: HpkeConfig,
 
     /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.

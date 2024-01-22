@@ -23,10 +23,10 @@ leader_auth = """{
 collector_auth = """{
   "bearer_token": "I am the collector!"
 }""" # SECRET
-
-[service.taskprov.hpke_collector_config]
-id = 23
-kem_id = "p256_hkdf_sha256"
-kdf_id = "hkdf_sha256"
-aead_id = "aes128_gcm"
-public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+hpke_collector_config = """{
+    "id": 23,
+    "kem_id": "p256_hkdf_sha256",
+    "kdf_id": "hkdf_sha256",
+    "aead_id": "aes128_gcm",
+    "public_key": "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+}"""
