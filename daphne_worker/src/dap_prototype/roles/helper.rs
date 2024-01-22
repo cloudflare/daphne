@@ -3,7 +3,7 @@
 
 //! Implementation of the helper side of the protocol
 
-use crate::config::DaphneWorker;
+use crate::dap_prototype::config::DaphneWorker;
 use async_trait::async_trait;
 use daphne::{
     error::DapAbort, fatal_error, messages::TaskId, roles::DapHelper, DapAggregationJobState,

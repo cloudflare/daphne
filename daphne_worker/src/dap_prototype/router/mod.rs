@@ -10,7 +10,7 @@ use daphne::DapResponse;
 use daphne_service_utils::DapRole;
 use worker::{Error, Headers, Response, Result, Router};
 
-use crate::{config::DaphneWorkerRequestState, DEFAULT_RESPONSE_HTML};
+use crate::dap_prototype::{config::DaphneWorkerRequestState, DEFAULT_RESPONSE_HTML};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RouterOptions {

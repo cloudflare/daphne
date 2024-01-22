@@ -4,7 +4,6 @@
 use std::ops::ControlFlow;
 
 use crate::{
-    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, req_parse, DurableOrdered},
     initialize_tracing, int_err,
 };
@@ -18,7 +17,7 @@ use worker::{
     Request, Response, Result, State,
 };
 
-use super::{DapDurableObject, GarbageCollectable};
+use super::{DapDurableObject, DaphneWorkerDurableConfig, GarbageCollectable};
 
 /// Durable Object (DO) representing an aggregation job queue.
 ///

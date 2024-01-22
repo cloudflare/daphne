@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    config::DaphneWorkerDurableConfig,
     durable::{
         create_span_from_request, req_parse, state_get, state_set_if_not_exists, DurableConnector,
         DurableOrdered, MAX_KEYS,
@@ -22,7 +21,7 @@ use worker::{
     ListOptions, Request, Response, Result, State,
 };
 
-use super::{DapDurableObject, GarbageCollectable};
+use super::{DapDurableObject, DaphneWorkerDurableConfig, GarbageCollectable};
 
 /// Durable Object (DO) for storing reports waiting to be processed.
 ///

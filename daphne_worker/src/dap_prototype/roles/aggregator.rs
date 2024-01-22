@@ -4,7 +4,7 @@
 //! Implementation of common requirments for both helpers and leaders
 
 use crate::{
-    config::{DapTaskConfigKvPair, DaphneWorker},
+    dap_prototype::config::{DapTaskConfigKvPair, DaphneWorker},
     now,
 };
 use async_trait::async_trait;

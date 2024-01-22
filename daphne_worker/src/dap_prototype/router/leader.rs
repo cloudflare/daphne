@@ -13,7 +13,7 @@ use prio::codec::ParameterizedEncode;
 use tracing::{info_span, Instrument};
 use worker::{Headers, Response, Result};
 
-use crate::{config::DaphneWorker, info_span_from_dap_request};
+use crate::{dap_prototype::config::DaphneWorker, info_span_from_dap_request};
 
 use super::{dap_response_to_worker, DapRouter};
 

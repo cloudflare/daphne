@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, state_get, state_set_if_not_exists},
     initialize_tracing, int_err,
 };
@@ -16,7 +15,7 @@ use worker::{
     Request, Response, Result, State,
 };
 
-use super::{req_parse, Alarmed, DapDurableObject};
+use super::{req_parse, Alarmed, DapDurableObject, DaphneWorkerDurableConfig};
 
 /// Durable Object (DO) for storing the Helper's state for a given aggregation job.
 ///

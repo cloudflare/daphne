@@ -10,7 +10,7 @@ mod aggregator;
 mod helper;
 mod leader;
 
-use crate::config::{BearerTokenKvPair, DaphneWorker};
+use super::config::{BearerTokenKvPair, DaphneWorker};
 use async_trait::async_trait;
 use daphne::{
     auth::BearerTokenProvider,

@@ -18,7 +18,7 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::inline_always)]
 
-use daphne_worker::{config, initialize_tracing, DaphneWorkerRouter};
+use daphne_worker::{initialize_tracing, DapWorkerMode};
 use tracing::info;
 use worker::{event, Env, Request, Response, Result};
 
@@ -47,16 +47,22 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> Result<Respon
 
     log_request(&req);
 
-    if config::is_running_as_storage_proxy(&env) {
-        info!("starting storage proxy");
-        daphne_worker::storage_proxy::handle_request(req, env, ctx).await
-    } else {
-        info!("starting normal worker");
-        let router = DaphneWorkerRouter {
-            enable_internal_test: true,
-            enable_default_response: false,
-            ..Default::default()
-        };
-        router.handle_request(req, env).await
+    match daphne_worker::is_running_as_storage_proxy(&env) {
+        DapWorkerMode::StorageProxy => {
+            info!("starting storage proxy");
+            daphne_worker::storage_proxy::handle_request(req, env, ctx).await
+        }
+        DapWorkerMode::LegacyWorker => {
+            info!("starting normal worker");
+            #[allow(deprecated)]
+            {
+                let router = daphne_worker::dap_prototype::DaphneWorkerRouter {
+                    enable_internal_test: true,
+                    enable_default_response: false,
+                    ..Default::default()
+                };
+                router.handle_request(req, env).await
+            }
+        }
     }
 }
