@@ -6,6 +6,7 @@
 use daphne::{fatal_error, metrics::DaphneMetrics, DapError};
 use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
+#[derive(Clone)]
 pub struct DaphneServiceMetrics {
     /// Daphne metrics.
     pub daphne: DaphneMetrics,

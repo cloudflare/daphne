@@ -9,6 +9,7 @@ use prometheus::{
     register_int_counter_with_registry, Histogram, IntCounter, IntCounterVec, Registry,
 };
 
+#[derive(Clone)]
 pub struct DaphneMetrics {
     /// Inbound request metrics: Successful requests served, broken down by type.
     inbound_request_counter: IntCounterVec,
