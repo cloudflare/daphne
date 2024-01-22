@@ -94,9 +94,11 @@ impl AsRef<BearerToken> for DaphneAuth {
 #[serde(try_from = "SerializedDaphneWorkerAuthMethod")]
 pub struct DaphneWorkerAuthMethod {
     /// Expected bearer token.
+    #[serde(default)]
     pub bearer_token: Option<BearerToken>,
 
     /// Details of trusted TLS client certificates.
+    #[serde(default)]
     pub cf_tls_client_auth: Option<Vec<TlsCertInfo>>,
 }
 

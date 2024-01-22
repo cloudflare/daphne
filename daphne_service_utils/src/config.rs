@@ -26,7 +26,7 @@ pub struct TaskprovConfig {
     pub leader_auth: DaphneWorkerAuthMethod,
 
     /// Leader: Method for authorizing Collector requests.
-    #[serde(with = "from_raw_string")]
+    #[serde(default, with = "from_raw_string")]
     pub collector_auth: Option<DaphneWorkerAuthMethod>,
 }
 
@@ -54,10 +54,12 @@ pub struct DaphneServiceConfig {
 
     /// draft-dcook-ppm-dap-interop-test-design: Base URL of the Aggregator (unversioned). If set,
     /// this field is used for endpoint configuration for interop testing.
+    #[serde(default)]
     pub base_url: Option<Url>,
 
     /// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension. If not set,
     /// then taskprov will be disabled.
+    #[serde(default)]
     pub taskprov: Option<TaskprovConfig>,
 
     /// Default DAP version to use if not specified by the API URL
