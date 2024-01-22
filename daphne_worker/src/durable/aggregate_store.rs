@@ -4,7 +4,6 @@
 use std::{collections::HashSet, io::Cursor, mem::size_of, ops::ControlFlow};
 
 use crate::{
-    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, state_get_or_default},
     initialize_tracing, int_err,
 };
@@ -31,7 +30,7 @@ use worker::{
     worker_sys, Env, Error, Request, Response, Result, State,
 };
 
-use super::{req_parse, DapDurableObject, GarbageCollectable};
+use super::{req_parse, DapDurableObject, DaphneWorkerDurableConfig, GarbageCollectable};
 
 /// Durable Object (DO) for storing aggregate shares for a bucket of reports.
 ///

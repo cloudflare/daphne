@@ -14,7 +14,7 @@ use daphne_service_utils::{
 use tracing::{debug, info_span, Instrument};
 use worker::Response;
 
-use crate::config::DaphneWorker;
+use crate::dap_prototype::config::DaphneWorker;
 
 use super::{DapRole, DapRouter};
 

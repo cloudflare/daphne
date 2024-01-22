@@ -15,7 +15,7 @@ fallthrough = false
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
 [vars]
-DAP_PROXY = "true"
+DAP_WORKER_MODE = "storage-proxy"
 DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
 DAP_DEPLOYMENT = "dev"
 DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"

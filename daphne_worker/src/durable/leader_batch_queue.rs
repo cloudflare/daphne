@@ -4,7 +4,6 @@
 use std::ops::ControlFlow;
 
 use crate::{
-    config::DaphneWorkerDurableConfig,
     durable::{create_span_from_request, state_get, DurableOrdered},
     initialize_tracing, int_err,
 };
@@ -20,7 +19,7 @@ use worker::{
     Request, Response, Result, State,
 };
 
-use super::{req_parse, DapDurableObject, GarbageCollectable};
+use super::{req_parse, DapDurableObject, DaphneWorkerDurableConfig, GarbageCollectable};
 
 const CURRENT: &str = "current";
 const PENDING_PREFIX: &str = "pending";

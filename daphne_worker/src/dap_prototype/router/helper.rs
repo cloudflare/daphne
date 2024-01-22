@@ -7,7 +7,8 @@ use tracing::Instrument;
 use worker::{Request, Response, Result, RouteContext};
 
 use crate::{
-    config::DaphneWorkerRequestState, info_span_from_dap_request, tracing_utils::MeasuredSpanName,
+    dap_prototype::config::DaphneWorkerRequestState, info_span_from_dap_request,
+    tracing_utils::MeasuredSpanName,
 };
 
 pub(super) fn add_helper_routes(router: DapRouter<'_>) -> DapRouter<'_> {

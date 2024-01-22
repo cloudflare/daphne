@@ -12,6 +12,7 @@ pub(crate) mod reports_pending;
 use crate::{
     int_err, now,
     tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
+    DapWorkerMode,
 };
 use daphne::messages::TaskId;
 use daphne_service_utils::{
@@ -21,7 +22,7 @@ use daphne_service_utils::{
 use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cmp::min, time::Duration};
-use tracing::{info_span, warn};
+use tracing::{info_span, trace, warn};
 use worker::{
     async_trait, js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request,
     RequestInit, Result, ScheduledTime, State, Stub,
@@ -515,6 +516,106 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
 impl<T> AsRef<T> for DurableOrdered<T> {
     fn as_ref(&self) -> &T {
         &self.item
+    }
+}
+
+pub(crate) struct DaphneWorkerDurableConfig {
+    /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
+    pub deployment: DaphneWorkerDeployment,
+
+    /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
+    pub collection_job_id_key: Option<[u8; 32]>,
+
+    /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
+    /// configured by the Leader.
+    pub helper_state_store_garbage_collect_after_secs: Option<Duration>,
+
+    /// The report storage maximum future time skew. Reports with timestamps greater than the
+    /// current time plus this value will be rejected.
+    pub report_storage_max_future_time_skew: daphne::messages::Duration,
+}
+
+impl DaphneWorkerDurableConfig {
+    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
+        let load_key = |name| {
+            let key = env
+                .secret(name)
+                .map_err(|e| format!("failed to load {name}: {e}"))?
+                .to_string();
+            let key = hex::decode(key)
+                .map_err(|e| format!("failed to load {name}: error while parsing hex: {e}"))?;
+            key.try_into()
+                .map_err(|_| format!("failed to load {name}: unexpected length"))
+        };
+
+        let is_do_proxy = crate::is_running_as_storage_proxy(env) == DapWorkerMode::StorageProxy;
+
+        let is_leader = match env.var("DAP_AGGREGATOR_ROLE").map(|s| s.to_string()) {
+            Ok(r) if r == "leader" => Some(true),
+            Ok(r) if r == "helper" => Some(false),
+            Err(_) if is_do_proxy => None,
+            other => {
+                let other = other?;
+                return Err(worker::Error::RustError(format!(
+                    "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
+                )));
+            }
+        };
+
+        let report_storage_max_future_time_skew = env
+            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
+            .to_string()
+            .parse()
+            .map_err(|e| {
+                worker::Error::RustError(format!(
+                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
+                ))
+            })?;
+
+        let collection_job_id_key = if let Some(true) | None = is_leader {
+            Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
+        } else {
+            None
+        };
+
+        let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
+            match deployment.to_string().as_str() {
+                "prod" => DaphneWorkerDeployment::Prod,
+                "dev" => DaphneWorkerDeployment::Dev,
+                s => {
+                    return Err(worker::Error::RustError(format!(
+                        "Invalid value for DAP_DEPLOYMENT: {s}",
+                    )))
+                }
+            }
+        } else {
+            DaphneWorkerDeployment::default()
+        };
+        if !matches!(deployment, DaphneWorkerDeployment::Prod) {
+            trace!("DAP deployment override applied: {deployment:?}");
+        }
+
+        let helper_state_store_garbage_collect_after_secs = if let Some(false) | None = is_leader {
+            Some(Duration::from_secs(
+                env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
+                    .to_string()
+                    .parse()
+                    .map_err(|err| {
+                        worker::Error::RustError(format!(
+                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
+                        ))
+                    })?,
+            ))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            deployment,
+            collection_job_id_key,
+            helper_state_store_garbage_collect_after_secs,
+            report_storage_max_future_time_skew,
+        })
     }
 }
 
