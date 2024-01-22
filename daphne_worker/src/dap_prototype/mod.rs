@@ -11,6 +11,7 @@ mod router;
 use super::initialize_tracing;
 use config::{DaphneWorkerIsolateState, DaphneWorkerRequestState};
 use daphne::audit_log::{AuditLog, NoopAuditLog};
+pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
 use std::str;
 use tracing::debug;
