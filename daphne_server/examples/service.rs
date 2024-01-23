@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use daphne_server::{router, App};
+use daphne_server::{router, App, StorageProxyConfig};
 use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics, DapRole};
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
@@ -14,7 +14,7 @@ use url::Url;
 struct Config {
     service: DaphneServiceConfig,
     port: u16,
-    storage_proxy: Url,
+    storage_proxy_config: StorageProxyConfig,
 }
 
 impl TryFrom<Args> for Config {
@@ -95,7 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let role = config.service.role;
     // Configure the application
-    let app = App::new(config.storage_proxy, daphne_service_metrics, config.service)?;
+    let app = App::new(
+        config.storage_proxy_config,
+        daphne_service_metrics,
+        config.service,
+    )?;
 
     // create the router that will handle the protocol's http requests
     let router = router::new(role, app);

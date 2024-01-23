@@ -19,9 +19,20 @@ pub struct BearerToken {
     raw: String,
 }
 
+impl BearerToken {
+    pub fn as_str(&self) -> &str {
+        self.raw.as_str()
+    }
+
+    /// Return "Bearer <`bearer_token`>"
+    pub fn to_standard_header_value(&self) -> String {
+        format!("Bearer {}", self.as_str())
+    }
+}
+
 impl AsRef<str> for BearerToken {
     fn as_ref(&self) -> &str {
-        self.raw.as_str()
+        self.as_str()
     }
 }
 
@@ -39,9 +50,7 @@ impl From<String> for BearerToken {
 
 impl From<&str> for BearerToken {
     fn from(raw: &str) -> Self {
-        Self {
-            raw: raw.to_string(),
-        }
+        Self::from(raw.to_string())
     }
 }
 

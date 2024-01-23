@@ -14,9 +14,12 @@ use daphne_service_utils::durable_requests::{
     bindings::DurableMethod, DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use url::Url;
 
 pub(crate) use kv::Kv;
+
+use crate::StorageProxyConfig;
+
+pub(crate) const DAP_STORAGE_AUTH_TOKEN: &str = "Authorization";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -30,15 +33,15 @@ pub(crate) enum Error {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Do<'h> {
-    url: &'h Url,
+    config: &'h StorageProxyConfig,
     http: &'h reqwest::Client,
     retry: bool,
 }
 
 impl<'h> Do<'h> {
-    pub fn new(url: &'h Url, client: &'h reqwest::Client) -> Self {
+    pub fn new(config: &'h StorageProxyConfig, client: &'h reqwest::Client) -> Self {
         Self {
-            url,
+            config,
             http: client,
             retry: false,
         }
@@ -70,14 +73,19 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
         );
         let url = self
             .durable
+            .config
             .url
             .join(&format!("{DO_PATH_PREFIX}{}", self.path.to_uri()))
             .unwrap();
         let resp = self
             .durable
             .http
-            .request(reqwest::Method::POST, url)
+            .post(url)
             .body(self.request.into_bytes())
+            .header(
+                DAP_STORAGE_AUTH_TOKEN,
+                self.durable.config.auth_token.to_standard_header_value(),
+            )
             .send()
             .await?;
 
