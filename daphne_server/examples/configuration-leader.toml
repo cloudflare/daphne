@@ -1,5 +1,9 @@
-storage_proxy = "http://localhost:4000"
 port = 8787
+
+[storage_proxy_config]
+url = "http://localhost:4000"
+# SECRET: This is a test secret. In production, we'll generate and securely provision the token.
+auth_token = 'this-is-the-storage-proxy-auth-token'
 
 [service]
 env = "oxy"

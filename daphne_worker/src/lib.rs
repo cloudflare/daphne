@@ -170,6 +170,7 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 
+mod auth;
 #[deprecated]
 pub mod dap_prototype;
 mod durable;

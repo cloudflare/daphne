@@ -71,8 +71,9 @@
 //!
 //! [to_uri]: daphne_service_utils::durable_requests::bindings::DurableMethod::to_uri
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
+use daphne::auth::BearerToken;
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
@@ -82,12 +83,48 @@ use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
+/// Check if the request's authorization. If unauthorized, return the reason why.
+pub fn unauthorized_reason(req: &Request, env: &Env) -> Option<worker::Result<Response>> {
+    static TRUSTED_TOKEN: OnceLock<Option<BearerToken>> = OnceLock::new();
+
+    let access_denied = |reason| Response::error(format!("Unauthorized: {reason}"), 401);
+    let auth = match req.headers().get("Authorization") {
+        Ok(Some(auth)) => auth,
+        Ok(None) => return Some(access_denied("missing Authorization header")),
+        Err(e) => return Some(Err(e)),
+    };
+    let Some(provided_token) = auth.strip_prefix("Bearer ").map(BearerToken::from) else {
+        return Some(access_denied("Authorization header has unexpected prefix"));
+    };
+    let Some(trusted_token) = TRUSTED_TOKEN.get_or_init(|| {
+        env.var("DAPHNE_SERVER_AUTH_TOKEN")
+            .ok()
+            .map(|t| t.to_string())
+            .map(BearerToken::from)
+    }) else {
+        tracing::warn!("trusted bearer token not configured");
+        return Some(Response::error(
+            "Authorization token for storage proxy is not configured",
+            500,
+        ));
+    };
+    if &provided_token != trusted_token {
+        return Some(access_denied("Incorrect authorization token"));
+    }
+
+    None
+}
+
 /// Handle a proxy request. This is the entry point of the Worker.
 pub async fn handle_request(
     req: Request,
     env: Env,
     _ctx: worker::Context,
 ) -> worker::Result<Response> {
+    if let Some(error_response) = unauthorized_reason(&req, &env) {
+        return error_response;
+    }
+
     let path = req.path();
     if let Some(uri) = path.strip_prefix(KV_PATH_PREFIX) {
         handle_kv_request(req, env, uri).await

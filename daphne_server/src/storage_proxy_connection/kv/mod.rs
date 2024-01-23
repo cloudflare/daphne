@@ -9,13 +9,14 @@ use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::RwLock;
-use url::Url;
+
+use crate::StorageProxyConfig;
 
 use super::{status_http_1_0_to_reqwest_0_11, Error};
 pub(crate) use cache::Cache;
 
 pub(crate) struct Kv<'h> {
-    url: &'h Url,
+    config: &'h StorageProxyConfig,
     http: &'h reqwest::Client,
     cache: &'h RwLock<Cache>,
 }
@@ -67,9 +68,13 @@ pub mod prefix {
 }
 
 impl<'h> Kv<'h> {
-    pub fn new(url: &'h Url, client: &'h reqwest::Client, cache: &'h RwLock<Cache>) -> Self {
+    pub fn new(
+        config: &'h StorageProxyConfig,
+        client: &'h reqwest::Client,
+        cache: &'h RwLock<Cache>,
+    ) -> Self {
         Self {
-            url,
+            config,
             http: client,
             cache,
         }
@@ -101,7 +106,15 @@ impl<'h> Kv<'h> {
                 );
             }
         }
-        let resp = self.http.get(self.url.join(&key).unwrap()).send().await?;
+        let resp = self
+            .http
+            .get(self.config.url.join(&key).unwrap())
+            .header(
+                super::DAP_STORAGE_AUTH_TOKEN,
+                self.config.auth_token.to_standard_header_value(),
+            )
+            .send()
+            .await?;
         if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
             Ok(None)
         } else {
@@ -120,7 +133,11 @@ impl<'h> Kv<'h> {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "PUT");
         self.http
-            .post(self.url.join(&key).unwrap())
+            .post(self.config.url.join(&key).unwrap())
+            .header(
+                super::DAP_STORAGE_AUTH_TOKEN,
+                self.config.auth_token.to_standard_header_value(),
+            )
             .body(serde_json::to_vec(&value).unwrap())
             .send()
             .await?
@@ -145,7 +162,11 @@ impl<'h> Kv<'h> {
         tracing::debug!(key, "PUT if not exists");
         let response = self
             .http
-            .put(self.url.join(&key).unwrap())
+            .put(self.config.url.join(&key).unwrap())
+            .header(
+                super::DAP_STORAGE_AUTH_TOKEN,
+                self.config.auth_token.to_standard_header_value(),
+            )
             .body(serde_json::to_vec(&value).unwrap())
             .send()
             .await?;

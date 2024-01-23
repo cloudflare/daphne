@@ -18,7 +18,7 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::inline_always)]
 
-use daphne::DapError;
+use daphne::{auth::BearerToken, DapError};
 use daphne_service_utils::{
     config::DaphneServiceConfig,
     metrics::{self, DaphneServiceMetrics},
@@ -31,6 +31,7 @@ mod silence_unused_crate_warning {
     use config as _;
     use tracing_subscriber as _;
 }
+use serde::{Deserialize, Serialize};
 use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;
 use url::Url;
@@ -55,10 +56,13 @@ mod storage_proxy_connection;
 /// ```
 /// use url::Url;
 /// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
+/// use daphne_server::{App, router, StorageProxyConfig};
 /// use daphne_service_utils::{config::DaphneServiceConfig, DapRole, metrics::DaphneServiceMetrics};
-/// use daphne_server::{App, router};
 ///
-/// let worker_url = Url::parse("http://example.com").unwrap();
+/// let storage_proxy_settings = StorageProxyConfig {
+///     url: Url::parse("http://example.com").unwrap(),
+///     auth_token: "some-token".into(),
+/// };
 /// let registry = prometheus::Registry::new();
 /// let daphne_service_metrics = DaphneServiceMetrics::register(&registry).unwrap();
 /// let global = DapGlobalConfig {
@@ -79,7 +83,7 @@ mod storage_proxy_connection;
 ///     default_version: DapVersion::DraftLatest,
 ///     report_storage_epoch_duration: 300,
 /// };
-/// let app = App::new(worker_url, daphne_service_metrics, service_config)?;
+/// let app = App::new(storage_proxy_settings, daphne_service_metrics, service_config)?;
 ///
 /// let router = router::new(DapRole::Helper, app);
 ///
@@ -88,11 +92,18 @@ mod storage_proxy_connection;
 /// # Ok::<(), daphne::DapError>(())
 /// ```
 pub struct App {
-    worker_url: Url,
+    storage_proxy_config: StorageProxyConfig,
     http: reqwest::Client,
     cache: RwLock<kv::Cache>,
     metrics: metrics::DaphneServiceMetrics,
     service_config: DaphneServiceConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageProxyConfig {
+    pub url: Url,
+    #[serde(with = "transparent_auth_token")]
+    pub auth_token: BearerToken,
 }
 
 impl router::DaphneService for App {
@@ -104,12 +115,12 @@ impl router::DaphneService for App {
 impl App {
     /// Create a new configured app. See [`App`] for details.
     pub fn new(
-        worker_url: Url,
+        storage_proxy_config: StorageProxyConfig,
         daphne_service_metrics: DaphneServiceMetrics,
         service_config: DaphneServiceConfig,
     ) -> Result<Self, DapError> {
         Ok(Self {
-            worker_url,
+            storage_proxy_config,
             http: reqwest::Client::new(),
             cache: Default::default(),
             metrics: daphne_service_metrics,
@@ -118,10 +129,48 @@ impl App {
     }
 
     pub(crate) fn durable(&self) -> Do<'_> {
-        Do::new(&self.worker_url, &self.http)
+        Do::new(&self.storage_proxy_config, &self.http)
     }
 
     pub(crate) fn kv(&self) -> Kv<'_> {
-        Kv::new(&self.worker_url, &self.http, &self.cache)
+        Kv::new(&self.storage_proxy_config, &self.http, &self.cache)
+    }
+}
+
+mod transparent_auth_token {
+    //! For backwards compatibility reasons we can't add `#[serde(transparent)]` to
+    //! [`BearerToken`], as such we have to have a custom serializer for this field in order to
+    //! make the config file less verbose.
+    //!
+    //! # Example
+    //! Without the serializer
+    //! ```yaml
+    //! auth_token:
+    //!     raw: 'the-token'
+    //! ```
+    //!
+    //! With the serializer
+    //! ```yaml
+    //! auth_token: 'the-token'
+    //! ```
+    //!
+    //! TODO(mendes): Once the `dap_prototype` is removed we can make the change to remove this.
+
+    use daphne::auth::BearerToken;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &BearerToken, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(value.as_ref())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BearerToken, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BearerToken::from(s))
     }
 }

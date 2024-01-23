@@ -15,6 +15,7 @@ fallthrough = false
 # as they are here. See
 # https://developers.cloudflare.com/workers/wrangler/commands/#secret.
 [vars]
+DAPHNE_SERVER_AUTH_TOKEN = "this-is-the-storage-proxy-auth-token" # SECRET
 DAP_WORKER_MODE = "storage-proxy"
 DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
 DAP_DEPLOYMENT = "dev"

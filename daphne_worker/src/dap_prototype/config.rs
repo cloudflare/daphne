@@ -24,7 +24,7 @@ use daphne::{
     DapVersion, Prio3Config, VdafConfig,
 };
 use daphne_service_utils::{
-    auth::{DaphneAuth, TlsClientAuth},
+    auth::DaphneAuth,
     config::{DaphneServiceConfig, DaphneWorkerDeployment, HpkeRecieverConfigList, TaskprovConfig},
     durable_requests::bindings::{
         DurableMethod, GarbageCollector, LeaderBatchQueue, LeaderBatchQueueResult,
@@ -1021,31 +1021,7 @@ impl<'srv> DaphneWorker<'srv> {
         let version: DapVersion = DaphneWorker::parse_version_param(ctx)?;
 
         // Determine the authorization method used by the sender.
-        let sender_auth = Some(DaphneAuth {
-            bearer_token: req
-                .headers()
-                .get("DAP-Auth-Token")
-                .map_err(|e| fatal_error!(err = ?e))?
-                .map(BearerToken::from),
-
-            // The runtime gives us a cf_tls_client_auth whether the communication was secured by
-            // it or not, so if a certificate wasn't presented, treat it as if it weren't there.
-            // Literal "1" indicates that a certificate was presented.
-            cf_tls_client_auth: req
-                .cf()
-                .tls_client_auth()
-                .filter(|auth| auth.cert_presented() == "1")
-                .map(|cert| {
-                    let verified = cert.cert_verified();
-                    let issuer = cert.cert_issuer_dn_rfc2253();
-                    let subject = cert.cert_subject_dn_rfc2253();
-                    TlsClientAuth {
-                        verified,
-                        issuer,
-                        subject,
-                    }
-                }),
-        });
+        let sender_auth = Some(crate::auth::auth_from_request(&req));
 
         let content_type = req
             .headers()

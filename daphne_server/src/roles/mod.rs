@@ -20,7 +20,7 @@ mod test_utils {
     };
     use prio::codec::Decode;
 
-    use crate::storage_proxy_connection::kv;
+    use crate::storage_proxy_connection::{kv, DAP_STORAGE_AUTH_TOKEN};
 
     impl crate::App {
         pub(crate) async fn internal_delete_all(&self) -> Result<(), DapError> {
@@ -28,7 +28,13 @@ mod test_utils {
             *self.cache.write().await = Default::default();
 
             self.http
-                .delete(self.worker_url.join(PURGE_STORAGE).unwrap())
+                .delete(self.storage_proxy_config.url.join(PURGE_STORAGE).unwrap())
+                .header(
+                    DAP_STORAGE_AUTH_TOKEN,
+                    self.storage_proxy_config
+                        .auth_token
+                        .to_standard_header_value(),
+                )
                 .send()
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?
