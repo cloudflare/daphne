@@ -26,7 +26,11 @@ use daphne::{
     messages::{AggregationJobId, CollectionJobId, TaskId},
     DapError, DapRequest, DapResource, DapResponse, DapVersion,
 };
-use daphne_service_utils::{auth::DaphneAuth, metrics::DaphneServiceMetrics, DapRole};
+use daphne_service_utils::{
+    auth::{DaphneAuth, TlsClientAuth},
+    metrics::DaphneServiceMetrics,
+    DapRole,
+};
 use http::Request;
 use prio::codec::Decode;
 use serde::Deserialize;
@@ -215,14 +219,26 @@ where
             .await
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-        let sender_auth = DaphneAuth {
-            bearer_token: parts
+        let extract_header_as_string = |header: &'static str| -> Option<String> {
+            parts
                 .headers
-                .get("DAP-Auth-Token")
-                .and_then(|v| v.to_str().ok())
-                .map(BearerToken::from),
-            // TODO(mendess) figure out tls
-            cf_tls_client_auth: None,
+                .get(header)?
+                .to_str()
+                .ok()
+                .map(ToString::to_string)
+        };
+
+        let sender_auth = DaphneAuth {
+            bearer_token: extract_header_as_string("DAP-Auth-Token").map(BearerToken::from),
+            cf_tls_client_auth: (|| {
+                // Whatever service ends up fronting this one and terminating mTLS must pass through
+                // these headers.
+                Some(TlsClientAuth {
+                    verified: extract_header_as_string("X-Client-Cert-Verified")?,
+                    issuer: extract_header_as_string("X-Client-Cert-Issuer-Dn-Rfc2253")?,
+                    subject: extract_header_as_string("X-Client-Cert-Subject-Dn-Rfc2253")?,
+                })
+            })(),
         };
 
         let media_type = DapMediaType::from_str_for_version(
@@ -234,11 +250,7 @@ where
         )
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?;
 
-        let taskprov = parts
-            .headers
-            .get("dap-taskprov")
-            .and_then(|v| v.to_str().ok())
-            .map(String::from);
+        let taskprov = extract_header_as_string("dap-taskprov");
 
         // TODO(mendess): this is very eager, we could redesign DapResponse later to allow for
         // streaming of data.
