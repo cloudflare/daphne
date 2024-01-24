@@ -47,12 +47,12 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> Result<Respon
 
     log_request(&req);
 
-    match daphne_worker::is_running_as_storage_proxy(&env) {
+    match daphne_worker::get_worker_mode(&env) {
         DapWorkerMode::StorageProxy => {
             info!("starting storage proxy");
             daphne_worker::storage_proxy::handle_request(req, env, ctx).await
         }
-        DapWorkerMode::LegacyWorker => {
+        DapWorkerMode::DapPrototype => {
             info!("starting normal worker");
             #[allow(deprecated)]
             {

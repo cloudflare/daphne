@@ -548,7 +548,7 @@ impl DaphneWorkerDurableConfig {
                 .map_err(|_| format!("failed to load {name}: unexpected length"))
         };
 
-        let is_do_proxy = crate::is_running_as_storage_proxy(env) == DapWorkerMode::StorageProxy;
+        let is_do_proxy = crate::get_worker_mode(env) == DapWorkerMode::StorageProxy;
 
         let is_leader = match env.var("DAP_AGGREGATOR_ROLE").map(|s| s.to_string()) {
             Ok(r) if r == "leader" => Some(true),

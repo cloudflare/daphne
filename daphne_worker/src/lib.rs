@@ -193,12 +193,12 @@ pub(crate) fn now() -> u64 {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum DapWorkerMode {
-    LegacyWorker,
+    DapPrototype,
     StorageProxy,
 }
-pub fn is_running_as_storage_proxy(env: &Env) -> DapWorkerMode {
+pub fn get_worker_mode(env: &Env) -> DapWorkerMode {
     match env.var("DAP_WORKER_MODE").map(|v| v.to_string()).as_deref() {
         Ok("storage-proxy") => DapWorkerMode::StorageProxy,
-        _ => DapWorkerMode::LegacyWorker,
+        _ => DapWorkerMode::DapPrototype,
     }
 }
