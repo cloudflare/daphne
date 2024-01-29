@@ -407,8 +407,8 @@ impl<'srv> DapAggregator<DaphneAuth> for DaphneWorker<'srv> {
         self.internal_current_batch(task_id).await
     }
 
-    fn metrics(&self) -> &DaphneMetrics {
-        &self.state.metrics.daphne
+    fn metrics(&self) -> &dyn DaphneMetrics {
+        &self.state.metrics
     }
 
     fn audit_log(&self) -> &dyn AuditLog {

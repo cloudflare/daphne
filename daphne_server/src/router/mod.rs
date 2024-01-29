@@ -42,7 +42,7 @@ type Router<A, B> = axum::Router<Arc<A>, B>;
 /// Capabilities necessary when running a native daphne service.
 pub trait DaphneService {
     /// The service metrics
-    fn server_metrics(&self) -> &DaphneServiceMetrics;
+    fn server_metrics(&self) -> &dyn DaphneServiceMetrics;
 }
 
 pub fn new<B>(role: DapRole, aggregator: App) -> axum::Router<(), B>
@@ -76,9 +76,7 @@ where
         );
         let resp = next.run(req).await;
         app.server_metrics()
-            .http_status_code_counter
-            .with_label_values(&[&format!("{}", resp.status())])
-            .inc();
+            .count_http_status_code(resp.status().as_u16());
         tracing::info!(
             status_code = %resp.status(),
             headers = ?resp.headers(),
@@ -101,7 +99,7 @@ where
 struct AxumDapResponse(axum::response::Response);
 
 impl AxumDapResponse {
-    pub fn new_success(response: DapResponse, metrics: &DaphneServiceMetrics) -> Self {
+    pub fn new_success(response: DapResponse, metrics: &dyn DaphneServiceMetrics) -> Self {
         let Some(media_type) = response.media_type.as_str_for_version(response.version) else {
             return AxumDapResponse::new_error(
                 fatal_error!(err = "failed to construct content-type",
@@ -127,7 +125,7 @@ impl AxumDapResponse {
         Self((StatusCode::OK, headers, response.payload).into_response())
     }
 
-    pub fn new_error<E: Into<DapError>>(error: E, metrics: &DaphneServiceMetrics) -> Self {
+    pub fn new_error<E: Into<DapError>>(error: E, metrics: &dyn DaphneServiceMetrics) -> Self {
         // trigger abort if transition failures reach this point.
         let error = match error.into() {
             DapError::Transition(failure) => DapAbort::report_rejected(failure),
@@ -146,18 +144,18 @@ impl AxumDapResponse {
             Ok(x) => x.into_problem_details(),
             Err(x) => x.into_problem_details(),
         };
-        metrics
-            .dap_abort_counter
-            // this to string is bounded by the
-            // number of variants in the enum
-            .with_label_values(&[&problem_details.title])
-            .inc();
+        // this to string is bounded by the
+        // number of variants in the enum
+        metrics.abort_count_inc(&problem_details.title);
         let headers = [(CONTENT_TYPE, "application/problem+json")];
 
         Self((status, headers, Json(problem_details)).into_response())
     }
 
-    pub fn from_result<E>(result: Result<DapResponse, E>, metrics: &DaphneServiceMetrics) -> Self
+    pub fn from_result<E>(
+        result: Result<DapResponse, E>,
+        metrics: &dyn DaphneServiceMetrics,
+    ) -> Self
     where
         E: Into<DapError>,
     {

@@ -89,7 +89,7 @@ async fn leader_current_batch(
 ) -> impl IntoResponse {
     match app.current_batch(&task_id).await {
         Ok(batch_id) => (StatusCode::OK, batch_id.to_base64url().into_bytes()).into_response(),
-        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
 }
 
@@ -97,7 +97,7 @@ async fn leader_current_batch(
 async fn delete_all(State(app): State<Arc<App>>) -> impl IntoResponse {
     match app.internal_delete_all().await {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
 }
 
@@ -121,7 +121,7 @@ async fn endpoint_for_task(
             Json(serde_json::json!({ "status": "success", "endpoint": path })),
         )
             .into_response(),
-        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
 }
 
@@ -137,7 +137,7 @@ async fn add_task(
             Json(serde_json::json!({ "status": "success" })),
         )
             .into_response(),
-        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
 }
 
@@ -153,6 +153,6 @@ async fn add_hpke_config(
             Json(serde_json::json!({ "status": "success" })),
         )
             .into_response(),
-        Err(e) => AxumDapResponse::new_error(e, &app.metrics).into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
 }

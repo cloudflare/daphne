@@ -11,6 +11,7 @@ mod router;
 use super::initialize_tracing;
 use config::{DaphneWorkerIsolateState, DaphneWorkerRequestState};
 use daphne::audit_log::{AuditLog, NoopAuditLog};
+use daphne_service_utils::metrics::DaphneServiceMetrics;
 pub use error_reporting::ErrorReporter;
 use once_cell::sync::OnceCell;
 use std::str;
@@ -109,12 +110,7 @@ impl DaphneWorkerRouter<'_> {
 
         state
             .metrics
-            .http_status_code_counter
-            .with_label_values(&[&format!(
-                "{}",
-                result.as_ref().map_or(500, |resp| resp.status_code())
-            )])
-            .inc();
+            .count_http_status_code(result.as_ref().map_or(500, |resp| resp.status_code()));
 
         // Push metrics to Prometheus metrics server, if configured.
         //

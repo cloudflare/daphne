@@ -28,7 +28,7 @@ hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
 hpke-rs-crypto.workspace = true
 hpke-rs-rust-crypto.workspace = true
 prio = { workspace = true, features = ["experimental"] }
-prometheus.workspace = true
+prometheus = { workspace = true, optional = true }
 rand.workspace = true
 replace_with.workspace = true
 ring.workspace = true
@@ -44,11 +44,13 @@ deepsize.workspace = true
 futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
-regex = "1.10.2"
 prio = { workspace = true, features = ["test-util"] }
+prometheus.workspace = true
+regex = "1.10.2"
 tokio.workspace = true
 
 [features]
-test-utils = ["dep:assert_matches", "dep:deepsize"]
+test-utils = ["dep:assert_matches", "dep:deepsize", "dep:prometheus"]
 send-traits = []
 default = []
+prometheus = ["dep:prometheus"]

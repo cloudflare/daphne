@@ -19,10 +19,7 @@
 #![allow(clippy::inline_always)]
 
 use daphne::{auth::BearerToken, DapError};
-use daphne_service_utils::{
-    config::DaphneServiceConfig,
-    metrics::{self, DaphneServiceMetrics},
-};
+use daphne_service_utils::{config::DaphneServiceConfig, metrics};
 // there is a bug in cargo where if a dependency is only used in tests/examples but not in the
 // library you get unused_crate_dependencies warnings when compiling the them.
 #[cfg(test)]
@@ -57,14 +54,14 @@ mod storage_proxy_connection;
 /// use url::Url;
 /// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
 /// use daphne_server::{App, router, StorageProxyConfig};
-/// use daphne_service_utils::{config::DaphneServiceConfig, DapRole, metrics::DaphneServiceMetrics};
+/// use daphne_service_utils::{config::DaphneServiceConfig, DapRole, metrics::DaphnePromServiceMetrics};
 ///
 /// let storage_proxy_settings = StorageProxyConfig {
 ///     url: Url::parse("http://example.com").unwrap(),
 ///     auth_token: "some-token".into(),
 /// };
 /// let registry = prometheus::Registry::new();
-/// let daphne_service_metrics = DaphneServiceMetrics::register(&registry).unwrap();
+/// let daphne_service_metrics = DaphnePromServiceMetrics::register(&registry).unwrap();
 /// let global = DapGlobalConfig {
 ///     max_batch_duration: 360_00,
 ///     min_batch_interval_start: 259_200,
@@ -95,7 +92,7 @@ pub struct App {
     storage_proxy_config: StorageProxyConfig,
     http: reqwest::Client,
     cache: RwLock<kv::Cache>,
-    metrics: metrics::DaphneServiceMetrics,
+    metrics: Box<dyn metrics::DaphneServiceMetrics>,
     service_config: DaphneServiceConfig,
 }
 
@@ -107,23 +104,26 @@ pub struct StorageProxyConfig {
 }
 
 impl router::DaphneService for App {
-    fn server_metrics(&self) -> &metrics::DaphneServiceMetrics {
-        &self.metrics
+    fn server_metrics(&self) -> &dyn metrics::DaphneServiceMetrics {
+        &*self.metrics
     }
 }
 
 impl App {
     /// Create a new configured app. See [`App`] for details.
-    pub fn new(
+    pub fn new<M>(
         storage_proxy_config: StorageProxyConfig,
-        daphne_service_metrics: DaphneServiceMetrics,
+        daphne_service_metrics: M,
         service_config: DaphneServiceConfig,
-    ) -> Result<Self, DapError> {
+    ) -> Result<Self, DapError>
+    where
+        M: metrics::DaphneServiceMetrics + 'static,
+    {
         Ok(Self {
             storage_proxy_config,
             http: reqwest::Client::new(),
             cache: Default::default(),
-            metrics: daphne_service_metrics,
+            metrics: Box::new(daphne_service_metrics),
             service_config,
         })
     }
