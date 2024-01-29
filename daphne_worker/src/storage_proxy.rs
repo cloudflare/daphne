@@ -126,7 +126,10 @@ pub async fn handle_request(
     }
 
     let path = req.path();
-    if let Some(uri) = path.strip_prefix(KV_PATH_PREFIX) {
+    if let Some(uri) = path
+        .strip_prefix(KV_PATH_PREFIX)
+        .and_then(|s| s.strip_prefix('/'))
+    {
         handle_kv_request(req, env, uri).await
     } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
         handle_do_request(req, env, uri).await
