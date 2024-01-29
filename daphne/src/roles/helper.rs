@@ -479,7 +479,7 @@ async fn finish_agg_job_and_aggregate<S: Sync>(
     helper: &impl DapHelper<S>,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
-    metrics: &DaphneMetrics,
+    metrics: &dyn DaphneMetrics,
     finish_agg_job: impl Fn(
         &HashMap<ReportId, ReportProcessedStatus>,
     ) -> Result<

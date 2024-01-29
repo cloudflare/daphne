@@ -846,7 +846,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError> {
         let mut processed = HashSet::with_capacity(reports.len());
         let mut states = Vec::with_capacity(reports.len());
@@ -1025,7 +1025,7 @@ impl VdafConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         match task_config.version {
             DapVersion::Draft02 => Ok(Self::draft02_handle_agg_job_init_req(
@@ -1048,7 +1048,7 @@ impl VdafConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut states = Vec::with_capacity(num_reports);
@@ -1220,7 +1220,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
         match task_config.version {
             DapVersion::Draft02 => self
@@ -1250,7 +1250,7 @@ impl VdafConfig {
         agg_job_id: &MetaAggregationJobId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
@@ -1365,7 +1365,7 @@ impl VdafConfig {
         task_config: &DapTaskConfig,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
@@ -1620,7 +1620,7 @@ impl VdafConfig {
         task_config: &DapTaskConfig,
         state: DapAggregationJobUncommitted,
         agg_job_resp: AggregationJobResp,
-        metrics: &DaphneMetrics,
+        metrics: &dyn DaphneMetrics,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {

@@ -154,7 +154,7 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Access the Prometheus metrics.
-    fn metrics(&self) -> &DaphneMetrics;
+    fn metrics(&self) -> &dyn DaphneMetrics;
 
     /// Access the audit log.
     fn audit_log(&self) -> &dyn AuditLog;

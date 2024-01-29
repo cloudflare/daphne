@@ -14,7 +14,7 @@ use crate::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, HpkeCiphertext,
         Interval, PartialBatchSelector, Report, ReportId, TaskId, Time, TransitionFailure,
     },
-    metrics::DaphneMetrics,
+    metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::{
         aggregator::MergeAggShareError, helper, DapAggregator, DapAuthorizedSender, DapHelper,
         DapLeader, DapReportInitializer,
@@ -65,8 +65,8 @@ pub struct AggregationJobTest {
     pub(crate) leader_registry: prometheus::Registry,
     #[allow(dead_code)]
     pub(crate) helper_registry: prometheus::Registry,
-    pub(crate) leader_metrics: DaphneMetrics,
-    pub(crate) helper_metrics: DaphneMetrics,
+    pub(crate) leader_metrics: DaphnePromMetrics,
+    pub(crate) helper_metrics: DaphnePromMetrics,
     pub(crate) leader_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
     pub(crate) helper_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
 }
@@ -147,8 +147,8 @@ impl AggregationJobTest {
             ])),
         )
         .unwrap();
-        let leader_metrics = DaphneMetrics::register(&leader_registry).unwrap();
-        let helper_metrics = DaphneMetrics::register(&helper_registry).unwrap();
+        let leader_metrics = DaphnePromMetrics::register(&leader_registry).unwrap();
+        let helper_metrics = DaphnePromMetrics::register(&helper_registry).unwrap();
 
         Self {
             now,
@@ -604,7 +604,7 @@ pub struct MockAggregator {
     pub helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
     pub agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucket, AggStore>>>>,
     pub collector_hpke_config: HpkeConfig,
-    pub metrics: DaphneMetrics,
+    pub metrics: DaphnePromMetrics,
     pub audit_log: MockAuditLog,
 
     // taskprov
@@ -665,7 +665,7 @@ impl MockAggregator {
             helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
-            metrics: DaphneMetrics::register(registry).unwrap(),
+            metrics: DaphnePromMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             taskprov_leader_token,
@@ -699,7 +699,7 @@ impl MockAggregator {
             helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
-            metrics: DaphneMetrics::register(registry).unwrap(),
+            metrics: DaphnePromMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             taskprov_leader_token,
@@ -1158,7 +1158,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         }
     }
 
-    fn metrics(&self) -> &DaphneMetrics {
+    fn metrics(&self) -> &dyn DaphneMetrics {
         &self.metrics
     }
 

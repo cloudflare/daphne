@@ -20,14 +20,19 @@ capnp.workspace = true
 daphne = { path = "../daphne", default-features = false }
 hex.workspace = true
 http.workspace = true
-prometheus.workspace = true
+prometheus = { workspace = true, optional = true }
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
 
+[dev-dependencies]
+daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
+prometheus.workspace = true
+
 [build-dependencies]
 capnpc = "0.18.0"
 
 [features]
-test-utils = []
+test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
+prometheus = ["dep:prometheus", "daphne/prometheus"]

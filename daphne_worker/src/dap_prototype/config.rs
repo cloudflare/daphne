@@ -29,7 +29,7 @@ use daphne_service_utils::{
     durable_requests::bindings::{
         DurableMethod, GarbageCollector, LeaderBatchQueue, LeaderBatchQueueResult,
     },
-    metrics::DaphneServiceMetrics,
+    metrics::{DaphnePromServiceMetrics, DaphneServiceMetrics},
     test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
     DapRole,
 };
@@ -345,7 +345,7 @@ pub(crate) struct DaphneWorkerRequestState<'srv> {
     pub(crate) prometheus_registry: Registry,
 
     /// Metrics.
-    pub(crate) metrics: DaphneServiceMetrics,
+    pub(crate) metrics: DaphnePromServiceMetrics,
 
     /// Hostname parsed from the HTTP request URL. Set to "unspecified-host" if the
     /// hostname is not part of the URL.
@@ -379,7 +379,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             ])),
         )
         .unwrap();
-        let metrics = DaphneServiceMetrics::register(&prometheus_registry)
+        let metrics = DaphnePromServiceMetrics::register(&prometheus_registry)
             .map_err(|e| worker::Error::RustError(format!("failed to register metrics: {e}")))?;
 
         crate::tracing_utils::initialize_timing_histograms(&prometheus_registry, None)
@@ -462,12 +462,9 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
             Ok(x) => x.into_problem_details(),
             Err(x) => x.into_problem_details(),
         };
-        self.metrics
-            .dap_abort_counter
-            // this to string is bounded by the
-            // number of variants in the enum
-            .with_label_values(&[&problem_details.title])
-            .inc();
+        // this to string is bounded by the
+        // number of variants in the enum
+        self.metrics.abort_count_inc(&problem_details.title);
         let mut headers = Headers::new();
         headers.set("Content-Type", "application/problem+json")?;
         Ok(Response::from_json(&problem_details)?

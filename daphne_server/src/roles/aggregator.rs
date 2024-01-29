@@ -373,8 +373,8 @@ impl DapAggregator<DaphneAuth> for crate::App {
         }
     }
 
-    fn metrics(&self) -> &DaphneMetrics {
-        &self.metrics.daphne
+    fn metrics(&self) -> &dyn DaphneMetrics {
+        self.metrics.daphne()
     }
 
     fn audit_log(&self) -> &dyn AuditLog {
