@@ -46,7 +46,7 @@ matchit.workspace = true
 paste.workspace = true
 prio = { workspace = true, features = ["test-util"] }
 prometheus.workspace = true
-regex = "1.10.2"
+regex = "1.10.3"
 tokio.workspace = true
 
 [features]

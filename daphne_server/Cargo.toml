@@ -19,7 +19,7 @@ readme = "../README.md"
 [dependencies]
 axum.workspace = true
 http.workspace = true
-hyper = "0.14.27"
+hyper = "0.14.28"
 bincode.workspace = true
 daphne = { path = "../daphne", features = ["send-traits"] }
 daphne_service_utils = { path = "../daphne_service_utils" }
@@ -37,7 +37,7 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-clap = { version = "4.4.11", features = ["derive"] }
+clap = { version = "4.4.18", features = ["derive"] }
 config = "0.13.4"
 daphne = { path = "../daphne", features = ["send-traits", "test-utils"] }
 daphne_service_utils = { path = "../daphne_service_utils", features = ["prometheus"] }
