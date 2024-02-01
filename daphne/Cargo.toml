@@ -40,6 +40,7 @@ url.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+criterion.workspace = true
 deepsize.workspace = true
 futures.workspace = true
 matchit.workspace = true
@@ -54,3 +55,7 @@ test-utils = ["dep:assert_matches", "dep:deepsize", "dep:prometheus"]
 send-traits = []
 default = []
 prometheus = ["dep:prometheus"]
+
+[[bench]]
+name = "vdaf"
+harness = false
