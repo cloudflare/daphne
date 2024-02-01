@@ -19,7 +19,7 @@
 #![allow(clippy::inline_always)]
 
 use daphne::{auth::BearerToken, DapError};
-use daphne_service_utils::{config::DaphneServiceConfig, metrics};
+use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics};
 // there is a bug in cargo where if a dependency is only used in tests/examples but not in the
 // library you get unused_crate_dependencies warnings when compiling the them.
 #[cfg(test)]
@@ -46,7 +46,7 @@ mod storage_proxy_connection;
 /// It can be constructed from:
 /// - a `url` that points to a cloudflare worker which serves as proxy for the storage
 /// implementation.
-/// - a prometheus registry to register metrics.
+/// - an implementation of [`DaphneServiceMetrics`].
 /// - a [`DaphneServiceConfig`].
 ///
 /// # Examples
@@ -92,7 +92,7 @@ pub struct App {
     storage_proxy_config: StorageProxyConfig,
     http: reqwest::Client,
     cache: RwLock<kv::Cache>,
-    metrics: Box<dyn metrics::DaphneServiceMetrics>,
+    metrics: Box<dyn DaphneServiceMetrics>,
     service_config: DaphneServiceConfig,
 }
 
@@ -104,7 +104,7 @@ pub struct StorageProxyConfig {
 }
 
 impl router::DaphneService for App {
-    fn server_metrics(&self) -> &dyn metrics::DaphneServiceMetrics {
+    fn server_metrics(&self) -> &dyn DaphneServiceMetrics {
         &*self.metrics
     }
 }
@@ -117,7 +117,7 @@ impl App {
         service_config: DaphneServiceConfig,
     ) -> Result<Self, DapError>
     where
-        M: metrics::DaphneServiceMetrics + 'static,
+        M: DaphneServiceMetrics + 'static,
     {
         Ok(Self {
             storage_proxy_config,
