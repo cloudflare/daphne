@@ -291,7 +291,7 @@ mod test {
                     expiration: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
-                    vdaf: vdaf_config.clone(),
+                    vdaf: vdaf_config,
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
                     method: Default::default(),
                 },
@@ -309,7 +309,7 @@ mod test {
                     query: DapQueryConfig::FixedSize {
                         max_batch_size: Some(2),
                     },
-                    vdaf: vdaf_config.clone(),
+                    vdaf: vdaf_config,
                     vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
                     method: Default::default(),
                 },

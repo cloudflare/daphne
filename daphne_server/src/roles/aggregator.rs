@@ -397,7 +397,7 @@ impl DapReportInitializer for crate::App {
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         tokio::task::spawn_blocking({
-            let vdaf_config = task_config.vdaf.clone();
+            let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
             move || {
                 consumed_reports

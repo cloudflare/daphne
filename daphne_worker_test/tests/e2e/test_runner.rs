@@ -107,7 +107,7 @@ impl TestRunner {
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
-            vdaf: VDAF_CONFIG.clone(),
+            vdaf: *VDAF_CONFIG,
             vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
             method: Default::default(),
