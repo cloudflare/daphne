@@ -31,7 +31,7 @@ daphne = { path = "../daphne", default-features = false, features = ["prometheus
 prometheus.workspace = true
 
 [build-dependencies]
-capnpc = "0.18.0"
+capnpc = "0.18.1"
 
 [features]
 test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
