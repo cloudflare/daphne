@@ -7,6 +7,7 @@ use crate::{
     audit_log::{AggregationJobAuditAction, AuditLog},
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
+    error::aborts::UnauthorizedReason,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
     messages::{
@@ -968,7 +969,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
         &self,
         task_config: &DapTaskConfig,
         req: &DapRequest<BearerToken>,
-    ) -> Result<Option<String>, DapError> {
+    ) -> Result<Option<UnauthorizedReason>, DapError> {
         self.bearer_token_authorized(task_config, req).await
     }
 

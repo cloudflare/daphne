@@ -448,11 +448,12 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         // trigger abort if transition failures reach this point.
         let e = match e.into() {
             DapError::Transition(failure) => DapAbort::report_rejected(failure),
-            e @ DapError::Fatal(..) => Err(e),
+            DapError::Fatal(e) => Err(e),
             DapError::Abort(abort) => Ok(abort),
         };
         let status = if let Err(e) = &e {
-            self.error_reporter.report_abort(e);
+            self.error_reporter
+                .report_abort(&DapError::Fatal(e.clone()));
             500
         } else {
             400
@@ -460,7 +461,7 @@ impl<'srv> DaphneWorkerRequestState<'srv> {
         error!(error = ?e, "request aborted");
         let problem_details = match e {
             Ok(x) => x.into_problem_details(),
-            Err(x) => x.into_problem_details(),
+            Err(x) => DapError::Fatal(x).into_problem_details(),
         };
         // this to string is bounded by the
         // number of variants in the enum

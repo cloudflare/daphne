@@ -5,6 +5,7 @@
 
 use crate::{
     constants::DapMediaType,
+    error::aborts::UnauthorizedReason,
     fatal_error,
     messages::{constant_time_eq, TaskId},
     DapError, DapRequest, DapSender, DapTaskConfig,
@@ -115,12 +116,10 @@ pub trait BearerTokenProvider {
         &self,
         task_config: &DapTaskConfig,
         req: &DapRequest<T>,
-    ) -> Result<Option<String>, DapError> {
+    ) -> Result<Option<UnauthorizedReason>, DapError> {
         if req.task_id.is_none() {
             // Can't authorize request with missing task ID.
-            return Ok(Some(
-                "Cannot authorize request with missing task ID.".into(),
-            ));
+            return Ok(Some(UnauthorizedReason::MissingTaskId));
         }
         let task_id = req.task_id.as_ref().unwrap();
 
@@ -137,7 +136,7 @@ pub trait BearerTokenProvider {
                     return Ok(if got.as_ref() == expected.as_ref() {
                         None
                     } else {
-                        Some("The indicated bearer token is incorrect for the Leader.".into())
+                        Some(UnauthorizedReason::InvalidBearerToken)
                     });
                 }
             }
@@ -152,16 +151,13 @@ pub trait BearerTokenProvider {
                     return Ok(if got.as_ref() == expected.as_ref() {
                         None
                     } else {
-                        Some("The indicated bearer token is incorrect for the Collector.".into())
+                        Some(UnauthorizedReason::InvalidBearerToken)
                     });
                 }
             }
         }
 
         // Deny request with unhandled or unknown media type.
-        Ok(Some(format!(
-            "Cannot resolve sender due to unexpected media type ({:?}).",
-            req.media_type
-        )))
+        Ok(Some(UnauthorizedReason::UnexpectedMediaType))
     }
 }

@@ -9,7 +9,7 @@ use prio::codec::Encode;
 use crate::{
     audit_log::AuditLog,
     constants::DapMediaType,
-    error::DapAbort,
+    error::{aborts::UnauthorizedReason, DapAbort},
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
         BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId, TaskId, Time,
@@ -62,7 +62,7 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
         &self,
         task_config: &DapTaskConfig,
         req: &DapRequest<S>,
-    ) -> Result<Option<String>, DapError>;
+    ) -> Result<Option<UnauthorizedReason>, DapError>;
 
     /// Look up the DAP global configuration.
     fn get_global_config(&self) -> &DapGlobalConfig;

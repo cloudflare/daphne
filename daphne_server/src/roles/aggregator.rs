@@ -7,7 +7,7 @@ use axum::async_trait;
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
     auth::{BearerToken, BearerTokenProvider},
-    error::DapAbort,
+    error::{aborts::UnauthorizedReason, DapAbort},
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
@@ -143,11 +143,11 @@ impl DapAggregator<DaphneAuth> for crate::App {
         &self,
         task_config: &DapTaskConfig,
         req: &DapRequest<DaphneAuth>,
-    ) -> Result<Option<String>, DapError> {
+    ) -> Result<Option<UnauthorizedReason>, DapError> {
         let mut authorized = false;
 
         let Some(ref sender_auth) = req.sender_auth else {
-            return Ok(Some("Missing authorization.".into()));
+            return Ok(Some(UnauthorizedReason::MissingAuth));
         };
 
         // If a bearer token is present, verify that it can be used to authorize the request.
@@ -165,17 +165,12 @@ impl DapAggregator<DaphneAuth> for crate::App {
         if let Some(ref cf_tls_client_auth) = sender_auth.cf_tls_client_auth {
             // TODO(cjpatton) Add support for TLS client authentication for non-Taskprov tasks.
             let Some(ref taskprov_config) = self.service_config.taskprov else {
-                return Ok(Some(
-                    "TLS client authentication is currently only supported with Taskprov.".into(),
-                ));
+                return Ok(Some(UnauthorizedReason::TlsAuthNotSupported));
             };
 
             // Check that that the certificate is valid. This is indicated by literal "SUCCESS".
             if cf_tls_client_auth.verified != "SUCCESS" {
-                return Ok(Some(format!(
-                    "Invalid TLS certificate ({}).",
-                    cf_tls_client_auth.verified
-                )));
+                return Ok(Some(UnauthorizedReason::InvalidTlsCert));
             }
 
             // Resolve the trusted certificate issuers and subjects for this request.
@@ -193,19 +188,14 @@ impl DapAggregator<DaphneAuth> for crate::App {
             ) {
                 trusted_certs
             } else {
-                let unauthorized_reason =
-                    format!("TLS client authentication is not configured for sender ({sender:?}.");
-                return Ok(Some(unauthorized_reason));
+                return Ok(Some(UnauthorizedReason::TlsNotConfigured));
             };
 
             if !trusted_certs.iter().any(|trusted_cert| {
                 trusted_cert.issuer == cf_tls_client_auth.issuer
                     && trusted_cert.subject == cf_tls_client_auth.subject
             }) {
-                return Ok(Some(format!(
-                    r#"Unexpected issuer "{}" and subject "{}"."#,
-                    cf_tls_client_auth.issuer, cf_tls_client_auth.subject,
-                )));
+                return Ok(Some(UnauthorizedReason::UnexpectedIssuerOrSubject));
             }
             authorized = true;
         }
@@ -213,7 +203,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         if authorized {
             Ok(None)
         } else {
-            Ok(Some("No suitable authorization method was found.".into()))
+            Ok(Some(UnauthorizedReason::NoSuitableAuthFound))
         }
     }
 

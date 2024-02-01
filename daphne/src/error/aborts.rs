@@ -12,6 +12,43 @@ use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
+use super::FatalDapError;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum UnauthorizedReason {
+    MissingAuth,
+    InvalidTlsCert,
+    TlsAuthNotSupported,
+    TlsNotConfigured,
+    UnexpectedIssuerOrSubject,
+    NoSuitableAuthFound,
+    MissingTaskId,
+    InvalidBearerToken,
+    UnexpectedMediaType,
+}
+
+impl std::fmt::Display for UnauthorizedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl UnauthorizedReason {
+    pub fn as_str(&self) -> &'static str {
+        match *self {
+            Self::InvalidBearerToken => "invalid_bearer_token",
+            Self::InvalidTlsCert => "invalid_tls_cert",
+            Self::MissingAuth => "missing_auth",
+            Self::MissingTaskId => "missing_task_id",
+            Self::NoSuitableAuthFound => "no_suitable_auth_found",
+            Self::TlsAuthNotSupported => "tls_auth_not_supported",
+            Self::TlsNotConfigured => "tls_not_configured",
+            Self::UnexpectedIssuerOrSubject => "unexpected_issuer_or_subject",
+            Self::UnexpectedMediaType => "unexpected_media_type",
+        }
+    }
+}
+
 // NOTE:
 // The display implementation of this error is used for metrics, as such, it can't be changed to
 // include field values
@@ -77,7 +114,10 @@ pub enum DapAbort {
 
     /// Unauthorized HTTP request.
     #[error("unauthorizedRequest")]
-    UnauthorizedRequest { detail: String, task_id: TaskId },
+    UnauthorizedRequest {
+        detail: UnauthorizedReason,
+        task_id: TaskId,
+    },
 
     /// Unrecognized aggregation job. Sent in response to an AggregateContinueReq for which the
     /// Helper does not recognize the indicated aggregation job.
@@ -114,8 +154,10 @@ impl DapAbort {
             | Self::BatchMismatch { detail, task_id }
             | Self::BatchOverlap { detail, task_id }
             | Self::InvalidBatchSize { detail, task_id }
-            | Self::QueryMismatch { detail, task_id }
-            | Self::UnauthorizedRequest { detail, task_id } => (Some(task_id), Some(detail), None),
+            | Self::QueryMismatch { detail, task_id } => (Some(task_id), Some(detail), None),
+            Self::UnauthorizedRequest { detail, task_id } => {
+                (Some(task_id), Some(detail.to_string()), None)
+            }
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
@@ -202,7 +244,7 @@ impl DapAbort {
     }
 
     #[inline]
-    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, DapError> {
+    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, FatalDapError> {
         let detail = match failure_reason {
             TransitionFailure::BatchCollected => {
                 "The report pertains to a batch that has already been collected."
@@ -211,10 +253,13 @@ impl DapAbort {
                 "A report with the same ID was uploaded previously."
             }
             _ => {
-                return Err(fatal_error!(
+                let DapError::Fatal(fatal) = fatal_error!(
                     err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
                     unexpected_transition_failure = ?failure_reason,
-                ))
+                ) else {
+                    unreachable!("fatal_error! should always creates a DapError::Fatal");
+                };
+                return Err(fatal);
             }
         };
 
