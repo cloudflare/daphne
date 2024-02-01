@@ -12,6 +12,8 @@ use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
+use super::FatalDapError;
+
 // NOTE:
 // The display implementation of this error is used for metrics, as such, it can't be changed to
 // include field values
@@ -202,7 +204,7 @@ impl DapAbort {
     }
 
     #[inline]
-    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, DapError> {
+    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, FatalDapError> {
         let detail = match failure_reason {
             TransitionFailure::BatchCollected => {
                 "The report pertains to a batch that has already been collected."
@@ -211,10 +213,13 @@ impl DapAbort {
                 "A report with the same ID was uploaded previously."
             }
             _ => {
-                return Err(fatal_error!(
+                let DapError::Fatal(fatal) = fatal_error!(
                     err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
                     unexpected_transition_failure = ?failure_reason,
-                ))
+                ) else {
+                    unreachable!("fatal_error! should always create a DapError::Fatal");
+                };
+                return Err(fatal);
             }
         };
 

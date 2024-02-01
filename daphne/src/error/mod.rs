@@ -72,7 +72,7 @@ impl From<VdafError> for DapError {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FatalDapError(pub(crate) String);
 
 impl std::error::Error for FatalDapError {}
