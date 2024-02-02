@@ -27,8 +27,7 @@ use crate::{
 };
 
 /// DAP Helper functionality.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 pub trait DapHelper<S: Sync>: DapAggregator<S> {
     /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
     /// indicating if the operation succeeded.

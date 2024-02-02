@@ -52,17 +52,5 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> Result<Respon
             info!("starting storage proxy");
             daphne_worker::storage_proxy::handle_request(req, env, ctx).await
         }
-        DapWorkerMode::DapPrototype => {
-            info!("starting normal worker");
-            #[allow(deprecated)]
-            {
-                let router = daphne_worker::dap_prototype::DaphneWorkerRouter {
-                    enable_internal_test: true,
-                    enable_default_response: false,
-                    ..Default::default()
-                };
-                router.handle_request(req, env).await
-            }
-        }
     }
 }

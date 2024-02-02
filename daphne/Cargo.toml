@@ -52,7 +52,6 @@ tokio.workspace = true
 
 [features]
 test-utils = ["dep:assert_matches", "dep:deepsize", "dep:prometheus"]
-send-traits = []
 default = []
 prometheus = ["dep:prometheus"]
 

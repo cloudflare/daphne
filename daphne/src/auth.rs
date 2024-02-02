@@ -61,8 +61,7 @@ impl AsRef<BearerToken> for BearerToken {
 }
 
 /// A source of bearer tokens used for authorizing DAP requests.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 pub trait BearerTokenProvider {
     /// A reference to a bearer token owned by the provider.
     type WrappedBearerToken<'a>: AsRef<BearerToken> + Send
@@ -111,7 +110,7 @@ pub trait BearerTokenProvider {
     ///
     /// Return `None` if the request is authorized. Otherwise return `Some(reason)`, where `reason`
     /// is the reason for the failure.
-    async fn bearer_token_authorized<T: AsRef<BearerToken> + Sync>(
+    async fn bearer_token_authorized<T: AsRef<BearerToken> + Send + Sync>(
         &self,
         task_config: &DapTaskConfig,
         req: &DapRequest<T>,

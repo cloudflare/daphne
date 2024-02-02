@@ -74,8 +74,7 @@ pub struct AggregationJobTest {
 // NOTE(cjpatton) This implementation of the report initializer is not feature complete. Since
 // [`AggrregationJobTest`], is only used to test the aggregation flow, features that are not
 // directly relevant to the tests aren't implemented.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapReportInitializer for AggregationJobTest {
     async fn initialize_reports<'req>(
         &self,
@@ -812,8 +811,7 @@ impl MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl BearerTokenProvider for MockAggregator {
     type WrappedBearerToken<'a> = &'a BearerToken;
 
@@ -846,8 +844,7 @@ impl BearerTokenProvider for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl HpkeDecrypter for MockAggregator {
     type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
@@ -893,8 +890,7 @@ impl HpkeDecrypter for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapAuthorizedSender<BearerToken> for MockAggregator {
     async fn authorize(
         &self,
@@ -910,8 +906,7 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapReportInitializer for MockAggregator {
     async fn initialize_reports<'req>(
         &self,
@@ -956,8 +951,7 @@ impl DapReportInitializer for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapAggregator<BearerToken> for MockAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
     // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
@@ -1171,8 +1165,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapHelper<BearerToken> for MockAggregator {
     async fn put_helper_state_if_not_exists<Id>(
         &self,
@@ -1228,8 +1221,7 @@ impl DapHelper<BearerToken> for MockAggregator {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl DapLeader<BearerToken> for MockAggregator {
     type ReportSelector = MockAggregatorReportSelector;
 

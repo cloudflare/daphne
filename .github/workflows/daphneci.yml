@@ -27,20 +27,10 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Linting
-        run: ./check-all.sh
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Testing
-        run: ./check-all.sh test
+        run: cargo test --all-targets
   e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checking out
-        uses: actions/checkout@v3
-      - name: Run integration tests
-        uses: isbang/compose-action@v1.4.1
-        with:
-          compose-file: "./docker-compose.yaml"
-          up-flags: "--build --abort-on-container-exit --exit-code-from test"
-  e2e-native:
     runs-on: ubuntu-latest
     steps:
       - name: Checking out

@@ -206,8 +206,7 @@ impl HpkeConfig {
 }
 
 /// HPKE decrypter functionality.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 pub trait HpkeDecrypter {
     /// Return type of `get_hpke_config_for()`, wraps a reference to an HPKE config.
     type WrappedHpkeConfig<'a>: AsRef<HpkeConfig> + Send
@@ -330,8 +329,7 @@ impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
     }
 }
 
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 impl HpkeDecrypter for HpkeReceiverConfig {
     type WrappedHpkeConfig<'a> = HpkeConfig;
 
