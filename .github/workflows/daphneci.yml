@@ -40,36 +40,3 @@ jobs:
         with:
           compose-file: "./daphne_server/docker-compose-e2e.yaml"
           up-flags: "--build --abort-on-container-exit --exit-code-from test"
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checking out
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-      - name: 🏷️ Docker meta
-        id: meta
-        uses: docker/metadata-action@507c2f2dc502c992ad446e3d7a5dfbe311567a96 # v4.3.0
-        with:
-          images: |
-            cloudflare/daphne-worker-helper
-          flavor: |
-            latest=auto
-          tags: |
-            type=semver,pattern={{version}}
-            type=sha
-      - name: 👷 Set up Docker Buildx
-        uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c # v2.5.0
-      - name: 🔏 Login to Docker Hub
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a # v2.1.0
-        if: github.event_name == 'push'
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: 🐋 Build and push
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671 # v4.0.0
-        with:
-          context: .
-          file: ./docker/miniflare.Dockerfile
-          target: helper
-          push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
