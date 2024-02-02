@@ -71,6 +71,15 @@ pub struct DaphneServiceConfig {
     /// A report will be accepted if its timestamp is no more than the specified number of seconds
     /// before the current time.
     pub report_storage_epoch_duration: daphne::messages::Duration,
+
+    /// The report storage maximum future time skew. Reports with timestamps greater than the
+    /// current time plus this value will be rejected.
+    #[serde(default = "default_report_storage_max_future_time_skew")]
+    pub report_storage_max_future_time_skew: daphne::messages::Duration,
+}
+
+fn default_report_storage_max_future_time_skew() -> daphne::messages::Duration {
+    300
 }
 
 /// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator

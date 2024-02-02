@@ -179,10 +179,10 @@ impl TaskId {
     }
 }
 
-/// A duration.
+/// A duration in seconds.
 pub type Duration = u64;
 
-/// The timestamp sent in a [`Report`].
+/// The timestamp sent in a [`Report`] in seconds.
 pub type Time = u64;
 
 /// Report extensions.

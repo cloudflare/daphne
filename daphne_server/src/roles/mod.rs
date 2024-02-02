@@ -1,9 +1,25 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::{ops::Range, time::SystemTime};
+
 mod aggregator;
 mod helper;
 mod leader;
+
+impl crate::App {
+    pub(crate) fn valid_report_time_range(&self) -> Range<u64> {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("now should always be after unix epoch")
+            .as_secs();
+
+        let start = now.saturating_sub(self.service_config.report_storage_epoch_duration);
+        let end = now.saturating_add(self.service_config.report_storage_max_future_time_skew);
+
+        start..end
+    }
+}
 
 #[cfg(feature = "test-utils")]
 mod test_utils {
