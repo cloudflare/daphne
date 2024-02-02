@@ -257,6 +257,16 @@ impl DaphneWorkerConfig {
             }
         };
 
+        let report_storage_max_future_time_skew = env
+            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
+            .to_string()
+            .parse()
+            .map_err(|e| {
+                worker::Error::RustError(format!(
+                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
+                ))
+            })?;
+
         Ok(Self {
             service_config: DaphneServiceConfig {
                 env: env_label,
@@ -272,6 +282,7 @@ impl DaphneWorkerConfig {
                 taskprov,
                 default_version,
                 report_storage_epoch_duration,
+                report_storage_max_future_time_skew,
             },
             durable_object_proxy: DaphneWorkerDurableConfig::from_worker_env(env)?,
             metrics_push_config,

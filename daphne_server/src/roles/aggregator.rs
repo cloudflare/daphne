@@ -16,7 +16,7 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
-    vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapQueryConfig,
     DapRequest, DapSender, DapTaskConfig, DapVersion,
 };
@@ -396,6 +396,8 @@ impl DapReportInitializer for crate::App {
         _part_batch_sel: &PartialBatchSelector,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
+        let valid_report_range = self.valid_report_time_range();
+
         tokio::task::spawn_blocking({
             let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
@@ -403,12 +405,26 @@ impl DapReportInitializer for crate::App {
                 consumed_reports
                     .into_par_iter()
                     .map(|consumed_report| {
-                        EarlyReportStateInitialized::initialize(
-                            is_leader,
-                            &vdaf_verify_key,
-                            &vdaf_config,
-                            consumed_report,
-                        )
+                        let metadata = consumed_report.metadata();
+                        let initialized = if metadata.time < valid_report_range.start {
+                            // If the report time is before the first valid timestamp, we drop it
+                            // because it's too late.
+                            consumed_report
+                                .into_initialized_rejected_due_to(TransitionFailure::ReportDropped)
+                        } else if valid_report_range.end < metadata.time {
+                            // If the report time is too far in the future of the maximum allowed
+                            // time skew so we reject it.
+                            consumed_report
+                                .into_initialized_rejected_due_to(TransitionFailure::ReportTooEarly)
+                        } else {
+                            EarlyReportStateInitialized::initialize(
+                                is_leader,
+                                &vdaf_verify_key,
+                                &vdaf_config,
+                                consumed_report,
+                            )?
+                        };
+                        Ok(initialized)
                     })
                     .collect::<Result<Vec<EarlyReportStateInitialized>, _>>()
             }

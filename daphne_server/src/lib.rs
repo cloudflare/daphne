@@ -79,6 +79,7 @@ mod storage_proxy_connection;
 ///     taskprov: None,
 ///     default_version: DapVersion::DraftLatest,
 ///     report_storage_epoch_duration: 300,
+///     report_storage_max_future_time_skew: 300,
 /// };
 /// let app = App::new(storage_proxy_settings, daphne_service_metrics, service_config)?;
 ///
