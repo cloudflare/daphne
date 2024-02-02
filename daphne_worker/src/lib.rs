@@ -170,9 +170,6 @@
 //! | `DAP_REPORT_SHARD_COUNT` | `u64` | no | Number of report shards per storage epoch. |
 //! | `DAP_REPORT_SHARD_KEY` | `String` | yes | Hex-encoded key used to hash a report into one of the report shards. |
 
-mod auth;
-#[deprecated]
-pub mod dap_prototype;
 mod durable;
 pub mod storage_proxy;
 mod tracing_utils;
@@ -194,12 +191,16 @@ pub(crate) fn now() -> u64 {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum DapWorkerMode {
-    DapPrototype,
     StorageProxy,
 }
 pub fn get_worker_mode(env: &Env) -> DapWorkerMode {
-    match env.var("DAP_WORKER_MODE").map(|v| v.to_string()).as_deref() {
-        Ok("storage-proxy") => DapWorkerMode::StorageProxy,
-        _ => DapWorkerMode::DapPrototype,
+    match env
+        .var("DAP_WORKER_MODE")
+        .expect("DAP_WORKER_MODE is required")
+        .to_string()
+        .as_str()
+    {
+        "storage-proxy" => DapWorkerMode::StorageProxy,
+        invalid => panic!("invalid DAP_WORKER_MODE: {invalid}"),
     }
 }

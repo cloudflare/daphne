@@ -62,39 +62,6 @@ impl<'srv> DurableConnector<'srv> {
         DurableConnector { env, retry: false }
     }
 
-    /// Configure the connector to retry requests a few times on failure. This method should only
-    /// be used for idempotent requests.
-    pub(crate) fn with_retry(self) -> Self {
-        Self {
-            env: self.env,
-            retry: true,
-        }
-    }
-
-    /// Send a GET request with the given path to the DO instance with the given binding and name.
-    /// The response is expected to be a JSON object.
-    pub(crate) async fn get<O: for<'b> Deserialize<'b>>(
-        &self,
-        durable_binding: &str,
-        durable_path: &'static str,
-        durable_name: String,
-    ) -> Result<O> {
-        let namespace = self.env.durable_object(durable_binding)?;
-        let stub = namespace.id_from_name(&durable_name)?.get_stub()?;
-        self.durable_request(
-            stub,
-            durable_binding,
-            durable_path,
-            Method::Get,
-            None::<()>,
-            |output, _retried| output,
-        )
-        .await
-        .map_err(|error| {
-            Error::RustError(format!("DO {durable_binding}: get {durable_path}: {error}"))
-        })
-    }
-
     /// Send a POST request with the given path to the DO instance with the given binding and name.
     /// The body of the request is a JSON object. The response is expected to be a JSON object.
     pub(crate) async fn post<I: Serialize, O: for<'b> Deserialize<'b>>(
@@ -529,10 +496,6 @@ pub(crate) struct DaphneWorkerDurableConfig {
     /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
     /// configured by the Leader.
     pub helper_state_store_garbage_collect_after_secs: Option<Duration>,
-
-    /// The report storage maximum future time skew. Reports with timestamps greater than the
-    /// current time plus this value will be rejected.
-    pub report_storage_max_future_time_skew: daphne::messages::Duration,
 }
 
 impl DaphneWorkerDurableConfig {
@@ -561,16 +524,6 @@ impl DaphneWorkerDurableConfig {
                 )));
             }
         };
-
-        let report_storage_max_future_time_skew = env
-            .var("DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW")?
-            .to_string()
-            .parse()
-            .map_err(|e| {
-                worker::Error::RustError(format!(
-                    "failed to parse DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: {e:?}"
-                ))
-            })?;
 
         let collection_job_id_key = if let Some(true) | None = is_leader {
             Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
@@ -614,7 +567,6 @@ impl DaphneWorkerDurableConfig {
             deployment,
             collection_job_id_key,
             helper_state_store_garbage_collect_after_secs,
-            report_storage_max_future_time_skew,
         })
     }
 }

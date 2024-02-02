@@ -85,8 +85,7 @@ async fn leader_send_http_request<S: Sync>(
 }
 
 /// A party in the DAP protocol who is authorized to send requests to another party.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 pub trait DapAuthorizedSender<S> {
     /// Add authorization to an outbound DAP request with the given task ID, media type, and payload.
     async fn authorize(
@@ -99,8 +98,7 @@ pub trait DapAuthorizedSender<S> {
 }
 
 /// DAP Leader functionality.
-#[cfg_attr(not(feature = "send-traits"), async_trait(?Send))]
-#[cfg_attr(feature = "send-traits", async_trait)]
+#[async_trait]
 pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Data type used to guide selection of a set of reports for aggregation.
     type ReportSelector;

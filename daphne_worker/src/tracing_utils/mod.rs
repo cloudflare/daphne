@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod fields_recording_layer;
-mod wasm_timing;
 mod workers_json_layer;
 
 use chrono::{SecondsFormat, Utc};
@@ -17,9 +16,6 @@ use tracing_subscriber::{
     registry, EnvFilter, Layer,
 };
 use worker::{console_log, Env};
-
-use wasm_timing::WasmTimingLayer;
-pub(crate) use wasm_timing::{initialize_timing_histograms, MeasuredSpanName};
 
 use self::workers_json_layer::WorkersJsonLayer;
 
@@ -204,17 +200,14 @@ pub fn initialize_tracing(env: &Env) {
         let (ansi, json) = match env.var("DAP_DEPLOYMENT") {
             Ok(format) if format.to_string() == "prod" => {
                 // JSON output
-                let json = WorkersJsonLayer.and_then(WasmTimingLayer);
-                (None, Some(json))
+                (None, Some(WorkersJsonLayer))
             }
             Ok(_) | Err(_) => {
                 // Console output
                 let ansi = fmt::layer()
                     .with_ansi(true)
                     .with_writer(LogWriter::new)
-                    .with_timer(WasmTime::new())
-                    .and_then(WasmTimingLayer);
-
+                    .with_timer(WasmTime::new());
                 (Some(ansi), None)
             }
         };
