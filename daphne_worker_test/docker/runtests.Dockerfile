@@ -1,4 +1,4 @@
-FROM rust:1.73-bookworm
+FROM rust:1.76-bookworm
 
 WORKDIR /tmp/dap_test
 

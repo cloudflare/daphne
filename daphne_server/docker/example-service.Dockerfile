@@ -1,4 +1,4 @@
-FROM rust:1.75-bookworm AS builder
+FROM rust:1.76-bookworm AS builder
 
 RUN apt update && \
     apt install -y \
