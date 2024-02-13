@@ -18,6 +18,7 @@
 #![allow(clippy::inconsistent_struct_constructor)]
 #![allow(clippy::similar_names)]
 #![allow(clippy::inline_always)]
+#![allow(clippy::no_effect_underscore_binding)]
 
 //! Daphne-Worker implements a [Workers](https://developers.cloudflare.com/workers/) backend for
 //! Daphne.
