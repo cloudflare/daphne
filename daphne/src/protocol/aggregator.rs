@@ -23,6 +23,11 @@ use crate::{
     DapLeaderAggregationJobTransition, DapOutputShare, DapTaskConfig, DapVersion,
     MetaAggregationJobId, VdafConfig,
 };
+#[cfg(any(test, feature = "test-utils"))]
+use crate::{
+    vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init},
+    DapAggregationParam,
+};
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
@@ -325,6 +330,21 @@ impl EarlyReportStateInitialized {
                 vdaf_verify_key,
                 agg_id,
                 &metadata.id.0,
+                public_share.as_ref(),
+                input_share.as_ref(),
+            ),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Mastic {
+                input_size,
+                weight_config,
+            } => mastic_prep_init(
+                *input_size,
+                *weight_config,
+                vdaf_verify_key,
+                // TODO(cjpatton) Plumb the agg param specified by the Collector.
+                &DapAggregationParam::Mastic {
+                    paths: vec![b"cool".to_vec(), b"trip".to_vec()],
+                },
                 public_share.as_ref(),
                 input_share.as_ref(),
             ),
@@ -703,6 +723,16 @@ impl DapTaskConfig {
                                     helper_prep_share.clone(),
                                     leader_prep_share,
                                 ),
+                                #[cfg(any(test, feature = "test-utils"))]
+                                VdafConfig::Mastic {
+                                    input_size: _,
+                                    weight_config,
+                                } => mastic_prep_finish_from_shares(
+                                    *weight_config,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                ),
                             });
 
                         match res {
@@ -840,6 +870,11 @@ impl DapTaskConfig {
                     leader.draft02_prep_share.unwrap(),
                     helper_prep_share,
                 ),
+                #[cfg(any(test, feature = "test-utils"))]
+                // draft02 compatibility: In theory we should be able to support Mastic (or
+                // Poplar1) in a limited capacity. However, this would probably overcomplicate the
+                // code. Since we don't plan to use it, don't support it.
+                VdafConfig::Mastic { .. } => unreachable!("draft02: Mastic is not supported"),
             };
 
             match res {
@@ -965,6 +1000,8 @@ impl DapTaskConfig {
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
                 }
+                #[cfg(any(test, feature = "test-utils"))]
+                VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),
             };
 
             match res {
@@ -1105,6 +1142,13 @@ impl DapTaskConfig {
                         }
                         VdafConfig::Prio2 { dimension } => {
                             prio2_prep_finish(*dimension, prep_state.clone(), leader_message)
+                        }
+                        #[cfg(any(test, feature = "test-utils"))]
+                        // draft02 compatibility: In theory we should be able to support Mastic (or
+                        // Poplar1) in a limited capacity. However, this would probably
+                        // overcomplicate the code.
+                        VdafConfig::Mastic { .. } => {
+                            unreachable!("draft02: Mastic is not supported")
                         }
                     };
 
