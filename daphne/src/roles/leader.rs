@@ -330,12 +330,10 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
     // Prepare AggregationJobInitReq.
     let agg_job_id = MetaAggregationJobId::gen_for_version(task_config.version);
     let transition = task_config
-        .vdaf
         .produce_agg_job_init_req(
             aggregator,
             aggregator,
             task_id,
-            task_config,
             &agg_job_id,
             part_batch_sel,
             reports,
@@ -394,14 +392,8 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Handle AggregationJobResp.
-    let transition = task_config.vdaf.handle_agg_job_resp(
-        task_id,
-        task_config,
-        &agg_job_id,
-        state,
-        agg_job_resp,
-        metrics,
-    )?;
+    let transition =
+        task_config.handle_agg_job_resp(task_id, &agg_job_id, state, agg_job_resp, metrics)?;
     let agg_span = match transition {
         DapLeaderAggregationJobTransition::Uncommitted(uncommited, agg_job_cont_req) => {
             // Send AggregationJobContinueReq and receive AggregationJobResp.
@@ -428,12 +420,7 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
                 .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
             // Handle AggregationJobResp.
-            task_config.vdaf.handle_final_agg_job_resp(
-                task_config,
-                uncommited,
-                agg_job_resp,
-                metrics,
-            )?
+            task_config.handle_final_agg_job_resp(uncommited, agg_job_resp, metrics)?
         }
         DapLeaderAggregationJobTransition::Finished(agg_span) => {
             if agg_span.report_count() > 0 {
@@ -514,7 +501,7 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
     let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
 
     // Prepare the Leader's aggregate share.
-    let leader_enc_agg_share = task_config.vdaf.produce_leader_encrypted_agg_share(
+    let leader_enc_agg_share = task_config.produce_leader_encrypted_agg_share(
         &task_config.collector_hpke_config,
         task_id,
         &batch_selector,

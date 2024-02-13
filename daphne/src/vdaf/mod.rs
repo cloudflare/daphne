@@ -607,6 +607,16 @@ impl Encode for VdafAggregateShare {
 }
 
 impl VdafConfig {
+    pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
+        match self {
+            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
+                VdafVerifyKey::Prio3HmacSha256Aes128([0; 32])
+            }
+            Self::Prio3(..) => VdafVerifyKey::Prio3([0; 16]),
+            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; 32]),
+        }
+    }
+
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
@@ -621,14 +631,6 @@ impl VdafConfig {
         }
     }
 
-    /// Checks if the provided aggregation parameter is valid for the underling VDAF being
-    /// executed.
-    pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
-        match self {
-            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
-        }
-    }
-
     /// Generate the Aggregators' shared verification parameters.
     pub fn gen_verify_key(&self) -> VdafVerifyKey {
         let mut rng = thread_rng();
@@ -637,15 +639,15 @@ impl VdafConfig {
         verify_key
     }
 
-    pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
+    /// Checks if the provided aggregation parameter is valid for the underling VDAF being
+    /// executed.
+    pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
-            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
-                VdafVerifyKey::Prio3HmacSha256Aes128([0; 32])
-            }
-            Self::Prio3(..) => VdafVerifyKey::Prio3([0; 16]),
-            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; 32]),
+            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
         }
     }
+
+    // Client
 
     /// Generate a report for a measurement. This method is run by the Client.
     ///
@@ -806,7 +808,7 @@ impl VdafConfig {
     /// remainder belonging to the Helpers. Note that the current draft only supports one Helper,
     /// so this method will return an error if `hpke_config_list.len() != 2`.
     ///
-    /// * `now` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
+    /// * `time` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
     /// ensure this value is truncated to the nearest `min_batch_duration`, as required by the
     /// spec.
     ///
@@ -832,7 +834,11 @@ impl VdafConfig {
             version,
         )
     }
+}
 
+// Aggregator
+
+impl DapTaskConfig {
     /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the initial aggregate request to be sent to the Helper.
     /// This method is called by the Leader.
@@ -842,7 +848,6 @@ impl VdafConfig {
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         agg_job_id: &MetaAggregationJobId,
         part_batch_sel: &PartialBatchSelector,
         reports: Vec<Report>,
@@ -872,7 +877,7 @@ impl VdafConfig {
                     decrypter,
                     true,
                     task_id,
-                    task_config,
+                    self,
                     report.report_metadata,
                     report.public_share,
                     &leader_share,
@@ -883,7 +888,7 @@ impl VdafConfig {
         }
 
         let initialized_reports = initializer
-            .initialize_reports(true, task_id, task_config, part_batch_sel, consumed_reports)
+            .initialize_reports(true, task_id, self, part_batch_sel, consumed_reports)
             .await?;
 
         assert_eq!(initialized_reports.len(), helper_shares.len());
@@ -900,19 +905,19 @@ impl VdafConfig {
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
-                    let (draft02_prep_share, draft_latest_payload) = match task_config.version {
+                    let (draft02_prep_share, draft_latest_payload) = match self.version {
                         DapVersion::Draft02 => (Some(prep_share), None),
                         DapVersion::DraftLatest => {
                             let mut outbound = Vec::with_capacity(
                                 prep_share
-                                    .encoded_len_with_param(&task_config.version)
+                                    .encoded_len_with_param(&self.version)
                                     .unwrap_or(0)
                                     + 5,
                             );
                             // Add the ping-pong "initialize" message framing
                             // (draft-irtf-cfrg-vdaf-08, Section 5.8).
                             outbound.push(PingPongMessageType::Initialize as u8);
-                            encode_u32_items(&mut outbound, &task_config.version, &[prep_share])
+                            encode_u32_items(&mut outbound, &self.version, &[prep_share])
                                 .map_err(DapError::encoding)?;
                             (None, Some(outbound))
                         }
@@ -954,7 +959,7 @@ impl VdafConfig {
                 part_batch_sel: part_batch_sel.clone(),
             },
             AggregationJobInitReq {
-                draft02_task_id: task_id.for_request_payload(&task_config.version),
+                draft02_task_id: task_id.for_request_payload(&self.version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
                 agg_param: Vec::default(),
                 part_batch_sel: part_batch_sel.clone(),
@@ -968,7 +973,6 @@ impl VdafConfig {
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         agg_job_init_req: &'req AggregationJobInitReq,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
@@ -992,7 +996,7 @@ impl VdafConfig {
                     decrypter,
                     false,
                     task_id,
-                    task_config,
+                    self,
                     // TODO: remove clones
                     prep_init.report_share.report_metadata.clone(),
                     prep_init.report_share.public_share.clone(),
@@ -1006,7 +1010,7 @@ impl VdafConfig {
             .initialize_reports(
                 false,
                 task_id,
-                task_config,
+                self,
                 &agg_job_init_req.part_batch_sel,
                 consumed_reports,
             )
@@ -1021,13 +1025,12 @@ impl VdafConfig {
     pub(crate) fn handle_agg_job_init_req(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
-        match task_config.version {
+        match self.version {
             DapVersion::Draft02 => Ok(Self::draft02_handle_agg_job_init_req(
                 report_status,
                 initialized_reports,
@@ -1036,7 +1039,6 @@ impl VdafConfig {
             )),
             DapVersion::DraftLatest => self.draft_latest_handle_agg_job_init_req(
                 task_id,
-                task_config,
                 report_status,
                 initialized_reports,
                 agg_job_init_req,
@@ -1108,7 +1110,6 @@ impl VdafConfig {
     fn draft_latest_handle_agg_job_init_req(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         initialized_reports: &[EarlyReportStateInitialized],
         agg_job_init_req: &AggregationJobInitReq,
@@ -1147,26 +1148,27 @@ impl VdafConfig {
                         )
                         .map_err(VdafError::Codec);
 
-                        let res = leader_prep_share.and_then(|leader_prep_share| match self {
-                            Self::Prio3(prio3_config) => prio3_prep_finish_from_shares(
-                                prio3_config,
-                                1,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
-                            Self::Prio2 { dimension } => prio2_prep_finish_from_shares(
-                                *dimension,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
-                        });
+                        let res =
+                            leader_prep_share.and_then(|leader_prep_share| match &self.vdaf {
+                                VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
+                                    prio3_config,
+                                    1,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                ),
+                                VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
+                                    *dimension,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                ),
+                            });
 
                         match res {
                             Ok((data, prep_msg)) => {
                                 agg_span.add_out_share(
-                                    task_config,
+                                    self,
                                     &agg_job_init_req.part_batch_sel,
                                     metadata.id,
                                     metadata.time,
@@ -1216,37 +1218,24 @@ impl VdafConfig {
     pub fn handle_agg_job_resp(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         agg_job_id: &MetaAggregationJobId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
-        match task_config.version {
+        match self.version {
             DapVersion::Draft02 => self
-                .draft02_handle_agg_job_resp(
-                    task_id,
-                    task_config,
-                    agg_job_id,
-                    state,
-                    agg_job_resp,
-                    metrics,
-                )
+                .draft02_handle_agg_job_resp(task_id, agg_job_id, state, agg_job_resp, metrics)
                 .map_err(Into::into),
-            DapVersion::DraftLatest => self.draft_latest_handle_agg_job_resp(
-                task_id,
-                task_config,
-                state,
-                agg_job_resp,
-                metrics,
-            ),
+            DapVersion::DraftLatest => {
+                self.draft_latest_handle_agg_job_resp(task_id, state, agg_job_resp, metrics)
+            }
         }
     }
 
     fn draft02_handle_agg_job_resp(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         agg_job_id: &MetaAggregationJobId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
@@ -1297,15 +1286,15 @@ impl VdafConfig {
                 }
             };
 
-            let res = match self {
-                Self::Prio3(prio3_config) => prio3_prep_finish_from_shares(
+            let res = match &self.vdaf {
+                VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
                     prio3_config,
                     0,
                     leader.prep_state,
                     leader.draft02_prep_share.unwrap(),
                     helper_prep_share,
                 ),
-                Self::Prio2 { dimension } => prio2_prep_finish_from_shares(
+                VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
                     *dimension,
                     leader.prep_state,
                     leader.draft02_prep_share.unwrap(),
@@ -1351,7 +1340,7 @@ impl VdafConfig {
                 part_batch_sel: state.part_batch_sel,
             },
             AggregationJobContinueReq {
-                draft02_task_id: task_id.for_request_payload(&task_config.version),
+                draft02_task_id: task_id.for_request_payload(&self.version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
                 round: None,
                 transitions,
@@ -1362,7 +1351,6 @@ impl VdafConfig {
     fn draft_latest_handle_agg_job_resp(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
@@ -1430,11 +1418,11 @@ impl VdafConfig {
                 }
             };
 
-            let res = match self {
-                Self::Prio3(prio3_config) => {
+            let res = match &self.vdaf {
+                VdafConfig::Prio3(prio3_config) => {
                     prio3_prep_finish(prio3_config, leader.prep_state, prep_msg)
                 }
-                Self::Prio2 { dimension } => {
+                VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
                 }
             };
@@ -1442,7 +1430,7 @@ impl VdafConfig {
             match res {
                 Ok(data) => {
                     agg_span.add_out_share(
-                        task_config,
+                        self,
                         &state.part_batch_sel,
                         leader.report_id,
                         leader.time,
@@ -1476,7 +1464,6 @@ impl VdafConfig {
     pub(crate) fn handle_agg_job_cont_req(
         &self,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
         state: &DapAggregationJobState,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         agg_job_id: &MetaAggregationJobId,
@@ -1572,11 +1559,11 @@ impl VdafConfig {
                 Some(ReportProcessedStatus::Rejected(failure)) => TransitionVar::Failed(*failure),
                 Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
                 None => {
-                    let res = match self {
-                        Self::Prio3(prio3_config) => {
+                    let res = match &self.vdaf {
+                        VdafConfig::Prio3(prio3_config) => {
                             prio3_prep_finish(prio3_config, prep_state.clone(), leader_message)
                         }
-                        Self::Prio2 { dimension } => {
+                        VdafConfig::Prio2 { dimension } => {
                             prio2_prep_finish(*dimension, prep_state.clone(), leader_message)
                         }
                     };
@@ -1584,7 +1571,7 @@ impl VdafConfig {
                     match res {
                         Ok(data) => {
                             agg_span.add_out_share(
-                                task_config,
+                                self,
                                 &state.part_batch_sel,
                                 *report_id,
                                 *time,
@@ -1617,7 +1604,6 @@ impl VdafConfig {
     /// Handle the last aggregate response from the Helper. This method is run by the Leader.
     pub fn handle_final_agg_job_resp(
         &self,
-        task_config: &DapTaskConfig,
         state: DapAggregationJobUncommitted,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
@@ -1663,7 +1649,7 @@ impl VdafConfig {
                 }
 
                 TransitionVar::Finished => agg_span.add_out_share(
-                    task_config,
+                    self,
                     &state.part_batch_sel,
                     out_share.report_id,
                     out_share.time,
@@ -1697,7 +1683,7 @@ impl VdafConfig {
         )
     }
 
-    /// Like [`produce_leader_encrypted_agg_share`](Self::produce_leader_encrypted_agg_share) but run by the Helper in response to an
+    /// Like [`produce_leader_encrypted_agg_share`](VdafConfig::produce_leader_encrypted_agg_share) but run by the Helper in response to an
     /// aggregate-share request.
     pub fn produce_helper_encrypted_agg_share(
         &self,
@@ -1718,7 +1704,11 @@ impl VdafConfig {
             version,
         )
     }
+}
 
+// Collector
+
+impl VdafConfig {
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
     /// after completing a collect request.
     ///
@@ -1935,7 +1925,7 @@ mod test {
                 t.now,
                 &t.task_id,
                 DapMeasurement::U64(1),
-                version,
+                t.task_config.version,
             )
             .unwrap();
 
@@ -2049,7 +2039,7 @@ mod test {
             t.now,
             &t.task_id,
             DapMeasurement::U64(1),
-            version,
+            t.task_config.version,
         );
         assert_matches!(
             res,
@@ -2675,7 +2665,7 @@ mod test {
                     typ: 0xffff,
                     payload: b"some extension data".to_vec(),
                 }],
-                version,
+                t.task_config.version,
             )
             .unwrap();
 
@@ -2726,7 +2716,7 @@ mod test {
                         payload: b"nor should this payload".to_vec(),
                     },
                 ],
-                version,
+                t.task_config.version,
             )
             .unwrap();
 

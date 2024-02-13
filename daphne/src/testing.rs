@@ -210,12 +210,10 @@ impl AggregationJobTest {
         reports: Vec<Report>,
     ) -> DapLeaderAggregationJobTransition<AggregationJobInitReq> {
         self.task_config
-            .vdaf
             .produce_agg_job_init_req(
                 &self.leader_hpke_receiver_config,
                 self,
                 &self.task_id,
-                &self.task_config,
                 &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 reports,
@@ -233,19 +231,15 @@ impl AggregationJobTest {
         agg_job_init_req: &AggregationJobInitReq,
     ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         self.task_config
-            .vdaf
             .handle_agg_job_init_req(
                 &self.task_id,
-                &self.task_config,
                 &HashMap::default(),
                 &self
                     .task_config
-                    .vdaf
                     .helper_initialize_reports(
                         &self.helper_hpke_receiver_config,
                         self,
                         &self.task_id,
-                        &self.task_config,
                         agg_job_init_req,
                     )
                     .await
@@ -265,10 +259,8 @@ impl AggregationJobTest {
         agg_job_resp: AggregationJobResp,
     ) -> DapLeaderAggregationJobTransition<AggregationJobContinueReq> {
         self.task_config
-            .vdaf
             .handle_agg_job_resp(
                 &self.task_id,
-                &self.task_config,
                 &self.agg_job_id,
                 leader_state,
                 agg_job_resp,
@@ -285,10 +277,8 @@ impl AggregationJobTest {
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
-            .vdaf
             .handle_agg_job_resp(
                 &self.task_id,
-                &self.task_config,
                 &self.agg_job_id,
                 leader_state,
                 agg_job_resp,
@@ -306,10 +296,8 @@ impl AggregationJobTest {
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
-            .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
-                &self.task_config,
                 helper_state,
                 &HashMap::default(),
                 &self.agg_job_id,
@@ -325,10 +313,8 @@ impl AggregationJobTest {
         agg_job_cont_req: &AggregationJobContinueReq,
     ) -> DapError {
         self.task_config
-            .vdaf
             .handle_agg_job_cont_req(
                 &self.task_id,
-                &self.task_config,
                 &helper_state,
                 &HashMap::default(),
                 &self.agg_job_id,
@@ -347,8 +333,7 @@ impl AggregationJobTest {
     ) -> DapAggregateSpan<DapAggregateShare> {
         let metrics = &self.leader_metrics;
         self.task_config
-            .vdaf
-            .handle_final_agg_job_resp(&self.task_config, leader_uncommitted, agg_job_resp, metrics)
+            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, metrics)
             .unwrap()
     }
 
@@ -360,7 +345,6 @@ impl AggregationJobTest {
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.task_config
-            .vdaf
             .produce_leader_encrypted_agg_share(
                 &self.task_config.collector_hpke_config,
                 &self.task_id,
@@ -380,7 +364,6 @@ impl AggregationJobTest {
         agg_share: &DapAggregateShare,
     ) -> HpkeCiphertext {
         self.task_config
-            .vdaf
             .produce_helper_encrypted_agg_share(
                 &self.task_config.collector_hpke_config,
                 &self.task_id,
