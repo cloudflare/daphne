@@ -48,7 +48,7 @@ pub(crate) fn prio2_prep_init(
     public_share_data: &[u8],
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
-    let VdafVerifyKey::Prio2(verify_key) = verify_key else {
+    let VdafVerifyKey::L32(verify_key) = verify_key else {
         panic!("unhandled verify key type");
     };
 
