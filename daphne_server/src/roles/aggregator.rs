@@ -16,9 +16,9 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
-    vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapQueryConfig,
-    DapRequest, DapSender, DapTaskConfig, DapVersion,
+    DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportState, EarlyReportStateConsumed,
+    EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,

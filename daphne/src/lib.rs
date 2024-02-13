@@ -65,6 +65,7 @@ pub mod error;
 pub mod hpke;
 pub mod messages;
 pub mod metrics;
+pub(crate) mod protocol;
 pub mod roles;
 pub mod taskprov;
 #[cfg(any(test, feature = "test-utils"))]
@@ -98,7 +99,6 @@ use std::{
     str::FromStr,
 };
 use url::Url;
-use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 
 // there is a bug in cargo where if a dependency is only used in tests/examples but not in the
 // library you get unused_crate_dependencies warnings when compiling the them.
@@ -106,6 +106,10 @@ use vdaf::{EarlyReportState, EarlyReportStateConsumed};
 mod silence_unused_crate_warning {
     use criterion as _;
 }
+
+pub use protocol::aggregator::{
+    EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
+};
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]

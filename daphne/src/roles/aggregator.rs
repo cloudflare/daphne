@@ -15,7 +15,7 @@ use crate::{
         BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId, TaskId, Time,
     },
     metrics::{DaphneMetrics, DaphneRequestType},
-    vdaf::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapRequest, DapResponse,
     DapTaskConfig, DapVersion,
 };
