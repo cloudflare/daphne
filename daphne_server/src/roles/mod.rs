@@ -28,7 +28,8 @@ mod test_utils {
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
-        DapError, DapQueryConfig, DapTaskConfig, DapVersion, Prio3Config, VdafConfig,
+        vdaf::{Prio3Config, VdafConfig},
+        DapError, DapQueryConfig, DapTaskConfig, DapVersion,
     };
     use daphne_service_utils::{
         test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},

@@ -575,16 +575,14 @@ mod tests {
     use prio::codec::ParameterizedDecode;
 
     use crate::messages::{AggregationJobInitReq, AggregationJobResp, Transition, TransitionVar};
+    use crate::vdaf::{Prio3Config, VdafConfig};
     use crate::{assert_metrics_include, MetaAggregationJobId};
     use crate::{roles::test::TestData, DapVersion};
 
     #[tokio::test]
     async fn replay_reports_when_continuing_aggregation_draft02() {
         let mut data = TestData::new(DapVersion::Draft02);
-        let task_id = data.insert_task(
-            DapVersion::Draft02,
-            crate::VdafConfig::Prio3(crate::Prio3Config::Count),
-        );
+        let task_id = data.insert_task(DapVersion::Draft02, VdafConfig::Prio3(Prio3Config::Count));
         let helper = data.new_helper();
         let test = data.with_leader(Arc::clone(&helper));
 

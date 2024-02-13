@@ -11,8 +11,8 @@ use daphne::{
         encode_base64url, Base64Encode, BatchId, CollectionJobId, Duration, HpkeConfigList,
         Interval, TaskId,
     },
+    vdaf::{Prio3Config, VdafConfig},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
-    Prio3Config, VdafConfig,
 };
 use daphne_service_utils::DaphneServiceReportSelector;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};

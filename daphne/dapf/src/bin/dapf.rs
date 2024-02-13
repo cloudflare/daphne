@@ -8,7 +8,8 @@ use daphne::{
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
-    DapMeasurement, DapVersion, VdafConfig,
+    vdaf::VdafConfig,
+    DapMeasurement, DapVersion,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;

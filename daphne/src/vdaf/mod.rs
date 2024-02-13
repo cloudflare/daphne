@@ -4,13 +4,13 @@
 //! Verifiable, Distributed Aggregation Functions
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
-pub mod prio2;
-pub mod prio3;
+pub(crate) mod prio2;
+pub(crate) mod prio3;
 
 use crate::{
     error::DapAbort,
     vdaf::{prio2::prio2_decode_prep_state, prio3::prio3_decode_prep_state},
-    DapError, Prio3Config, VdafConfig,
+    DapError,
 };
 #[cfg(any(test, feature = "test-utils"))]
 use prio::field::FieldElement;
@@ -34,6 +34,91 @@ pub(crate) enum VdafError {
     Vdaf(#[from] prio::vdaf::VdafError),
     #[error("{0}")]
     Uncategorized(String),
+}
+
+/// Specification of a concrete VDAF.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum VdafConfig {
+    Prio3(Prio3Config),
+    Prio2 { dimension: usize },
+}
+
+impl std::str::FromStr for VdafConfig {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
+}
+
+impl std::fmt::Display for VdafConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
+            VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
+        }
+    }
+}
+
+/// Supported data types for prio3.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum Prio3Config {
+    /// A 64-bit counter. The aggregate is the sum of the measurements, where each measurement is
+    /// equal to `0` or `1`.
+    Count,
+
+    /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
+    /// 2^bits)`.
+    Sum { bits: usize },
+
+    /// A histogram for estimating the distribution of 64-bit, unsigned integers where each
+    /// measurement is a bucket index in range `[0, len)`.
+    Histogram { length: usize, chunk_length: usize },
+
+    /// The element-wise sum of vectors. Each vector has `len` elements.
+    /// Each element is a 64-bit unsigned integer in range `[0,2^bits)`.
+    SumVec {
+        bits: usize,
+        length: usize,
+        chunk_length: usize,
+    },
+
+    /// A variant of `SumVec` that uses a smaller field (`Field64`), multiple proofs, and a custom
+    /// XOF (`XofHmacSha256Aes128`).
+    SumVecField64MultiproofHmacSha256Aes128 {
+        bits: usize,
+        length: usize,
+        chunk_length: usize,
+        num_proofs: u8,
+    },
+}
+
+impl std::fmt::Display for Prio3Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Prio3Config::Count => write!(f, "Count"),
+            Prio3Config::Histogram {
+                length,
+                chunk_length,
+            } => write!(f, "Histogram({length},{chunk_length})"),
+            Prio3Config::Sum { bits } => write!(f, "Sum({bits})"),
+            Prio3Config::SumVec {
+                bits,
+                length,
+                chunk_length,
+            } => write!(f, "SumVec({bits},{length},{chunk_length})"),
+            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits,
+                length,
+                chunk_length,
+                num_proofs,
+            } => write!(f, "SumVecField64MultiproofHmacSha256Aes128({bits},{length},{chunk_length},{num_proofs})"),
+        }
+    }
 }
 
 /// A VDAF verification key.

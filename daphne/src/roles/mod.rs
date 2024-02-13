@@ -170,11 +170,11 @@ mod test {
         },
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
-        vdaf::VdafVerifyKey,
+        vdaf::{Prio3Config, VdafConfig, VdafVerifyKey},
         DapAbort, DapAggregateShare, DapAggregationJobState, DapBatchBucket, DapCollectJob,
         DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
         DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
-        MetaAggregationJobId, Prio3Config, VdafConfig,
+        MetaAggregationJobId,
     };
     use assert_matches::assert_matches;
     use matchit::Router;

@@ -30,10 +30,11 @@ mod test {
         },
         test_versions,
         testing::AggregationJobTest,
+        vdaf::{Prio3Config, VdafConfig},
         DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
         DapAggregationJobUncommitted, DapError, DapHelperAggregationJobTransition,
-        DapLeaderAggregationJobTransition, DapMeasurement, DapVersion, Prio3Config,
-        VdafAggregateShare, VdafConfig, VdafPrepMessage, VdafPrepState,
+        DapLeaderAggregationJobTransition, DapMeasurement, DapVersion, VdafAggregateShare,
+        VdafPrepMessage, VdafPrepState,
     };
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;

@@ -622,9 +622,13 @@ mod test {
     use prio::vdaf::prio3_test::check_test_vec;
 
     use crate::{
-        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest,
-        vdaf::prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, DapAggregateResult,
-        DapMeasurement, DapVersion, Prio3Config, VdafConfig,
+        async_test_versions,
+        hpke::HpkeKemId,
+        testing::AggregationJobTest,
+        vdaf::{
+            prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
+        },
+        DapAggregateResult, DapMeasurement, DapVersion,
     };
 
     async fn roundtrip_count(version: DapVersion) {
