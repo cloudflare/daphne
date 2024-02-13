@@ -15,11 +15,13 @@ use crate::{
         Interval, PartialBatchSelector, Report, ReportId, TaskId, Time, TransitionFailure,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
+    protocol::aggregator::{
+        EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
+    },
     roles::{
         aggregator::MergeAggShareError, helper, DapAggregator, DapAuthorizedSender, DapHelper,
         DapLeader, DapReportInitializer,
     },
-    vdaf::{EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationJobUncommitted, DapBatchBucket, DapCollectJob, DapError, DapGlobalConfig,
     DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition, DapMeasurement,
