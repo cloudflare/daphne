@@ -1,4 +1,4 @@
-FROM rust:1.73-bookworm AS builder
+FROM rust:1.76-bookworm AS builder
 WORKDIR /tmp/dap_test
 RUN apt update && \
     apt install -y \
