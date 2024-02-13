@@ -432,8 +432,8 @@ mod test {
         hpke::{HpkeKemId, HpkeReceiverConfig},
         messages::{self, encode_base64url, Extension, ReportId, ReportMetadata, TaskId},
         test_versions,
-        vdaf::VdafVerifyKey,
-        DapRequest, DapResource, DapTaskConfig, DapVersion, VdafConfig,
+        vdaf::{VdafConfig, VdafVerifyKey},
+        DapRequest, DapResource, DapTaskConfig, DapVersion,
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
