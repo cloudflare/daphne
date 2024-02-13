@@ -130,20 +130,17 @@ impl std::fmt::Display for Prio3Config {
 )]
 pub enum VdafVerifyKey {
     /// Prio3 with the standard XOF.
-    Prio3(#[serde(with = "hex")] [u8; 16]),
+    L16(#[serde(with = "hex")] [u8; 16]),
 
-    /// Prio3 with XofHmacSha256Aes128.
-    Prio3HmacSha256Aes128(#[serde(with = "hex")] [u8; 32]),
-
-    /// Prio2.
-    Prio2(#[serde(with = "hex")] [u8; 32]),
+    /// Prio2 and Prio3 with XofHmacSha256Aes128.
+    L32(#[serde(with = "hex")] [u8; 32]),
 }
 
 impl KeyType for VdafVerifyKey {
     fn len(&self) -> usize {
         match self {
-            Self::Prio3(bytes) => bytes.len(),
-            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => bytes.len(),
+            Self::L16(bytes) => bytes.len(),
+            Self::L32(bytes) => bytes.len(),
         }
     }
 }
@@ -151,8 +148,8 @@ impl KeyType for VdafVerifyKey {
 impl AsRef<[u8]> for VdafVerifyKey {
     fn as_ref(&self) -> &[u8] {
         match self {
-            Self::Prio3(bytes) => &bytes[..],
-            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => &bytes[..],
+            Self::L16(bytes) => &bytes[..],
+            Self::L32(bytes) => &bytes[..],
         }
     }
 }
@@ -160,8 +157,8 @@ impl AsRef<[u8]> for VdafVerifyKey {
 impl AsMut<[u8]> for VdafVerifyKey {
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
-            Self::Prio3(bytes) => &mut bytes[..],
-            Self::Prio3HmacSha256Aes128(bytes) | Self::Prio2(bytes) => &mut bytes[..],
+            Self::L16(bytes) => &mut bytes[..],
+            Self::L32(bytes) => &mut bytes[..],
         }
     }
 }
@@ -317,25 +314,24 @@ impl Encode for VdafAggregateShare {
 impl VdafConfig {
     pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
         match self {
-            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
-                VdafVerifyKey::Prio3HmacSha256Aes128([0; 32])
-            }
-            Self::Prio3(..) => VdafVerifyKey::Prio3([0; 16]),
-            Self::Prio2 { .. } => VdafVerifyKey::Prio2([0; 32]),
+            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
+            | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
+            Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
         }
     }
 
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
         match self {
-            Self::Prio3(..) => Ok(VdafVerifyKey::Prio3(<[u8; 16]>::try_from(bytes).map_err(
-                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
-            )?)),
-            Self::Prio2 { .. } => {
-                Ok(VdafVerifyKey::Prio2(<[u8; 32]>::try_from(bytes).map_err(
+            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
+            | Self::Prio2 { .. } => {
+                Ok(VdafVerifyKey::L32(<[u8; 32]>::try_from(bytes).map_err(
                     |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
                 )?))
             }
+            Self::Prio3(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
+                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
+            )?)),
         }
     }
 

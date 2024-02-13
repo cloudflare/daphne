@@ -170,7 +170,7 @@ mod test {
         },
         test_versions,
         testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
-        vdaf::{Prio3Config, VdafConfig, VdafVerifyKey},
+        vdaf::{Prio3Config, VdafConfig},
         DapAbort, DapAggregateShare, DapAggregationJobState, DapBatchBucket, DapCollectJob,
         DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
         DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
@@ -291,7 +291,7 @@ mod test {
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
-                    vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
                 },
             );
@@ -309,7 +309,7 @@ mod test {
                         max_batch_size: Some(2),
                     },
                     vdaf: vdaf_config,
-                    vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
                 },
             );
@@ -325,7 +325,7 @@ mod test {
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
-                    vdaf_verify_key: VdafVerifyKey::Prio3(rng.gen()),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
                 },
             );
@@ -391,10 +391,7 @@ mod test {
                     expiration: self.now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
-                    vdaf_verify_key: match vdaf {
-                        VdafConfig::Prio2 { .. } => VdafVerifyKey::Prio2(rng.gen()),
-                        VdafConfig::Prio3(_) => VdafVerifyKey::Prio3(rng.gen()),
-                    },
+                    vdaf_verify_key: vdaf.gen_verify_key(),
                     vdaf,
                     method: Default::default(),
                 },

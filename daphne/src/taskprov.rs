@@ -506,8 +506,8 @@ mod test {
             204, 49, 124, 7, 97, 221, 4, 232, 53, 194, 171, 19, 51,
         ];
         match &vk {
-            VdafVerifyKey::Prio2(bytes) => assert_eq!(*bytes, expected),
-            _ => unreachable!(),
+            VdafVerifyKey::L32(bytes) => assert_eq!(*bytes, expected),
+            VdafVerifyKey::L16(..) => unreachable!(),
         }
     }
 

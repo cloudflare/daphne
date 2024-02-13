@@ -147,7 +147,7 @@ pub(crate) fn prio3_prep_init(
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
     return match (&config, verify_key) {
-        (Prio3Config::Count, VdafVerifyKey::Prio3(verify_key)) => {
+        (Prio3Config::Count, VdafVerifyKey::L16(verify_key)) => {
             let vdaf = Prio3::new_count(2)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -167,7 +167,7 @@ pub(crate) fn prio3_prep_init(
                 length,
                 chunk_length,
             },
-            VdafVerifyKey::Prio3(verify_key),
+            VdafVerifyKey::L16(verify_key),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)?;
             let (state, share) = prep_init(
@@ -183,7 +183,7 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepMessage::Prio3ShareField128(share),
             ))
         }
-        (Prio3Config::Sum { bits }, VdafVerifyKey::Prio3(verify_key)) => {
+        (Prio3Config::Sum { bits }, VdafVerifyKey::L16(verify_key)) => {
             let vdaf = Prio3::new_sum(2, *bits)?;
             let (state, share) = prep_init(
                 vdaf,
@@ -204,7 +204,7 @@ pub(crate) fn prio3_prep_init(
                 length,
                 chunk_length,
             },
-            VdafVerifyKey::Prio3(verify_key),
+            VdafVerifyKey::L16(verify_key),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)?;
             let (state, share) = prep_init(
@@ -227,7 +227,7 @@ pub(crate) fn prio3_prep_init(
                 chunk_length,
                 num_proofs,
             },
-            VdafVerifyKey::Prio3HmacSha256Aes128(verify_key),
+            VdafVerifyKey::L32(verify_key),
         ) => {
             let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                 *bits,
