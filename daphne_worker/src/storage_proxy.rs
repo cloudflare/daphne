@@ -116,6 +116,7 @@ pub fn unauthorized_reason(req: &Request, env: &Env) -> Option<worker::Result<Re
 }
 
 /// Handle a proxy request. This is the entry point of the Worker.
+#[allow(clippy::no_effect_underscore_binding)]
 pub async fn handle_request(
     req: Request,
     env: Env,
