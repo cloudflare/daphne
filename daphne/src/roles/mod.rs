@@ -238,7 +238,6 @@ mod test {
         pub time_interval_task_id: TaskId,
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
-        version: DapVersion,
         helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
         pub leader_token: BearerToken,
@@ -365,7 +364,6 @@ mod test {
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
-                version,
                 helper_registry,
                 tasks,
                 leader_token,
@@ -445,7 +443,6 @@ mod test {
                 time_interval_task_id: self.time_interval_task_id,
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
-                version: self.version,
                 helper_registry: self.helper_registry,
                 leader_registry: self.leader_registry,
             }
@@ -461,7 +458,6 @@ mod test {
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
-        version: DapVersion,
         pub helper_registry: prometheus::Registry,
         pub leader_registry: prometheus::Registry,
     }
@@ -510,12 +506,10 @@ mod test {
 
             let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
                 task_config
-                    .vdaf
                     .produce_agg_job_init_req(
                         self.leader.as_ref(),
                         self.leader.as_ref(),
                         task_id,
-                        &task_config,
                         &agg_job_id,
                         &part_batch_sel,
                         reports,
@@ -605,33 +599,35 @@ mod test {
         }
 
         pub async fn gen_test_report(&self, task_id: &TaskId) -> Report {
-            let version = self.leader.unchecked_get_task_config(task_id).await.version;
+            let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
             // Construct HPKE config list.
             let hpke_config_list = [
                 self.leader
-                    .get_hpke_config_for(version, Some(task_id))
+                    .get_hpke_config_for(task_config.version, Some(task_id))
                     .await
                     .unwrap()
                     .as_ref()
                     .clone(),
                 self.helper
-                    .get_hpke_config_for(version, Some(task_id))
+                    .get_hpke_config_for(task_config.version, Some(task_id))
                     .await
                     .unwrap()
                     .as_ref()
                     .clone(),
             ];
 
-            // Construct report.
-            let vdaf_config: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-            vdaf_config
+            // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
+            // measurement to generate. However, we could extend the code to support more VDAFs.
+            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
+            task_config
+                .vdaf
                 .produce_report(
                     &hpke_config_list,
                     self.now,
                     task_id,
                     DapMeasurement::U64(1),
-                    self.version,
+                    task_config.version,
                 )
                 .unwrap()
         }
@@ -1133,10 +1129,8 @@ mod test {
                     .unwrap();
             let task_config = t.leader.unchecked_get_task_config(task_id).await;
             let transition = task_config
-                .vdaf
                 .handle_agg_job_resp(
                     task_id,
-                    &task_config,
                     &MetaAggregationJobId::Draft02(agg_job_id),
                     leader_state,
                     agg_job_resp,
@@ -1868,7 +1862,7 @@ mod test {
                             DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
                         },
                     }],
-                    version,
+                    task_config.version,
                 )
                 .unwrap();
 

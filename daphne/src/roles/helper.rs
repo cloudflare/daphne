@@ -137,22 +137,14 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     )?;
 
     let initialized_reports = task_config
-        .vdaf
-        .helper_initialize_reports(
-            aggregator,
-            aggregator,
-            task_id,
-            task_config,
-            &agg_job_init_req,
-        )
+        .helper_initialize_reports(aggregator, aggregator, task_id, &agg_job_init_req)
         .await?;
 
     let agg_job_resp = match task_config.version {
         DapVersion::Draft02 => {
-            let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) =
-                task_config.vdaf.handle_agg_job_init_req(
+            let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) = task_config
+                .handle_agg_job_init_req(
                     task_id,
-                    task_config,
                     &HashMap::default(), // no reports have been processed yet
                     &initialized_reports,
                     &agg_job_init_req,
@@ -184,9 +176,8 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
                 metrics,
                 |report_status| {
                     let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
-                        task_config.vdaf.handle_agg_job_init_req(
+                        task_config.handle_agg_job_init_req(
                             task_id,
-                            task_config,
                             report_status,
                             &initialized_reports,
                             &agg_job_init_req,
@@ -268,9 +259,8 @@ pub async fn handle_agg_job_cont_req<'req, S: Sync, A: DapHelper<S>>(
 
     let agg_job_resp =
         finish_agg_job_and_aggregate(aggregator, task_id, task_config, metrics, |report_status| {
-            task_config.vdaf.handle_agg_job_cont_req(
+            task_config.handle_agg_job_cont_req(
                 task_id,
-                task_config,
                 &state,
                 report_status,
                 &agg_job_id,
@@ -405,7 +395,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
         .mark_collected(task_id, &agg_share_req.batch_sel)
         .await?;
 
-    let encrypted_agg_share = task_config.vdaf.produce_helper_encrypted_agg_share(
+    let encrypted_agg_share = task_config.produce_helper_encrypted_agg_share(
         &task_config.collector_hpke_config,
         task_id,
         &agg_share_req.batch_sel,
