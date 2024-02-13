@@ -83,6 +83,8 @@ use std::{
     str::FromStr,
 };
 use url::Url;
+#[cfg(any(test, feature = "test-utils"))]
+use vdaf::mastic::MasticWeight;
 
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
@@ -773,6 +775,20 @@ pub enum DapMeasurement {
     U32Vec(Vec<u32>),
     U64Vec(Vec<u64>),
     U128Vec(Vec<u128>),
+    #[cfg(any(test, feature = "test-utils"))]
+    Mastic {
+        input: Vec<u8>,
+        weight: MasticWeight,
+    },
+}
+
+/// An aggregation parameter.
+pub enum DapAggregationParam {
+    Empty,
+    #[cfg(any(test, feature = "test-utils"))]
+    Mastic {
+        paths: Vec<Vec<u8>>,
+    },
 }
 
 /// The aggregate result computed by the Collector.

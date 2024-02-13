@@ -8,6 +8,8 @@ use crate::{
     vdaf::{prio2::prio2_unshard, prio3::prio3_unshard},
     DapAggregateResult, DapError, DapVersion, VdafConfig,
 };
+#[cfg(any(test, feature = "test-utils"))]
+use crate::{vdaf::mastic::mastic_unshard, DapAggregationParam};
 use prio::codec::Encode;
 
 use super::{
@@ -93,6 +95,18 @@ impl VdafConfig {
             Self::Prio2 { dimension } => {
                 Ok(prio2_unshard(*dimension, num_measurements, agg_shares)?)
             }
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic {
+                input_size: _,
+                weight_config,
+            } => Ok(mastic_unshard(
+                *weight_config,
+                // TODO(cjpatton) Plumb the agg param specified by the Collector.
+                &DapAggregationParam::Mastic {
+                    paths: vec![b"cool".to_vec(), b"trip".to_vec()],
+                },
+                agg_shares,
+            )?),
         }
     }
 }

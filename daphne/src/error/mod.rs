@@ -65,9 +65,10 @@ impl FatalDapError {
 impl From<VdafError> for DapError {
     fn from(e: VdafError) -> Self {
         match e {
-            VdafError::Codec(..) | VdafError::Vdaf(..) | VdafError::Uncategorized(..) => {
+            VdafError::Codec(..) | VdafError::Vdaf(..) => {
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
+            VdafError::Uncategorized(s) => Self::Fatal(FatalDapError(s)),
         }
     }
 }

@@ -4,6 +4,8 @@
 //! Verifiable, Distributed Aggregation Functions
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) mod mastic;
 pub(crate) mod prio2;
 pub(crate) mod prio3;
 
@@ -25,6 +27,11 @@ use prio::{
 use rand::prelude::*;
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
+#[cfg(any(test, feature = "test-utils"))]
+use std::io::Read;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub use self::mastic::MasticWeightConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
@@ -42,7 +49,17 @@ pub(crate) enum VdafError {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
     Prio3(Prio3Config),
-    Prio2 { dimension: usize },
+    Prio2 {
+        dimension: usize,
+    },
+    #[cfg(any(test, feature = "test-utils"))]
+    Mastic {
+        /// Length of each input, in number of bytes.
+        input_size: usize,
+
+        /// The type of each weight.
+        weight_config: MasticWeightConfig,
+    },
 }
 
 impl std::str::FromStr for VdafConfig {
@@ -58,6 +75,11 @@ impl std::fmt::Display for VdafConfig {
         match self {
             VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Mastic {
+                input_size,
+                weight_config,
+            } => write!(f, "Mastic({input_size}, {weight_config})"),
         }
     }
 }
@@ -171,6 +193,10 @@ pub enum VdafPrepState {
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
+    #[cfg(any(test, feature = "test-utils"))]
+    Mastic {
+        out_share: Vec<Field64>,
+    },
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -181,10 +207,12 @@ impl deepsize::DeepSizeOf for VdafPrepState {
         //
         // This happens to be correct for helpers but not for leaders
         match self {
-            VdafPrepState::Prio2(_)
-            | VdafPrepState::Prio3Field64(_)
-            | VdafPrepState::Prio3Field64HmacSha256Aes128(_)
-            | VdafPrepState::Prio3Field128(_) => 0,
+            Self::Prio2(_)
+            | Self::Prio3Field64(_)
+            | Self::Prio3Field64HmacSha256Aes128(_)
+            | Self::Prio3Field128(_) => 0,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic { .. } => 0,
         }
     }
 }
@@ -196,6 +224,8 @@ impl Encode for VdafPrepState {
             Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
             Self::Prio3Field128(state) => state.encode(bytes),
             Self::Prio2(state) => state.encode(bytes),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic { .. } => todo!("mastic: decoding of prep state is not implemented"),
         }
     }
 }
@@ -215,6 +245,8 @@ impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPre
                 Ok(prio2_decode_prep_state(*dimension, agg_id, bytes)
                     .map_err(|e| CodecError::Other(Box::new(e)))?)
             }
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Mastic { .. } => todo!("mastic: decoding of prep state is not implemented"),
         }
     }
 }
@@ -227,6 +259,8 @@ pub enum VdafPrepMessage {
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
     Prio3ShareField64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
+    #[cfg(any(test, feature = "test-utils"))]
+    MasticShare(Field64),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -243,6 +277,8 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
             Self::Prio3ShareField64(..)
             | Self::Prio3ShareField64HmacSha256Aes128(..)
             | Self::Prio3ShareField128(..) => 0,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::MasticShare(..) => 0,
         }
     }
 }
@@ -254,6 +290,8 @@ impl Encode for VdafPrepMessage {
             Self::Prio3ShareField64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3ShareField128(share) => share.encode(bytes),
             Self::Prio2Share(share) => share.encode(bytes),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::MasticShare(weight) => weight.encode(bytes),
         }
     }
 }
@@ -278,6 +316,10 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
             VdafPrepState::Prio2(state) => Ok(VdafPrepMessage::Prio2Share(
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
             )),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafPrepState::Mastic { .. } => {
+                todo!("mastic: decoding of prep messages is not implemented")
+            }
         }
     }
 }
@@ -317,6 +359,8 @@ impl VdafConfig {
             Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
             | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
             Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
         }
     }
 
@@ -332,6 +376,12 @@ impl VdafConfig {
             Self::Prio3(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
                 |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
             )?)),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic { .. } => {
+                Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
+                    |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
+                )?))
+            }
         }
     }
 
@@ -348,6 +398,24 @@ impl VdafConfig {
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
             Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic { .. } => todo!("mastic: agg param validation is not implemented"),
         }
     }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn decode_field_vec<F: FieldElement>(
+    bytes: &[u8],
+    len: usize,
+) -> Result<Vec<F>, CodecError> {
+    debug_assert!(F::ENCODED_SIZE < 64);
+    let mut buf = [0; 64];
+    let mut r = std::io::Cursor::new(bytes);
+    let mut v = Vec::with_capacity(len);
+    for _ in 0..len {
+        r.read_exact(&mut buf[..F::ENCODED_SIZE])?;
+        v.push(F::get_decoded(&buf[..F::ENCODED_SIZE])?);
+    }
+    Ok(v)
 }
