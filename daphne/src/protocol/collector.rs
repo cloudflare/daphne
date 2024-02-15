@@ -1,15 +1,15 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#[cfg(any(test, feature = "test-utils"))]
+use crate::vdaf::mastic::mastic_unshard;
 use crate::{
     fatal_error,
     hpke::HpkeDecrypter,
-    messages::{encode_u32_bytes, BatchSelector, HpkeCiphertext, TaskId},
+    messages::{encode_u32_prefixed, BatchSelector, HpkeCiphertext, TaskId},
     vdaf::{prio2::prio2_unshard, prio3::prio3_unshard},
-    DapAggregateResult, DapError, DapVersion, VdafConfig,
+    DapAggregateResult, DapAggregationParam, DapError, DapVersion, VdafConfig,
 };
-#[cfg(any(test, feature = "test-utils"))]
-use crate::{vdaf::mastic::mastic_unshard, DapAggregationParam};
 use prio::codec::Encode;
 
 use super::{
@@ -40,7 +40,7 @@ impl VdafConfig {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
         report_count: u64,
-        agg_param: &[u8],
+        agg_param: &DapAggregationParam,
         encrypted_agg_shares: Vec<HpkeCiphertext>,
         version: DapVersion,
     ) -> Result<DapAggregateResult, DapError> {
@@ -63,7 +63,8 @@ impl VdafConfig {
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
         if version != DapVersion::Draft02 {
-            encode_u32_bytes(&mut aad, agg_param).map_err(DapError::encoding)?;
+            encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
+                .map_err(DapError::encoding)?;
         }
         batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
@@ -99,14 +100,7 @@ impl VdafConfig {
             Self::Mastic {
                 input_size: _,
                 weight_config,
-            } => Ok(mastic_unshard(
-                *weight_config,
-                // TODO(cjpatton) Plumb the agg param specified by the Collector.
-                &DapAggregationParam::Mastic {
-                    paths: vec![b"cool".to_vec(), b"trip".to_vec()],
-                },
-                agg_shares,
-            )?),
+            } => Ok(mastic_unshard(*weight_config, agg_param, agg_shares)?),
         }
     }
 }

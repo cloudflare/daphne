@@ -1,15 +1,17 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#[cfg(any(test, feature = "test-utils"))]
+use crate::vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init};
 use crate::{
     error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
-        encode_u32_bytes, AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp,
-        Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
-        PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
-        Transition, TransitionFailure, TransitionVar,
+        encode_u32_bytes, encode_u32_prefixed, AggregationJobContinueReq, AggregationJobInitReq,
+        AggregationJobResp, Base64Encode, BatchSelector, Extension, HpkeCiphertext,
+        PartialBatchSelector, PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata,
+        ReportShare, TaskId, Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
@@ -19,14 +21,9 @@ use crate::{
         VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationJobUncommitted, DapError, DapHelperAggregationJobTransition,
+    DapAggregationJobUncommitted, DapAggregationParam, DapError, DapHelperAggregationJobTransition,
     DapLeaderAggregationJobTransition, DapOutputShare, DapTaskConfig, DapVersion,
     MetaAggregationJobId, VdafConfig,
-};
-#[cfg(any(test, feature = "test-utils"))]
-use crate::{
-    vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init},
-    DapAggregationParam,
 };
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
@@ -302,8 +299,13 @@ impl EarlyReportStateInitialized {
         is_leader: bool,
         vdaf_verify_key: &VdafVerifyKey,
         vdaf_config: &VdafConfig,
+        agg_param: &DapAggregationParam,
         early_report_state_consumed: EarlyReportStateConsumed,
     ) -> Result<Self, DapError> {
+        // We need to use this variable for Mastic, which is currently only enabled in tests or
+        // when the feature "test-utils" is enabled.
+        let _ = agg_param;
+
         let (metadata, public_share, input_share) = match early_report_state_consumed {
             EarlyReportStateConsumed::Ready {
                 metadata,
@@ -341,10 +343,7 @@ impl EarlyReportStateInitialized {
                 *input_size,
                 *weight_config,
                 vdaf_verify_key,
-                // TODO(cjpatton) Plumb the agg param specified by the Collector.
-                &DapAggregationParam::Mastic {
-                    paths: vec![b"cool".to_vec(), b"trip".to_vec()],
-                },
+                agg_param,
                 public_share.as_ref(),
                 input_share.as_ref(),
             ),
@@ -410,6 +409,7 @@ impl DapTaskConfig {
         task_id: &TaskId,
         agg_job_id: &MetaAggregationJobId,
         part_batch_sel: &PartialBatchSelector,
+        agg_param: &DapAggregationParam,
         reports: Vec<Report>,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError> {
@@ -448,7 +448,14 @@ impl DapTaskConfig {
         }
 
         let initialized_reports = initializer
-            .initialize_reports(true, task_id, self, part_batch_sel, consumed_reports)
+            .initialize_reports(
+                true,
+                task_id,
+                self,
+                part_batch_sel,
+                agg_param,
+                consumed_reports,
+            )
             .await?;
 
         assert_eq!(initialized_reports.len(), helper_shares.len());
@@ -521,7 +528,7 @@ impl DapTaskConfig {
             AggregationJobInitReq {
                 draft02_task_id: task_id.for_request_payload(&self.version),
                 draft02_agg_job_id: agg_job_id.for_request_payload(),
-                agg_param: Vec::default(),
+                agg_param: agg_param.get_encoded().map_err(DapError::encoding)?,
                 part_batch_sel: part_batch_sel.clone(),
                 prep_inits,
             },
@@ -566,12 +573,17 @@ impl DapTaskConfig {
             );
         }
 
+        let agg_param =
+            DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_job_init_req.agg_param)
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
         let initialized_reports = initializer
             .initialize_reports(
                 false,
                 task_id,
                 self,
                 &agg_job_init_req.part_batch_sel,
+                &agg_param,
                 consumed_reports,
             )
             .await?;
@@ -1249,7 +1261,7 @@ impl DapTaskConfig {
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
-        agg_param: &[u8],
+        agg_param: &DapAggregationParam,
         agg_share: &DapAggregateShare,
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapError> {
@@ -1271,7 +1283,7 @@ impl DapTaskConfig {
         hpke_config: &HpkeConfig,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
-        agg_param: &[u8],
+        agg_param: &DapAggregationParam,
         agg_share: &DapAggregateShare,
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapError> {
@@ -1292,7 +1304,7 @@ fn produce_encrypted_agg_share(
     hpke_config: &HpkeConfig,
     task_id: &TaskId,
     batch_sel: &BatchSelector,
-    agg_param: &[u8],
+    agg_param: &DapAggregationParam,
     agg_share: &DapAggregateShare,
     version: DapVersion,
 ) -> Result<HpkeCiphertext, DapError> {
@@ -1320,7 +1332,8 @@ fn produce_encrypted_agg_share(
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad).map_err(DapError::encoding)?;
     if version != DapVersion::Draft02 {
-        encode_u32_bytes(&mut aad, agg_param).map_err(DapError::encoding)?;
+        encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
+            .map_err(DapError::encoding)?;
     }
     batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 

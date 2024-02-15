@@ -16,8 +16,8 @@ use crate::{
     },
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapRequest, DapResponse,
-    DapTaskConfig, DapVersion,
+    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
+    DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -32,6 +32,7 @@ pub trait DapReportInitializer {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         part_batch_sel: &PartialBatchSelector,
+        agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;
 }
@@ -101,8 +102,8 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;
 
-    /// Check whether the batch determined by the collect request would overlap with a previous
-    /// batch.
+    /// Fixed-size tasks: Check whether the batch determined by the collect request would overlap
+    /// with a previous batch.
     async fn is_batch_overlapping(
         &self,
         task_id: &TaskId,
@@ -149,6 +150,7 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError>;
 
+    /// Fixed-size tasks: Return the ID of the batch currently being filled.
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Access the Prometheus metrics.

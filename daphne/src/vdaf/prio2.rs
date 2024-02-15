@@ -160,7 +160,7 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
 mod test {
     use crate::{
         async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig,
-        DapAggregateResult, DapMeasurement, DapVersion,
+        DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
     async fn roundtrip(version: DapVersion) {
@@ -170,13 +170,16 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
-                DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
-                DapMeasurement::U32Vec(vec![1, 0, 0, 0, 1]),
-                DapMeasurement::U32Vec(vec![0, 1, 0, 0, 1]),
-                DapMeasurement::U32Vec(vec![0, 0, 1, 0, 1]),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
+                    DapMeasurement::U32Vec(vec![1, 1, 0, 0, 1]),
+                    DapMeasurement::U32Vec(vec![1, 0, 0, 0, 1]),
+                    DapMeasurement::U32Vec(vec![0, 1, 0, 0, 1]),
+                    DapMeasurement::U32Vec(vec![0, 0, 1, 0, 1]),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U32Vec(vec![3, 3, 1, 0, 5]));
     }

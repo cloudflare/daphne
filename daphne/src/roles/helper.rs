@@ -21,7 +21,7 @@ use crate::{
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::ReportProcessedStatus,
     roles::aggregator::MergeAggShareError,
-    DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapError,
+    DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapAggregationParam, DapError,
     DapHelperAggregationJobTransition, DapRequest, DapResource, DapResponse, DapTaskConfig,
     DapVersion, MetaAggregationJobId,
 };
@@ -345,13 +345,17 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
     let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
+    let agg_param =
+        DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &agg_share_req.agg_param)
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
     // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
     // collected batches.
     check_batch(
         aggregator,
         task_config,
         task_id,
-        &agg_share_req.batch_sel,
+        &agg_share_req.batch_sel.clone().into(),
         &agg_share_req.agg_param,
         now,
     )
@@ -399,7 +403,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
         &task_config.collector_hpke_config,
         task_id,
         &agg_share_req.batch_sel,
-        &agg_share_req.agg_param,
+        &agg_param,
         &agg_share,
         task_config.version,
     )?;
@@ -597,7 +601,12 @@ mod tests {
             .collect::<Vec<_>>();
 
         let (_, req) = test
-            .gen_test_agg_job_init_req(&task_id, DapVersion::Draft02, reports)
+            .gen_test_agg_job_init_req(
+                &task_id,
+                DapVersion::Draft02,
+                DapAggregationParam::Empty,
+                reports,
+            )
             .await;
 
         let meta_agg_job_id = MetaAggregationJobId::Draft02(

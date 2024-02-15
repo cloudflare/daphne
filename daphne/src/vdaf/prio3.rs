@@ -664,7 +664,7 @@ mod test {
         vdaf::{
             prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
         },
-        DapAggregateResult, DapMeasurement, DapVersion,
+        DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
     async fn roundtrip_count(version: DapVersion) {
@@ -674,13 +674,16 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U64(0),
-                DapMeasurement::U64(1),
-                DapMeasurement::U64(1),
-                DapMeasurement::U64(1),
-                DapMeasurement::U64(0),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U64(0),
+                    DapMeasurement::U64(1),
+                    DapMeasurement::U64(1),
+                    DapMeasurement::U64(1),
+                    DapMeasurement::U64(0),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U64(3));
     }
@@ -694,13 +697,16 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U64(0),
-                DapMeasurement::U64(1),
-                DapMeasurement::U64(1337),
-                DapMeasurement::U64(4),
-                DapMeasurement::U64(0),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U64(0),
+                    DapMeasurement::U64(1),
+                    DapMeasurement::U64(1337),
+                    DapMeasurement::U64(4),
+                    DapMeasurement::U64(0),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U128(1342));
     }
@@ -718,11 +724,14 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U128Vec(vec![1337, 0]),
-                DapMeasurement::U128Vec(vec![0, 1337]),
-                DapMeasurement::U128Vec(vec![1, 1]),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U128Vec(vec![1337, 0]),
+                    DapMeasurement::U128Vec(vec![0, 1337]),
+                    DapMeasurement::U128Vec(vec![1, 1]),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U128Vec(vec![1338, 1338]));
     }
@@ -739,13 +748,16 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U64(0),
-                DapMeasurement::U64(1),
-                DapMeasurement::U64(2),
-                DapMeasurement::U64(2),
-                DapMeasurement::U64(2),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U64(0),
+                    DapMeasurement::U64(1),
+                    DapMeasurement::U64(2),
+                    DapMeasurement::U64(2),
+                    DapMeasurement::U64(2),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U128Vec(vec![1, 1, 3]));
     }
@@ -764,11 +776,14 @@ mod test {
             version,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::U64Vec(vec![1337, 0]),
-                DapMeasurement::U64Vec(vec![0, 1337]),
-                DapMeasurement::U64Vec(vec![1, 1]),
-            ])
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::U64Vec(vec![1337, 0]),
+                    DapMeasurement::U64Vec(vec![0, 1337]),
+                    DapMeasurement::U64Vec(vec![1, 1]),
+                ],
+            )
             .await;
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1338, 1338]));
     }

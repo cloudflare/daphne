@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
+use futures::future::try_join_all;
+use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use tracing::{debug, error};
 use url::Url;
 
@@ -22,8 +23,9 @@ use crate::{
         TaskId,
     },
     metrics::DaphneRequestType,
-    DapCollectJob, DapError, DapLeaderAggregationJobTransition, DapLeaderProcessTelemetry,
-    DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion, MetaAggregationJobId,
+    DapAggregationParam, DapCollectionJob, DapError, DapLeaderAggregationJobTransition,
+    DapLeaderProcessTelemetry, DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion,
+    MetaAggregationJobId,
 };
 
 struct LeaderHttpRequestOptions<'p> {
@@ -97,50 +99,67 @@ pub trait DapAuthorizedSender<S> {
     ) -> Result<S, DapError>;
 }
 
+/// A work item, either an aggregation job or collection job.
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum WorkItem {
+    AggregationJob {
+        task_id: TaskId,
+        part_batch_sel: PartialBatchSelector,
+        agg_param: DapAggregationParam,
+        reports: Vec<Report>,
+    },
+    CollectionJob {
+        task_id: TaskId,
+        coll_job_id: CollectionJobId,
+        batch_sel: BatchSelector,
+        agg_param: DapAggregationParam,
+    },
+}
+
+impl WorkItem {
+    /// Get the ID for the task to which the work item is associated.
+    pub fn task_id(&self) -> &TaskId {
+        match self {
+            Self::AggregationJob { task_id, .. } | Self::CollectionJob { task_id, .. } => task_id,
+        }
+    }
+}
+
 /// DAP Leader functionality.
 #[async_trait]
 pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
-    /// Data type used to guide selection of a set of reports for aggregation.
-    type ReportSelector;
-
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError>;
 
-    /// Fetch a sequence of reports to aggregate, grouped by task ID, then by partial batch
-    /// selector. The reports returned are removed from persistent storage.
-    async fn get_reports(
-        &self,
-        selector: &Self::ReportSelector,
-    ) -> Result<HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>>, DapError>;
-
-    /// Create a collect job.
-    //
-    // TODO spec: Figure out if the hostname for the collect URI needs to match the Leader.
+    /// Initialize a collection job.
     async fn init_collect_job(
         &self,
         task_id: &TaskId,
         collect_job_id: &Option<CollectionJobId>,
-        collect_req: &CollectionReq,
+        batch_sel: BatchSelector,
+        agg_param: DapAggregationParam,
     ) -> Result<Url, DapError>;
 
     /// Check the status of a collect job.
     async fn poll_collect_job(
         &self,
         task_id: &TaskId,
-        collect_id: &CollectionJobId,
-    ) -> Result<DapCollectJob, DapError>;
+        coll_job_id: &CollectionJobId,
+    ) -> Result<DapCollectionJob, DapError>;
 
-    /// Fetch the current collect job queue. The result is the sequence of collect ID and request
-    /// pairs, in order of priority.
-    async fn get_pending_collect_jobs(
-        &self,
-    ) -> Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError>;
+    /// Drain at most `num_items` items from the work queue.
+    async fn dequeue_work(&self, num_items: usize) -> Result<Vec<WorkItem>, DapError>;
 
-    /// Complete a collect job by assigning it the completed [`CollectResp`](crate::messages::Collection).
+    /// Append `items` to the work queue.
+    async fn enqueue_work(&self, items: Vec<WorkItem>) -> Result<(), DapError>;
+
+    /// Complete a collect job by assigning it the completed
+    /// [`Collection`](crate::messages::Collection).
     async fn finish_collect_job(
         &self,
         task_id: &TaskId,
-        collect_id: &CollectionJobId,
+        coll_job_id: &CollectionJobId,
         collect_resp: &Collection,
     ) -> Result<(), DapError>;
 
@@ -191,8 +210,6 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
     }
 
     // Check that the indicated HpkeConfig is present.
-    //
-    // TODO spec: It's not clear if this behavior is MUST, SHOULD, or MAY.
     if !aggregator
         .can_hpke_decrypt(req.task_id()?, report.encrypted_input_shares[0].config_id)
         .await?
@@ -219,7 +236,7 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
 
 /// Handle a collect job from the Collector. The response is the URI that the Collector will
 /// poll later on to get the collection.
-pub async fn handle_collect_job_req<S: Sync, A: DapLeader<S>>(
+pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<Url, DapError> {
@@ -249,38 +266,26 @@ pub async fn handle_collect_job_req<S: Sync, A: DapLeader<S>>(
         .into());
     }
 
-    let mut collect_req = CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
+    let coll_job_req = CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
+    let agg_param =
+        DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &coll_job_req.agg_param)
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.version != req.version {
         return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
     }
 
-    if collect_req.query == Query::FixedSizeCurrentBatch {
-        // This is where we assign the current batch, and convert the
-        // Query::FixedSizeCurrentBatch into a Query::FixedSizeByBatchId.
-        //
-        // TODO(bhalleycf) Note that currently we are just looking at the
-        // head of the uncollected batch queue, so there is no parallelism
-        // possible for collectors on a given task.  To allow multiple
-        // batches for a task to be collected concurrently for the same task,
-        // we'd need a more complex DO state that allowed us to have batch
-        // state go from unassigned -> in-progress -> complete.
-        let batch_id = aggregator.current_batch(task_id).await?;
-        debug!("FixedSize batch id is {batch_id}");
-        collect_req.query = Query::FixedSizeByBatchId { batch_id };
-    }
-
     // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
     // collected batches.
-    let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
     check_batch(
         aggregator,
         task_config,
         task_id,
-        &batch_selector,
-        &collect_req.agg_param,
+        &coll_job_req.query,
+        &coll_job_req.agg_param,
         now,
     )
     .await?;
@@ -301,8 +306,16 @@ pub async fn handle_collect_job_req<S: Sync, A: DapLeader<S>>(
         }
     };
 
+    let batch_sel = match coll_job_req.query {
+        Query::TimeInterval { batch_interval } => BatchSelector::TimeInterval { batch_interval },
+        Query::FixedSizeByBatchId { batch_id } => BatchSelector::FixedSizeByBatchId { batch_id },
+        Query::FixedSizeCurrentBatch => BatchSelector::FixedSizeByBatchId {
+            batch_id: aggregator.current_batch(task_id).await?,
+        },
+    };
+
     let collect_job_uri = aggregator
-        .init_collect_job(task_id, &collect_job_id, &collect_req)
+        .init_collect_job(task_id, &collect_job_id, batch_sel, agg_param)
         .await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Collect);
@@ -311,16 +324,12 @@ pub async fn handle_collect_job_req<S: Sync, A: DapLeader<S>>(
 
 /// Run an aggregation job for a set of reports. Return the number of reports that were
 /// aggregated successfully.
-//
-// TODO Handle non-encodable messages gracefully. The length of `reports` may be too long to
-// encode in `AggregationJobInitReq`, in which case this method will panic. We should increase
-// the capacity of this message in the spec. In the meantime, we should at a minimum log this
-// when it happens.
-pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
+async fn run_agg_job<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,
+    agg_param: &DapAggregationParam,
     reports: Vec<Report>,
 ) -> Result<u64, DapError> {
     let metrics = aggregator.metrics();
@@ -336,6 +345,7 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
             task_id,
             &agg_job_id,
             part_batch_sel,
+            agg_param,
             reports,
             metrics,
         )
@@ -476,18 +486,18 @@ pub async fn run_agg_job<S: Sync, A: DapLeader<S>>(
 /// Handle a pending collection job. If the results are ready, then compute the aggregate
 /// results and store them to be retrieved by the Collector later. Returns the number of
 /// reports in the batch.
-pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
+async fn run_coll_job<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
     task_id: &TaskId,
-    collect_id: &CollectionJobId,
     task_config: &DapTaskConfig,
-    collect_req: &CollectionReq,
+    coll_job_id: &CollectionJobId,
+    batch_sel: &BatchSelector,
+    agg_param: &DapAggregationParam,
 ) -> Result<u64, DapError> {
     let metrics = aggregator.metrics();
 
-    debug!("collecting id {collect_id}");
-    let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
-    let leader_agg_share = aggregator.get_agg_share(task_id, &batch_selector).await?;
+    debug!("collecting id {coll_job_id}");
+    let leader_agg_share = aggregator.get_agg_share(task_id, batch_sel).await?;
 
     let taskprov = task_config.resolve_taskprove_advertisement()?;
 
@@ -498,14 +508,12 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
         return Ok(0);
     }
 
-    let batch_selector = BatchSelector::try_from(collect_req.query.clone())?;
-
     // Prepare the Leader's aggregate share.
     let leader_enc_agg_share = task_config.produce_leader_encrypted_agg_share(
         &task_config.collector_hpke_config,
         task_id,
-        &batch_selector,
-        &collect_req.agg_param,
+        batch_sel,
+        agg_param,
         &leader_agg_share,
         task_config.version,
     )?;
@@ -513,8 +521,10 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
     // Prepare AggregateShareReq.
     let agg_share_req = AggregateShareReq {
         draft02_task_id: task_id.for_request_payload(&task_config.version),
-        batch_sel: batch_selector.clone(),
-        agg_param: collect_req.agg_param.clone(),
+        batch_sel: batch_sel.clone(),
+        agg_param: agg_param
+            .get_encoded()
+            .map_err(|e| fatal_error!(err = ?e))?,
         report_count: leader_agg_share.report_count,
         checksum: leader_agg_share.checksum,
     };
@@ -566,13 +576,13 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
 
     // Complete the collect job.
     let collection = Collection {
-        part_batch_sel: batch_selector.into(),
+        part_batch_sel: batch_sel.clone().into(),
         report_count: leader_agg_share.report_count,
         draft_latest_interval,
         encrypted_agg_shares: [leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
     };
     aggregator
-        .finish_collect_job(task_id, collect_id, &collection)
+        .finish_collect_job(task_id, coll_job_id, &collection)
         .await?;
 
     // Mark reports as collected.
@@ -584,75 +594,115 @@ pub async fn run_collect_job<S: Sync, A: DapLeader<S>>(
     Ok(agg_share_req.report_count)
 }
 
-/// Fetch a set of reports grouped by task, then run an aggregation job for each task. Once all
-/// jobs are completed, process the collect job queue. It is not safe to run multiple instances
-/// of this function in parallel.
+/// Drain a number of items from the work queue and process them.
 ///
-/// This method is geared primarily towards testing. It also demonstrates how to properly
-/// synchronize collect and aggregation jobs. If used in a large DAP deployment, it is likely
-/// create a bottleneck. Such deployments can improve throughput by running many aggregation
-/// jobs in parallel.
+/// Aggregation jobs are handled in parallel, subject to the restriction that all aggregation jobs
+/// pertaining to a task are completed before processing any collection job for the same task.
+///
+/// Collection jobs are processed in order. If a collection job is still pending once processed, it
+/// is pushed to the back of the work queue.
 pub async fn process<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
-    selector: &A::ReportSelector,
     host: &str,
+    num_items: usize,
 ) -> Result<DapLeaderProcessTelemetry, DapError> {
     let mut telem = DapLeaderProcessTelemetry::default();
 
-    tracing::debug!("RUNNING get_reports");
-    // Fetch reports and run an aggregation job for each task.
-    for (task_id, reports) in aggregator.get_reports(selector).await? {
-        tracing::debug!("RUNNING get_task_config_for {task_id}");
-        let task_config = aggregator
-            .get_task_config_for(&task_id)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
+    tracing::debug!("RUNNING read_work_stream");
 
-        for (part_batch_sel, reports) in reports {
-            // TODO Consider splitting reports into smaller chunks.
-            // TODO Consider handling tasks in parallel.
-            telem.reports_processed += reports.len() as u64;
-            debug!(
-                "process {} reports for task {task_id} with selector {part_batch_sel:?}",
-                reports.len()
-            );
-            if !reports.is_empty() {
-                tracing::debug!(
-                    "RUNNING run_agg_job FOR TID {task_id} AND {part_batch_sel:?} AND {host}"
-                );
-                telem.reports_aggregated += run_agg_job(
+    let mut agg_jobs = HashMap::new();
+    let mut pending_coll_jobs = Vec::new();
+    for work_item in aggregator.dequeue_work(num_items).await? {
+        match work_item {
+            WorkItem::AggregationJob {
+                task_id,
+                part_batch_sel,
+                agg_param,
+                reports,
+            } => {
+                let agg_jobs_per_task: &mut Vec<_> = agg_jobs.entry(task_id).or_default();
+                agg_jobs_per_task.push(async move {
+                    let task_config = aggregator
+                        .get_task_config_for(&task_id)
+                        .await?
+                        .ok_or(DapAbort::UnrecognizedTask)?;
+
+                    if reports.is_empty() {
+                        return Ok(0);
+                    }
+
+                    tracing::debug!(
+                        "RUNNING run_agg_job FOR TID {task_id} AND {part_batch_sel:?} AND {host}"
+                    );
+                    run_agg_job(
+                        aggregator,
+                        &task_id,
+                        task_config.as_ref(),
+                        &part_batch_sel,
+                        &agg_param,
+                        reports,
+                    )
+                    .await
+                });
+            }
+            WorkItem::CollectionJob {
+                task_id,
+                coll_job_id,
+                batch_sel,
+                agg_param,
+            } => {
+                // Wait for all pending aggregation jobs for this task to complete before
+                // processing the next collection job. This is to prevent a race condition
+                // involving an aggregate share computed during a collection job and any output
+                // shares computed during an aggregation job.
+                if let Some(agg_jobs_per_task) = agg_jobs.get_mut(&task_id) {
+                    telem.reports_aggregated +=
+                        try_join_all(agg_jobs_per_task.drain(0..agg_jobs_per_task.len()))
+                            .await?
+                            .into_iter()
+                            .sum::<u64>();
+                }
+
+                let task_config = aggregator
+                    .get_task_config_for(&task_id)
+                    .await?
+                    .ok_or(DapAbort::UnrecognizedTask)?;
+
+                tracing::debug!("RUNNING run_collect_job FOR TID {task_id} AND {coll_job_id} AND {batch_sel:?} AND {agg_param:?} AND {host}");
+                let collected = run_coll_job(
                     aggregator,
                     &task_id,
                     task_config.as_ref(),
-                    &part_batch_sel,
-                    reports,
+                    &coll_job_id,
+                    &batch_sel,
+                    &agg_param,
                 )
                 .await?;
+
+                if collected > 0 {
+                    telem.reports_collected += collected;
+                } else {
+                    pending_coll_jobs.push(WorkItem::CollectionJob {
+                        task_id,
+                        coll_job_id,
+                        batch_sel,
+                        agg_param,
+                    });
+                }
             }
         }
     }
-    // Process pending collect jobs. We wait until all aggregation jobs are finished before
-    // proceeding to this step. This is to prevent a race condition involving an aggregate
-    // share computed during a collect job and any output shares computed during an aggregation
-    // job.
-    tracing::debug!("GETTING get_pending_collect_jobs");
-    for (task_id, collect_id, collect_req) in aggregator.get_pending_collect_jobs().await? {
-        tracing::debug!("GETTING get_task_config_for {task_id}");
-        let task_config = aggregator
-            .get_task_config_for(&task_id)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
 
-        tracing::debug!("RUNNING run_collect_job FOR TID {task_id} AND {collect_id} AND {collect_req:?} AND {host}");
-        telem.reports_collected += run_collect_job(
-            aggregator,
-            &task_id,
-            &collect_id,
-            task_config.as_ref(),
-            &collect_req,
-        )
-        .await?;
+    for (_task_id, mut agg_jobs_per_task) in agg_jobs {
+        telem.reports_aggregated +=
+            try_join_all(agg_jobs_per_task.drain(0..agg_jobs_per_task.len()))
+                .await?
+                .into_iter()
+                .sum::<u64>();
     }
+
+    // Put all pending collection jobs back in the queue.
+    aggregator.enqueue_work(pending_coll_jobs).await?;
 
     Ok(telem)
 }

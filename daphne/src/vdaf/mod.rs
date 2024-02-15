@@ -399,7 +399,9 @@ impl VdafConfig {
         match self {
             Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => todo!("mastic: agg param validation is not implemented"),
+            // TODO(cjpatton) Implement agg param validation once we know what we need. In the
+            // meantime, permit everything.
+            Self::Mastic { .. } => true,
         }
     }
 }

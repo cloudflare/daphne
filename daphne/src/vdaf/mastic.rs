@@ -92,7 +92,7 @@ pub(crate) fn mastic_prep_init(
     };
 
     match (weight_config, agg_param) {
-        (MasticWeightConfig::Count, DapAggregationParam::Mastic { paths }) => {
+        (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
             // Simulate Mastic, insecurely. The public share encodes the plaintext input; the input
             // share encodes the plaintext weight.
             if public_share_bytes.len() != input_size {
@@ -108,10 +108,12 @@ pub(crate) fn mastic_prep_init(
             }
 
             let weight = Field64::from(u64::from(input_share_bytes[0]));
-            let out_share = paths
+            let out_share = agg_param
+                .prefixes()
                 .iter()
-                .map(|path| {
-                    if path.len() > input_size {
+                .map(|prefix| {
+                    let prefix_bytes = prefix.to_bytes();
+                    if prefix_bytes.len() > input_size {
                         return Err(VdafError::Codec(prio::codec::CodecError::Other(
                             "mastic: malformed agg param: path with invalid length".into(),
                         )));
@@ -119,7 +121,7 @@ pub(crate) fn mastic_prep_init(
 
                     // If the path is a prefix of the input, then the value is the
                     // weight; otherwise the value is 0.
-                    let value = if path == &public_share_bytes[..path.len()] {
+                    let value = if prefix_bytes == public_share_bytes[..prefix_bytes.len()] {
                         weight
                     } else {
                         Field64::zero()
@@ -207,10 +209,10 @@ pub(crate) fn mastic_unshard<M: IntoIterator<Item = Vec<u8>>>(
     agg_share_bytes: M,
 ) -> Result<DapAggregateResult, VdafError> {
     match (weight_config, agg_param) {
-        (MasticWeightConfig::Count, DapAggregationParam::Mastic { paths }) => {
+        (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
             let agg: Vec<Field64> = agg_share_bytes
                 .into_iter()
-                .map(|bytes| decode_field_vec(&bytes, paths.len()))
+                .map(|bytes| decode_field_vec(&bytes, agg_param.prefixes().len()))
                 .reduce(|r, agg_share| {
                     let mut agg = r?;
                     for (x, y) in agg.iter_mut().zip(agg_share?.into_iter()) {
@@ -236,6 +238,8 @@ pub(crate) fn mastic_unshard<M: IntoIterator<Item = Vec<u8>>>(
 
 #[cfg(test)]
 mod test {
+    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
+
     use super::*;
     use crate::{
         hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig, DapAggregateResult,
@@ -253,31 +257,39 @@ mod test {
             DapVersion::DraftLatest,
         );
         let got = t
-            .roundtrip(vec![
-                DapMeasurement::Mastic {
-                    input: b"cool".to_vec(),
-                    weight: MasticWeight::Bool(false),
-                },
-                DapMeasurement::Mastic {
-                    input: b"cool".to_vec(),
-                    weight: MasticWeight::Bool(true),
-                },
-                DapMeasurement::Mastic {
-                    input: b"trip".to_vec(),
-                    weight: MasticWeight::Bool(true),
-                },
-                DapMeasurement::Mastic {
-                    input: b"trip".to_vec(),
-                    weight: MasticWeight::Bool(true),
-                },
-                DapMeasurement::Mastic {
-                    input: b"cool".to_vec(),
-                    weight: MasticWeight::Bool(false),
-                },
-            ])
+            .roundtrip(
+                DapAggregationParam::Mastic(
+                    Poplar1AggregationParam::try_from_prefixes(vec![
+                        IdpfInput::from_bytes(b"cool"),
+                        IdpfInput::from_bytes(b"trip"),
+                    ])
+                    .unwrap(),
+                ),
+                vec![
+                    DapMeasurement::Mastic {
+                        input: b"cool".to_vec(),
+                        weight: MasticWeight::Bool(false),
+                    },
+                    DapMeasurement::Mastic {
+                        input: b"cool".to_vec(),
+                        weight: MasticWeight::Bool(true),
+                    },
+                    DapMeasurement::Mastic {
+                        input: b"trip".to_vec(),
+                        weight: MasticWeight::Bool(true),
+                    },
+                    DapMeasurement::Mastic {
+                        input: b"trip".to_vec(),
+                        weight: MasticWeight::Bool(true),
+                    },
+                    DapMeasurement::Mastic {
+                        input: b"cool".to_vec(),
+                        weight: MasticWeight::Bool(false),
+                    },
+                ],
+            )
             .await;
 
-        // For the moment, we hard-code `b"cool"` and `b"trip"` as the prefixes of interest.
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1, 2]));
     }
 }

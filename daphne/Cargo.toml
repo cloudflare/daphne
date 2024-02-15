@@ -23,6 +23,7 @@ async-trait.workspace = true
 assert_matches = { workspace = true, optional = true }
 base64.workspace = true
 deepsize = { workspace = true, optional = true }
+futures.workspace = true
 hex.workspace = true
 hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
 hpke-rs-crypto.workspace = true
@@ -42,7 +43,6 @@ url.workspace = true
 assert_matches.workspace = true
 criterion.workspace = true
 deepsize.workspace = true
-futures.workspace = true
 matchit.workspace = true
 paste.workspace = true
 prio = { workspace = true, features = ["test-util"] }
