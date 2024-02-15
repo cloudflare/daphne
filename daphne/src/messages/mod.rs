@@ -467,6 +467,7 @@ impl Decode for PartialBatchSelector {
 /// A batch selector issued by the Leader in an aggregate-share request.
 #[derive(Clone, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum BatchSelector {
     TimeInterval { batch_interval: Interval },
     FixedSizeByBatchId { batch_id: BatchId },
@@ -476,7 +477,9 @@ impl std::fmt::Display for BatchSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval { .. } => write!(f, "time_interval"),
-            Self::FixedSizeByBatchId { .. } => write!(f, "fixed_size"),
+            Self::FixedSizeByBatchId { batch_id } => {
+                write!(f, "fixed_size_by_batch_id({})", batch_id.to_base64url())
+            }
         }
     }
 }
@@ -888,6 +891,27 @@ pub enum Query {
     TimeInterval { batch_interval: Interval },
     FixedSizeByBatchId { batch_id: BatchId },
     FixedSizeCurrentBatch,
+}
+
+impl From<BatchSelector> for Query {
+    fn from(batch_sel: BatchSelector) -> Self {
+        match batch_sel {
+            BatchSelector::TimeInterval { batch_interval } => Self::TimeInterval { batch_interval },
+            BatchSelector::FixedSizeByBatchId { batch_id } => Self::FixedSizeByBatchId { batch_id },
+        }
+    }
+}
+
+impl std::fmt::Display for Query {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval { .. } => write!(f, "time_interval"),
+            Self::FixedSizeByBatchId { batch_id } => {
+                write!(f, "fixed_size_by_batch_id({})", batch_id.to_base64url())
+            }
+            Self::FixedSizeCurrentBatch => write!(f, "fixed_size_current_batch"),
+        }
+    }
 }
 
 impl ParameterizedEncode<DapVersion> for Query {
@@ -1378,23 +1402,29 @@ pub fn decode_base64url_vec<T: AsRef<[u8]>>(input: T) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(input).ok()
 }
 
-// Cribbed from `decode_u16_items()` from libprio.
-fn encode_u16_prefixed(
-    version: DapVersion,
-    bytes: &mut Vec<u8>,
-    e: impl Fn(DapVersion, &mut Vec<u8>) -> Result<(), CodecError>,
-) -> Result<(), CodecError> {
-    // Reserve space for the length prefix.
-    let len_offset = bytes.len();
-    0_u16.encode(bytes)?;
+macro_rules! make_encode_len_prefixed {
+    ($type:ident, $name:ident) => {
+        pub(crate) fn $name(
+            version: DapVersion,
+            bytes: &mut Vec<u8>,
+            e: impl Fn(DapVersion, &mut Vec<u8>) -> Result<(), CodecError>,
+        ) -> Result<(), CodecError> {
+            // Reserve space for the length prefix.
+            let len_offset = bytes.len();
+            (0 as $type).encode(bytes)?;
 
-    e(version, bytes)?;
-    let len_bytes = std::mem::size_of::<u16>();
-    let len = bytes.len() - len_offset - len_bytes;
-    bytes[len_offset..len_offset + len_bytes]
-        .copy_from_slice(&u16::to_be_bytes(len.try_into().unwrap()));
-    Ok(())
+            e(version, bytes)?;
+            let len_bytes = std::mem::size_of::<$type>();
+            let len = bytes.len() - len_offset - len_bytes;
+            bytes[len_offset..len_offset + len_bytes]
+                .copy_from_slice(&$type::to_be_bytes(len.try_into().unwrap()));
+            Ok(())
+        }
+    };
 }
+
+make_encode_len_prefixed!(u16, encode_u16_prefixed);
+make_encode_len_prefixed!(u32, encode_u32_prefixed);
 
 // Cribbed from `decode_u16_items()` from libprio.
 fn decode_u16_prefixed<O>(

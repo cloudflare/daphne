@@ -9,7 +9,7 @@ pub mod leader;
 
 use crate::{
     constants::DapMediaType,
-    messages::{Base64Encode, BatchSelector, ReportMetadata, TaskId, Time},
+    messages::{Base64Encode, Query, ReportMetadata, TaskId, Time},
     taskprov, DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
 use tracing::warn;
@@ -22,12 +22,11 @@ async fn check_batch<S: Sync>(
     agg: &impl DapAggregator<S>,
     task_config: &DapTaskConfig,
     task_id: &TaskId,
-    batch_sel: &BatchSelector,
+    query: &Query,
     agg_param: &[u8],
     now: Time,
 ) -> Result<(), DapError> {
     let global_config = agg.get_global_config();
-    let batch_overlapping = agg.is_batch_overlapping(task_id, batch_sel);
 
     // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
@@ -40,8 +39,8 @@ async fn check_batch<S: Sync>(
     }
 
     // Check that the batch boundaries are valid.
-    match (&task_config.query, batch_sel) {
-        (DapQueryConfig::TimeInterval { .. }, BatchSelector::TimeInterval { batch_interval }) => {
+    match (&task_config.query, query) {
+        (DapQueryConfig::TimeInterval { .. }, Query::TimeInterval { batch_interval }) => {
             if batch_interval.start % task_config.time_precision != 0
                 || batch_interval.duration % task_config.time_precision != 0
                 || batch_interval.duration < task_config.time_precision
@@ -68,13 +67,8 @@ async fn check_batch<S: Sync>(
                 );
             }
         }
-        (DapQueryConfig::FixedSize { .. }, BatchSelector::FixedSizeByBatchId { batch_id }) => {
-            // TODO(cjpatton) The Helper can avoid this callback by first fetching the aggregate
-            // share and aborting with "batchInvalid" if the report count is 0. Depending on how we
-            // resolve https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/issues/342, this check may
-            // become unnecessary for the Leader.
-            //
-            // Consider removing this callback once we resolve DAP issue #342.
+        (DapQueryConfig::FixedSize { .. }, Query::FixedSizeCurrentBatch) => (), // nothing to do
+        (DapQueryConfig::FixedSize { .. }, Query::FixedSizeByBatchId { batch_id }) => {
             if !agg.batch_exists(task_id, batch_id).await? {
                 return Err(DapAbort::BatchInvalid {
                     detail: format!(
@@ -86,12 +80,14 @@ async fn check_batch<S: Sync>(
                 .into());
             }
         }
-        _ => return Err(DapAbort::query_mismatch(task_id, &task_config.query, batch_sel).into()),
+        _ => return Err(DapAbort::query_mismatch(task_id, &task_config.query, query).into()),
     };
 
     // Check that the batch does not overlap with any previously collected batch.
-    if batch_overlapping.await? {
-        return Err(DapAbort::batch_overlap(task_id, batch_sel).into());
+    if let Ok(batch_sel) = query.clone().try_into() {
+        if agg.is_batch_overlapping(task_id, &batch_sel).await? {
+            return Err(DapAbort::batch_overlap(task_id, query).into());
+        }
     }
 
     Ok(())
@@ -168,32 +164,25 @@ mod test {
             Report, ReportId, ReportMetadata, TaskId, Time, Transition, TransitionFailure,
             TransitionVar,
         },
+        roles::leader::WorkItem,
         test_versions,
-        testing::{AggStore, MockAggregator, MockAggregatorReportSelector},
-        vdaf::{Prio3Config, VdafConfig},
-        DapAbort, DapAggregateShare, DapAggregationJobState, DapBatchBucket, DapCollectJob,
-        DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
-        DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
-        MetaAggregationJobId,
+        testing::{AggStore, MockAggregator},
+        vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
+        DapAbort, DapAggregateShare, DapAggregationJobState, DapAggregationParam, DapBatchBucket,
+        DapCollectionJob, DapError, DapGlobalConfig, DapLeaderAggregationJobTransition,
+        DapMeasurement, DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters,
+        DapVersion, MetaAggregationJobId,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
-    use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
+    use prio::{
+        codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+        idpf::IdpfInput,
+        vdaf::poplar1::Poplar1AggregationParam,
+    };
     use rand::{thread_rng, Rng};
     use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
-
-    macro_rules! get_reports {
-        ($leader:expr, $selector:expr) => {{
-            let reports_per_task = $leader.get_reports($selector).await.unwrap();
-            assert_eq!(reports_per_task.len(), 1);
-            let (task_id, reports_per_part_batch_sel) =
-                reports_per_task.into_iter().next().unwrap();
-            assert_eq!(reports_per_part_batch_sel.len(), 1);
-            let (part_batch_sel, reports) = reports_per_part_batch_sel.into_iter().next().unwrap();
-            (task_id, part_batch_sel, reports)
-        }};
-    }
 
     fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
         match version {
@@ -238,6 +227,7 @@ mod test {
         pub time_interval_task_id: TaskId,
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
+        pub heavy_hitters_task_id: TaskId,
         helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
         pub leader_token: BearerToken,
@@ -278,6 +268,7 @@ mod test {
             let time_interval_task_id = TaskId(rng.gen());
             let fixed_size_task_id = TaskId(rng.gen());
             let expired_task_id = TaskId(rng.gen());
+            let heavy_hitters_task_id = TaskId(rng.gen());
             let mut tasks = HashMap::new();
             tasks.insert(
                 time_interval_task_id,
@@ -318,14 +309,35 @@ mod test {
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-                    leader_url,
-                    helper_url,
+                    leader_url: leader_url.clone(),
+                    helper_url: helper_url.clone(),
                     time_precision: Self::TASK_TIME_PRECISION,
                     expiration: now, // Expires this second
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
+                    method: Default::default(),
+                },
+            );
+
+            let mastic = VdafConfig::Mastic {
+                input_size: 1,
+                weight_config: MasticWeightConfig::Count,
+            };
+            tasks.insert(
+                heavy_hitters_task_id,
+                DapTaskConfig {
+                    version,
+                    collector_hpke_config: collector_hpke_receiver_config.config.clone(),
+                    leader_url,
+                    helper_url,
+                    time_precision: Self::TASK_TIME_PRECISION,
+                    expiration: now + Self::TASK_TIME_PRECISION,
+                    min_batch_size: 10,
+                    query: DapQueryConfig::TimeInterval,
+                    vdaf: mastic,
+                    vdaf_verify_key: mastic.gen_verify_key(),
                     method: Default::default(),
                 },
             );
@@ -364,6 +376,7 @@ mod test {
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
+                heavy_hitters_task_id,
                 helper_registry,
                 tasks,
                 leader_token,
@@ -440,6 +453,7 @@ mod test {
                 time_interval_task_id: self.time_interval_task_id,
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
+                heavy_hitters_task_id: self.heavy_hitters_task_id,
                 helper_registry: self.helper_registry,
                 leader_registry: self.leader_registry,
             }
@@ -455,6 +469,7 @@ mod test {
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
+        heavy_hitters_task_id: TaskId,
         pub helper_registry: prometheus::Registry,
         pub leader_registry: prometheus::Registry,
     }
@@ -484,10 +499,40 @@ mod test {
             }
         }
 
+        pub async fn gen_test_coll_job_req(
+            &self,
+            query: Query,
+            task_id: &TaskId,
+        ) -> DapRequest<BearerToken> {
+            self.gen_test_coll_job_req_for_agg_param(query, DapAggregationParam::Empty, task_id)
+                .await
+        }
+
+        pub async fn gen_test_coll_job_req_for_agg_param(
+            &self,
+            query: Query,
+            agg_param: DapAggregationParam,
+            task_id: &TaskId,
+        ) -> DapRequest<BearerToken> {
+            let task_config = self.leader.unchecked_get_task_config(task_id).await;
+
+            self.collector_authorized_req(
+                task_id,
+                &task_config,
+                DapMediaType::CollectReq,
+                CollectionReq {
+                    draft02_task_id: task_id.for_request_payload(&task_config.version),
+                    query,
+                    agg_param: agg_param.get_encoded().unwrap(),
+                },
+            )
+        }
+
         pub async fn gen_test_agg_job_init_req(
             &self,
             task_id: &TaskId,
             version: DapVersion,
+            agg_param: DapAggregationParam,
             reports: Vec<Report>,
         ) -> (DapAggregationJobState, DapRequest<BearerToken>) {
             let mut rng = thread_rng();
@@ -509,6 +554,7 @@ mod test {
                         task_id,
                         &agg_job_id,
                         &part_batch_sel,
+                        &agg_param,
                         reports,
                         &self.leader.metrics,
                     )
@@ -596,6 +642,20 @@ mod test {
         }
 
         pub async fn gen_test_report(&self, task_id: &TaskId) -> Report {
+            // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
+            // measurement to generate. However, we could extend the code to support more VDAFs.
+            let task_config = self.leader.unchecked_get_task_config(task_id).await;
+            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
+
+            self.gen_test_report_for_measurement(task_id, DapMeasurement::U64(1))
+                .await
+        }
+
+        pub async fn gen_test_report_for_measurement(
+            &self,
+            task_id: &TaskId,
+            measurement: DapMeasurement,
+        ) -> Report {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
             // Construct HPKE config list.
@@ -614,71 +674,16 @@ mod test {
                     .clone(),
             ];
 
-            // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
-            // measurement to generate. However, we could extend the code to support more VDAFs.
-            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
             task_config
                 .vdaf
                 .produce_report(
                     &hpke_config_list,
                     self.now,
                     task_id,
-                    DapMeasurement::U64(1),
+                    measurement,
                     task_config.version,
                 )
                 .unwrap()
-        }
-
-        pub async fn run_agg_job(&self, task_id: &TaskId) -> Result<(), DapError> {
-            let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
-            let task_config = wrapped.as_ref().unwrap();
-
-            let report_sel = MockAggregatorReportSelector(*task_id);
-            let (task_id, part_batch_sel, reports) = get_reports!(self.leader, &report_sel);
-
-            // Leader->Helper: Run aggregation job.
-            let _reports_aggregated = leader::run_agg_job(
-                &*self.leader,
-                &task_id,
-                task_config,
-                &part_batch_sel,
-                reports,
-            )
-            .await?;
-            Ok(())
-        }
-
-        pub async fn run_col_job(&self, task_id: &TaskId, query: &Query) -> Result<(), DapError> {
-            let wrapped = self.leader.get_task_config_for(task_id).await.unwrap();
-            let task_config = wrapped.as_ref().unwrap();
-
-            // Collector->Leader: Initialize collection job.
-            let req = self.collector_authorized_req(
-                task_id,
-                task_config,
-                DapMediaType::CollectReq,
-                CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&task_config.version),
-                    query: query.clone(),
-                    agg_param: Vec::default(),
-                },
-            );
-
-            // Leader: Handle request from Collector.
-            leader::handle_collect_job_req(&*self.leader, &req).await?;
-            let resp = self.leader.get_pending_collect_jobs().await?;
-            let (task_id, collect_id, collect_req) = &resp[0];
-
-            // Leader->Helper: Complete collection job.
-            let _reports_collected = leader::run_collect_job(
-                &*self.leader,
-                task_id,
-                collect_id,
-                task_config,
-                collect_req,
-            )
-            .await?;
-            Ok(())
         }
 
         pub async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
@@ -715,7 +720,7 @@ mod test {
             msg: M,
         ) -> DapRequest<BearerToken> {
             let mut rng = thread_rng();
-            let collect_job_id = CollectionJobId(rng.gen());
+            let coll_job_id = CollectionJobId(rng.gen());
             let sender_auth = if task_config.method_is_taskprov() {
                 Some(self.taskprov_collector_token.clone())
             } else {
@@ -729,7 +734,7 @@ mod test {
                 resource: if task_config.version == DapVersion::Draft02 {
                     DapResource::Undefined
                 } else {
-                    DapResource::CollectionJob(collect_job_id)
+                    DapResource::CollectionJob(coll_job_id)
                 },
                 payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
                 sender_auth,
@@ -810,7 +815,12 @@ mod test {
         let t = Test::new(version);
         let report = t.gen_test_report(&t.time_interval_task_id).await;
         let (_, mut req) = t
-            .gen_test_agg_job_init_req(&t.time_interval_task_id, version, vec![report])
+            .gen_test_agg_job_init_req(
+                &t.time_interval_task_id,
+                version,
+                DapAggregationParam::Empty,
+                vec![report],
+            )
             .await;
         req.sender_auth = None;
 
@@ -993,7 +1003,7 @@ mod test {
 
     async_test_versions! { handle_agg_share_req_invalid_batch_sel }
 
-    async fn handle_collect_job_req_unauthorized_request(version: DapVersion) {
+    async fn handle_coll_job_req_unauthorized_request(version: DapVersion) {
         let mut rng = thread_rng();
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
@@ -1020,19 +1030,19 @@ mod test {
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            leader::handle_collect_job_req(&*t.leader, &req).await,
+            leader::handle_coll_job_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            leader::handle_collect_job_req(&*t.leader, &req).await,
+            leader::handle_coll_job_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
     }
 
-    async_test_versions! { handle_collect_job_req_unauthorized_request }
+    async_test_versions! { handle_coll_job_req_unauthorized_request }
 
     async fn handle_agg_job_req_failure_hpke_decrypt_error(version: DapVersion) {
         let t = Test::new(version);
@@ -1041,7 +1051,7 @@ mod test {
         let mut report = t.gen_test_report(task_id).await;
         report.encrypted_input_shares[1].payload[0] ^= 0xff; // Cause decryption to fail
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, vec![report])
+            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1069,7 +1079,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, vec![report])
+            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1094,7 +1104,12 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (leader_state, req) = t
-            .gen_test_agg_job_init_req(task_id, version, vec![report.clone()])
+            .gen_test_agg_job_init_req(
+                task_id,
+                version,
+                DapAggregationParam::Empty,
+                vec![report.clone()],
+            )
             .await;
 
         // Add dummy data to report store backend. This is done in a new scope so that the lock on the
@@ -1106,7 +1121,7 @@ mod test {
                 .lock()
                 .expect("report_store: failed to lock");
             let report_store = guard.entry(*task_id).or_default();
-            report_store.processed.insert(report.report_metadata.id);
+            report_store.insert(report.report_metadata.id);
         }
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1183,7 +1198,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, vec![report])
+            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
             .await;
 
         // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
@@ -1241,7 +1256,12 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, DapVersion::Draft02, vec![report])
+            .gen_test_agg_job_init_req(
+                task_id,
+                DapVersion::Draft02,
+                DapAggregationParam::Empty,
+                vec![report],
+            )
             .await;
 
         // Send aggregate request.
@@ -1343,35 +1363,57 @@ mod test {
 
     async_test_versions! { handle_upload_req_task_expired }
 
-    async fn get_reports_empty_response(version: DapVersion) {
+    async fn dequeue_work_empty(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
+        let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
-        let report = t.gen_test_report(task_id).await;
-        let req = t.gen_test_upload_req(report.clone(), task_id).await;
+        for _ in 0..10 {
+            let report = t.gen_test_report(task_id).await;
+            let req = t.gen_test_upload_req(report.clone(), task_id).await;
+            leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        }
 
-        // Upload report.
-        leader::handle_upload_req(&*t.leader, &req)
-            .await
-            .expect("upload failed unexpectedly");
+        let query = task_config.query_for_current_batch_window(t.now);
+        let req = t.gen_test_coll_job_req(query, task_id).await;
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
 
-        // Get one report. This should return with the report that was uploaded earlier.
-        // We also check that the task ID associated to the report is the same one we
-        // requested.
-        let report_sel = MockAggregatorReportSelector(*task_id);
-        let (returned_task_id, _part_batch_sel, reports) = get_reports!(t.leader, &report_sel);
-        assert_eq!(reports.len(), 1);
+        // Get the next work item. This should be an aggregation job for the reports that were
+        // uploaded.
+        let mut work_items = t.leader.dequeue_work(1).await.unwrap();
+        assert_eq!(work_items.len(), 1);
+        let WorkItem::AggregationJob {
+            task_id: returned_task_id,
+            part_batch_sel: _,
+            agg_param: _,
+            reports,
+        } = work_items.pop().unwrap()
+        else {
+            panic!("unexpected work item type");
+        };
+        assert_eq!(reports.len(), 10);
         assert_eq!(&returned_task_id, task_id);
 
-        // Try to get another report. This should not return an error, but simply
-        // an empty vector, as we drained the ReportStore above. The task ID
-        // associated to the report should be the same one we requested.
-        let (returned_task_id, _part_batch_sel, reports) = get_reports!(t.leader, &report_sel);
-        assert_eq!(reports.len(), 0);
+        // Get the next work item. This should be the collection job.
+        let mut work_items = t.leader.dequeue_work(1).await.unwrap();
+        assert_eq!(work_items.len(), 1);
+        let WorkItem::CollectionJob {
+            task_id: returned_task_id,
+            coll_job_id: _,
+            batch_sel: _,
+            agg_param: _,
+        } = work_items.pop().unwrap()
+        else {
+            panic!("unexpected work item type");
+        };
         assert_eq!(&returned_task_id, task_id);
+
+        // Get the next work item. Expect the return value to be empty because there is no more
+        // work to process.
+        assert_eq!(t.leader.dequeue_work(1).await.unwrap().len(), 0);
     }
 
-    async_test_versions! { get_reports_empty_response }
+    async_test_versions! { dequeue_work_empty }
 
     async fn poll_collect_job_test_results(version: DapVersion) {
         let t = Test::new(version);
@@ -1392,23 +1434,28 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        leader::handle_collect_job_req(&*t.leader, &req)
-            .await
-            .unwrap();
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
 
-        // Expect DapCollectJob::Unknown due to invalid collect ID.
+        // Expect DapCollectionJob::Unknown due to invalid collect ID.
         assert_eq!(
             t.leader
                 .poll_collect_job(task_id, &CollectionJobId::default())
                 .await
                 .unwrap(),
-            DapCollectJob::Unknown
+            DapCollectionJob::Unknown
         );
 
         // Leader: Get pending collect job to obtain collect_id
-        let resp = t.leader.get_pending_collect_jobs().await.unwrap();
-        let (_task_id, collect_id, _collect_req) = &resp[0];
-        let collect_resp = Collection {
+        let WorkItem::CollectionJob {
+            task_id: _,
+            coll_job_id,
+            batch_sel: _,
+            agg_param: _,
+        } = t.leader.dequeue_work(1).await.unwrap().pop().unwrap()
+        else {
+            panic!("unexpected work item type")
+        };
+        let collection = Collection {
             part_batch_sel: PartialBatchSelector::TimeInterval,
             report_count: 0,
             draft_latest_interval: if version == DapVersion::Draft02 {
@@ -1433,34 +1480,34 @@ mod test {
             ],
         };
 
-        // Expect DapCollectJob::Pending due to pending collect job.
+        // Expect DapCollectionJob::Pending due to pending collect job.
         assert_eq!(
             t.leader
-                .poll_collect_job(task_id, collect_id)
+                .poll_collect_job(task_id, &coll_job_id)
                 .await
                 .unwrap(),
-            DapCollectJob::Pending
+            DapCollectionJob::Pending
         );
 
         // Leader: Complete the collect job by storing CollectResp in LeaderStore.processed.
         t.leader
-            .finish_collect_job(task_id, collect_id, &collect_resp)
+            .finish_collect_job(task_id, &coll_job_id, &collection)
             .await
             .unwrap();
 
-        // Expect DapCollectJob::Done due to processed collect job.
+        // Expect DapCollectionJob::Done due to processed collect job.
         assert_matches!(
             t.leader
-                .poll_collect_job(task_id, collect_id)
+                .poll_collect_job(task_id, &coll_job_id)
                 .await
                 .unwrap(),
-            DapCollectJob::Done(..)
+            DapCollectionJob::Done(..)
         );
     }
 
     async_test_versions! { poll_collect_job_test_results }
 
-    async fn handle_collect_job_req_fail_invalid_batch_interval(version: DapVersion) {
+    async fn handle_coll_job_req_fail_invalid_batch_interval(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1484,7 +1531,7 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = leader::handle_collect_job_req(&*t.leader, &req)
+        let err = leader::handle_coll_job_req(&*t.leader, &req)
             .await
             .unwrap_err();
 
@@ -1511,7 +1558,7 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = leader::handle_collect_job_req(&*t.leader, &req)
+        let err = leader::handle_coll_job_req(&*t.leader, &req)
             .await
             .unwrap_err();
 
@@ -1538,7 +1585,7 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let err = leader::handle_collect_job_req(&*t.leader, &req)
+        let err = leader::handle_coll_job_req(&*t.leader, &req)
             .await
             .unwrap_err();
 
@@ -1546,9 +1593,9 @@ mod test {
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into future".to_string()));
     }
 
-    async_test_versions! { handle_collect_job_req_fail_invalid_batch_interval }
+    async_test_versions! { handle_coll_job_req_fail_invalid_batch_interval }
 
-    async fn handle_collect_job_req_succeed_max_batch_interval(version: DapVersion) {
+    async fn handle_coll_job_req_succeed_max_batch_interval(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1572,45 +1619,66 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let _collect_uri = leader::handle_collect_job_req(&*t.leader, &req)
-            .await
-            .unwrap();
+        let _collect_uri = leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
     }
 
-    async_test_versions! { handle_collect_job_req_succeed_max_batch_interval }
+    async_test_versions! { handle_coll_job_req_succeed_max_batch_interval }
 
-    // Send a collect request with an overlapping batch interval.
-    async fn handle_collect_job_req_fail_overlapping_batch_interval(version: DapVersion) {
+    async fn handle_coll_job_req_fail_overlapping_batch_interval(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
-        // Create a report.
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
-
-        // Client: Send upload request to Leader.
         leader::handle_upload_req(&*t.leader, &req).await.unwrap();
 
-        // Leader: Run aggregation job.
-        t.run_agg_job(task_id).await.unwrap();
-
-        // Run first collect job (expect success).
         let query = task_config.query_for_current_batch_window(t.now);
-        t.run_col_job(task_id, &query).await.unwrap();
+        let req = t.gen_test_coll_job_req(query, task_id).await;
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
 
-        // run a second collect job (expect failure due to overlapping batch).
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
+
+        // Repeat the request. Expect failure due to overlapping batch.
         assert_matches!(
-            t.run_col_job(task_id, &query).await.unwrap_err(),
+            leader::handle_coll_job_req(&*t.leader, &req)
+                .await
+                .unwrap_err(),
             DapError::Abort(DapAbort::BatchOverlap { .. })
         );
     }
 
-    async_test_versions! { handle_collect_job_req_fail_overlapping_batch_interval }
+    async_test_versions! { handle_coll_job_req_fail_overlapping_batch_interval }
+
+    async fn handle_coll_job_req_fail_unrecongized_batch(version: DapVersion) {
+        let t = Test::new(version);
+        let task_id = &t.fixed_size_task_id;
+
+        let req = t
+            .gen_test_coll_job_req(
+                Query::FixedSizeByBatchId {
+                    batch_id: BatchId(thread_rng().gen()),
+                },
+                task_id,
+            )
+            .await;
+
+        // Expect failure due to unrecognized batch
+        assert_matches!(
+            leader::handle_coll_job_req(&*t.leader, &req)
+                .await
+                .unwrap_err(),
+            DapError::Abort(DapAbort::BatchInvalid { .. })
+        );
+    }
+
+    async_test_versions! { handle_coll_job_req_fail_unrecongized_batch }
 
     // Test a successful collect request submission.
     // This checks that the Leader reponds with the collect ID with the ID associated to the request.
-    async fn handle_collect_job_req_success(version: DapVersion) {
+    async fn handle_coll_job_req_success(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
@@ -1629,14 +1697,23 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let url = leader::handle_collect_job_req(&*t.leader, &req)
-            .await
-            .unwrap();
-        let resp = t.leader.get_pending_collect_jobs().await.unwrap();
-        let (_leader_task_id, leader_collect_id, leader_collect_req) = &resp[0];
+        let url = leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
+        let WorkItem::CollectionJob {
+            task_id: _,
+            coll_job_id: leader_collect_id,
+            batch_sel: leader_batch_sel,
+            agg_param: leader_agg_param,
+        } = t.leader.dequeue_work(1).await.unwrap().pop().unwrap()
+        else {
+            panic!("unexpected work item type");
+        };
 
         // Check that the CollectReq sent by Collector is the same that is received by Leader.
-        assert_eq!(&collector_collect_req, leader_collect_req);
+        assert_eq!(collector_collect_req.query, leader_batch_sel.into());
+        assert_eq!(
+            collector_collect_req.agg_param,
+            leader_agg_param.get_encoded().unwrap()
+        );
 
         // Check that the collect_id included in the URI is the same with the one received
         // by Leader.
@@ -1653,10 +1730,10 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_collect_job_req_success }
+    async_test_versions! { handle_coll_job_req_success }
 
     // Test that the Leader handles queries from the Collector properly.
-    async fn handle_collect_job_req_invalid_query(version: DapVersion) {
+    async fn handle_coll_job_req_invalid_query(version: DapVersion) {
         let mut rng = thread_rng();
         let t = Test::new(version);
 
@@ -1678,7 +1755,7 @@ mod test {
             },
         );
         assert_matches!(
-            leader::handle_collect_job_req(&*t.leader, &req)
+            leader::handle_coll_job_req(&*t.leader, &req)
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
@@ -1702,14 +1779,14 @@ mod test {
             },
         );
         assert_matches!(
-            leader::handle_collect_job_req(&*t.leader, &req)
+            leader::handle_coll_job_req(&*t.leader, &req)
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::BatchInvalid { .. })
         );
     }
 
-    async_test_versions! { handle_collect_job_req_invalid_query }
+    async_test_versions! { handle_coll_job_req_invalid_query }
 
     async fn handle_upload_req(version: DapVersion) {
         let t = Test::new(version);
@@ -1728,20 +1805,26 @@ mod test {
     async fn e2e_time_interval(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
-        let task_config = t.leader.unchecked_get_task_config(task_id).await;
-
-        let report = t.gen_test_report(task_id).await;
-        let req = t.gen_test_upload_req(report, task_id).await;
+        let task_config = t
+            .leader
+            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .await;
 
         // Client: Send upload request to Leader.
-        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        let report = t.gen_test_report(task_id).await;
+        leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+            .await
+            .unwrap();
 
-        // Leader: Run aggregation job.
-        t.run_agg_job(task_id).await.unwrap();
-
-        // Collector: Create collection job and poll result.
+        // Collector: Request result from the Leader.
         let query = task_config.query_for_current_batch_window(t.now);
-        t.run_col_job(task_id, &query).await.unwrap();
+        leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
+            .await
+            .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
@@ -1767,22 +1850,30 @@ mod test {
     async fn e2e_fixed_size(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.fixed_size_task_id;
-        let task_config = t.leader.unchecked_get_task_config(task_id).await;
-
-        let report = t.gen_test_report(task_id).await;
-        let req = t.gen_test_upload_req(report, task_id).await;
 
         // Client: Send upload request to Leader.
-        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        let report = t.gen_test_report(task_id).await;
+        leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+            .await
+            .unwrap();
 
-        // Leader: Run aggregation job.
-        t.run_agg_job(task_id).await.unwrap();
+        // Collector: Request result from the Leader.
+        let query = match version {
+            DapVersion::Draft02 => {
+                let batch_id = t.leader.current_batch(task_id).await.unwrap();
+                println!("hella {}", batch_id.to_base64url());
 
-        // Collector: Create collection job and poll result.
-        let query = Query::FixedSizeByBatchId {
-            batch_id: t.leader.current_batch_id(task_id, &task_config).unwrap(),
+                Query::FixedSizeByBatchId { batch_id }
+            }
+            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
         };
-        t.run_col_job(task_id, &query).await.unwrap();
+        leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
+            .await
+            .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
@@ -1875,20 +1966,20 @@ mod test {
             leader::handle_upload_req(&*t.leader, &req).await.unwrap();
         }
 
-        // Leader: Run aggregation job.
-        t.run_agg_job(&task_id).await.unwrap();
-
-        // The Leader is now configured with the task.
-        assert_eq!(
-            t.leader.unchecked_get_task_config(&task_id).await,
-            task_config
-        );
-
-        // Collector: Create collection job and poll result.
-        let query = Query::FixedSizeByBatchId {
-            batch_id: t.leader.current_batch_id(&task_id, &task_config).unwrap(),
+        // Collector: Request result from the Leader.
+        let query = match version {
+            DapVersion::Draft02 => Query::FixedSizeByBatchId {
+                batch_id: t.leader.current_batch(&task_id).await.unwrap(),
+            },
+            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
         };
-        t.run_col_job(&task_id, &query).await.unwrap();
+        leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
+            .await
+            .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
@@ -2009,4 +2100,138 @@ mod test {
     }
 
     test_versions! { early_metadata_checks }
+
+    // Test multiple tasks in flight at once.
+    async fn multi_task(version: DapVersion) {
+        let t = Test::new(version);
+
+        // Requests for the time-interval task.
+        {
+            let task_id = &t.time_interval_task_id;
+            let task_config = t
+                .leader
+                .unchecked_get_task_config(&t.fixed_size_task_id)
+                .await;
+
+            let report = t.gen_test_report(task_id).await;
+            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+                .await
+                .unwrap();
+
+            let query = task_config.query_for_current_batch_window(t.now);
+            leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
+                .await
+                .unwrap();
+        }
+
+        // Requests for the fixed-length task.
+        {
+            let task_id = &t.fixed_size_task_id;
+
+            let report = t.gen_test_report(task_id).await;
+            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+                .await
+                .unwrap();
+
+            // Collector: Request result from the Leader.
+            let query = match version {
+                DapVersion::Draft02 => {
+                    let batch_id = t.leader.current_batch(task_id).await.unwrap();
+                    println!("hella {}", batch_id.to_base64url());
+
+                    Query::FixedSizeByBatchId { batch_id }
+                }
+                DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+            };
+            leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
+                .await
+                .unwrap();
+        }
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
+
+        let agg_job_req_count = match version {
+            DapVersion::Draft02 => 2,
+            DapVersion::DraftLatest => 1,
+        } * 2;
+
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 2,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 2,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 2,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 2,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 2,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 2,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 2,
+        });
+    }
+
+    async_test_versions! { multi_task }
+
+    // TODO(cjpatton) Test collecting the batch multiple times per the "heavy hitters" mode of
+    // operation for Mastic.
+    #[tokio::test]
+    async fn heavy_hitters() {
+        let t = Test::new(DapVersion::DraftLatest);
+        let task_id = &t.heavy_hitters_task_id;
+        let task_config = t
+            .leader
+            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .await;
+
+        for i in 0..10 {
+            let report = t
+                .gen_test_report_for_measurement(
+                    task_id,
+                    DapMeasurement::Mastic {
+                        input: vec![i],
+                        weight: MasticWeight::Bool(true),
+                    },
+                )
+                .await;
+            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+                .await
+                .unwrap();
+        }
+
+        // Collector: Request result from the Leader.
+        let query = task_config.query_for_current_batch_window(t.now);
+        let agg_param = DapAggregationParam::Mastic(
+            Poplar1AggregationParam::try_from_prefixes(vec![
+                IdpfInput::from_bytes(&[0]),
+                IdpfInput::from_bytes(&[1]),
+                IdpfInput::from_bytes(&[7]),
+            ])
+            .unwrap(),
+        );
+        leader::handle_coll_job_req(
+            &*t.leader,
+            &t.gen_test_coll_job_req_for_agg_param(query, agg_param, task_id)
+                .await,
+        )
+        .await
+        .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
+
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 10,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 10,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 1,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 10,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 10,
+        });
+    }
 }

@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{Base64Encode, BatchSelector, TaskId, TransitionFailure},
+    messages::{Base64Encode, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;
@@ -181,12 +181,9 @@ impl DapAbort {
     }
 
     #[inline]
-    pub(crate) fn batch_overlap(task_id: &TaskId, batch_sel: &BatchSelector) -> Self {
+    pub(crate) fn batch_overlap(task_id: &TaskId, batch_sel: impl std::fmt::Display) -> Self {
         Self::BatchOverlap {
-            detail: format!(
-                "The batch indicated by the request: {}",
-                serde_json::to_string(batch_sel).expect("failed to JSON-encode the batch selector while constructing a \"batchOverlap\" abort"),
-            ),
+            detail: format!("The batch indicated by the request: {batch_sel}"),
             task_id: *task_id,
         }
     }

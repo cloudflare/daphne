@@ -9,7 +9,7 @@ use daphne::{
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
     vdaf::VdafConfig,
-    DapMeasurement, DapVersion,
+    DapAggregationParam, DapMeasurement, DapVersion,
 };
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
@@ -269,7 +269,7 @@ async fn main() -> Result<()> {
                     &task_id,
                     &batch_selector,
                     collect_resp.report_count,
-                    &[],
+                    &DapAggregationParam::Empty,
                     collect_resp.encrypted_agg_shares.to_vec(),
                     version,
                 )

@@ -70,6 +70,8 @@ pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::{encode_base64url, Base64Encode};
+#[cfg(any(test, feature = "test-utils"))]
+use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
@@ -783,12 +785,47 @@ pub enum DapMeasurement {
 }
 
 /// An aggregation parameter.
+#[derive(Clone, Debug)]
 pub enum DapAggregationParam {
     Empty,
     #[cfg(any(test, feature = "test-utils"))]
-    Mastic {
-        paths: Vec<Vec<u8>>,
-    },
+    Mastic(Poplar1AggregationParam),
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl deepsize::DeepSizeOf for DapAggregationParam {
+    fn deep_size_of(&self) -> usize {
+        0
+    }
+
+    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
+        0
+    }
+}
+
+impl Encode for DapAggregationParam {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        let _ = bytes;
+        match self {
+            Self::Empty => Ok(()),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mastic(agg_param) => agg_param.encode(bytes),
+        }
+    }
+}
+
+impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
+    fn decode_with_param(
+        vdaf_config: &VdafConfig,
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        let _ = bytes;
+        match vdaf_config {
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Mastic { .. } => Ok(Self::Mastic(Poplar1AggregationParam::decode(bytes)?)),
+            _ => Ok(Self::Empty),
+        }
+    }
 }
 
 /// The aggregate result computed by the Collector.
@@ -1129,9 +1166,10 @@ pub struct DapResponse {
 }
 
 /// Status of a collect job.
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DapCollectJob {
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum DapCollectionJob {
     Done(Collection),
     Pending,
     Unknown,
