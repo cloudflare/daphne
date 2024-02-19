@@ -1,23 +1,6 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::ignored_unit_patterns)]
-#![allow(clippy::if_not_else)]
-#![allow(clippy::default_trait_access)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::inconsistent_struct_constructor)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::inline_always)]
-
 use daphne_worker::{initialize_tracing, DapWorkerMode};
 use tracing::info;
 use worker::{event, Env, Request, Response, Result};

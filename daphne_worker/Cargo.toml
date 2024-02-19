@@ -45,3 +45,6 @@ reqwest.workspace = true # used in doc tests
 
 [features]
 test-utils = ["daphne_service_utils/test-utils"]
+
+[lints]
+workspace = true

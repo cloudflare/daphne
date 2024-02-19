@@ -48,3 +48,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [features]
 test-utils = ["daphne/test-utils", "daphne_service_utils/test-utils"]
+
+[lints]
+workspace = true

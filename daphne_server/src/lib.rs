@@ -1,33 +1,8 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::ignored_unit_patterns)]
-#![allow(clippy::if_not_else)]
-#![allow(clippy::default_trait_access)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::inconsistent_struct_constructor)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::inline_always)]
-
 use daphne::{auth::BearerToken, DapError};
 use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics};
-// there is a bug in cargo where if a dependency is only used in tests/examples but not in the
-// library you get unused_crate_dependencies warnings when compiling the them.
-#[cfg(test)]
-mod silence_unused_crate_warning {
-    use clap as _;
-    use config as _;
-    use tracing_subscriber as _;
-}
 use serde::{Deserialize, Serialize};
 use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;

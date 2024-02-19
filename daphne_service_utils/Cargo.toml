@@ -36,3 +36,6 @@ capnpc = "0.18.1"
 [features]
 test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
 prometheus = ["dep:prometheus", "daphne/prometheus"]
+
+[lints]
+workspace = true

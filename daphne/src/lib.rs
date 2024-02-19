@@ -1,24 +1,6 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![warn(unused_crate_dependencies)]
-#![warn(rustdoc::broken_intra_doc_links)]
-#![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::if_not_else)]
-#![allow(clippy::default_trait_access)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::inconsistent_struct_constructor)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::inline_always)]
-
 //! This crate implements the core protocol logic for the Distributed Aggregation Protocol
 //! ([DAP](https://datatracker.ietf.org/doc/draft-ietf-ppm-dap/)) standard under development in the
 //! PPM working group of the IETF. See [`VdafConfig`] for a listing of supported
@@ -101,13 +83,6 @@ use std::{
     str::FromStr,
 };
 use url::Url;
-
-// there is a bug in cargo where if a dependency is only used in tests/examples but not in the
-// library you get unused_crate_dependencies warnings when compiling the them.
-#[cfg(test)]
-mod silence_unused_crate_warning {
-    use criterion as _;
-}
 
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
