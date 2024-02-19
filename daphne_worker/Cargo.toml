@@ -19,12 +19,11 @@ readme = "../README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-async-trait.workspace = true
 bincode.workspace = true
 chrono = { version = "0.4.33", default-features = false, features = ["clock", "wasmbind"] }
 daphne = { path = "../daphne", features = ["prometheus"] }
 daphne_service_utils = { path = "../daphne_service_utils", features = ["prometheus"] }
-futures.workspace = true
+futures = { workspace = true, optional = true }
 hex.workspace = true
 prio.workspace = true
 rand.workspace = true
@@ -44,7 +43,7 @@ paste.workspace = true
 reqwest.workspace = true # used in doc tests
 
 [features]
-test-utils = ["daphne_service_utils/test-utils"]
+test-utils = ["daphne_service_utils/test-utils", "dep:futures"]
 
 [lints]
 workspace = true
