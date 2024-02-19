@@ -14,6 +14,7 @@ pub mod test_route_types;
 // the generated code expects this module to be defined at the root of the library.
 mod durable_request_capnp {
     #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
     include!(concat!(
         env!("OUT_DIR"),
         "/src/durable_requests/durable_request_capnp.rs"

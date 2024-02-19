@@ -16,7 +16,7 @@ use url::Url;
 struct Config {
     service: DaphneServiceConfig,
     port: u16,
-    storage_proxy_config: StorageProxyConfig,
+    storage_proxy: StorageProxyConfig,
 }
 
 impl TryFrom<Args> for Config {
@@ -97,11 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let role = config.service.role;
     // Configure the application
-    let app = App::new(
-        config.storage_proxy_config,
-        daphne_service_metrics,
-        config.service,
-    )?;
+    let app = App::new(config.storage_proxy, daphne_service_metrics, config.service)?;
 
     // create the router that will handle the protocol's http requests
     let router = router::new(role, app);

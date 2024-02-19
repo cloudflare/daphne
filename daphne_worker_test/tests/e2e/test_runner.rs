@@ -84,15 +84,15 @@ impl TestRunner {
             DapVersion::Draft02 => "v02",
             DapVersion::DraftLatest => "v09",
         };
-        let mut leader_url = Url::parse(&format!("http://leader:8787/{}/", version_path)).unwrap();
-        let mut helper_url = Url::parse(&format!("http://helper:8788/{}/", version_path)).unwrap();
-        println!("leader_url = {}", leader_url);
+        let mut leader_url = Url::parse(&format!("http://leader:8787/{version_path}/")).unwrap();
+        let mut helper_url = Url::parse(&format!("http://helper:8788/{version_path}/")).unwrap();
+        println!("leader_url = {leader_url}");
         if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
                 leader_url.set_host(Some("127.0.0.1")).unwrap();
                 helper_url.set_host(Some("127.0.0.1")).unwrap();
             } else {
-                panic!("unrecognized value for DAP_DEPLOYMENT: '{}'", env);
+                panic!("unrecognized value for DAP_DEPLOYMENT: '{env}'");
             }
         };
 
@@ -103,7 +103,7 @@ impl TestRunner {
             version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
-            expiration: now + 604800, // one week from now
+            expiration: now + 604_800, // one week from now
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
@@ -115,9 +115,9 @@ impl TestRunner {
 
         // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
         let global_config = DapGlobalConfig {
-            max_batch_duration: 360000,
-            min_batch_interval_start: 259200,
-            max_batch_interval_end: 259200,
+            max_batch_duration: 360_000,
+            min_batch_interval_start: 259_200,
+            max_batch_interval_end: 259_200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
             allow_taskprov: true,
         };
@@ -262,7 +262,7 @@ impl TestRunner {
         t
     }
 
-    pub fn http_client(&self) -> reqwest::Client {
+    pub fn http_client() -> reqwest::Client {
         reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -277,7 +277,7 @@ impl TestRunner {
         }
     }
 
-    pub fn report_interval(&self, interval: &Interval) -> Range<u64> {
+    pub fn report_interval(interval: &Interval) -> Range<u64> {
         const REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: u64 = 300;
         // This is a portion of the interval which is guaranteed to be a valid report time
         // provided that the interval start time is valid.
@@ -296,7 +296,7 @@ impl TestRunner {
                 HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
                 HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap(),
             ],
-            _ => {
+            DapVersion::DraftLatest => {
                 let mut leader_hpke_config_list =
                     HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
                 let mut helper_hpke_config_list =
@@ -408,7 +408,7 @@ impl TestRunner {
         let got = problem_details.as_object().unwrap().get("type").unwrap();
         assert_eq!(
             got,
-            &format!("urn:ietf:params:ppm:dap:error:{}", expected_err_type)
+            &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}")
         );
     }
 
@@ -529,7 +529,7 @@ impl TestRunner {
         let got = problem_details.as_object().unwrap().get("type").unwrap();
         assert_eq!(
             got,
-            &format!("urn:ietf:params:ppm:dap:error:{}", expected_err_type)
+            &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}")
         );
     }
 
@@ -631,7 +631,7 @@ impl TestRunner {
         path: &str,
         data: &I,
     ) -> O {
-        let client = self.http_client();
+        let client = Self::http_client();
         let mut url = if is_leader {
             self.leader_url.clone()
         } else {
@@ -644,9 +644,11 @@ impl TestRunner {
             .send()
             .await
             .expect("request failed");
-        if resp.status() != 200 {
-            panic!("request to {} failed: response: {:?}", url, resp);
-        }
+        assert_eq!(
+            resp.status(),
+            200,
+            "request to {url} failed: response: {resp:?}"
+        );
         let t = resp.text().await.expect("failed to extract text");
         // This is needed so we can have tests that call this expecting nothing and have it work
         // for empty bodies.
@@ -685,13 +687,13 @@ impl TestRunner {
     }
 
     pub async fn internal_delete_all(&self, batch_interval: &Interval) {
-        let client = self.http_client();
+        let client = Self::http_client();
         post_internal_delete_all(&client, &self.leader_url, batch_interval).await;
         post_internal_delete_all(&client, &self.helper_url, batch_interval).await;
     }
 
     pub async fn internal_current_batch(&self, task_id: &TaskId) -> BatchId {
-        let client = self.http_client();
+        let client = Self::http_client();
         let mut url = self.leader_url.clone();
         url.set_path(&format!(
             "internal/current_batch/task/{}",
@@ -707,7 +709,7 @@ impl TestRunner {
             BatchId::try_from_base64url(batch_id_base64url)
                 .expect("Failed to parse URL-safe base64 batch ID")
         } else {
-            panic!("request to {} failed: response: {:?}", url, resp);
+            panic!("request to {url} failed: response: {resp:?}");
         }
     }
 
@@ -784,32 +786,27 @@ async fn get_raw_hpke_config(
         match req.send().await {
             Ok(resp) => {
                 if resp.status() == 200 {
-                    println!("{} is up.", svc);
+                    println!("{svc} is up.");
                     return resp.bytes().await.unwrap().to_vec();
-                } else {
-                    panic!(
-                        "request to {} failed: status = {}, body = {}",
-                        url,
-                        resp.status(),
-                        resp.text().await.unwrap()
-                    );
                 }
+                panic!(
+                    "request to {} failed: status = {}, body = {}",
+                    url,
+                    resp.status(),
+                    resp.text().await.unwrap()
+                );
             }
             Err(e) => {
                 println!(
-                    "[{:?}/{:?}] waiting {:?} for {} to be up: error: {:?}",
-                    elapsed_time, max_time_to_wait, time_to_wait, svc, e
+                    "[{elapsed_time:?}/{max_time_to_wait:?}] waiting {time_to_wait:?} for {svc} to be up: error: {e:?}"
                 );
                 elapsed_time += time_to_wait;
                 std::thread::sleep(time_to_wait);
             }
         };
     }
-    println!(
-        "error: timeout after {:?} waiting for {}",
-        elapsed_time, svc
-    );
-    panic!("{} at {} is down.", svc, url)
+    println!("error: timeout after {elapsed_time:?} waiting for {svc}");
+    panic!("{svc} at {url} is down.")
 }
 
 async fn post_internal_delete_all(
