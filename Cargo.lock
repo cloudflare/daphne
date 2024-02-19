@@ -827,6 +827,7 @@ dependencies = [
  "paste",
  "prio",
  "rand",
+ "reqwest",
  "ring",
  "serde",
  "serde-wasm-bindgen",

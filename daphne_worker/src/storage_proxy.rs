@@ -39,8 +39,6 @@
 //! binding used to create the [`DurableRequest`].
 //!
 //! ```
-//! # // hack so we don't need to depend on reqwest just for this example.
-//! # use reqwest_wasm as reqwest;
 //! use url::Url;
 //! use daphne_service_utils::durable_requests::{
 //!     DurableRequest,
