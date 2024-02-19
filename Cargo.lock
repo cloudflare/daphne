@@ -744,22 +744,18 @@ name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
  "assert_matches",
- "async-trait",
  "cap",
  "cfg-if",
  "console_error_panic_hook",
  "daphne",
  "daphne_service_utils",
  "daphne_worker",
- "getrandom",
  "hex",
  "hpke-rs",
  "paste",
  "prio",
- "prometheus",
  "rand",
  "reqwest",
- "ring",
  "serde",
  "serde_json",
  "tokio",
@@ -805,7 +801,6 @@ dependencies = [
  "capnpc",
  "daphne",
  "hex",
- "http",
  "prometheus",
  "ring",
  "serde",
@@ -817,7 +812,6 @@ dependencies = [
 name = "daphne_worker"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "bincode",
  "chrono",
  "daphne",
@@ -1087,10 +1081,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "190092ea657667030ac6a35e305e62fc4dd69fd98ac98631e5d3a2b1575a12b5"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi",
- "wasm-bindgen",
 ]
 
 [[package]]

@@ -58,3 +58,6 @@ prometheus = ["dep:prometheus"]
 [[bench]]
 name = "vdaf"
 harness = false
+
+[lints]
+workspace = true

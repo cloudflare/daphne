@@ -44,3 +44,6 @@ paste.workspace = true
 
 [features]
 test-utils = ["daphne_service_utils/test-utils"]
+
+[lints]
+workspace = true
