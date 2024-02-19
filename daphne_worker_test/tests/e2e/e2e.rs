@@ -53,12 +53,12 @@ async fn leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let prefix = if want_prefix {
         format!("/{}", version.as_ref())
     } else {
-        String::from("")
+        String::new()
     };
     let t = TestRunner::default_with_version(version).await;
     let res: InternalTestEndpointForTaskResult = t
         .leader_post_internal(
-            format!("{}/internal/test/endpoint_for_task", prefix).as_ref(),
+            format!("{prefix}/internal/test/endpoint_for_task").as_ref(),
             &json!({
                 "task_id": "blah blah ignored",
                 "role": "leader",
@@ -79,13 +79,13 @@ async fn leader_endpoint_for_task(version: DapVersion, want_prefix: bool) {
 }
 
 async fn leader_endpoint_for_task_unprefixed(version: DapVersion) {
-    leader_endpoint_for_task(version, false).await
+    leader_endpoint_for_task(version, false).await;
 }
 
 async_test_versions! { leader_endpoint_for_task_unprefixed }
 
 async fn leader_endpoint_for_task_prefixed(version: DapVersion) {
-    leader_endpoint_for_task(version, true).await
+    leader_endpoint_for_task(version, true).await;
 }
 
 async_test_versions! { leader_endpoint_for_task_prefixed }
@@ -94,12 +94,12 @@ async fn helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
     let prefix = if want_prefix {
         format!("/{}", version.as_ref())
     } else {
-        String::from("")
+        String::new()
     };
     let t = TestRunner::default_with_version(version).await;
     let res: InternalTestEndpointForTaskResult = t
         .helper_post_internal(
-            format!("{}/internal/test/endpoint_for_task", prefix).as_ref(),
+            format!("{prefix}/internal/test/endpoint_for_task").as_ref(),
             &json!({
                 "task_id": "blah blah ignored",
                 "role": "helper",
@@ -120,20 +120,20 @@ async fn helper_endpoint_for_task(version: DapVersion, want_prefix: bool) {
 }
 
 async fn helper_endpoint_for_task_unprefixed(version: DapVersion) {
-    helper_endpoint_for_task(version, false).await
+    helper_endpoint_for_task(version, false).await;
 }
 
 async_test_versions! { helper_endpoint_for_task_unprefixed }
 
 async fn helper_endpoint_for_task_prefixed(version: DapVersion) {
-    helper_endpoint_for_task(version, true).await
+    helper_endpoint_for_task(version, true).await;
 }
 
 async_test_versions! { helper_endpoint_for_task_prefixed }
 
 async fn leader_hpke_config(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     t.leader_get_raw_hpke_config(&client).await;
 }
 
@@ -141,7 +141,7 @@ async_test_versions! { leader_hpke_config }
 
 async fn helper_hpke_config(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     t.helper_get_raw_hpke_config(&client).await;
 }
 
@@ -149,7 +149,7 @@ async_test_versions! { helper_hpke_config }
 
 async fn hpke_configs_are_cached(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     // Get a set of HPKE configs from leader and helper.
     let hpke_config_list_0 = t.get_hpke_configs(version, &client).await;
     // Get another set of HPKE configs from leader and helper.
@@ -166,7 +166,7 @@ async_test_versions! { hpke_configs_are_cached }
 async fn leader_upload(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
 
@@ -352,7 +352,7 @@ async_test_versions! { leader_upload }
 async fn leader_upload_taskprov() {
     let version = DapVersion::Draft02;
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = "upload";
 
@@ -464,7 +464,7 @@ async fn internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let path = t.upload_path();
 
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     let report_sel = DaphneServiceReportSelector {
@@ -477,7 +477,7 @@ async fn internal_leader_process(version: DapVersion) {
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
     for _ in 0..report_sel.max_reports + 3 {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -524,7 +524,7 @@ async_test_versions! { internal_leader_process }
 // Test that all reports eventually get drained at minimum aggregation rate.
 async fn leader_process_min_agg_rate(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
@@ -532,7 +532,7 @@ async fn leader_process_min_agg_rate(version: DapVersion) {
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..7 {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -563,7 +563,7 @@ async fn leader_process_min_agg_rate(version: DapVersion) {
     for i in 0..7 {
         // Each round should process exactly one report.
         let agg_telem = t.internal_process(&client, &report_sel).await;
-        assert_eq!(agg_telem.reports_processed, 1, "round {} is empty", i);
+        assert_eq!(agg_telem.reports_processed, 1, "round {i} is empty");
     }
 
     let agg_telem = t.internal_process(&client, &report_sel).await;
@@ -576,7 +576,7 @@ async fn leader_collect_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
 
@@ -585,7 +585,7 @@ async fn leader_collect_ok(version: DapVersion) {
     let mut time_min = u64::MAX;
     let mut time_max = 0u64;
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         time_min = min(time_min, now);
         time_max = max(time_max, now);
         t.leader_put_expect_ok(
@@ -623,11 +623,11 @@ async fn leader_collect_ok(version: DapVersion) {
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
-    println!("collect_uri: {}", collect_uri);
+    println!("collect_uri: {collect_uri}");
 
     // Poll the collect URI before the CollectResp is ready.
     let resp = t.poll_collection_url(&client, &collect_uri).await;
-    assert_eq!(resp.status(), 202, "response: {:?}", resp);
+    assert_eq!(resp.status(), 202, "response: {resp:?}");
 
     // The reports are aggregated in the background.
     let agg_telem = t
@@ -676,7 +676,7 @@ async fn leader_collect_ok(version: DapVersion) {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(t.task_config.min_batch_size as u128)
+        DapAggregateResult::U128(u128::from(t.task_config.min_batch_size))
     );
 
     if version != DapVersion::Draft02 {
@@ -703,7 +703,7 @@ async fn leader_collect_ok(version: DapVersion) {
     // to avoid sharding ReportsProcessed by batch bucket, which is not feasilbe for fixed-size
     // tasks.
     //
-    //  let now = rng.gen_range(t.report_interval(&batch_interval));
+    //  let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
     //  t.leader_post_expect_abort(
     //      &client,
     //      None, // dap_auth_token
@@ -725,7 +725,7 @@ async_test_versions! { leader_collect_ok }
 // have been processed.
 async fn leader_collect_ok_interleaved(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
@@ -733,7 +733,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -795,14 +795,14 @@ async_test_versions! { leader_collect_ok_interleaved }
 async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size - 1 {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -838,7 +838,7 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
-    println!("collect_uri: {}", collect_uri);
+    println!("collect_uri: {collect_uri}");
 
     // The reports are aggregated in the background.
     let agg_telem = t
@@ -869,7 +869,7 @@ async_test_versions! { leader_collect_not_ready_min_batch_size }
 
 async fn leader_collect_abort_unknown_request(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
 
     // Poll collect URI for an unknown collect request.
     let fake_task_id = TaskId([0; 32]);
@@ -893,7 +893,7 @@ async_test_versions! { leader_collect_abort_unknown_request }
 
 async fn leader_collect_accept_global_config_max_batch_duration(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let batch_interval = Interval {
         start: t.task_config.quantized_time_lower_bound(t.now)
             - t.global_config.max_batch_duration / 2,
@@ -918,7 +918,7 @@ async_test_versions! { leader_collect_accept_global_config_max_batch_duration }
 
 async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let batch_interval = t.batch_interval();
     let path = &t.collect_path_for_task(&t.task_id);
 
@@ -998,14 +998,14 @@ async_test_versions! { leader_collect_abort_invalid_batch_interval }
 async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -1121,7 +1121,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         max_reports: 100,
     };
 
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     // Clients: Upload reports.
@@ -1181,11 +1181,11 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
-    println!("collect_uri: {}", collect_uri);
+    println!("collect_uri: {collect_uri}");
 
     // Collector: Poll the collect URI before the CollectResp is ready.
     let resp = t.poll_collection_url(&client, &collect_uri).await;
-    assert_eq!(resp.status(), 202, "response: {:?}", resp);
+    assert_eq!(resp.status(), 202, "response: {resp:?}");
 
     // ... Aggregators run processing loop.
     let agg_telem = t.internal_process(&client, &report_sel).await;
@@ -1218,7 +1218,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(t.task_config.min_batch_size as u128)
+        DapAggregateResult::U128(u128::from(t.task_config.min_batch_size))
     );
 
     // Collector: Poll the collect URI once more. Expect the response to be the same as the first,
@@ -1323,7 +1323,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
-    let client = t.http_client();
+    let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
     let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
@@ -1354,7 +1354,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                 DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
             },
         }];
-        let now = rng.gen_range(t.report_interval(&batch_interval));
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
             &path,
@@ -1394,11 +1394,11 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
-    println!("collect_uri: {}", collect_uri);
+    println!("collect_uri: {collect_uri}");
 
     // Poll the collect URI before the CollectResp is ready.
     let resp = t.poll_collection_url(&client, &collect_uri).await;
-    assert_eq!(resp.status(), 202, "response: {:?}", resp);
+    assert_eq!(resp.status(), 202, "response: {resp:?}");
 
     // The reports are aggregated in the background.
     let agg_telem = t

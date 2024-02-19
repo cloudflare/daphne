@@ -72,7 +72,7 @@ impl LeaderAggregationJobQueue {
         let mut req = match self.schedule_for_garbage_collection(req).await? {
             ControlFlow::Continue(req) => req,
             // This req was a GC request and as such we must return from this function.
-            ControlFlow::Break(_) => return Response::from_json(&()),
+            ControlFlow::Break(()) => return Response::from_json(&()),
         };
         match bindings::LeaderAggJobQueue::try_from_uri(&req.path()) {
             // Put a job (near) the back of the queue.

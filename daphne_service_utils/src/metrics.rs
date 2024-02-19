@@ -23,39 +23,39 @@ mod prometheus {
 
     impl DaphneMetrics for DaphnePromServiceMetrics {
         fn report_inc_by(&self, status: &str, val: u64) {
-            self.daphne.report_inc_by(status, val)
+            self.daphne.report_inc_by(status, val);
         }
 
         fn inbound_req_inc(&self, request_type: daphne::metrics::DaphneRequestType) {
-            self.daphne.inbound_req_inc(request_type)
+            self.daphne.inbound_req_inc(request_type);
         }
 
         fn agg_job_started_inc(&self) {
-            self.daphne.agg_job_started_inc()
+            self.daphne.agg_job_started_inc();
         }
 
         fn agg_job_completed_inc(&self) {
-            self.daphne.agg_job_completed_inc()
+            self.daphne.agg_job_completed_inc();
         }
 
         fn agg_job_observe_batch_size(&self, val: usize) {
-            self.daphne.agg_job_observe_batch_size(val)
+            self.daphne.agg_job_observe_batch_size(val);
         }
 
         fn agg_job_put_span_retry_inc(&self) {
-            self.daphne.agg_job_put_span_retry_inc()
+            self.daphne.agg_job_put_span_retry_inc();
         }
     }
 
     impl DaphneServiceMetrics for DaphnePromServiceMetrics {
         fn abort_count_inc(&self, label: &str) {
-            self.dap_abort_counter.with_label_values(&[label]).inc()
+            self.dap_abort_counter.with_label_values(&[label]).inc();
         }
 
         fn count_http_status_code(&self, status_code: u16) {
             self.http_status_code_counter
                 .with_label_values(&[&status_code.to_string()])
-                .inc()
+                .inc();
         }
 
         fn daphne(&self) -> &dyn DaphneMetrics {

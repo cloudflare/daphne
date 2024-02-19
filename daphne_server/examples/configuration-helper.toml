@@ -1,6 +1,6 @@
 port = 8788
 
-[storage_proxy_config]
+[storage_proxy]
 url = "http://localhost:4001"
 # SECRET: This is a test secret. In production, we'll generate and securely provision the token.
 auth_token = 'this-is-the-storage-proxy-auth-token'

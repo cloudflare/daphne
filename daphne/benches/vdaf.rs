@@ -14,6 +14,8 @@ use prio::{
 fn count_vec(c: &mut Criterion) {
     for dimension in [100, 1_000, 10_000, 100_000] {
         let nonce = [0; 16];
+        #[allow(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_sign_loss)]
         let chunk_length = (dimension as f64).sqrt() as usize; // asymptotically optimal
 
         // Prio2

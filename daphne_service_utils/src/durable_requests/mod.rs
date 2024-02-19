@@ -90,7 +90,7 @@ impl ObjectIdFrom {
     /// Assert that the object is being referenced by name.
     ///
     /// # Note
-    /// This is here for convenience of the daphne_worker and can be removed in the future.
+    /// This is here for convenience of the `daphne_worker` and can be removed in the future.
     pub fn unwrap_from_name(self) -> String {
         let Self::Name(name) = self else {
             panic!("unwraped a {self:?} when a Name was expected");
@@ -101,7 +101,7 @@ impl ObjectIdFrom {
     /// Assert that the object is being referenced by id.
     ///
     /// # Note
-    /// This is here for convenience of the daphne_worker and can be removed in the future.
+    /// This is here for convenience of the `daphne_worker` and can be removed in the future.
     pub fn unwrap_from_hex(self) -> String {
         let Self::Hex(name) = self else {
             panic!("unwraped a {self:?} when a Hex was expected");
@@ -112,7 +112,7 @@ impl ObjectIdFrom {
 
 /// A durable object request meant for the storage proxy.
 ///
-/// It's generic over the payload which can be any type that implements AsRef<[u8]>. This payload
+/// It's generic over the payload which can be any type that implements [`AsRef]`<[u8]>. This payload
 /// is what is ultimately passed to the durable object.
 #[derive(Debug, Clone)]
 pub struct DurableRequest<P: AsRef<[u8]>> {
@@ -232,7 +232,7 @@ impl<'s> TryFrom<&'s [u8]> for DurableRequest<&'s [u8]> {
             binding,
             id,
             retry,
-            body: &bytes[cursor.position() as usize..],
+            body: &bytes[cursor.position().try_into().unwrap_or(usize::MAX)..],
         })
     }
 }
@@ -241,6 +241,7 @@ impl<P> DurableRequest<P>
 where
     P: AsRef<[u8]>,
 {
+    #[must_use]
     pub fn with_retry(self) -> Self {
         Self {
             retry: true,

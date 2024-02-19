@@ -139,7 +139,7 @@ define_do_binding! {
         DeleteAll = "/internal/do/delete_all",
     }
 
-    fn name(_: ()) -> ObjectIdFrom {
+    fn name((): ()) -> ObjectIdFrom {
         ObjectIdFrom::Name(Self::NAME_STR.into())
     }
 }
