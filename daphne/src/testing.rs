@@ -28,7 +28,6 @@ use crate::{
     DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
     MetaAggregationJobId, VdafConfig,
 };
-use assert_matches::assert_matches;
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
 use prio::codec::Encode;
@@ -583,10 +582,224 @@ impl AuditLog for MockAuditLog {
 
 #[derive(Default)]
 pub struct MockLeaderMemory {
-    pub work_queue: VecDeque<WorkItem>,
-    pub pending_reports: HashMap<DapBatchBucket, VecDeque<Report>>,
-    pub coll_jobs: HashMap<CollectionJobId, DapCollectionJob>,
-    pub batch_queue: VecDeque<(BatchId, u64)>, // Batch ID, batch size
+    work_queue: VecDeque<WorkItem>,
+    per_task: HashMap<TaskId, MockLeaderMemoryPerTask>,
+}
+
+impl MockLeaderMemory {
+    pub fn delete_all(&mut self) {
+        self.work_queue.clear();
+        self.per_task.clear();
+    }
+
+    pub fn put_report(
+        &mut self,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        report: Report,
+    ) -> Result<(), DapError> {
+        let per_task = self.per_task.entry(*task_id).or_default();
+        let bucket = per_task.assign_report_to_bucket(task_config, &report);
+
+        // Store the report until a collection job is initialized for it. Note that, in a
+        // production Leader, it will usually be desirable to start aggregating reports immediately
+        // (if allowed by the VDAF).
+        per_task
+            .pending_reports
+            .entry(bucket)
+            .or_default()
+            .push_back(report);
+        Ok(())
+    }
+
+    pub fn current_batch(
+        &self,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+    ) -> std::result::Result<BatchId, DapError> {
+        if !matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+            return Err(DapError::Abort(DapAbort::BadRequest(
+                "tried to get current batch from non fixed-size task".into(),
+            )));
+        }
+
+        let Some(per_task) = self.per_task.get(task_id) else {
+            return Err(DapError::Abort(DapAbort::UnrecognizedTask));
+        };
+
+        per_task
+            .batch_queue
+            .front()
+            .map(|(batch_id, _report_count)| *batch_id)
+            .ok_or_else(|| DapError::Abort(DapAbort::BadRequest("empty batch queue".into())))
+    }
+
+    pub fn enqueue_work(&mut self, work_items: Vec<WorkItem>) -> Result<(), DapError> {
+        self.work_queue.extend(work_items);
+        Ok(())
+    }
+
+    pub fn dequeue_work(&mut self, num_items: usize) -> Result<Vec<WorkItem>, DapError> {
+        let mut work_items = Vec::with_capacity(num_items);
+
+        // Drain the work queue for each task, in an arbitrary order. Note that a production
+        // Leader would likely need to handle tasks in some priority order, e.g., drain the
+        // oldest tasks first.
+        let n = std::cmp::min(self.work_queue.len(), num_items);
+        work_items.extend(self.work_queue.drain(..n));
+        Ok(work_items)
+    }
+
+    pub fn init_collect_job(
+        &mut self,
+        task_id: &TaskId,
+        task_config: &DapTaskConfig,
+        coll_job_id: &Option<CollectionJobId>,
+        batch_sel: BatchSelector,
+        agg_param: DapAggregationParam,
+    ) -> Result<Url, DapError> {
+        let per_task = self.per_task.entry(*task_id).or_default();
+
+        // Construct the collection URI for this collection job.
+        let coll_job_id = (*coll_job_id).unwrap_or(CollectionJobId(thread_rng().gen()));
+        let coll_job_uri = task_config
+            .leader_url
+            .join(&format!(
+                "collect/task/{}/req/{}",
+                task_id.to_base64url(),
+                coll_job_id.to_base64url(),
+            ))
+            .map_err(|e| fatal_error!(err = ?e))?;
+
+        // Store the collection job in the pending state.
+        if per_task.coll_jobs.get(&coll_job_id).is_some() {
+            return Err(DapError::Abort(DapAbort::BadRequest(format!(
+                "tried to overwrite collection job {}",
+                coll_job_id.to_base64url()
+            ))));
+        }
+
+        per_task
+            .coll_jobs
+            .insert(coll_job_id, DapCollectionJob::Pending);
+
+        // Fill the work queue. Queue an aggregation job for each bucket of pending reports
+        // incident to the collection job.
+        for bucket in task_config.batch_span_for_sel(&batch_sel)? {
+            if let Some(reports) = per_task.pending_reports.remove(&bucket) {
+                self.work_queue.push_back(WorkItem::AggregationJob {
+                    task_id: *task_id,
+                    part_batch_sel: batch_sel.clone().into(),
+                    agg_param: agg_param.clone(),
+                    reports: reports.into(),
+                });
+            }
+
+            // The batch will be collected, so remove it from the batch queue.
+            if let DapBatchBucket::FixedSize { ref batch_id } = bucket {
+                per_task
+                    .batch_queue
+                    .retain(|(queued_batch_id, _batch_count)| batch_id != queued_batch_id);
+            }
+        }
+
+        // Queue processing of the collection job.
+        self.work_queue.push_back(WorkItem::CollectionJob {
+            task_id: *task_id,
+            coll_job_id,
+            batch_sel,
+            agg_param,
+        });
+
+        Ok(coll_job_uri)
+    }
+
+    pub fn poll_collect_job(
+        &self,
+        task_id: &TaskId,
+        coll_job_id: &CollectionJobId,
+    ) -> Result<DapCollectionJob, DapError> {
+        if let Some(per_task) = self.per_task.get(task_id) {
+            Ok(per_task
+                .coll_jobs
+                .get(coll_job_id)
+                .cloned()
+                .unwrap_or(DapCollectionJob::Unknown))
+        } else {
+            Err(DapError::Abort(DapAbort::UnrecognizedTask))
+        }
+    }
+
+    pub fn finish_collect_job(
+        &mut self,
+        task_id: &TaskId,
+        coll_job_id: &CollectionJobId,
+        collection: &Collection,
+    ) -> Result<(), DapError> {
+        let Some(per_task) = self.per_task.get_mut(task_id) else {
+            return Err(fatal_error!(err = "collect job not found for task_id", %task_id));
+        };
+
+        let Some(coll_job) = per_task.coll_jobs.get_mut(coll_job_id) else {
+            return Err(fatal_error!(err = "collect job not found for collect_id", %task_id))?;
+        };
+
+        match coll_job {
+            DapCollectionJob::Pending => {
+                // Mark collection job as complete.
+                *coll_job = DapCollectionJob::Done(collection.clone());
+                Ok(())
+            }
+            DapCollectionJob::Done(_) => Err(fatal_error!(
+                err = "tried to overwrite completed collection job"
+            )),
+            DapCollectionJob::Unknown => Err(fatal_error!(
+                err = "tried to overwrite collection job in unkonwn state"
+            )),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MockLeaderMemoryPerTask {
+    pending_reports: HashMap<DapBatchBucket, VecDeque<Report>>,
+    coll_jobs: HashMap<CollectionJobId, DapCollectionJob>,
+    batch_queue: VecDeque<(BatchId, u64)>, // Batch ID, batch size
+}
+
+impl MockLeaderMemoryPerTask {
+    fn assign_report_to_bucket(
+        &mut self,
+        task_config: &DapTaskConfig,
+        report: &Report,
+    ) -> DapBatchBucket {
+        let mut rng = thread_rng();
+        match task_config.query {
+            // For fixed-size queries, the bucket corresponds to a single batch.
+            DapQueryConfig::FixedSize { .. } => {
+                // Assign the report to the first unsaturated batch.
+                for (batch_id, report_count) in &mut self.batch_queue {
+                    if *report_count < task_config.min_batch_size {
+                        *report_count += 1;
+                        return DapBatchBucket::FixedSize {
+                            batch_id: *batch_id,
+                        };
+                    }
+                }
+
+                // No unsaturated batch exists, so create a new batch.
+                let batch_id = BatchId(rng.gen());
+                self.batch_queue.push_back((batch_id, 1));
+                DapBatchBucket::FixedSize { batch_id }
+            }
+
+            // For time-interval queries, the bucket is the batch window computed by truncating the
+            // report timestamp.
+            DapQueryConfig::TimeInterval => DapBatchBucket::TimeInterval {
+                batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
+            },
+        }
+    }
 }
 
 pub struct MockAggregator {
@@ -596,7 +809,7 @@ pub struct MockAggregator {
     pub leader_token: BearerToken,
     pub collector_token: Option<BearerToken>, // Not set by Helper
     pub(crate) report_store: Arc<Mutex<HashMap<TaskId, HashSet<ReportId>>>>,
-    pub(crate) leader_state_store: Arc<Mutex<HashMap<TaskId, MockLeaderMemory>>>,
+    pub(crate) leader_state_store: Arc<Mutex<MockLeaderMemory>>,
     pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
     pub(crate) agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucket, AggStore>>>>,
     pub collector_hpke_config: HpkeConfig,
@@ -729,76 +942,6 @@ impl MockAggregator {
         self.hpke_receiver_config_list
             .iter()
             .find(|&hpke_receiver_config| hpke_config_id == hpke_receiver_config.config.id)
-    }
-
-    /// Assign the report to a bucket.
-    async fn assign_report_to_bucket(
-        &self,
-        report: &Report,
-        task_id: &TaskId,
-    ) -> Option<DapBatchBucket> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await
-            .unwrap()
-            .expect("tasks: unrecognized task");
-
-        let mut rng = thread_rng();
-        match task_config.query {
-            // For fixed-size queries, the bucket corresponds to a single batch.
-            DapQueryConfig::FixedSize { .. } => {
-                let mut guard = self
-                    .leader_state_store
-                    .lock()
-                    .expect("leader_state_store: failed to lock");
-                let leader_state_store = guard.entry(*task_id).or_default();
-
-                // Assign the report to the first unsaturated batch.
-                for (batch_id, report_count) in &mut leader_state_store.batch_queue {
-                    if *report_count < task_config.min_batch_size {
-                        *report_count += 1;
-                        return Some(DapBatchBucket::FixedSize {
-                            batch_id: *batch_id,
-                        });
-                    }
-                }
-
-                // No unsaturated batch exists, so create a new batch.
-                let batch_id = BatchId(rng.gen());
-                leader_state_store.batch_queue.push_back((batch_id, 1));
-                Some(DapBatchBucket::FixedSize { batch_id })
-            }
-
-            // For time-interval queries, the bucket is the batch window computed by truncating the
-            // report timestamp.
-            DapQueryConfig::TimeInterval => Some(DapBatchBucket::TimeInterval {
-                batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
-            }),
-        }
-    }
-
-    /// Return the ID of the batch currently being filled with reports. Panics unless the task is
-    /// configured for fixed-size queries.
-    pub(crate) fn current_batch_id(
-        &self,
-        task_id: &TaskId,
-        task_config: &DapTaskConfig,
-    ) -> Option<BatchId> {
-        // Calling current_batch() is only well-defined for fixed-size tasks.
-        assert_matches!(task_config.query, DapQueryConfig::FixedSize { .. });
-
-        let guard = self
-            .leader_state_store
-            .lock()
-            .expect("leader_state_store: failed to lock");
-        let leader_state_store = guard
-            .get(task_id)
-            .expect("leader_state_store: unrecognized task");
-
-        leader_state_store
-            .batch_queue
-            .front()
-            .map(|(batch_id, _report_count)| *batch_id)
     }
 
     pub(crate) async fn unchecked_get_task_config(&self, task_id: &TaskId) -> DapTaskConfig {
@@ -1019,16 +1162,16 @@ impl DapAggregator<BearerToken> for MockAggregator {
     ) -> Result<bool, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
-            .await
-            .unwrap()
-            .expect("tasks: unrecognized task");
-        let guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let Some(agg_store) = guard.get(task_id) else {
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+
+        let agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        let Some(agg_store_per_task) = agg_store.get(task_id) else {
             return Ok(false);
         };
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get(&bucket) {
+            if let Some(inner_agg_store) = agg_store_per_task.get(&bucket) {
                 if inner_agg_store.collected {
                     return Ok(true);
                 }
@@ -1052,12 +1195,13 @@ impl DapAggregator<BearerToken> for MockAggregator {
         };
 
         let uploaded = {
-            let leader_state_guard = self
+            let leader_state = self
                 .leader_state_store
                 .lock()
                 .map_err(|e| fatal_error!(err = ?e))?;
             self.is_leader()
-                && leader_state_guard
+                && leader_state
+                    .per_task
                     .get(task_id)
                     .map(|leader_state| {
                         leader_state
@@ -1159,17 +1303,6 @@ impl DapAggregator<BearerToken> for MockAggregator {
         Ok(())
     }
 
-    async fn current_batch(&self, task_id: &TaskId) -> std::result::Result<BatchId, DapError> {
-        let task_config = self.unchecked_get_task_config(task_id).await;
-        if let Some(id) = self.current_batch_id(task_id, &task_config) {
-            Ok(id)
-        } else {
-            Err(DapError::Abort(DapAbort::BadRequest(
-                "unknown version".to_string(),
-            )))
-        }
-    }
-
     fn metrics(&self) -> &dyn DaphneMetrics {
         &self.metrics
     }
@@ -1242,60 +1375,43 @@ impl DapHelper<BearerToken> for MockAggregator {
 #[async_trait]
 impl DapLeader<BearerToken> for MockAggregator {
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
-        let bucket = self
-            .assign_report_to_bucket(report, task_id)
-            .await
-            .ok_or_else(|| fatal_error!(err = "could not determine batch for report"))?;
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
+        self.leader_state_store
+            .lock()
+            .map_err(|e| fatal_error!(err = ?e))?
+            .put_report(task_id, &task_config, report.clone())
+    }
+
+    async fn current_batch(&self, task_id: &TaskId) -> std::result::Result<BatchId, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or_else(|| fatal_error!(err = "task not found"))?;
+
+        self.leader_state_store
+            .lock()
+            .map_err(|e| fatal_error!(err = ?e))?
+            .current_batch(task_id, &task_config)
+    }
+
+    async fn dequeue_work(&self, num_items: usize) -> Result<Vec<WorkItem>, DapError> {
+        self.leader_state_store
+            .lock()
+            .map_err(|e| fatal_error!(err = ?e))?
+            .dequeue_work(num_items)
+    }
+
+    async fn enqueue_work(&self, work_items: Vec<WorkItem>) -> Result<(), DapError> {
         let mut leader_state = self
             .leader_state_store
             .lock()
             .map_err(|e| fatal_error!(err = ?e))?;
 
-        // Store the report until a collection job is initialized for it. Note that, in a
-        // production Leader, it will usually be desirable to start aggregating reports immediately
-        // (if allowed by the VDAF).
-        leader_state
-            .entry(*task_id)
-            .or_default()
-            .pending_reports
-            .entry(bucket)
-            .or_default()
-            .push_back(report.clone());
-        Ok(())
-    }
-
-    async fn dequeue_work(&self, num_items: usize) -> Result<Vec<WorkItem>, DapError> {
-        let mut leader_state_store = self
-            .leader_state_store
-            .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        let mut work_items = Vec::with_capacity(num_items);
-
-        // Drain the work queue for each task, in an arbitrary order. Note that a production
-        // Leader would likely need to handle tasks in some priority order, e.g., drain the
-        // oldest tasks first.
-        for (_task_id, leader_state) in leader_state_store.iter_mut() {
-            let n = std::cmp::min(leader_state.work_queue.len(), num_items - work_items.len());
-            work_items.extend(leader_state.work_queue.drain(..n));
-            if work_items.len() >= num_items {
-                break;
-            }
-        }
-
-        debug_assert!(work_items.len() <= num_items);
-        Ok(work_items)
-    }
-
-    async fn enqueue_work(&self, work_items: Vec<WorkItem>) -> Result<(), DapError> {
-        let mut leader_state_store = self
-            .leader_state_store
-            .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
         for work_item in work_items {
-            let leader_state = leader_state_store.entry(*work_item.task_id()).or_default();
             leader_state.work_queue.push_back(work_item);
         }
         Ok(())
@@ -1314,78 +1430,21 @@ impl DapLeader<BearerToken> for MockAggregator {
             .await?
             .ok_or_else(|| fatal_error!(err = "task not found"))?;
 
-        // Construct the collection URI for this collection job.
-        let coll_job_id = (*coll_job_id).unwrap_or(CollectionJobId(thread_rng().gen()));
-        let coll_job_uri = task_config
-            .leader_url
-            .join(&format!(
-                "collect/task/{}/req/{}",
-                task_id.to_base64url(),
-                coll_job_id.to_base64url(),
-            ))
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        let mut leader_state_guard = self
-            .leader_state_store
+        self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-        let leader_state = leader_state_guard.entry(*task_id).or_default();
-
-        // Store the collection job in the pending state.
-        if leader_state.coll_jobs.get(&coll_job_id).is_some() {
-            return Err(DapError::Abort(DapAbort::BadRequest(format!(
-                "tried to overwrite collection job {}",
-                coll_job_id.to_base64url()
-            ))));
-        }
-
-        leader_state
-            .coll_jobs
-            .insert(coll_job_id, DapCollectionJob::Pending);
-
-        // Fill the work queue. Queue an aggregation job for each bucket of pending reports
-        // incident to the collection job.
-        for bucket in task_config.batch_span_for_sel(&batch_sel)? {
-            if let Some(reports) = leader_state.pending_reports.remove(&bucket) {
-                leader_state.work_queue.push_back(WorkItem::AggregationJob {
-                    task_id: *task_id,
-                    part_batch_sel: batch_sel.clone().into(),
-                    agg_param: agg_param.clone(),
-                    reports: reports.into(),
-                });
-            }
-        }
-
-        // Queue processing of the collection job.
-        leader_state.work_queue.push_back(WorkItem::CollectionJob {
-            task_id: *task_id,
-            coll_job_id,
-            batch_sel,
-            agg_param,
-        });
-
-        Ok(coll_job_uri)
+            .map_err(|e| fatal_error!(err = ?e))?
+            .init_collect_job(task_id, &task_config, coll_job_id, batch_sel, agg_param)
     }
 
-    // Called to retrieve completed CollectResp at the request of Collector.
     async fn poll_collect_job(
         &self,
         task_id: &TaskId,
-        collect_id: &CollectionJobId,
+        coll_job_id: &CollectionJobId,
     ) -> Result<DapCollectionJob, DapError> {
-        let leader_state_store = self
-            .leader_state_store
+        self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        let leader_state = leader_state_store
-            .get(task_id)
-            .ok_or_else(|| fatal_error!(err = "collect job not found for task_id", %task_id))?;
-        Ok(leader_state
-            .coll_jobs
-            .get(collect_id)
-            .cloned()
-            .unwrap_or(DapCollectionJob::Unknown))
+            .map_err(|e| fatal_error!(err = ?e))?
+            .poll_collect_job(task_id, coll_job_id)
     }
 
     async fn finish_collect_job(
@@ -1394,32 +1453,10 @@ impl DapLeader<BearerToken> for MockAggregator {
         coll_job_id: &CollectionJobId,
         collection: &Collection,
     ) -> Result<(), DapError> {
-        let mut leader_state_store = self
-            .leader_state_store
+        self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        let leader_state = leader_state_store
-            .get_mut(task_id)
-            .ok_or_else(|| fatal_error!(err = "collect job not found for task_id", %task_id))?;
-        let coll_job = leader_state
-            .coll_jobs
-            .get_mut(coll_job_id)
-            .ok_or_else(|| fatal_error!(err = "collect job not found for collect_id", %task_id))?;
-
-        match coll_job {
-            DapCollectionJob::Pending => {
-                // Mark collect job as Processed.
-                *coll_job = DapCollectionJob::Done(collection.clone());
-                Ok(())
-            }
-            DapCollectionJob::Done(_) => Err(fatal_error!(
-                err = "tried to overwrite completed collection job"
-            )),
-            DapCollectionJob::Unknown => Err(fatal_error!(
-                err = "tried to overwrite collection job in unkonwn state"
-            )),
-        }
+            .map_err(|e| fatal_error!(err = ?e))?
+            .finish_collect_job(task_id, coll_job_id, collection)
     }
 
     async fn send_http_post(

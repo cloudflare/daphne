@@ -1,8 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne::{auth::BearerToken, DapError};
+use std::sync::Arc;
+
+use daphne::{auth::BearerToken, testing::MockLeaderMemory, DapError};
 use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics};
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;
@@ -70,6 +73,11 @@ pub struct App {
     cache: RwLock<kv::Cache>,
     metrics: Box<dyn DaphneServiceMetrics>,
     service_config: DaphneServiceConfig,
+
+    /// Volatile memory for the Leader, including the work queue, pending reports, and pending
+    /// colleciton requests. Note that in a production Leader, it is necessary to store this state
+    /// across requsets.
+    test_leader_state: Arc<Mutex<MockLeaderMemory>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,6 +109,7 @@ impl App {
             cache: Default::default(),
             metrics: Box::new(daphne_service_metrics),
             service_config,
+            test_leader_state: Default::default(),
         })
     }
 

@@ -3,7 +3,7 @@
 
 #![allow(unused_variables)]
 
-use std::{collections::HashMap, time::Instant};
+use std::time::Instant;
 
 use axum::{async_trait, http::Method};
 use daphne::{
@@ -11,36 +11,15 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
-    messages::{
-        Base64Encode, Collection, CollectionJobId, CollectionReq, PartialBatchSelector, Report,
-        TaskId, TransitionFailure,
-    },
-    roles::{DapAggregator, DapAuthorizedSender, DapLeader},
-    DapCollectJob, DapError, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+    messages::{BatchId, BatchSelector, Collection, CollectionJobId, Report, TaskId},
+    roles::{leader::WorkItem, DapAggregator, DapAuthorizedSender, DapLeader},
+    DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse, DapTaskConfig,
 };
-use daphne_service_utils::{
-    auth::DaphneAuth,
-    durable_requests::{
-        bindings::{self, BatchCount, CollectQueueRequest, PendingReport, ReportsPendingResult},
-        ObjectIdFrom,
-    },
-};
-use prio::codec::{ParameterizedDecode, ParameterizedEncode};
-use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use daphne_service_utils::auth::DaphneAuth;
+use tracing::{error, info};
 use url::Url;
 
 use crate::storage_proxy_connection::method_http_1_0_to_reqwest_0_11;
-
-/// Parameters used by the Leader to select a set of reports for aggregation.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DaphneReportSelector {
-    /// Maximum number of aggregation jobs to process at once.
-    pub max_agg_jobs: u64,
-
-    /// Maximum number of reports to drain for each aggregation job.
-    pub max_reports: u64,
-}
 
 #[async_trait]
 impl DapAuthorizedSender<DaphneAuth> for crate::App {
@@ -66,259 +45,80 @@ impl DapAuthorizedSender<DaphneAuth> for crate::App {
 
 #[async_trait]
 impl DapLeader<DaphneAuth> for crate::App {
-    type ReportSelector = DaphneReportSelector;
-
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
-        let task_id_hex = task_id.to_hex();
-        let version = task_config.as_ref().version;
-        let pending_report = PendingReport {
-            version,
-            task_id: *task_id,
-            report_hex: hex::encode(
-                report
-                    .get_encoded_with_param(&version)
-                    .map_err(DapError::encoding)?,
-            ),
-        };
-        let res: ReportsPendingResult = self
-            .durable()
-            .request(
-                bindings::ReportsPending::Put,
-                (
-                    task_config.as_ref(),
-                    &task_id_hex,
-                    &report.report_metadata.id,
-                    report.report_metadata.time,
-                    &self.service_config.report_shard_key,
-                    self.service_config.report_shard_count,
-                    self.service_config.report_storage_epoch_duration,
-                ),
-            )
-            .encode_bincode(pending_report)
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
 
-        match res {
-            ReportsPendingResult::Ok => Ok(()),
-            ReportsPendingResult::ErrReportExists => {
-                // NOTE This check for report replay is not definitive. It's possible for two
-                // reports with the same ID to appear in two different ReportsPending instances.
-                // The definitive check is performed by DapAggregator::check_early_reject(), which
-                // tracks all report IDs consumed for the task in ReportsProcessed. This check
-                // would be too expensive to do during the upload sub-protocol.
-                Err(DapError::Transition(TransitionFailure::ReportReplayed))
-            }
-        }
+        self.test_leader_state
+            .lock()
+            .await
+            .put_report(task_id, &task_config, report.clone())
     }
 
-    async fn get_reports(
-        &self,
-        report_sel: &Self::ReportSelector,
-    ) -> Result<HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>>, DapError> {
-        //// Read at most `report_sel.max_buckets` buckets from the agg job queue. The result is ordered
-        //// from oldest to newest.
-        ////
-        //// NOTE There is only one agg job queue for now (`queue_num == 0`). In the future, work
-        //// will be sharded across multiple queues.
-        let res: Vec<String> = self
-            .durable()
-            .request(bindings::LeaderAggJobQueue::Get, 0)
-            .encode_bincode(report_sel.max_agg_jobs)
-            .send()
+    async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+
+        self.test_leader_state
+            .lock()
             .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-        //// Drain at most `report_sel.max_reports` from each ReportsPending instance and group them
-        //// by task.
-        ////
-        //// TODO Figure out if we can safely handle each instance in parallel.
-        let mut reports_per_task: HashMap<TaskId, Vec<Report>> = HashMap::new();
-        for reports_pending_id_hex in res.into_iter().map(ObjectIdFrom::Hex) {
-            let reports_from_durable: Vec<PendingReport> = self
-                .durable()
-                .request_with_id(bindings::ReportsPending::Get, reports_pending_id_hex)
-                .encode_bincode(report_sel.max_reports)
-                .send()
-                .await
-                .map_err(|e| fatal_error!(err = ?e))?;
-
-            for pending_report in reports_from_durable {
-                let report_bytes = hex::decode(&pending_report.report_hex)
-                    .map_err(|e| DapAbort::from_hex_error(e, pending_report.task_id))?;
-
-                let version = self
-                    .get_task_config_for(&pending_report.task_id)
-                    .await?
-                    .ok_or(DapAbort::UnrecognizedTask)?
-                    .as_ref()
-                    .version;
-                let report = Report::get_decoded_with_param(&version, &report_bytes)
-                    .map_err(|e| DapAbort::from_codec_error(e, pending_report.task_id))?;
-                if let Some(reports) = reports_per_task.get_mut(&pending_report.task_id) {
-                    reports.push(report);
-                } else {
-                    reports_per_task.insert(pending_report.task_id, vec![report]);
-                }
-            }
-        }
-
-        let mut reports_per_task_part: HashMap<TaskId, HashMap<PartialBatchSelector, Vec<Report>>> =
-            HashMap::new();
-        for (task_id, mut reports) in reports_per_task {
-            let task_config = self
-                .get_task_config_for(&task_id)
-                .await
-                .map_err(|e| fatal_error!(err = ?e))?
-                .ok_or(DapAbort::UnrecognizedTask)?;
-            let task_id_hex = task_id.to_hex();
-            let reports_per_part = reports_per_task_part.entry(task_id).or_default();
-            match task_config.as_ref().query {
-                DapQueryConfig::TimeInterval => {
-                    reports_per_part.insert(PartialBatchSelector::TimeInterval, reports);
-                }
-                DapQueryConfig::FixedSize { .. } => {
-                    let num_unassigned = reports.len();
-                    let batch_assignments: Vec<BatchCount> = self
-                        .durable()
-                        .request(
-                            bindings::LeaderBatchQueue::Assign,
-                            (task_config.as_ref().version, &task_id_hex),
-                        )
-                        .encode_bincode((task_config.as_ref().min_batch_size, num_unassigned))
-                        .send()
-                        .await
-                        .map_err(|e| fatal_error!(err = ?e))?;
-                    for batch_count in batch_assignments {
-                        let BatchCount {
-                            batch_id,
-                            report_count,
-                        } = batch_count;
-                        reports_per_part.insert(
-                            PartialBatchSelector::FixedSizeByBatchId { batch_id },
-                            reports.drain(..report_count).collect(),
-                        );
-                    }
-                    if !reports.is_empty() {
-                        return Err(fatal_error!(
-                            err = "LeaderBatchQueue returned the wrong number of reports:",
-                            got = reports.len() + num_unassigned,
-                            want = num_unassigned,
-                        ));
-                    }
-                }
-            };
-        }
-
-        for (task_id, reports) in &reports_per_task_part {
-            let mut report_count = 0;
-            for reports in reports.values() {
-                report_count += reports.len();
-            }
-            debug!(
-                "got {} reports for task {}",
-                report_count,
-                task_id.to_base64url()
-            );
-        }
-        Ok(reports_per_task_part)
+            .current_batch(task_id, &task_config)
     }
 
     async fn init_collect_job(
         &self,
         task_id: &TaskId,
-        collect_job_id: &Option<CollectionJobId>,
-        collect_req: &CollectionReq,
+        coll_job_id: &Option<CollectionJobId>,
+        batch_sel: BatchSelector,
+        agg_param: DapAggregationParam,
     ) -> Result<url::Url, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask)?;
-        // Try to put the request into collection job queue. If the request is overlapping
-        // with past requests, then abort.
-        let collect_queue_req = CollectQueueRequest {
-            collect_req: collect_req.clone(),
-            task_id: *task_id,
-            collect_job_id: *collect_job_id,
-        };
-        let collect_id: CollectionJobId = self
-            .durable()
-            .request(bindings::LeaderColJobQueue::Put, 0)
-            .encode_bincode(collect_queue_req)
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-        debug!("assigned collect_id {collect_id}");
 
-        let url = task_config.as_ref().leader_url.clone();
-
-        // Note that we always return the draft02 URI, but the latest draft ignores it.
-        let collect_uri = url
-            .join(&format!(
-                "collect/task/{}/req/{}",
-                task_id.to_base64url(),
-                collect_id.to_base64url(),
-            ))
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        Ok(collect_uri)
+        self.test_leader_state.lock().await.init_collect_job(
+            task_id,
+            &task_config,
+            coll_job_id,
+            batch_sel,
+            agg_param,
+        )
     }
 
     async fn poll_collect_job(
         &self,
         task_id: &TaskId,
-        collect_id: &CollectionJobId,
-    ) -> Result<DapCollectJob, DapError> {
-        self.durable()
-            .request(bindings::LeaderColJobQueue::GetResult, 0)
-            .encode_bincode((&task_id, &collect_id))
-            .send()
+        coll_job_id: &CollectionJobId,
+    ) -> Result<DapCollectionJob, DapError> {
+        self.test_leader_state
+            .lock()
             .await
-            .map_err(|e| fatal_error!(err = ?e))
-    }
-
-    async fn get_pending_collect_jobs(
-        &self,
-    ) -> Result<Vec<(TaskId, CollectionJobId, CollectionReq)>, DapError> {
-        self.durable()
-            .request(bindings::LeaderColJobQueue::Get, 0)
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))
+            .poll_collect_job(task_id, coll_job_id)
     }
 
     async fn finish_collect_job(
         &self,
         task_id: &TaskId,
-        collect_id: &CollectionJobId,
-        collect_resp: &Collection,
+        coll_job_id: &CollectionJobId,
+        collection: &Collection,
     ) -> Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
-
-        if let PartialBatchSelector::FixedSizeByBatchId { batch_id } = &collect_resp.part_batch_sel
-        {
-            self.durable()
-                .request(
-                    bindings::LeaderBatchQueue::Remove,
-                    (task_config.as_ref().version, &task_id.to_hex()),
-                )
-                .encode_bincode(batch_id.to_hex())
-                .send()
-                .await
-                .map_err(|e| fatal_error!(err = ?e))?;
-        }
-        self.durable()
-            .request(bindings::LeaderColJobQueue::Finish, 0)
-            .encode_bincode((task_id, collect_id, collect_resp))
-            .send()
+        self.test_leader_state
+            .lock()
             .await
-            .map_err(|e| fatal_error!(err = ?e))
+            .finish_collect_job(task_id, coll_job_id, collection)
+    }
+
+    async fn dequeue_work(&self, num_items: usize) -> Result<Vec<WorkItem>, DapError> {
+        self.test_leader_state.lock().await.dequeue_work(num_items)
+    }
+
+    async fn enqueue_work(&self, items: Vec<WorkItem>) -> Result<(), DapError> {
+        self.test_leader_state.lock().await.enqueue_work(items)
     }
 
     async fn send_http_post(

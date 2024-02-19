@@ -102,8 +102,8 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;
 
-    /// Fixed-size tasks: Check whether the batch determined by the collect request would overlap
-    /// with a previous batch.
+    /// Check whether the batch determined by the collect request would overlap with a previously
+    /// collected batch.
     async fn is_batch_overlapping(
         &self,
         task_id: &TaskId,
@@ -149,9 +149,6 @@ pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError>;
-
-    /// Fixed-size tasks: Return the ID of the batch currently being filled.
-    async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Access the Prometheus metrics.
     fn metrics(&self) -> &dyn DaphneMetrics;

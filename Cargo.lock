@@ -744,6 +744,7 @@ name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
  "cap",
  "cfg-if",
  "console_error_panic_hook",

@@ -6,9 +6,8 @@
 pub mod taskprov;
 
 use crate::{
-    fatal_error,
     hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
-    DapError, DapVersion,
+    DapVersion,
 };
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use hpke_rs::HpkePublicKey;
@@ -522,20 +521,6 @@ impl Default for BatchSelector {
     }
 }
 
-impl TryFrom<Query> for BatchSelector {
-    type Error = DapError;
-
-    fn try_from(query: Query) -> Result<Self, DapError> {
-        match query {
-            Query::TimeInterval { batch_interval } => Ok(Self::TimeInterval { batch_interval }),
-            Query::FixedSizeByBatchId { batch_id } => Ok(Self::FixedSizeByBatchId { batch_id }),
-            Query::FixedSizeCurrentBatch => Err(fatal_error!(
-                err = "tried to make a BatchSelector from a FixedSizeCurrentBatch query",
-            )),
-        }
-    }
-}
-
 /// The `PrepareInit` message consisting of the report share and the Leader's initial prep share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrepareInit {
@@ -891,6 +876,20 @@ pub enum Query {
     TimeInterval { batch_interval: Interval },
     FixedSizeByBatchId { batch_id: BatchId },
     FixedSizeCurrentBatch,
+}
+
+impl Query {
+    pub(crate) fn into_batch_sel(self) -> Option<BatchSelector> {
+        match self {
+            Self::TimeInterval { batch_interval } => {
+                Some(BatchSelector::TimeInterval { batch_interval })
+            }
+            Self::FixedSizeByBatchId { batch_id } => {
+                Some(BatchSelector::FixedSizeByBatchId { batch_id })
+            }
+            Self::FixedSizeCurrentBatch => None,
+        }
+    }
 }
 
 impl From<BatchSelector> for Query {

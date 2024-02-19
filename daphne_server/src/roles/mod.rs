@@ -41,6 +41,8 @@ mod test_utils {
 
     impl crate::App {
         pub(crate) async fn internal_delete_all(&self) -> Result<(), DapError> {
+            self.test_leader_state.lock().await.delete_all();
+
             use daphne_service_utils::durable_requests::PURGE_STORAGE;
             *self.cache.write().await = Default::default();
 

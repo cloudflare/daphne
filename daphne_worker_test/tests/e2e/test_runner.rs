@@ -14,7 +14,6 @@ use daphne::{
     vdaf::{Prio3Config, VdafConfig},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
 };
-use daphne_service_utils::DaphneServiceReportSelector;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
@@ -601,18 +600,13 @@ impl TestRunner {
             .await
     }
 
-    pub async fn internal_process(
-        &self,
-        client: &reqwest::Client,
-        report_sel: &DaphneServiceReportSelector,
-    ) -> DapLeaderProcessTelemetry {
+    pub async fn internal_process(&self, client: &reqwest::Client) -> DapLeaderProcessTelemetry {
         // Replace path "/v09" with "/internal/process".
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
 
         let resp = client
             .post(url.as_str())
-            .json(&report_sel)
             .send()
             .await
             .expect("request failed");

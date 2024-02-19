@@ -20,7 +20,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 async-trait.workspace = true
-assert_matches = { workspace = true, optional = true }
 base64.workspace = true
 deepsize = { workspace = true, optional = true }
 futures.workspace = true
@@ -51,7 +50,7 @@ regex.workspace = true
 tokio.workspace = true
 
 [features]
-test-utils = ["dep:assert_matches", "dep:deepsize", "dep:prometheus"]
+test-utils = ["dep:deepsize", "dep:prometheus"]
 default = []
 prometheus = ["dep:prometheus"]
 

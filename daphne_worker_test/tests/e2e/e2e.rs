@@ -14,11 +14,10 @@ use daphne::{
         Report, ReportId, ReportMetadata, TaskId,
     },
     taskprov::compute_task_id,
-    DapAggregateResult, DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters,
-    DapVersion,
+    DapAggregateResult, DapAggregationParam, DapMeasurement, DapQueryConfig, DapTaskConfig,
+    DapTaskParameters, DapVersion,
 };
-use daphne_service_utils::DaphneServiceReportSelector;
-use prio::codec::{ParameterizedDecode, ParameterizedEncode};
+use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -188,18 +187,6 @@ async fn leader_upload(version: DapVersion) {
         DapMediaType::Report,
         None,
         report.get_encoded_with_param(&version).unwrap(),
-    )
-    .await;
-
-    // Try uploading the same report a second time (expect failure due to repeated ID.
-    t.leader_put_expect_abort(
-        &client,
-        None, // dap_auth_token
-        &path,
-        DapMediaType::Report,
-        report.get_encoded_with_param(&version).unwrap(),
-        400,
-        "reportRejected",
     )
     .await;
 
@@ -463,20 +450,13 @@ async fn leader_upload_taskprov() {
 async fn internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let path = t.upload_path();
-
     let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
-
-    let report_sel = DaphneServiceReportSelector {
-        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-        max_reports: t.task_config.min_batch_size,
-    };
-
     let batch_interval = t.batch_interval();
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
-    for _ in 0..report_sel.max_reports + 3 {
+    for _ in 0..t.task_config.min_batch_size + 3 {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             &client,
@@ -499,78 +479,45 @@ async fn internal_leader_process(version: DapVersion) {
         .await;
     }
 
-    let agg_telem = t.internal_process(&client, &report_sel).await;
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
+        query: Query::TimeInterval {
+            batch_interval: batch_interval.clone(),
+        },
+        agg_param: DapAggregationParam::Empty.get_encoded().unwrap(),
+    };
+    let _collect_uri = t
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
+        .await;
+
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(
         agg_telem.reports_processed,
-        report_sel.max_reports + 3,
+        t.task_config.min_batch_size + 3,
         "reports processed"
     );
     assert_eq!(
         agg_telem.reports_aggregated,
-        report_sel.max_reports + 3,
+        t.task_config.min_batch_size + 3,
         "reports aggregated"
     );
-    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
+    assert_eq!(
+        agg_telem.reports_collected,
+        t.task_config.min_batch_size + 3,
+        "reports collected"
+    );
 
     // There should be nothing left to aggregate.
-    let agg_telem = t.internal_process(&client, &report_sel).await;
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(agg_telem.reports_processed, 0, "reports processed");
     assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
 async_test_versions! { internal_leader_process }
-
-// Test that all reports eventually get drained at minimum aggregation rate.
-async fn leader_process_min_agg_rate(version: DapVersion) {
-    let t = TestRunner::default_with_version(version).await;
-    let client = TestRunner::http_client();
-    let batch_interval = t.batch_interval();
-    let hpke_config_list = t.get_hpke_configs(version, &client).await;
-    let path = t.upload_path();
-
-    // The reports are uploaded in the background.
-    let mut rng = thread_rng();
-    for _ in 0..7 {
-        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
-            &client,
-            &path,
-            DapMediaType::Report,
-            None,
-            t.task_config
-                .vdaf
-                .produce_report(
-                    &hpke_config_list,
-                    now,
-                    &t.task_id,
-                    DapMeasurement::U64(1),
-                    version,
-                )
-                .unwrap()
-                .get_encoded_with_param(&version)
-                .unwrap(),
-        )
-        .await;
-    }
-
-    // One bucket and one report/bucket equal an aggregation rate of one report.
-    let report_sel = DaphneServiceReportSelector {
-        max_agg_jobs: 1,
-        max_reports: 1,
-    };
-
-    for i in 0..7 {
-        // Each round should process exactly one report.
-        let agg_telem = t.internal_process(&client, &report_sel).await;
-        assert_eq!(agg_telem.reports_processed, 1, "round {i} is empty");
-    }
-
-    let agg_telem = t.internal_process(&client, &report_sel).await;
-    assert_eq!(agg_telem.reports_processed, 0, "reports processed");
-}
-
-async_test_versions! { leader_process_min_agg_rate }
 
 async fn leader_collect_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
@@ -610,12 +557,13 @@ async fn leader_collect_ok(version: DapVersion) {
     }
 
     // Get the collect URI.
+    let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
         draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
-        agg_param: Vec::new(),
+        agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
         .leader_post_collect(
@@ -630,15 +578,7 @@ async fn leader_collect_ok(version: DapVersion) {
     assert_eq!(resp.status(), 202, "response: {resp:?}");
 
     // The reports are aggregated in the background.
-    let agg_telem = t
-        .internal_process(
-            &client,
-            &DaphneServiceReportSelector {
-                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-                max_reports: 100,
-            },
-        )
-        .await;
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(
         agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
@@ -668,7 +608,7 @@ async fn leader_collect_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
-            &collect_req.agg_param,
+            &agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
@@ -730,7 +670,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
     let path = t.upload_path();
 
-    // The reports are uploaded in the background.
+    // The reports are uploaded ...
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
@@ -755,19 +695,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
         .await;
     }
 
-    let report_sel = DaphneServiceReportSelector {
-        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-        max_reports: 100,
-    };
-
-    // All reports for the task get processed ...
-    let agg_telem = t.internal_process(&client, &report_sel).await;
-    assert_eq!(
-        agg_telem.reports_processed, t.task_config.min_batch_size,
-        "reports processed"
-    );
-
-    // ... then the collect request is issued ...
+    // ... the result is requested ...
     let collect_req = CollectionReq {
         draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
@@ -782,8 +710,12 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
         )
         .await;
 
-    // ... then the collect job gets completed.
-    let agg_telem = t.internal_process(&client, &report_sel).await;
+    // ... then reports are aggregated and the result produced.
+    let agg_telem = t.internal_process(&client).await;
+    assert_eq!(
+        agg_telem.reports_processed, t.task_config.min_batch_size,
+        "reports processed"
+    );
     assert_eq!(
         agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
@@ -841,15 +773,7 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
     println!("collect_uri: {collect_uri}");
 
     // The reports are aggregated in the background.
-    let agg_telem = t
-        .internal_process(
-            &client,
-            &DaphneServiceReportSelector {
-                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-                max_reports: 100,
-            },
-        )
-        .await;
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(
         agg_telem.reports_processed,
         t.task_config.min_batch_size - 1
@@ -1043,15 +967,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         .await;
 
     // The reports are aggregated in the background.
-    let agg_telem = t
-        .internal_process(
-            &client,
-            &DaphneServiceReportSelector {
-                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-                max_reports: 100,
-            },
-        )
-        .await;
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(
         agg_telem.reports_processed, t.task_config.min_batch_size,
         "reports processed"
@@ -1108,19 +1024,11 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
 
 async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
-async fn fixed_size(version: DapVersion, use_current: bool) {
-    if version == DapVersion::Draft02 && use_current {
-        // draft02 compatibility: The "current batch" isn't a feature in draft02, but is in the
-        // latest version.
-        return;
-    }
+#[tokio::test]
+async fn fixed_size() {
+    let version = DapVersion::DraftLatest;
     let t = TestRunner::fixed_size(version).await;
     let path = t.upload_path();
-    let report_sel = DaphneServiceReportSelector {
-        max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-        max_reports: 100,
-    };
-
     let client = TestRunner::http_client();
     let hpke_config_list = t.get_hpke_configs(version, &client).await;
 
@@ -1147,33 +1055,18 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         .await;
     }
 
-    // ... Aggregators run processing loop.
-    let agg_telem = t.internal_process(&client, &report_sel).await;
-    assert_eq!(
-        agg_telem.reports_processed, t.task_config.min_batch_size,
-        "reports processed"
-    );
-    assert_eq!(
-        agg_telem.reports_aggregated, t.task_config.min_batch_size,
-        "reports aggregated"
-    );
-    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
-
     // Get the oldest, not-yet-collected batch ID.
-    //
-    // TODO spec: Decide whether to formalize this (cf.
-    // https://github.com/ietf-wg-ppm/draft-ietf-ppm-dap/pull/313).
     let batch_id = t.internal_current_batch(&t.task_id).await;
 
     // Collector: Get the collect URI.
+    let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
         draft02_task_id: t.collect_task_id_field(),
-        query: if use_current {
-            Query::FixedSizeCurrentBatch
-        } else {
-            Query::FixedSizeByBatchId { batch_id }
+        query: match version {
+            DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
+            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
         },
-        agg_param: Vec::new(),
+        agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
         .leader_post_collect(
@@ -1187,10 +1080,16 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
     let resp = t.poll_collection_url(&client, &collect_uri).await;
     assert_eq!(resp.status(), 202, "response: {resp:?}");
 
-    // ... Aggregators run processing loop.
-    let agg_telem = t.internal_process(&client, &report_sel).await;
-    assert_eq!(agg_telem.reports_processed, 0, "reports processed");
-    assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
+    // Aggregators run processing loop.
+    let agg_telem = t.internal_process(&client).await;
+    assert_eq!(
+        agg_telem.reports_processed, t.task_config.min_batch_size,
+        "reports processed"
+    );
+    assert_eq!(
+        agg_telem.reports_aggregated, t.task_config.min_batch_size,
+        "reports aggregated"
+    );
     assert_eq!(
         agg_telem.reports_collected, t.task_config.min_batch_size,
         "reports collected"
@@ -1210,7 +1109,7 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
             &t.task_id,
             &BatchSelector::FixedSizeByBatchId { batch_id },
             collection.report_count,
-            &collect_req.agg_param,
+            &agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
@@ -1253,17 +1152,35 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         .await;
     }
 
-    // ... Aggregators run processing loop.
-    let agg_telem = t.internal_process(&client, &report_sel).await;
-    assert_eq!(agg_telem.reports_processed, 2, "reports processed");
-    assert_eq!(agg_telem.reports_aggregated, 2, "reports aggregated");
-    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
-
     // Get the oldest, not-yet-collected batch ID. This should be different than the one we got
     // before, since that batch was collected.
     let prev_batch_id = batch_id;
     let batch_id = t.internal_current_batch(&t.task_id).await;
     assert_ne!(batch_id, prev_batch_id);
+
+    // Collector: Get the collect URI.
+    let agg_param = DapAggregationParam::Empty;
+    let collect_req = CollectionReq {
+        draft02_task_id: t.collect_task_id_field(),
+        query: match version {
+            DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
+            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+        },
+        agg_param: agg_param.get_encoded().unwrap(),
+    };
+    let collect_uri = t
+        .leader_post_collect(
+            &client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
+        .await;
+    println!("collect_uri: {}", collect_uri);
+
+    // Aggregators run processing loop.
+    let agg_telem = t.internal_process(&client).await;
+    assert_eq!(agg_telem.reports_processed, 2, "reports processed");
+    assert_eq!(agg_telem.reports_aggregated, 2, "reports aggregated");
+    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
     // Collector: Try CollectReq with out-dated batch ID.
     if t.version == DapVersion::Draft02 {
@@ -1306,18 +1223,6 @@ async fn fixed_size(version: DapVersion, use_current: bool) {
         .await;
     }
 }
-
-async fn fixed_size_no_current(version: DapVersion) {
-    fixed_size(version, true).await;
-}
-
-async_test_versions! { fixed_size_no_current }
-
-async fn fixed_size_current(version: DapVersion) {
-    fixed_size(version, true).await;
-}
-
-async_test_versions! { fixed_size_current }
 
 async fn leader_collect_taskprov_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
@@ -1377,13 +1282,15 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         .await;
     }
 
+    let agg_param = DapAggregationParam::Empty;
+
     // Get the collect URI.
     let collect_req = CollectionReq {
         draft02_task_id: Some(task_id),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
-        agg_param: Vec::new(),
+        agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
         .leader_post_collect_using_token(
@@ -1401,15 +1308,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     assert_eq!(resp.status(), 202, "response: {resp:?}");
 
     // The reports are aggregated in the background.
-    let agg_telem = t
-        .internal_process(
-            &client,
-            &DaphneServiceReportSelector {
-                max_agg_jobs: 100, // Needs to be sufficiently large to touch each bucket.
-                max_reports: 100,
-            },
-        )
-        .await;
+    let agg_telem = t.internal_process(&client).await;
     assert_eq!(
         agg_telem.reports_processed, task_config.min_batch_size,
         "reports processed"
@@ -1438,7 +1337,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                 batch_interval: batch_interval.clone(),
             },
             collection.report_count,
-            &collect_req.agg_param,
+            &agg_param,
             collection.encrypted_agg_shares.to_vec(),
             version,
         )

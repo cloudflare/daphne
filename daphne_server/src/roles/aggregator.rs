@@ -16,15 +16,13 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
-    DapAggregateShare, DapAggregateSpan, DapBatchBucket, DapError, DapGlobalConfig, DapQueryConfig,
-    DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportState, EarlyReportStateConsumed,
-    EarlyReportStateInitialized,
+    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
+    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportState,
+    EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
-    durable_requests::bindings::{
-        self, AggregateStoreMergeReq, AggregateStoreMergeResp, LeaderBatchQueueResult,
-    },
+    durable_requests::bindings::{self, AggregateStoreMergeReq, AggregateStoreMergeResp},
 };
 use futures::{future::try_join_all, StreamExt};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -344,35 +342,6 @@ impl DapAggregator<DaphneAuth> for crate::App {
         Ok(!agg_share.empty())
     }
 
-    async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-
-        if !matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
-            return Err(fatal_error!(err = "query type mismatch"));
-        }
-
-        let res: LeaderBatchQueueResult = self
-            .durable()
-            .request(
-                bindings::LeaderBatchQueue::Current,
-                (task_config.as_ref().version, &task_id.to_hex()),
-            )
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        match res {
-            LeaderBatchQueueResult::Ok(batch_id) => Ok(batch_id),
-
-            // TODO Return 400 Bad Request (with problem detail "empty batch queue") here instead
-            // 500 Internal Error
-            LeaderBatchQueueResult::EmptyQueue => Err(fatal_error!(err = "empty batch queue")),
-        }
-    }
-
     fn metrics(&self) -> &dyn DaphneMetrics {
         self.metrics.daphne()
     }
@@ -394,6 +363,7 @@ impl DapReportInitializer for crate::App {
         _task_id: &TaskId,
         task_config: &DapTaskConfig,
         _part_batch_sel: &PartialBatchSelector,
+        agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let valid_report_range = self.valid_report_time_range();
@@ -401,6 +371,7 @@ impl DapReportInitializer for crate::App {
         tokio::task::spawn_blocking({
             let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
+            let agg_param = agg_param.clone();
             move || {
                 consumed_reports
                     .into_par_iter()
@@ -421,6 +392,7 @@ impl DapReportInitializer for crate::App {
                                 is_leader,
                                 &vdaf_verify_key,
                                 &vdaf_config,
+                                &agg_param,
                                 consumed_report,
                             )?
                         };
