@@ -30,6 +30,8 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Testing
         run: cargo test --all-targets
+      - name: Doc Testing
+        run: cargo test --doc
   e2e:
     runs-on: ubuntu-latest
     steps:
