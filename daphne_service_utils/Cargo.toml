@@ -19,7 +19,6 @@ readme = "../README.md"
 capnp.workspace = true
 daphne = { path = "../daphne", default-features = false }
 hex.workspace = true
-http.workspace = true
 prometheus = { workspace = true, optional = true }
 ring.workspace = true
 serde.workspace = true
