@@ -37,6 +37,7 @@ worker.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+async-trait.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
 daphne_service_utils = { path = "../daphne_service_utils" }
 hex.workspace = true

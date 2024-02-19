@@ -14,11 +14,10 @@ use axum::{
 use daphne::{
     hpke::HpkeReceiverConfig,
     messages::{Base64Encode, TaskId},
-    roles::{leader, DapAggregator, DapLeader},
+    roles::{leader, DapLeader},
     DapVersion,
 };
 use daphne_service_utils::{
-    auth::DaphneAuth,
     test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
     DapRole,
 };
@@ -66,11 +65,8 @@ where
 }
 
 #[tracing::instrument(skip(app))]
-async fn leader_process(
-    State(app): State<Arc<App>>,
-    Json(report_sel): Json<<App as DapLeader<DaphneAuth>>::ReportSelector>,
-) -> Response {
-    match leader::process(&*app, &report_sel, "unspecified-daphne-worker-host").await {
+async fn leader_process(State(app): State<Arc<App>>) -> Response {
+    match leader::process(&*app, "unspecified-daphne-worker-host", 100).await {
         Ok(telem) => (StatusCode::OK, Json(telem)).into_response(),
         Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }

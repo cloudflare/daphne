@@ -104,10 +104,7 @@ async fn get_collect_uri<A>(
 where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
 {
-    match (
-        leader::handle_collect_job_req(&*app, &req).await,
-        req.version,
-    ) {
+    match (leader::handle_coll_job_req(&*app, &req).await, req.version) {
         (Ok(uri), DapVersion::Draft02) => (
             StatusCode::SEE_OTHER,
             AppendHeaders([(header::LOCATION, uri.as_str())]),
@@ -141,7 +138,7 @@ where
         Err(e) => return AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     };
     match app.poll_collect_job(task_id, collect_id).await {
-        Ok(daphne::DapCollectJob::Done(collect_resp)) => AxumDapResponse::new_success(
+        Ok(daphne::DapCollectionJob::Done(collect_resp)) => AxumDapResponse::new_success(
             daphne::DapResponse {
                 version: req.version,
                 media_type: DapMediaType::Collection,
@@ -159,8 +156,8 @@ where
             app.server_metrics(),
         )
         .into_response(),
-        Ok(daphne::DapCollectJob::Pending) => StatusCode::ACCEPTED.into_response(),
-        Ok(daphne::DapCollectJob::Unknown) => AxumDapResponse::new_error(
+        Ok(daphne::DapCollectionJob::Pending) => StatusCode::ACCEPTED.into_response(),
+        Ok(daphne::DapCollectionJob::Unknown) => AxumDapResponse::new_error(
             DapAbort::BadRequest("unknown collection job id".into()),
             app.server_metrics(),
         )

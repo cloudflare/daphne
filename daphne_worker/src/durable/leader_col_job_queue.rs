@@ -9,7 +9,7 @@ use crate::{
 };
 use daphne::{
     messages::{Base64Encode, Collection, CollectionJobId, CollectionReq, TaskId},
-    DapCollectJob, DapVersion,
+    DapCollectionJob, DapVersion,
 };
 use daphne_service_utils::{
     config::DaphneWorkerDeployment,
@@ -218,11 +218,11 @@ impl LeaderCollectionJobQueue {
                     if pending {
                         self.state.storage().delete(&pending_key).await?;
                     }
-                    Response::from_json(&DapCollectJob::Done(collect_resp))
+                    Response::from_json(&DapCollectionJob::Done(collect_resp))
                 } else if pending {
-                    Response::from_json(&DapCollectJob::Pending)
+                    Response::from_json(&DapCollectionJob::Pending)
                 } else {
-                    Response::from_json(&DapCollectJob::Unknown)
+                    Response::from_json(&DapCollectionJob::Unknown)
                 }
             }
 

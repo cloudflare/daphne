@@ -18,9 +18,9 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        AggregateShare, AggregateShareReq, AggregationJobResp, Base64Encode, BatchSelector,
-        Collection, CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report,
-        TaskId,
+        AggregateShare, AggregateShareReq, AggregationJobResp, Base64Encode, BatchId,
+        BatchSelector, Collection, CollectionJobId, CollectionReq, Interval, PartialBatchSelector,
+        Query, Report, TaskId,
     },
     metrics::DaphneRequestType,
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderAggregationJobTransition,
@@ -131,6 +131,9 @@ impl WorkItem {
 pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError>;
+
+    /// Fixed-size tasks: Return the ID of the batch currently being filled.
+    async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Initialize a collection job.
     async fn init_collect_job(
@@ -620,6 +623,7 @@ pub async fn process<S: Sync, A: DapLeader<S>>(
                 agg_param,
                 reports,
             } => {
+                telem.reports_processed += u64::try_from(reports.len()).unwrap();
                 let agg_jobs_per_task: &mut Vec<_> = agg_jobs.entry(task_id).or_default();
                 agg_jobs_per_task.push(async move {
                     let task_config = aggregator
