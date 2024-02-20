@@ -43,12 +43,7 @@ impl GarbageCollector {
             Some(bindings::GarbageCollector::Put) => {
                 let durable_ref: DurableReference = req_parse(&mut req).await?;
                 match durable_ref.binding.as_ref() {
-                    bindings::ReportsPending::BINDING
-                    | bindings::AggregateStore::BINDING
-                    | bindings::LeaderAggJobQueue::BINDING
-                    | bindings::LeaderBatchQueue::BINDING
-                    | bindings::LeaderColJobQueue::BINDING
-                    | bindings::HelperState::BINDING => (),
+                    bindings::AggregateStore::BINDING | bindings::HelperState::BINDING => (),
                     s => {
                         let message = format!("GarbageCollector: unrecognized binding: {s}");
                         error!("{}", message);

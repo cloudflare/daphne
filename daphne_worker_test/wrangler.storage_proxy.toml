@@ -17,20 +17,14 @@ fallthrough = false
 [vars]
 DAPHNE_SERVER_AUTH_TOKEN = "this-is-the-storage-proxy-auth-token" # SECRET
 DAP_WORKER_MODE = "storage-proxy"
-DAP_REPORT_STORAGE_MAX_FUTURE_TIME_SKEW = "300"
 DAP_DEPLOYMENT = "dev"
 DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
-DAP_COLLECTION_JOB_ID_KEY = "12da249b0e3b1a9b5936d6ff6cdd2fa09964e2e11f5450e04eef11dc5e64daf1" # SECRET
 
 [durable_objects]
 bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
     { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
     { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
-    { name = "DAP_LEADER_AGG_JOB_QUEUE", class_name = "LeaderAggregationJobQueue" },
-    { name = "DAP_LEADER_BATCH_QUEUE", class_name = "LeaderBatchQueue" },
-    { name = "DAP_LEADER_COL_JOB_QUEUE", class_name = "LeaderCollectionJobQueue" },
-    { name = "DAP_REPORTS_PENDING", class_name = "ReportsPending" },
 ]
 
 
@@ -57,10 +51,6 @@ preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
 tag = "v1"
 new_classes = [
     "AggregateStore",
-    "HelperStateStore",
-    "LeaderAggregationJobQueue",
-    "LeaderBatchQueue",
-    "LeaderCollectionJobQueue",
     "GarbageCollector",
-    "ReportsPending",
+    "HelperStateStore",
 ]
