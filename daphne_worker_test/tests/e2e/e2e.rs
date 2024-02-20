@@ -1174,7 +1174,7 @@ async fn fixed_size() {
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )
         .await;
-    println!("collect_uri: {}", collect_uri);
+    println!("collect_uri: {collect_uri}");
 
     // Aggregators run processing loop.
     let agg_telem = t.internal_process(&client).await;
