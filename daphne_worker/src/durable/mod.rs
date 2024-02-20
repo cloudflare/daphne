@@ -4,10 +4,6 @@
 pub(crate) mod aggregate_store;
 pub(crate) mod garbage_collector;
 pub(crate) mod helper_state_store;
-pub(crate) mod leader_agg_job_queue;
-pub(crate) mod leader_batch_queue;
-pub(crate) mod leader_col_job_queue;
-pub(crate) mod reports_pending;
 
 use crate::{
     int_err, now,
@@ -373,13 +369,6 @@ pub(crate) struct DurableOrdered<T> {
 }
 
 impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
-    /// Return the front of a queue stored in the provided DO state. The string `prefix` defines
-    /// the queue's namespace, i.e., the prefix of each key for each key/value pair in the queue.
-    /// At most `limit` queue elements are returned.
-    pub(crate) async fn get_front(state: &State, prefix: &str, limit: usize) -> Result<Vec<Self>> {
-        get_front(state, prefix, Some(limit)).await
-    }
-
     /// Return all elements in the queue.
     ///
     /// WARNING: If the queue is too long, then this action is likely to cause the Workers runtime
@@ -416,52 +405,9 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
         }
     }
 
-    /// Create a new element for a strictly ordered queue. (Use `put()` to store it.)
-    ///
-    /// Items in this queue are handled in order of creation (i.e., the time at which this method
-    /// was evaluated.) The order of the item is determined a counter stored in the provided DO
-    /// state. (The element must, in turn, be stored in the same state.) This counter is stored
-    /// under the following key:
-    ///
-    /// ```text
-    ///     <prefix>/next_ordinal
-    /// ```
-    ///
-    /// where `<prefix>` is the provided prefix. The format of each ordinal is:
-    ///
-    /// ```text
-    ///     order/<ordinal>
-    /// ```
-    ///
-    /// where `<ordinal>` is the value of the counter at the time of creation.
-    pub(crate) async fn new_strictly_ordered(state: &State, item: T, prefix: &str) -> Result<Self> {
-        // Get the next ordinal.
-        let next_ordinal_key = format!("{prefix}/next_ordinal");
-        let mut next_ordinal: u64 = state_get_or_default(state, &next_ordinal_key).await?;
-        let ordinal = format!("order/{next_ordinal}");
-
-        // Update the next ordinal.
-        next_ordinal += 1;
-        state
-            .storage()
-            .put(&next_ordinal_key, &next_ordinal)
-            .await?;
-
-        Ok(Self {
-            item,
-            prefix: prefix.to_string(),
-            ordinal,
-        })
-    }
-
     /// Store the item in the provided DO state.
     pub(crate) async fn put(&self, state: &State) -> Result<()> {
         state.storage().put(&self.key(), &self.item).await
-    }
-
-    /// Delete the item from the provided DO state.
-    pub(crate) async fn delete(&self, state: &State) -> Result<bool> {
-        state.storage().delete(&self.key()).await
     }
 
     /// Compute the key used to store store the item. The key format is:
@@ -473,10 +419,6 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
     /// where `<prefix>` is the indicated namespace and `<ordinal>` is the item's ordinal.
     pub(crate) fn key(&self) -> String {
         format!("{}/item/{}", self.prefix, self.ordinal)
-    }
-
-    pub(crate) fn into_item(self) -> T {
-        self.item
     }
 }
 
@@ -490,9 +432,6 @@ pub(crate) struct DaphneWorkerDurableConfig {
     /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
     pub deployment: DaphneWorkerDeployment,
 
-    /// Leader: Key used to derive collection job IDs. This field is not configured by the Helper.
-    pub collection_job_id_key: Option<[u8; 32]>,
-
     /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
     /// configured by the Leader.
     pub helper_state_store_garbage_collect_after_secs: Option<Duration>,
@@ -500,17 +439,6 @@ pub(crate) struct DaphneWorkerDurableConfig {
 
 impl DaphneWorkerDurableConfig {
     pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
-        let load_key = |name| {
-            let key = env
-                .secret(name)
-                .map_err(|e| format!("failed to load {name}: {e}"))?
-                .to_string();
-            let key = hex::decode(key)
-                .map_err(|e| format!("failed to load {name}: error while parsing hex: {e}"))?;
-            key.try_into()
-                .map_err(|_| format!("failed to load {name}: unexpected length"))
-        };
-
         let is_do_proxy = crate::get_worker_mode(env) == DapWorkerMode::StorageProxy;
 
         let is_leader = match env.var("DAP_AGGREGATOR_ROLE").map(|s| s.to_string()) {
@@ -523,12 +451,6 @@ impl DaphneWorkerDurableConfig {
                     "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
                 )));
             }
-        };
-
-        let collection_job_id_key = if let Some(true) | None = is_leader {
-            Some(load_key("DAP_COLLECTION_JOB_ID_KEY")?)
-        } else {
-            None
         };
 
         let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
@@ -565,7 +487,6 @@ impl DaphneWorkerDurableConfig {
 
         Ok(Self {
             deployment,
-            collection_job_id_key,
             helper_state_store_garbage_collect_after_secs,
         })
     }
@@ -670,67 +591,4 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
     let span = info_span!("DO span", p = %shorten_paths(path.split('/')).display());
     span.in_scope(|| tracing::info!("{}", path));
     span
-}
-
-#[cfg(test)]
-mod test {
-    use daphne::{
-        messages::{HpkeCiphertext, Report, ReportId, ReportMetadata, TaskId},
-        test_versions, DapVersion,
-    };
-    use daphne_service_utils::durable_requests::bindings::PendingReport;
-    use prio::codec::{ParameterizedDecode, ParameterizedEncode};
-    use rand::prelude::*;
-
-    // Test that the `PendingReport.report_id_hex()` method properly extracts the report ID from the
-    // hex-encoded report. This helps ensure that changes to the `Report` wire format don't cause any
-    // regressions to `ReportStore`.
-    fn parse_report_id_hex_from_report(version: DapVersion) {
-        let mut rng = thread_rng();
-        let task_id = TaskId([17; 32]);
-        let report = Report {
-            draft02_task_id: task_id.for_request_payload(&version),
-            report_metadata: ReportMetadata {
-                id: ReportId(rng.gen()),
-                time: rng.gen(),
-                draft02_extensions: match version {
-                    DapVersion::Draft02 => Some(Vec::new()),
-                    DapVersion::DraftLatest => None,
-                },
-            },
-            public_share: Vec::default(),
-            encrypted_input_shares: [
-                HpkeCiphertext {
-                    config_id: 0,
-                    enc: Vec::default(),
-                    payload: Vec::default(),
-                },
-                HpkeCiphertext {
-                    config_id: 0,
-                    enc: Vec::default(),
-                    payload: Vec::default(),
-                },
-            ],
-        };
-
-        let pending_report = PendingReport {
-            task_id,
-            version,
-            report_hex: hex::encode(report.get_encoded_with_param(&version).unwrap()),
-        };
-
-        let got = ReportId::get_decoded_with_param(
-            &version,
-            &hex::decode(
-                pending_report
-                    .report_id_hex()
-                    .expect("report_id_hex() failed"),
-            )
-            .expect("hex::decode() failed"),
-        )
-        .expect("ReportId::get_decoded_with_param() failed");
-        assert_eq!(got, report.report_metadata.id);
-    }
-
-    test_versions! {parse_report_id_hex_from_report}
 }
