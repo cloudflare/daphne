@@ -40,7 +40,7 @@ pub(crate) enum VdafError {
     #[error("{0}")]
     Vdaf(#[from] prio::vdaf::VdafError),
     #[error("{0}")]
-    Uncategorized(String),
+    Dap(DapError),
 }
 
 /// Specification of a concrete VDAF.

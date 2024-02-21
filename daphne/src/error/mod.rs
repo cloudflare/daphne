@@ -68,7 +68,7 @@ impl From<VdafError> for DapError {
             VdafError::Codec(..) | VdafError::Vdaf(..) => {
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
-            VdafError::Uncategorized(s) => Self::Fatal(FatalDapError(s)),
+            VdafError::Dap(e) => e,
         }
     }
 }

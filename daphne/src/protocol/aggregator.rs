@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
-    error::{DapAbort, FatalDapError},
+    error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
@@ -759,9 +759,7 @@ impl DapTaskConfig {
                                 TransitionVar::Failed(failure)
                             }
 
-                            Err(VdafError::Uncategorized(e)) => {
-                                return Err(DapError::Fatal(FatalDapError(e)))
-                            }
+                            Err(VdafError::Dap(e)) => return Err(e),
                         }
                     }
 
@@ -810,7 +808,7 @@ impl DapTaskConfig {
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapAbort> {
+    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
@@ -819,7 +817,8 @@ impl DapTaskConfig {
                     state.seq.len(),
                 ),
                 task_id: Some(*task_id),
-            });
+            }
+            .into());
         }
 
         let mut transitions = Vec::with_capacity(state.seq.len());
@@ -836,7 +835,8 @@ impl DapTaskConfig {
                         helper.report_id.to_base64url()
                     ),
                     task_id: Some(*task_id),
-                });
+                }
+                .into());
             }
 
             let helper_prep_share = match &helper.var {
@@ -852,7 +852,8 @@ impl DapTaskConfig {
                     return Err(DapAbort::InvalidMessage {
                         detail: "helper sent unexpected `Finished` message".to_string(),
                         task_id: Some(*task_id),
-                    })
+                    }
+                    .into())
                 }
             };
 
@@ -897,9 +898,7 @@ impl DapTaskConfig {
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
 
-                Err(VdafError::Uncategorized(e)) => {
-                    unreachable!("encountered unhandled, fatal error: {e}")
-                }
+                Err(VdafError::Dap(e)) => return Err(e),
             }
         }
 
@@ -1020,7 +1019,7 @@ impl DapTaskConfig {
                     metrics.report_inc_by(&format!("rejected_{failure}"), 1);
                 }
 
-                Err(VdafError::Uncategorized(e)) => return Err(DapError::Fatal(FatalDapError(e))),
+                Err(VdafError::Dap(e)) => return Err(e),
             }
         }
 
@@ -1169,9 +1168,7 @@ impl DapTaskConfig {
                             TransitionVar::Failed(failure)
                         }
 
-                        Err(VdafError::Uncategorized(e)) => {
-                            return Err(DapError::Fatal(FatalDapError(e)))
-                        }
+                        Err(VdafError::Dap(e)) => return Err(e),
                     }
                 }
             };
