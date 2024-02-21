@@ -8,7 +8,7 @@
 //!
 //! [draft-mouris-cfrg-mastic]: https://datatracker.ietf.org/doc/draft-mouris-cfrg-mastic/
 
-use crate::{DapAggregateResult, DapAggregationParam, DapMeasurement};
+use crate::{fatal_error, DapAggregateResult, DapAggregationParam, DapMeasurement};
 
 use super::{
     decode_field_vec, VdafAggregateShare, VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
@@ -71,9 +71,9 @@ pub(crate) fn mastic_shard(
             // to the weight.
             Ok((input, vec![vec![u8::from(counter)]; 2]))
         }
-        _ => Err(VdafError::Uncategorized(
-            "mastic: unexpected measurement type".into(),
-        )),
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected measurement type"
+        ))),
     }
 }
 
@@ -86,9 +86,9 @@ pub(crate) fn mastic_prep_init(
     input_share_bytes: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
     let VdafVerifyKey::L16(_verify_key) = verify_key else {
-        return Err(VdafError::Uncategorized(
-            "mastic: unexpected verify key type".into(),
-        ));
+        return Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected verify key type"
+        )));
     };
 
     match (weight_config, agg_param) {
@@ -135,9 +135,9 @@ pub(crate) fn mastic_prep_init(
                 VdafPrepMessage::MasticShare(weight),
             ))
         }
-        _ => Err(VdafError::Uncategorized(
-            "mastic: unexpected agg param type".into(),
-        )),
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected agg param type"
+        ))),
     }
 }
 
@@ -174,9 +174,9 @@ pub(crate) fn mastic_prep_finish_from_shares(
                 Vec::new(),
             ))
         }
-        _ => Err(VdafError::Uncategorized(
-            "mastic: unexpected prep state".into(),
-        )),
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected prep state"
+        ))),
     }
 }
 
@@ -195,9 +195,9 @@ pub(crate) fn mastic_prep_finish(
 
             Ok(VdafAggregateShare::Field64(AggregateShare::from(out_share)))
         }
-        _ => Err(VdafError::Uncategorized(
-            "mastic: unexpected prep state".into(),
-        )),
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected prep state"
+        ))),
     }
 }
 
@@ -219,16 +219,18 @@ pub(crate) fn mastic_unshard<M: IntoIterator<Item = Vec<u8>>>(
                     Ok(agg)
                 })
                 .ok_or_else(|| {
-                    VdafError::Uncategorized("mastic: unexpected number of agg shares".into())
+                    VdafError::Dap(fatal_error!(
+                        err = "mastic: unexpected number of agg shares"
+                    ))
                 })??;
 
             Ok(DapAggregateResult::U64Vec(
                 agg.into_iter().map(u64::from).collect(),
             ))
         }
-        _ => Err(VdafError::Uncategorized(
-            "mastic: unexpected agg param type".into(),
-        )),
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = "mastic: unexpected agg param type"
+        ))),
     }
 }
 

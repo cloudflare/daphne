@@ -5,8 +5,8 @@
 //! [VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
-    vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare, VdafPrepMessage,
-    VdafPrepState, VdafVerifyKey,
+    fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
+    VdafPrepMessage, VdafPrepState, VdafVerifyKey,
 };
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
@@ -24,10 +24,14 @@ pub(crate) fn prio2_shard(
     measurement: DapMeasurement,
     nonce: &[u8; 16],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     let (public_share, input_shares) = match measurement {
         DapMeasurement::U32Vec(ref data) => vdaf.shard(data, nonce)?,
-        _ => panic!("prio2_shard: unexpected measurement type"),
+        _ => {
+            return Err(VdafError::Dap(fatal_error!(
+                err = "prio2_shard: unexpected measurement type"
+            )))
+        }
     };
 
     Ok((
@@ -49,10 +53,12 @@ pub(crate) fn prio2_prep_init(
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
     let VdafVerifyKey::L32(verify_key) = verify_key else {
-        panic!("unhandled verify key type");
+        return Err(VdafError::Dap(fatal_error!(
+            err = "unhandled verify key type"
+        )));
     };
 
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
@@ -70,19 +76,25 @@ pub(crate) fn prio2_prep_finish_from_shares(
     host_share: VdafPrepMessage,
     peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     let (out_share, outbound) = match (host_state, host_share) {
         (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
             let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
             vdaf.prepare_shares_to_prepare_message(&(), [share, peer_share])?;
             match vdaf.prepare_next(state, ())? {
                 PrepareTransition::Continue(..) => {
-                    panic!("prio2_prep_finish_from_shares: unexpected transition (continued)")
+                    return Err(VdafError::Dap(fatal_error!(
+                        err = "prio2_prep_finish_from_shares: unexpected transition (continued)",
+                    )))
                 }
                 PrepareTransition::Finish(out_share) => (out_share, Vec::new()),
             }
         }
-        _ => panic!("prio2_prep_finish_from_shares: host state does not match share"),
+        _ => {
+            return Err(VdafError::Dap(fatal_error!(
+                err = "prio2_prep_finish_from_shares: host state does not match share",
+            )))
+        }
     };
     let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
@@ -94,16 +106,22 @@ pub(crate) fn prio2_prep_finish(
     host_state: VdafPrepState,
     peer_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     <()>::get_decoded(peer_message_data)?;
     let out_share = match host_state {
         VdafPrepState::Prio2(state) => match vdaf.prepare_next(state, ())? {
             PrepareTransition::Continue(..) => {
-                panic!("prio2_prep_finish: unexpected transition (continued)")
+                return Err(VdafError::Dap(fatal_error!(
+                    err = "prio2_prep_finish: unexpected transition (continued)",
+                )))
             }
             PrepareTransition::Finish(out_share) => out_share,
         },
-        _ => panic!("prio2_prep_finish: unexpected state type"),
+        _ => {
+            return Err(VdafError::Dap(fatal_error!(
+                err = "prio2_prep_finish: unexpected state type"
+            )))
+        }
     };
     let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
@@ -115,7 +133,7 @@ pub(crate) fn prio2_decode_prep_state(
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,
 ) -> Result<VdafPrepState, VdafError> {
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     Ok(VdafPrepState::Prio2(Prio2PrepareState::decode_with_param(
         &(&vdaf, agg_id),
         bytes,
@@ -128,7 +146,7 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
     num_measurements: usize,
     encoded_agg_shares: M,
 ) -> Result<DapAggregateResult, VdafError> {
-    let vdaf = Prio2::new(dimension)?;
+    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     let mut agg_shares = Vec::with_capacity(vdaf.num_aggregators());
     for encoded in encoded_agg_shares {
         let agg_share = AggregateShare::get_decoded_with_param(&(&vdaf, &()), encoded.as_ref())?;
