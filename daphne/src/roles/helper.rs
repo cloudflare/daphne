@@ -136,8 +136,10 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
         &agg_job_init_req.agg_param,
     )?;
 
+    let prep_init_count = agg_job_init_req.prep_inits.len();
+    let part_batch_sel = agg_job_init_req.part_batch_sel.clone();
     let initialized_reports = task_config
-        .helper_initialize_reports(aggregator, aggregator, task_id, &agg_job_init_req)
+        .helper_initialize_reports(aggregator, aggregator, task_id, agg_job_init_req)
         .await?;
 
     let agg_job_resp = match task_config.version {
@@ -146,8 +148,8 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
                 .handle_agg_job_init_req(
                     task_id,
                     &HashMap::default(), // no reports have been processed yet
+                    &part_batch_sel,
                     &initialized_reports,
-                    &agg_job_init_req,
                     metrics,
                 )?
             else {
@@ -179,8 +181,8 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
                         task_config.handle_agg_job_init_req(
                             task_id,
                             report_status,
+                            &part_batch_sel,
                             &initialized_reports,
-                            &agg_job_init_req,
                             metrics,
                         )?
                     else {
@@ -201,7 +203,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
         aggregator.host(),
         task_id,
         task_config,
-        agg_job_init_req.prep_inits.len() as u64,
+        prep_init_count as u64,
         AggregationJobAuditAction::Init,
     );
 
