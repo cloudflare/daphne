@@ -47,7 +47,9 @@ mod test {
         },
     };
     use rand::prelude::*;
-    use std::fmt::Debug;
+    use std::{fmt::Debug, iter::zip};
+
+    use super::aggregator::ReportState;
 
     impl<M: Debug> DapLeaderAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
@@ -111,19 +113,24 @@ mod test {
             )
             .unwrap();
 
+        let [leader_share, helper_share] = report.encrypted_input_shares;
+
         let early_report_state_consumed = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
             true, // is_leader
             &t.task_id,
             &t.task_config,
-            report.report_metadata.clone(),
-            report.public_share.clone(),
-            &report.encrypted_input_shares[0],
+            ReportState {
+                metadata: report.report_metadata.clone(),
+                public_share: report.public_share.clone(),
+                draft_latest_prep_init_payload: None,
+            },
+            leader_share,
         )
         .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
-            state: leader_step,
+            vdaf_state: leader_step,
             message: leader_share,
             ..
         } = EarlyReportStateInitialized::initialize(
@@ -143,14 +150,17 @@ mod test {
             false, // is_helper
             &t.task_id,
             &t.task_config,
-            report.report_metadata,
-            report.public_share,
-            &report.encrypted_input_shares[1],
+            ReportState {
+                metadata: report.report_metadata,
+                public_share: report.public_share,
+                draft_latest_prep_init_payload: None,
+            },
+            helper_share,
         )
         .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
-            state: helper_step,
+            vdaf_state: helper_step,
             message: helper_share,
             ..
         } = EarlyReportStateInitialized::initialize(
@@ -259,7 +269,7 @@ mod test {
             );
         }
 
-        match t.handle_agg_job_init_req(&agg_job_init_req).await {
+        match t.handle_agg_job_init_req(agg_job_init_req).await {
             DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
                 assert_eq!(helper_state.seq.len(), 3);
                 assert_eq!(agg_job_resp.transitions.len(), 3);
@@ -351,7 +361,7 @@ mod test {
             .await
             .unwrap_continued();
         let agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -376,7 +386,7 @@ mod test {
             .await
             .unwrap_continued();
         let agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -422,7 +432,7 @@ mod test {
         };
 
         let agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -447,7 +457,7 @@ mod test {
             .await
             .unwrap_continued();
         let mut agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -472,7 +482,7 @@ mod test {
             .await
             .unwrap_continued();
         let mut agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -497,7 +507,7 @@ mod test {
             .await
             .unwrap_continued();
         let mut agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -523,7 +533,7 @@ mod test {
             .await
             .unwrap_continued();
         let mut agg_job_resp = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .into_message();
 
@@ -554,7 +564,7 @@ mod test {
             .unwrap_continued();
 
         let (leader_agg_span, helper_agg_span) =
-            match t.handle_agg_job_init_req(&agg_job_init_req).await {
+            match t.handle_agg_job_init_req(agg_job_init_req).await {
                 DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
                     // draft02
                     let (leader_uncommitted, agg_job_cont_req) = t
@@ -619,8 +629,13 @@ mod test {
             .produce_agg_job_init_req(&DapAggregationParam::Empty, reports)
             .await
             .unwrap_continued();
+        let prep_init_ids = agg_job_init_req
+            .prep_inits
+            .iter()
+            .map(|r| r.report_share.report_metadata.id)
+            .collect::<Vec<_>>();
         let (helper_state, agg_job_resp) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_continued();
 
@@ -633,20 +648,8 @@ mod test {
 
         assert_eq!(2, helper_agg_span.report_count());
         assert_eq!(2, agg_job_resp.transitions.len());
-        assert_eq!(
-            agg_job_resp.transitions[0].report_id,
-            agg_job_init_req.prep_inits[0]
-                .report_share
-                .report_metadata
-                .id
-        );
-        assert_eq!(
-            agg_job_resp.transitions[1].report_id,
-            agg_job_init_req.prep_inits[2]
-                .report_share
-                .report_metadata
-                .id
-        );
+        assert_eq!(agg_job_resp.transitions[0].report_id, prep_init_ids[0]);
+        assert_eq!(agg_job_resp.transitions[1].report_id, prep_init_ids[2]);
 
         assert_metrics_include!(t.leader_registry, {
             r#"report_counter{env="test_leader",host="leader.com",status="rejected_vdaf_prep_error"}"#: 1,
@@ -673,21 +676,20 @@ mod test {
             .produce_agg_job_init_req(&DapAggregationParam::Empty, reports)
             .await
             .unwrap_continued();
+        let prep_init_ids = agg_job_init_req
+            .prep_inits
+            .iter()
+            .map(|r| r.report_share.report_metadata.id)
+            .collect::<Vec<_>>();
         let (helper_agg_span, agg_job_resp) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_finished();
 
         assert_eq!(2, helper_agg_span.report_count());
         assert_eq!(3, agg_job_resp.transitions.len());
-        for i in 0..3 {
-            assert_eq!(
-                agg_job_resp.transitions[i].report_id,
-                agg_job_init_req.prep_inits[i]
-                    .report_share
-                    .report_metadata
-                    .id
-            );
+        for (transition, prep_init_id) in zip(&agg_job_resp.transitions, prep_init_ids) {
+            assert_eq!(transition.report_id, prep_init_id);
         }
 
         let DapLeaderAggregationJobTransition::Finished(leader_agg_span) =
@@ -709,7 +711,7 @@ mod test {
             .await
             .unwrap_continued();
         let (helper_state, agg_job_resp) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_continued();
 
@@ -741,7 +743,7 @@ mod test {
             .await
             .unwrap_continued();
         let (helper_state, agg_job_resp) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_continued();
 
@@ -769,7 +771,7 @@ mod test {
             .await
             .unwrap_continued();
         let (helper_state, agg_job_resp) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_continued();
 
@@ -853,7 +855,7 @@ mod test {
             .await
             .unwrap_continued();
         let (want, _) = t
-            .handle_agg_job_init_req(&agg_job_init_req)
+            .handle_agg_job_init_req(agg_job_init_req)
             .await
             .unwrap_continued();
 
@@ -882,15 +884,19 @@ mod test {
             )
             .unwrap();
 
+        let [leader_share, _] = report.encrypted_input_shares;
         let report_metadata = report.report_metadata.clone();
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
             true,
             &t.task_id,
             &t.task_config,
-            report.report_metadata,
-            report.public_share,
-            &report.encrypted_input_shares[0],
+            ReportState {
+                metadata: report.report_metadata,
+                public_share: report.public_share,
+                draft_latest_prep_init_payload: None,
+            },
+            leader_share,
         )
         .await
         .unwrap();
@@ -934,14 +940,18 @@ mod test {
             .unwrap();
 
         let report_metadata = report.report_metadata.clone();
+        let [leader_share, _] = report.encrypted_input_shares;
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
             true,
             &t.task_id,
             &t.task_config,
-            report.report_metadata,
-            report.public_share,
-            &report.encrypted_input_shares[0],
+            ReportState {
+                metadata: report.report_metadata,
+                public_share: report.public_share,
+                draft_latest_prep_init_payload: None,
+            },
+            leader_share,
         )
         .await
         .unwrap();

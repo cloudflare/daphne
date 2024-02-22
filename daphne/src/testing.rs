@@ -233,12 +233,13 @@ impl AggregationJobTest {
     /// Panics if the Helper aborts.
     pub async fn handle_agg_job_init_req(
         &self,
-        agg_job_init_req: &AggregationJobInitReq,
+        agg_job_init_req: AggregationJobInitReq,
     ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         self.task_config
             .handle_agg_job_init_req(
                 &self.task_id,
                 &HashMap::default(),
+                &agg_job_init_req.part_batch_sel.clone(),
                 &self
                     .task_config
                     .helper_initialize_reports(
@@ -249,7 +250,6 @@ impl AggregationJobTest {
                     )
                     .await
                     .unwrap(),
-                agg_job_init_req,
                 &self.helper_metrics,
             )
             .unwrap()
@@ -427,7 +427,7 @@ impl AggregationJobTest {
         };
 
         let (leader_agg_span, helper_agg_span) =
-            match self.handle_agg_job_init_req(&agg_job_init_req).await {
+            match self.handle_agg_job_init_req(agg_job_init_req).await {
                 DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
                     let got = DapAggregationJobState::get_decoded(
                         &self.task_config.vdaf,
