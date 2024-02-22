@@ -2019,7 +2019,7 @@ mod test {
                 bits: 1,
                 length: 10,
                 chunk_length: 2,
-                num_proofs: 4,
+                num_proofs: 3,
             }),
             DapMeasurement::U64Vec(vec![1; 10]),
         )

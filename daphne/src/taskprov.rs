@@ -241,20 +241,29 @@ impl VdafConfig {
                     chunk_length,
                     num_proofs,
                 },
-            ) => Ok(VdafConfig::Prio3(
-                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                    bits: bits.into(),
-                    length: length.try_into().map_err(|_| DapAbort::InvalidTask {
-                        detail: "length is larger than the system's word size".to_string(),
-                        task_id: *task_id,
-                    })?,
-                    chunk_length: chunk_length.try_into().map_err(|_| DapAbort::InvalidTask {
-                        detail: "chunk_length is larger than the system's word size".to_string(),
-                        task_id: *task_id,
-                    })?,
-                    num_proofs,
-                },
-            )),
+            ) => {
+                const MAX_PROOFS: u8 = 3;
+                if num_proofs == 0 || num_proofs > MAX_PROOFS {
+                    return Err(DapAbort::InvalidTask { detail: format!("invalid number of proofs for Prio3SumVecField64MultiproofHmacSha256Aes128: got {num_proofs}; expected a value in range [0, {MAX_PROOFS}]"), task_id: *task_id });
+                }
+                Ok(VdafConfig::Prio3(
+                    Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                        bits: bits.into(),
+                        length: length.try_into().map_err(|_| DapAbort::InvalidTask {
+                            detail: "length is larger than the system's word size".to_string(),
+                            task_id: *task_id,
+                        })?,
+                        chunk_length: chunk_length.try_into().map_err(|_| {
+                            DapAbort::InvalidTask {
+                                detail: "chunk_length is larger than the system's word size"
+                                    .to_string(),
+                                task_id: *task_id,
+                            }
+                        })?,
+                        num_proofs,
+                    },
+                ))
+            }
             (DapVersion::Draft02, var) => Err(DapAbort::InvalidTask {
                 detail: format!("draft02: unsupported VDAF: {var:?}"),
                 task_id: *task_id,
