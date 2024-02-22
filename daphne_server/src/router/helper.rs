@@ -56,7 +56,7 @@ where
                 app.server_metrics(),
                 match req.version {
                     daphne::DapVersion::Draft02 => StatusCode::OK,
-                    daphne::DapVersion::DraftLatest => StatusCode::CREATED,
+                    daphne::DapVersion::Draft09 | daphne::DapVersion::Latest => StatusCode::CREATED,
                 },
             )
         }

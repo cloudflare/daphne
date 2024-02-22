@@ -300,9 +300,10 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     // from the request path.
     let collect_job_id = match (req.version, &req.resource) {
         (DapVersion::Draft02, DapResource::Undefined) => None,
-        (DapVersion::DraftLatest, DapResource::CollectionJob(ref collect_job_id)) => {
-            Some(*collect_job_id)
-        }
+        (
+            DapVersion::Draft09 | DapVersion::Latest,
+            DapResource::CollectionJob(ref collect_job_id),
+        ) => Some(*collect_job_id),
         (_, DapResource::Undefined) => {
             return Err(DapAbort::BadRequest("missing collection ID".into()).into())
         }
@@ -562,9 +563,9 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
     // In the latest draft, the Collection message includes the smallest quantized time
     // interval containing all reports in the batch.
-    let draft_latest_interval = match task_config.version {
+    let draft09_interval = match task_config.version {
         DapVersion::Draft02 => None,
-        DapVersion::DraftLatest => {
+        DapVersion::Draft09 | DapVersion::Latest => {
             let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
             let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
             Some(Interval {
@@ -583,7 +584,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
     let collection = Collection {
         part_batch_sel: batch_sel.clone().into(),
         report_count: leader_agg_share.report_count,
-        draft_latest_interval,
+        draft09_interval,
         encrypted_agg_shares: [leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
     };
     aggregator

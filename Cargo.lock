@@ -780,6 +780,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "paste",
  "prio",
  "prometheus",
  "rand",

@@ -110,7 +110,7 @@ where
             AppendHeaders([(header::LOCATION, uri.as_str())]),
         )
             .into_response(),
-        (Ok(_), DapVersion::DraftLatest) => StatusCode::CREATED.into_response(),
+        (Ok(_), DapVersion::Draft09 | DapVersion::Latest) => StatusCode::CREATED.into_response(),
         (Err(e), _) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }

@@ -153,7 +153,7 @@ async fn resolve_taskprov<S: Sync>(
 mod test {
     use super::{aggregator, helper, leader, DapAggregator, DapAuthorizedSender, DapLeader};
     use crate::{
-        assert_metrics_include, async_test_versions,
+        assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
         constants::DapMediaType,
         hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
@@ -187,7 +187,7 @@ mod test {
     fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
         match version {
             DapVersion::Draft02 => Some(Vec::new()),
-            DapVersion::DraftLatest => None,
+            DapVersion::Draft09 | DapVersion::Latest => None,
         }
     }
 
@@ -1458,7 +1458,7 @@ mod test {
         let collection = Collection {
             part_batch_sel: PartialBatchSelector::TimeInterval,
             report_count: 0,
-            draft_latest_interval: if version == DapVersion::Draft02 {
+            draft09_interval: if version == DapVersion::Draft02 {
                 None
             } else {
                 Some(Interval {
@@ -1828,7 +1828,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::DraftLatest => 1,
+            DapVersion::Draft09 | DapVersion::Latest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -1865,7 +1865,7 @@ mod test {
 
                 Query::FixedSizeByBatchId { batch_id }
             }
-            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
         };
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
             .await
@@ -1877,7 +1877,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::DraftLatest => 1,
+            DapVersion::Draft09 | DapVersion::Latest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -1946,7 +1946,7 @@ mod test {
                     test_measurement.clone(),
                     vec![Extension::Taskprov {
                         draft02_payload: match version {
-                            DapVersion::DraftLatest => None,
+                            DapVersion::Draft09 | DapVersion::Latest => None,
                             DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
                         },
                     }],
@@ -1971,7 +1971,7 @@ mod test {
             DapVersion::Draft02 => Query::FixedSizeByBatchId {
                 batch_id: t.leader.current_batch(&task_id).await.unwrap(),
             },
-            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
         };
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
             .await
@@ -1983,7 +1983,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::DraftLatest => 1,
+            DapVersion::Draft09 | DapVersion::Latest => 1,
         };
 
         assert_metrics_include!(t.helper_registry, {
@@ -2011,10 +2011,9 @@ mod test {
 
     async_test_versions! { e2e_taskprov_prio2 }
 
-    #[tokio::test]
-    async fn e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128_draft09() {
+    async fn e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
         e2e_taskprov(
-            DapVersion::DraftLatest,
+            version,
             VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 1,
                 length: 10,
@@ -2025,6 +2024,9 @@ mod test {
         )
         .await;
     }
+
+    async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Draft09 }
+    async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Latest }
 
     fn early_metadata_checks(version: DapVersion) {
         let t = Test::new(version);
@@ -2141,7 +2143,7 @@ mod test {
 
                     Query::FixedSizeByBatchId { batch_id }
                 }
-                DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+                DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
             };
             leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
                 .await
@@ -2154,7 +2156,7 @@ mod test {
 
         let agg_job_req_count = match version {
             DapVersion::Draft02 => 2,
-            DapVersion::DraftLatest => 1,
+            DapVersion::Draft09 | DapVersion::Latest => 1,
         } * 2;
 
         assert_metrics_include!(t.helper_registry, {
@@ -2175,9 +2177,11 @@ mod test {
 
     // TODO(cjpatton) Test collecting the batch multiple times per the "heavy hitters" mode of
     // operation for Mastic.
+    //
+    // TODO(cjpatton) Create a test for "attribute based metrics" for draft09.
     #[tokio::test]
     async fn heavy_hitters() {
-        let t = Test::new(DapVersion::DraftLatest);
+        let t = Test::new(DapVersion::Latest);
         let task_id = &t.heavy_hitters_task_id;
         let task_config = t
             .leader

@@ -196,7 +196,7 @@ where
             .as_ref()
             .get_encoded()
             .map_err(DapError::encoding)?,
-        DapVersion::DraftLatest => {
+        DapVersion::Draft09 | DapVersion::Latest => {
             let hpke_config_list = HpkeConfigList {
                 hpke_configs: vec![hpke_config.as_ref().clone()],
             };

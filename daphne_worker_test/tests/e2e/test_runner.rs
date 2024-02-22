@@ -79,12 +79,8 @@ impl TestRunner {
 
         // When running in a local development environment, override the hostname of each
         // aggregator URL with 127.0.0.1.
-        let version_path = match version {
-            DapVersion::Draft02 => "v02",
-            DapVersion::DraftLatest => "v09",
-        };
-        let mut leader_url = Url::parse(&format!("http://leader:8787/{version_path}/")).unwrap();
-        let mut helper_url = Url::parse(&format!("http://helper:8788/{version_path}/")).unwrap();
+        let mut leader_url = Url::parse(&format!("http://leader:8787/{version}/")).unwrap();
+        let mut helper_url = Url::parse(&format!("http://helper:8788/{version}/")).unwrap();
         println!("leader_url = {leader_url}");
         if let Ok(env) = std::env::var("DAP_DEPLOYMENT") {
             if env == "dev" {
@@ -295,7 +291,7 @@ impl TestRunner {
                 HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
                 HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap(),
             ],
-            DapVersion::DraftLatest => {
+            DapVersion::Draft09 | DapVersion::Latest => {
                 let mut leader_hpke_config_list =
                     HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
                 let mut helper_hpke_config_list =
@@ -710,14 +706,16 @@ impl TestRunner {
     pub fn upload_path_for_task(&self, id: &TaskId) -> String {
         match self.version {
             DapVersion::Draft02 => "upload".to_string(),
-            DapVersion::DraftLatest => format!("tasks/{}/reports", id.to_base64url()),
+            DapVersion::Draft09 | DapVersion::Latest => {
+                format!("tasks/{}/reports", id.to_base64url())
+            }
         }
     }
 
     pub fn collect_path_for_task(&self, task_id: &TaskId) -> String {
         match self.version {
             DapVersion::Draft02 => "collect".to_string(),
-            DapVersion::DraftLatest => {
+            DapVersion::Draft09 | DapVersion::Latest => {
                 let collection_job_id = CollectionJobId(thread_rng().gen());
                 format!(
                     "tasks/{}/collection_jobs/{}",

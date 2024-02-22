@@ -289,7 +289,7 @@ async fn leader_upload(version: DapVersion) {
     );
     let builder = match t.version {
         DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::DraftLatest => client.put(url.as_str()),
+        DapVersion::Draft09 | DapVersion::Latest => client.put(url.as_str()),
     };
     let resp = builder
         .body(
@@ -300,7 +300,7 @@ async fn leader_upload(version: DapVersion) {
                     time: t.now,
                     draft02_extensions: match version {
                         DapVersion::Draft02 => Some(Vec::default()),
-                        DapVersion::DraftLatest => None,
+                        DapVersion::Draft09 | DapVersion::Latest => None,
                     },
                 },
                 public_share: b"public share".to_vec(),
@@ -621,7 +621,7 @@ async fn leader_collect_ok(version: DapVersion) {
 
     if version != DapVersion::Draft02 {
         // Check that the time interval for the reports is correct.
-        let interval = collection.draft_latest_interval.as_ref().unwrap();
+        let interval = collection.draft09_interval.as_ref().unwrap();
         let low = t.task_config.quantized_time_lower_bound(time_min);
         let high = t.task_config.quantized_time_upper_bound(time_max);
         assert!(low < high);
@@ -1026,7 +1026,7 @@ async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
 #[tokio::test]
 async fn fixed_size() {
-    let version = DapVersion::DraftLatest;
+    let version = DapVersion::Draft09;
     let t = TestRunner::fixed_size(version).await;
     let path = t.upload_path();
     let client = TestRunner::http_client();
@@ -1064,7 +1064,7 @@ async fn fixed_size() {
         draft02_task_id: t.collect_task_id_field(),
         query: match version {
             DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
-            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
         },
         agg_param: agg_param.get_encoded().unwrap(),
     };
@@ -1164,7 +1164,7 @@ async fn fixed_size() {
         draft02_task_id: t.collect_task_id_field(),
         query: match version {
             DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
-            DapVersion::DraftLatest => Query::FixedSizeCurrentBatch,
+            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
         },
         agg_param: agg_param.get_encoded().unwrap(),
     };
@@ -1255,7 +1255,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov {
             draft02_payload: match version {
-                DapVersion::DraftLatest => None,
+                DapVersion::Draft09 | DapVersion::Latest => None,
                 DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
             },
         }];

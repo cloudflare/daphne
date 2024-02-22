@@ -6,9 +6,9 @@ mod client;
 mod collector;
 
 const CTX_INPUT_SHARE_DRAFT02: &[u8] = b"dap-02 input share";
-const CTX_INPUT_SHARE_DRAFT_LATEST: &[u8] = b"dap-09 input share";
+const CTX_INPUT_SHARE_DRAFT09: &[u8] = b"dap-09 input share";
 const CTX_AGG_SHARE_DRAFT02: &[u8] = b"dap-02 aggregate share";
-const CTX_AGG_SHARE_DRAFT_LATEST: &[u8] = b"dap-09 aggregate share";
+const CTX_AGG_SHARE_DRAFT09: &[u8] = b"dap-09 aggregate share";
 const CTX_ROLE_COLLECTOR: u8 = 0;
 const CTX_ROLE_CLIENT: u8 = 1;
 const CTX_ROLE_LEADER: u8 = 2;
@@ -418,7 +418,7 @@ mod test {
                         public_share: report0.public_share,
                         encrypted_input_share: report0.encrypted_input_shares[1].clone(),
                     },
-                    draft_latest_payload: Some(b"malformed payload".to_vec()),
+                    draft09_payload: Some(b"malformed payload".to_vec()),
                 },
                 PrepareInit {
                     report_share: ReportShare {
@@ -426,7 +426,7 @@ mod test {
                         public_share: report1.public_share,
                         encrypted_input_share: report1.encrypted_input_shares[1].clone(),
                     },
-                    draft_latest_payload: Some(b"malformed payload".to_vec()),
+                    draft09_payload: Some(b"malformed payload".to_vec()),
                 },
             ],
         };
@@ -658,18 +658,12 @@ mod test {
 
     #[tokio::test]
     async fn agg_job_init_req_skip_vdaf_prep_error_draft09() {
-        let t = AggregationJobTest::new(
-            TEST_VDAF,
-            HpkeKemId::X25519HkdfSha256,
-            DapVersion::DraftLatest,
-        );
+        let t =
+            AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, DapVersion::Draft09);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         reports.insert(
             1,
-            t.produce_invalid_report_vdaf_prep_failure(
-                DapMeasurement::U64(1),
-                DapVersion::DraftLatest,
-            ),
+            t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Draft09),
         );
 
         let (leader_state, agg_job_init_req) = t
@@ -908,7 +902,7 @@ mod test {
             DapVersion::Draft02 => true,
             // In the latest version we're meant to reject reports containing unrecognized
             // extensions.
-            DapVersion::DraftLatest => false,
+            DapVersion::Draft09 | DapVersion::Latest => false,
         };
         assert_eq!(consumed_report.is_ready(), expect_ready);
     }

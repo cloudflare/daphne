@@ -35,9 +35,8 @@ use std::{
 };
 
 use super::{
-    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT_LATEST, CTX_INPUT_SHARE_DRAFT02,
-    CTX_INPUT_SHARE_DRAFT_LATEST, CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER,
-    CTX_ROLE_LEADER,
+    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT02, CTX_INPUT_SHARE_DRAFT09,
+    CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER, CTX_ROLE_LEADER,
 };
 
 // Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
@@ -126,7 +125,7 @@ impl EarlyReportStateConsumed {
 
         let input_share_text = match task_config.version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::DraftLatest => CTX_INPUT_SHARE_DRAFT_LATEST,
+            DapVersion::Draft09 | DapVersion::Latest => CTX_INPUT_SHARE_DRAFT09,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
@@ -162,9 +161,9 @@ impl EarlyReportStateConsumed {
 
         // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
         // draft, the plaintext also encodes the report extensions.
-        let (input_share, draft_latest_extensions) = match task_config.version {
+        let (input_share, draft09_extensions) = match task_config.version {
             DapVersion::Draft02 => (encoded_input_share, None),
-            DapVersion::DraftLatest => {
+            DapVersion::Draft09 | DapVersion::Latest => {
                 match PlaintextInputShare::get_decoded_with_param(
                     &task_config.version,
                     &encoded_input_share,
@@ -183,7 +182,7 @@ impl EarlyReportStateConsumed {
         // Handle report extensions.
         {
             let extensions = match task_config.version {
-                DapVersion::DraftLatest => draft_latest_extensions.as_ref().unwrap(),
+                DapVersion::Draft09 | DapVersion::Latest => draft09_extensions.as_ref().unwrap(),
                 DapVersion::Draft02 => state.metadata.draft02_extensions.as_ref().unwrap(),
             };
 
@@ -204,7 +203,7 @@ impl EarlyReportStateConsumed {
                     }
 
                     // Reject reports with unrecognized extensions.
-                    (DapVersion::DraftLatest, ..) => {
+                    (DapVersion::Draft09 | DapVersion::Latest, ..) => {
                         return Ok(Self::Rejected {
                             metadata: state.metadata,
                             failure: TransitionFailure::InvalidMessage,
@@ -460,9 +459,9 @@ impl DapTaskConfig {
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
-                    let (draft02_prep_share, draft_latest_payload) = match self.version {
+                    let (draft02_prep_share, draft09_payload) = match self.version {
                         DapVersion::Draft02 => (Some(prep_share), None),
-                        DapVersion::DraftLatest => {
+                        DapVersion::Draft09 | DapVersion::Latest => {
                             let mut outbound = Vec::with_capacity(
                                 prep_share
                                     .encoded_len_with_param(&self.version)
@@ -490,7 +489,7 @@ impl DapTaskConfig {
                             public_share: state.public_share,
                             encrypted_input_share: helper_share,
                         },
-                        draft_latest_payload,
+                        draft09_payload,
                     });
                 }
 
@@ -555,7 +554,7 @@ impl DapTaskConfig {
                     ReportState {
                         metadata: prep_init.report_share.report_metadata,
                         public_share: prep_init.report_share.public_share,
-                        draft_latest_prep_init_payload: prep_init.draft_latest_payload,
+                        draft_latest_prep_init_payload: prep_init.draft09_payload,
                     },
                     prep_init.report_share.encrypted_input_share,
                 )
@@ -599,7 +598,7 @@ impl DapTaskConfig {
                 initialized_reports,
                 metrics,
             )),
-            DapVersion::DraftLatest => self.draft_latest_handle_agg_job_init_req(
+            DapVersion::Draft09 | DapVersion::Latest => self.draft09_handle_agg_job_init_req(
                 task_id,
                 report_status,
                 part_batch_sel,
@@ -665,7 +664,7 @@ impl DapTaskConfig {
         )
     }
 
-    fn draft_latest_handle_agg_job_init_req(
+    fn draft09_handle_agg_job_init_req(
         &self,
         task_id: &TaskId,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
@@ -789,8 +788,8 @@ impl DapTaskConfig {
             DapVersion::Draft02 => self
                 .draft02_handle_agg_job_resp(task_id, agg_job_id, state, agg_job_resp, metrics)
                 .map_err(Into::into),
-            DapVersion::DraftLatest => {
-                self.draft_latest_handle_agg_job_resp(task_id, state, agg_job_resp, metrics)
+            DapVersion::Draft09 | DapVersion::Latest => {
+                self.draft09_handle_agg_job_resp(task_id, state, agg_job_resp, metrics)
             }
         }
     }
@@ -916,7 +915,7 @@ impl DapTaskConfig {
         ))
     }
 
-    fn draft_latest_handle_agg_job_resp(
+    fn draft09_handle_agg_job_resp(
         &self,
         task_id: &TaskId,
         state: DapAggregationJobState,
@@ -1299,7 +1298,7 @@ fn produce_encrypted_agg_share(
 
     let agg_share_text = match version {
         DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::DraftLatest => CTX_AGG_SHARE_DRAFT_LATEST,
+        DapVersion::Draft09 | DapVersion::Latest => CTX_AGG_SHARE_DRAFT09,
     };
     let n: usize = agg_share_text.len();
     let mut info = Vec::with_capacity(n + 2);

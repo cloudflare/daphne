@@ -147,7 +147,7 @@ fn get_taskprov_task_config<S>(
             )
         })?)
     } else if let Some(metadata) = report_metadata_advertisement {
-        if req.version == DapVersion::DraftLatest {
+        if matches!(req.version, DapVersion::Draft09 | DapVersion::Latest) {
             return Ok(None);
         }
         let taskprovs: Vec<&Extension> = metadata
@@ -234,7 +234,7 @@ impl VdafConfig {
                 })?,
             }),
             (
-                DapVersion::DraftLatest,
+                DapVersion::Draft09 | DapVersion::Latest,
                 VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
                     bits,
                     length,
@@ -684,7 +684,7 @@ mod test {
             (DapVersion::Draft02, Err(DapAbort::InvalidMessage { detail, .. })) => {
                 assert_eq!(detail, "codec error: unexpected value");
             }
-            (DapVersion::DraftLatest, Err(DapAbort::InvalidTask { detail, .. })) => {
+            (DapVersion::Draft09, Err(DapAbort::InvalidTask { detail, .. })) => {
                 assert_eq!(detail, "unimplemented VDAF type (1337)");
             }
             (_, r) => panic!("unexpected result: {r:?} ({version})"),

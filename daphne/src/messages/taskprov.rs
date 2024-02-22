@@ -92,7 +92,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafTypeVar {
                     num_proofs: u8::decode(bytes)?,
                 })
             }
-            (DapVersion::DraftLatest, Some(bytes_left), ..) => {
+            (DapVersion::Draft09 | DapVersion::Latest, Some(bytes_left), ..) => {
                 let mut param = vec![0; bytes_left - 4];
                 bytes.read_exact(&mut param)?;
                 Ok(Self::NotImplemented {
@@ -102,7 +102,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafTypeVar {
             }
             // draft02 compatibility: We don't recognize the VDAF type, which means the rest of
             // this message is not decodable. We must abort.
-            (DapVersion::Draft02, ..) | (DapVersion::DraftLatest, None, ..) => {
+            (DapVersion::Draft02, ..) | (DapVersion::Draft09 | DapVersion::Latest, None, ..) => {
                 Err(CodecError::UnexpectedValue)
             }
         }
@@ -140,7 +140,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for DpConfig {
         let dp_mechanism = u8::decode(bytes)?;
         match (version, bytes_left, dp_mechanism) {
             (.., DP_MECHANISM_NONE) => Ok(Self::None),
-            (DapVersion::DraftLatest, Some(bytes_left), ..) => {
+            (DapVersion::Draft09 | DapVersion::Latest, Some(bytes_left), ..) => {
                 let mut param = vec![0; bytes_left - 1];
                 bytes.read_exact(&mut param)?;
                 Ok(Self::NotImplemented {
@@ -150,7 +150,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for DpConfig {
             }
             // draft02 compatibility: We must abort because unimplemented DP mechansims can't be
             // decoded.
-            (DapVersion::Draft02, ..) | (DapVersion::DraftLatest, None, ..) => {
+            (DapVersion::Draft02, ..) | (DapVersion::Draft09 | DapVersion::Latest, None, ..) => {
                 Err(CodecError::UnexpectedValue)
             }
         }
@@ -268,7 +268,7 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         self.time_precision.encode(bytes)?;
         self.max_batch_query_count.encode(bytes)?;
         self.min_batch_size.encode(bytes)?;
-        if *version == DapVersion::DraftLatest {
+        if matches!(version, DapVersion::Draft09 | DapVersion::Latest) {
             self.encode_query_type(bytes)?;
         }
         match &self.var {
@@ -290,7 +290,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let query_type = match version {
-            DapVersion::DraftLatest => None,
+            DapVersion::Draft09 | DapVersion::Latest => None,
             DapVersion::Draft02 => Some(Ok(u8::decode(bytes)?)),
         };
         let time_precision = Duration::decode(bytes)?;
@@ -302,7 +302,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
             (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
                 max_batch_size: u32::decode(bytes)?,
             },
-            (DapVersion::DraftLatest, Some(bytes_left), ..) => {
+            (DapVersion::Draft09 | DapVersion::Latest, Some(bytes_left), ..) => {
                 let mut param = vec![0; bytes_left - 15];
                 bytes.read_exact(&mut param)?;
 
@@ -313,7 +313,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
             }
             // draft02 compatibility: We must abort because unimplemented query configurations
             // can't be decoded.
-            (DapVersion::Draft02, ..) | (DapVersion::DraftLatest, None, ..) => {
+            (DapVersion::Draft02, ..) | (DapVersion::Draft09 | DapVersion::Latest, None, ..) => {
                 return Err(CodecError::UnexpectedValue)
             }
         };
@@ -351,7 +351,7 @@ impl ParameterizedEncode<DapVersion> for TaskConfig {
                 &(),
                 &[self.leader_url.clone(), self.helper_url.clone()],
             )?,
-            DapVersion::DraftLatest => {
+            DapVersion::Draft09 | DapVersion::Latest => {
                 self.leader_url.encode(bytes)?;
                 self.helper_url.encode(bytes)?;
             }
@@ -377,7 +377,9 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             DapVersion::Draft02 => decode_u16_items(&(), bytes)?
                 .try_into()
                 .map_err(|_| CodecError::UnexpectedValue)?, // Expect exactly two Aggregator endpoints.
-            DapVersion::DraftLatest => [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?],
+            DapVersion::Draft09 | DapVersion::Latest => {
+                [UrlBytes::decode(bytes)?, UrlBytes::decode(bytes)?]
+            }
         };
         let query_config = taskprov_decode_u16_prefixed(*version, bytes, |version, inner, len| {
             // We need to know the length of the `QueryConfig` in order to decode variants we don't
@@ -414,7 +416,7 @@ fn taskprov_encode_u16_prefixed(
     e: impl Fn(DapVersion, &mut Vec<u8>) -> Result<(), CodecError>,
 ) -> Result<(), CodecError> {
     match version {
-        DapVersion::DraftLatest => encode_u16_prefixed(version, bytes, e),
+        DapVersion::Draft09 | DapVersion::Latest => encode_u16_prefixed(version, bytes, e),
         // draft02 compatibility: No length prefix is used.
         DapVersion::Draft02 => e(version, bytes),
     }
@@ -426,7 +428,7 @@ fn taskprov_decode_u16_prefixed<O>(
     d: impl Fn(DapVersion, &mut Cursor<&[u8]>, Option<usize>) -> Result<O, CodecError>,
 ) -> Result<O, CodecError> {
     match version {
-        DapVersion::DraftLatest => decode_u16_prefixed(version, bytes, d),
+        DapVersion::Draft09 | DapVersion::Latest => decode_u16_prefixed(version, bytes, d),
         // draft02 compatibility: No length prefix is used.
         DapVersion::Draft02 => d(version, bytes, None),
     }
@@ -519,12 +521,12 @@ mod tests {
             },
         };
         let encoded = query_config
-            .get_encoded_with_param(&DapVersion::DraftLatest)
+            .get_encoded_with_param(&DapVersion::Draft09)
             .unwrap();
 
         assert_eq!(
             QueryConfig::get_decoded_with_param(
-                &(DapVersion::DraftLatest, Some(encoded.len())),
+                &(DapVersion::Draft09, Some(encoded.len())),
                 &encoded,
             )
             .unwrap(),
@@ -573,12 +575,12 @@ mod tests {
             param: b"dp mechanism param".to_vec(),
         };
         let encoded = dp_config
-            .get_encoded_with_param(&DapVersion::DraftLatest)
+            .get_encoded_with_param(&DapVersion::Draft09)
             .unwrap();
 
         assert_eq!(
             DpConfig::get_decoded_with_param(
-                &(DapVersion::DraftLatest, Some(encoded.len())),
+                &(DapVersion::Draft09, Some(encoded.len())),
                 &encoded,
             )
             .unwrap(),
@@ -643,7 +645,7 @@ mod tests {
     test_versions! { roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
     #[test]
-    fn roundtrip_vdaf_config_not_implemented_draftlatest() {
+    fn roundtrip_vdaf_config_not_implemented_draft09() {
         let vdaf_config = VdafConfig {
             dp_config: DpConfig::None,
             var: VdafTypeVar::NotImplemented {
@@ -652,12 +654,12 @@ mod tests {
             },
         };
         let encoded = vdaf_config
-            .get_encoded_with_param(&DapVersion::DraftLatest)
+            .get_encoded_with_param(&DapVersion::Draft09)
             .unwrap();
 
         assert_eq!(
             VdafConfig::get_decoded_with_param(
-                &(DapVersion::DraftLatest, Some(encoded.len())),
+                &(DapVersion::Draft09, Some(encoded.len())),
                 &encoded
             )
             .unwrap(),
