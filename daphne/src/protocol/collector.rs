@@ -13,7 +13,7 @@ use crate::{
 use prio::codec::Encode;
 
 use super::{
-    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT_LATEST, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER,
+    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT09, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER,
     CTX_ROLE_LEADER,
 };
 
@@ -52,7 +52,7 @@ impl VdafConfig {
 
         let agg_share_text = match version {
             DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::DraftLatest => CTX_AGG_SHARE_DRAFT_LATEST,
+            DapVersion::Draft09 | DapVersion::Latest => CTX_AGG_SHARE_DRAFT09,
         };
         let n: usize = agg_share_text.len();
         let mut info = Vec::with_capacity(n + 2);

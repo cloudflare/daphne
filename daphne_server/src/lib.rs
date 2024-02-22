@@ -55,7 +55,7 @@ mod storage_proxy_connection;
 ///     report_shard_count: 4,
 ///     base_url: None,
 ///     taskprov: None,
-///     default_version: DapVersion::DraftLatest,
+///     default_version: DapVersion::Draft09,
 ///     report_storage_epoch_duration: 300,
 ///     report_storage_max_future_time_skew: 300,
 /// };

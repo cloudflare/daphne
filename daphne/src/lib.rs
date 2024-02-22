@@ -101,7 +101,10 @@ pub enum DapVersion {
 
     #[serde(rename = "v09")]
     #[default]
-    DraftLatest,
+    Draft09,
+
+    #[serde(rename = "v10")]
+    Latest,
 }
 
 impl FromStr for DapVersion {
@@ -109,7 +112,8 @@ impl FromStr for DapVersion {
     fn from_str(version: &str) -> Result<Self, Self::Err> {
         match version {
             "v02" => Ok(DapVersion::Draft02),
-            "v09" => Ok(DapVersion::DraftLatest),
+            "v09" => Ok(DapVersion::Draft09),
+            "v10" => Ok(DapVersion::Latest),
             _ => Err(DapAbort::version_unknown()),
         }
     }
@@ -119,7 +123,8 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft02 => "v02",
-            DapVersion::DraftLatest => "v09",
+            DapVersion::Draft09 => "v09",
+            DapVersion::Latest => "v10",
         }
     }
 }
@@ -492,7 +497,9 @@ impl DapTaskParameters {
         .unwrap();
 
         let (taskprov_advertisement, taskprov_report_extension_payload) = match self.version {
-            DapVersion::DraftLatest => (Some(encode_base64url(&encoded_taskprov_config)), None),
+            DapVersion::Draft09 | DapVersion::Latest => {
+                (Some(encode_base64url(&encoded_taskprov_config)), None)
+            }
             // draft02 compatibility: The taskprov config is advertised in an HTTP header in
             // the latest draft. In draft02, it is carried by a report extension.
             DapVersion::Draft02 => (None, Some(encoded_taskprov_config)),
@@ -1109,7 +1116,7 @@ pub struct DapRequest<S> {
 impl<S> Default for DapRequest<S> {
     fn default() -> Self {
         Self {
-            version: DapVersion::DraftLatest,
+            version: DapVersion::Draft09,
             media_type: None,
             task_id: Default::default(),
             resource: Default::default(),
@@ -1202,7 +1209,7 @@ pub struct DapLeaderProcessTelemetry {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum MetaAggregationJobId {
     Draft02(Draft02AggregationJobId),
-    DraftLatest(AggregationJobId),
+    Draft09(AggregationJobId),
 }
 
 macro_rules! generate_from_id_impls_for_meta_agg_job_id {
@@ -1222,7 +1229,7 @@ macro_rules! generate_from_id_impls_for_meta_agg_job_id {
 }
 
 generate_from_id_impls_for_meta_agg_job_id!(Draft02 => Draft02AggregationJobId);
-generate_from_id_impls_for_meta_agg_job_id!(DraftLatest => AggregationJobId);
+generate_from_id_impls_for_meta_agg_job_id!(Draft09 => AggregationJobId);
 
 impl MetaAggregationJobId {
     /// Generate a random ID of the type required for the version.
@@ -1230,7 +1237,7 @@ impl MetaAggregationJobId {
         let mut rng = thread_rng();
         match version {
             DapVersion::Draft02 => Self::Draft02(Draft02AggregationJobId(rng.gen())),
-            DapVersion::DraftLatest => Self::DraftLatest(AggregationJobId(rng.gen())),
+            DapVersion::Draft09 | DapVersion::Latest => Self::Draft09(AggregationJobId(rng.gen())),
         }
     }
 
@@ -1239,7 +1246,7 @@ impl MetaAggregationJobId {
     pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
         match self {
             Self::Draft02(agg_job_id) => Some(*agg_job_id),
-            Self::DraftLatest(..) => None,
+            Self::Draft09(..) => None,
         }
     }
 
@@ -1249,7 +1256,7 @@ impl MetaAggregationJobId {
         match self {
             // In draft02, the aggregation job ID is not determined until the payload is parsed.
             Self::Draft02(..) => DapResource::Undefined,
-            Self::DraftLatest(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
+            Self::Draft09(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
         }
     }
 
@@ -1257,7 +1264,7 @@ impl MetaAggregationJobId {
     pub fn to_hex(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_hex(),
-            Self::DraftLatest(agg_job_id) => agg_job_id.to_hex(),
+            Self::Draft09(agg_job_id) => agg_job_id.to_hex(),
         }
     }
 
@@ -1265,7 +1272,7 @@ impl MetaAggregationJobId {
     pub fn to_base64url(&self) -> String {
         match self {
             Self::Draft02(agg_job_id) => agg_job_id.to_base64url(),
-            Self::DraftLatest(agg_job_id) => agg_job_id.to_base64url(),
+            Self::Draft09(agg_job_id) => agg_job_id.to_base64url(),
         }
     }
 }

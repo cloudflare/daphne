@@ -170,7 +170,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
             agg_job_resp
         }
 
-        DapVersion::DraftLatest => {
+        DapVersion::Draft09 | DapVersion::Latest => {
             let agg_job_resp = finish_agg_job_and_aggregate(
                 aggregator,
                 task_id,
@@ -462,10 +462,12 @@ fn resolve_agg_job_id<'id, S>(
         (DapVersion::Draft02, DapResource::Undefined, Some(agg_job_id)) => {
             Ok(MetaAggregationJobId::Draft02(*agg_job_id))
         }
-        (DapVersion::DraftLatest, DapResource::AggregationJob(agg_job_id), None) => {
-            Ok(MetaAggregationJobId::DraftLatest(*agg_job_id))
-        }
-        (DapVersion::DraftLatest, DapResource::Undefined, None) => {
+        (
+            DapVersion::Draft09 | DapVersion::Latest,
+            DapResource::AggregationJob(agg_job_id),
+            None,
+        ) => Ok(MetaAggregationJobId::Draft09(*agg_job_id)),
+        (DapVersion::Draft09 | DapVersion::Latest, DapResource::Undefined, None) => {
             Err(DapAbort::BadRequest("undefined resource".into()))
         }
         _ => unreachable!("unhandled resource {:?}", req.resource),

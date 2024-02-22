@@ -49,7 +49,7 @@
 //!     bindings::AggregateStore::Merge,
 //!     // some mock data here
 //!     (
-//!         daphne::DapVersion::DraftLatest,
+//!         daphne::DapVersion::Draft09,
 //!         "some-task-id-in-hex",
 //!         &daphne::DapBatchBucket::TimeInterval { batch_window: 50 }
 //!     ),

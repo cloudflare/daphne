@@ -17,7 +17,7 @@ use prio::codec::{Encode, ParameterizedEncode};
 use rand::prelude::*;
 
 use super::{
-    CTX_INPUT_SHARE_DRAFT02, CTX_INPUT_SHARE_DRAFT_LATEST, CTX_ROLE_CLIENT, CTX_ROLE_HELPER,
+    CTX_INPUT_SHARE_DRAFT02, CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_HELPER,
     CTX_ROLE_LEADER,
 };
 
@@ -84,8 +84,8 @@ impl VdafConfig {
             return Err(fatal_error!(err = "unexpected number of HPKE configs"));
         }
 
-        let (draft02_extensions, mut draft_latest_plaintext_input_share) = match version {
-            DapVersion::DraftLatest => (
+        let (draft02_extensions, mut draft09_plaintext_input_share) = match version {
+            DapVersion::Draft09 | DapVersion::Latest => (
                 None,
                 Some(PlaintextInputShare {
                     extensions,
@@ -102,7 +102,7 @@ impl VdafConfig {
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
-            if let Some(ref mut plaintext_input_share) = draft_latest_plaintext_input_share {
+            if let Some(ref mut plaintext_input_share) = draft09_plaintext_input_share {
                 plaintext_input_share.payload = input_share;
                 plaintext_input_share.get_encoded_with_param(&version)
             } else {
@@ -112,7 +112,7 @@ impl VdafConfig {
 
         let input_share_text = match version {
             DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::DraftLatest => CTX_INPUT_SHARE_DRAFT_LATEST,
+            DapVersion::Draft09 | DapVersion::Latest => CTX_INPUT_SHARE_DRAFT09,
         };
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);

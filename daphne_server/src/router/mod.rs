@@ -299,7 +299,7 @@ where
                     collect_job_id.map_or(DapResource::Undefined, DapResource::CollectionJob);
                 (task_id, resource)
             }
-            DapVersion::DraftLatest => {
+            DapVersion::Draft09 | DapVersion::Latest => {
                 let resource = match media_type {
                     Some(
                         DapMediaType::AggregationJobInitReq
@@ -354,12 +354,12 @@ mod test {
         Router,
     };
     use daphne::{
+        async_test_version, async_test_versions,
         messages::{AggregationJobId, Base64Encode, TaskId},
         DapRequest, DapResource, DapVersion,
     };
     use daphne_service_utils::auth::DaphneAuth;
     use futures::future::BoxFuture;
-    use prio::codec::Encode;
     use rand::{thread_rng, Rng};
     use tokio::sync::mpsc::{self, Sender};
     use tower::ServiceExt;
@@ -426,45 +426,33 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn parse_latest_version() {
+    async fn parse_version(version: DapVersion) {
         let test = test_router();
 
         let req = test(
             Request::builder()
-                .uri("/v09/parse-version")
+                .uri(format!("/{version}/parse-version"))
                 .body(Body::empty())
                 .unwrap(),
         )
         .await;
 
-        assert_eq!(req.version, DapVersion::DraftLatest);
+        assert_eq!(req.version, version);
     }
 
-    #[tokio::test]
-    async fn parse_draft02_version() {
-        let test = test_router();
+    async_test_versions! { parse_version }
 
-        let req = test(
-            Request::builder()
-                .uri("/v02/parse-version")
-                .body("1".repeat(32))
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(req.version, DapVersion::Draft02);
-    }
-
-    #[tokio::test]
-    async fn parse_task_id_latest_version() {
+    async fn parse_task_id(version: DapVersion) {
         let test = test_router();
 
         let task_id = TaskId(thread_rng().gen());
 
         let req = test(
             Request::builder()
-                .uri(format!("/v09/{}/parse-task-id", task_id.to_base64url()))
+                .uri(format!(
+                    "/{version}/{}/parse-task-id",
+                    task_id.to_base64url()
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -473,29 +461,9 @@ mod test {
         assert_eq!(req.task_id, Some(task_id));
     }
 
-    #[tokio::test]
-    async fn parse_task_id_draft02_version() {
-        let test = test_router();
+    async_test_versions! { parse_task_id }
 
-        let task_id = TaskId(thread_rng().gen());
-
-        let req = test(
-            Request::builder()
-                .uri("/v02/parse-version")
-                .body({
-                    let mut v = Vec::new();
-                    task_id.encode(&mut v).unwrap();
-                    Body::from(v)
-                })
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(req.task_id, Some(task_id));
-    }
-
-    #[tokio::test]
-    async fn parse_agg_job_id_latest_version() {
+    async fn parse_agg_job_id(version: DapVersion) {
         let test = test_router();
 
         let agg_job_id = AggregationJobId(thread_rng().gen());
@@ -503,7 +471,7 @@ mod test {
         let req = test(
             Request::builder()
                 .uri(format!(
-                    "/v09/{}/parse-agg-job-id",
+                    "/{version}/{}/parse-agg-job-id",
                     agg_job_id.to_base64url()
                 ))
                 .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
@@ -514,4 +482,7 @@ mod test {
 
         assert_eq!(req.resource, DapResource::AggregationJob(agg_job_id));
     }
+
+    async_test_version! { parse_agg_job_id, Draft09 }
+    async_test_version! { parse_agg_job_id, Latest }
 }

@@ -499,7 +499,7 @@ impl AggregationJobTest {
 //
 // and
 //
-//     something_draftlatest
+//     something_draft09
 //
 // that called something(version) with the appropriate version.
 //
@@ -522,7 +522,7 @@ macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::test_version! { $fname, Draft02 }
-            $crate::test_version! { $fname, DraftLatest }
+            $crate::test_version! { $fname, Draft09 }
         )*
     };
 }
@@ -544,7 +544,8 @@ macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
             $crate::async_test_version! { $fname, Draft02 }
-            $crate::async_test_version! { $fname, DraftLatest }
+            $crate::async_test_version! { $fname, Draft09 }
+            $crate::async_test_version! { $fname, Latest }
         )*
     };
 }
