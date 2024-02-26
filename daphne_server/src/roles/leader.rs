@@ -202,7 +202,7 @@ impl crate::App {
         const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
         const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
-        if status == 200 {
+        if status.is_success() {
             // Translate the reqwest response into a Worker response.
             let media_type = reqwest_resp
                 .headers()

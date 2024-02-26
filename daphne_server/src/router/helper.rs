@@ -10,6 +10,7 @@ use daphne::{
     roles::{helper, DapHelper},
 };
 use daphne_service_utils::auth::DaphneAuth;
+use http::StatusCode;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
 
@@ -47,18 +48,27 @@ async fn agg_job<A>(
 where
     A: DapHelper<DaphneAuth> + DaphneService + Send + Sync,
 {
-    AxumDapResponse::from_result(
-        match req.media_type {
-            Some(DapMediaType::AggregationJobInitReq) => {
-                helper::handle_agg_job_init_req(&*app, &req).await
-            }
-            Some(DapMediaType::AggregationJobContinueReq) => {
-                helper::handle_agg_job_cont_req(&*app, &req).await
-            }
-            m => Err(DapAbort::BadRequest(format!("unexpected media type: {m:?}")).into()),
-        },
-        app.server_metrics(),
-    )
+    match req.media_type {
+        Some(DapMediaType::AggregationJobInitReq) => {
+            let resp = helper::handle_agg_job_init_req(&*app, &req).await;
+            AxumDapResponse::from_result_with_success_code(
+                resp,
+                app.server_metrics(),
+                match req.version {
+                    daphne::DapVersion::Draft02 => StatusCode::OK,
+                    daphne::DapVersion::DraftLatest => StatusCode::CREATED,
+                },
+            )
+        }
+        Some(DapMediaType::AggregationJobContinueReq) => {
+            let resp = helper::handle_agg_job_cont_req(&*app, &req).await;
+            AxumDapResponse::from_result(resp, app.server_metrics())
+        }
+        m => AxumDapResponse::new_error(
+            DapAbort::BadRequest(format!("unexpected media type: {m:?}")),
+            app.server_metrics(),
+        ),
+    }
 }
 
 #[tracing::instrument(

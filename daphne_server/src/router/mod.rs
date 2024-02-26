@@ -100,6 +100,14 @@ struct AxumDapResponse(axum::response::Response);
 
 impl AxumDapResponse {
     pub fn new_success(response: DapResponse, metrics: &dyn DaphneServiceMetrics) -> Self {
+        Self::new_success_with_code(response, metrics, StatusCode::OK)
+    }
+
+    pub fn new_success_with_code(
+        response: DapResponse,
+        metrics: &dyn DaphneServiceMetrics,
+        status_code: StatusCode,
+    ) -> Self {
         let Some(media_type) = response.media_type.as_str_for_version(response.version) else {
             return AxumDapResponse::new_error(
                 fatal_error!(err = "failed to construct content-type",
@@ -122,7 +130,7 @@ impl AxumDapResponse {
 
         let headers = [(CONTENT_TYPE, media_type)];
 
-        Self((StatusCode::OK, headers, response.payload).into_response())
+        Self((status_code, headers, response.payload).into_response())
     }
 
     pub fn new_error<E: Into<DapError>>(error: E, metrics: &dyn DaphneServiceMetrics) -> Self {
@@ -164,8 +172,19 @@ impl AxumDapResponse {
     where
         E: Into<DapError>,
     {
+        Self::from_result_with_success_code(result, metrics, StatusCode::OK)
+    }
+
+    pub fn from_result_with_success_code<E>(
+        result: Result<DapResponse, E>,
+        metrics: &dyn DaphneServiceMetrics,
+        status_code: StatusCode,
+    ) -> Self
+    where
+        E: Into<DapError>,
+    {
         match result {
-            Ok(o) => Self::new_success(o, metrics),
+            Ok(o) => Self::new_success_with_code(o, metrics, status_code),
             Err(e) => Self::new_error(e, metrics),
         }
     }
