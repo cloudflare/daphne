@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use daphne::{auth::BearerToken, testing::MockLeaderMemory, DapError};
+use daphne::{auth::BearerToken, roles::leader::in_memory_leader::InMemoryLeaderState, DapError};
 use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics};
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ pub struct App {
     /// Volatile memory for the Leader, including the work queue, pending reports, and pending
     /// colleciton requests. Note that in a production Leader, it is necessary to store this state
     /// across requsets.
-    test_leader_state: Arc<Mutex<MockLeaderMemory>>,
+    test_leader_state: Arc<Mutex<InMemoryLeaderState>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

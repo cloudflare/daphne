@@ -1,6 +1,8 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub mod in_memory_leader;
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
