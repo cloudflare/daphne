@@ -68,7 +68,7 @@ async fn leader_send_http_request<S: Sync>(
 
     let req = DapRequest {
         version: task_config.version,
-        media_type: req_media_type,
+        media_type: Some(req_media_type),
         task_id: Some(*task_id),
         resource,
         sender_auth: Some(

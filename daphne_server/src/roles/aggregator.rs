@@ -177,7 +177,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
             }
 
             // Resolve the trusted certificate issuers and subjects for this request.
-            let sender = req.media_type.sender();
+            let sender = req.sender();
             let trusted_certs = if let (Some(DapSender::Leader), Some(ref trusted_certs)) =
                 (sender, &taskprov_config.leader_auth.cf_tls_client_auth)
             {

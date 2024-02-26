@@ -301,8 +301,10 @@ pub async fn handle_agg_job_req<'req, S: Sync, A: DapHelper<S>>(
     req: &DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
     match req.media_type {
-        DapMediaType::AggregationJobInitReq => handle_agg_job_init_req(aggregator, req).await,
-        DapMediaType::AggregationJobContinueReq => handle_agg_job_cont_req(aggregator, req).await,
+        Some(DapMediaType::AggregationJobInitReq) => handle_agg_job_init_req(aggregator, req).await,
+        Some(DapMediaType::AggregationJobContinueReq) => {
+            handle_agg_job_cont_req(aggregator, req).await
+        }
         //TODO spec: Specify this behavior.
         _ => Err(DapAbort::BadRequest("unexpected media type".into()).into()),
     }

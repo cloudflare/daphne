@@ -97,7 +97,7 @@ fn check_request_content_type<S>(
     req: &DapRequest<S>,
     expected: DapMediaType,
 ) -> Result<(), DapAbort> {
-    if req.media_type != expected {
+    if req.media_type != Some(expected) {
         Err(DapAbort::content_type(req, expected))
     } else {
         Ok(())
@@ -491,7 +491,7 @@ mod test {
 
             DapRequest {
                 version,
-                media_type: DapMediaType::Report,
+                media_type: Some(DapMediaType::Report),
                 task_id: Some(*task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),
@@ -703,7 +703,7 @@ mod test {
             );
             DapRequest {
                 version: task_config.version,
-                media_type,
+                media_type: Some(media_type),
                 task_id: Some(*task_id),
                 resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
                 payload,
@@ -729,7 +729,7 @@ mod test {
 
             DapRequest {
                 version: task_config.version,
-                media_type,
+                media_type: Some(media_type),
                 task_id: Some(*task_id),
                 resource: if task_config.version == DapVersion::Draft02 {
                     DapResource::Undefined
@@ -848,7 +848,7 @@ mod test {
         let task_id = TaskId(rng.gen());
         let req = DapRequest {
             version: DapVersion::Draft02,
-            media_type: DapMediaType::HpkeConfigList,
+            media_type: Some(DapMediaType::HpkeConfigList),
             payload: Vec::new(),
             task_id: Some(task_id),
             resource: DapResource::Undefined,
@@ -867,7 +867,7 @@ mod test {
         let t = Test::new(version);
         let req = DapRequest {
             version: DapVersion::Draft02,
-            media_type: DapMediaType::HpkeConfigList,
+            media_type: Some(DapMediaType::HpkeConfigList),
             task_id: Some(t.time_interval_task_id),
             resource: DapResource::Undefined,
             payload: Vec::new(),
@@ -1011,7 +1011,7 @@ mod test {
         let collect_job_id = CollectionJobId(rng.gen());
         let mut req = DapRequest {
             version: task_config.version,
-            media_type: DapMediaType::CollectReq,
+            media_type: Some(DapMediaType::CollectReq),
             task_id: Some(*task_id),
             resource: if version == DapVersion::Draft02 {
                 DapResource::Undefined
@@ -1319,7 +1319,7 @@ mod test {
         let report_invalid_task_id = t.gen_test_report(task_id).await;
         let req = DapRequest {
             version: task_config.version,
-            media_type: DapMediaType::Report,
+            media_type: Some(DapMediaType::Report),
             task_id: Some(TaskId([0; 32])),
             resource: DapResource::Undefined,
             payload: report_invalid_task_id
@@ -1346,7 +1346,7 @@ mod test {
         let report = t.gen_test_report(task_id).await;
         let req = DapRequest {
             version: task_config.version,
-            media_type: DapMediaType::Report,
+            media_type: Some(DapMediaType::Report),
             task_id: Some(*task_id),
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version).unwrap(),
@@ -1956,7 +1956,7 @@ mod test {
 
             let req = DapRequest {
                 version,
-                media_type: DapMediaType::Report,
+                media_type: Some(DapMediaType::Report),
                 task_id: Some(task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),

@@ -1235,7 +1235,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         _url: Url,
     ) -> Result<DapResponse, DapError> {
         match req.media_type {
-            DapMediaType::AggregationJobInitReq | DapMediaType::AggregationJobContinueReq => {
+            Some(DapMediaType::AggregationJobInitReq | DapMediaType::AggregationJobContinueReq) => {
                 Ok(helper::handle_agg_job_req(
                     &**self.peer.as_ref().expect("peer not configured"),
                     &req,
@@ -1243,7 +1243,7 @@ impl DapLeader<BearerToken> for MockAggregator {
                 .await
                 .expect("peer aborted unexpectedly"))
             }
-            DapMediaType::AggregateShareReq => Ok(helper::handle_agg_share_req(
+            Some(DapMediaType::AggregateShareReq) => Ok(helper::handle_agg_share_req(
                 &**self.peer.as_ref().expect("peer not configured"),
                 &req,
             )
@@ -1258,7 +1258,7 @@ impl DapLeader<BearerToken> for MockAggregator {
         req: DapRequest<BearerToken>,
         _url: Url,
     ) -> Result<DapResponse, DapError> {
-        if req.media_type == DapMediaType::AggregationJobInitReq {
+        if req.media_type == Some(DapMediaType::AggregationJobInitReq) {
             Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),
                 &req,

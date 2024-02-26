@@ -159,7 +159,10 @@ impl DapAbort {
             .as_str_for_version(req.version)
             .expect("could not resolve content-type for expected media type");
 
-        if let Some(got_str) = req.media_type.as_str_for_version(req.version) {
+        if let Some(got_str) = req
+            .media_type
+            .and_then(|mt| mt.as_str_for_version(req.version))
+        {
             Self::BadRequest(format!(
                 "unexpected content-type: got {got_str}; want {want_str}"
             ))

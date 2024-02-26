@@ -1086,7 +1086,7 @@ pub struct DapRequest<S> {
     pub version: DapVersion,
 
     /// Request media type, sent in the "content-type" header of the HTTP request.
-    pub media_type: DapMediaType,
+    pub media_type: Option<DapMediaType>,
 
     /// ID of the task with which the request is associated. This field is optional, since some
     /// requests may apply to all tasks, e.g., the request for the HPKE configuration.
@@ -1110,7 +1110,7 @@ impl<S> Default for DapRequest<S> {
     fn default() -> Self {
         Self {
             version: DapVersion::DraftLatest,
-            media_type: Default::default(),
+            media_type: None,
             task_id: Default::default(),
             resource: Default::default(),
             payload: Default::default(),
@@ -1154,6 +1154,10 @@ impl<S> DapRequest<S> {
                 "missing or malformed collection job ID".into(),
             ))
         }
+    }
+
+    pub fn sender(&self) -> Option<DapSender> {
+        self.media_type.map(|m| m.sender())
     }
 }
 
