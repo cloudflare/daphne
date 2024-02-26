@@ -20,6 +20,8 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
           override: true
+      - name: Cargo hack
+        uses: taiki-e/install-action@cargo-hack
       - name: Cap'n'proto
         run: sudo apt install capnproto
       - name: Rust cache
@@ -27,7 +29,7 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Linting
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo hack clippy --each-feature -- -D warnings
       - name: Testing
         run: cargo test --all-targets
       - name: Doc Testing
