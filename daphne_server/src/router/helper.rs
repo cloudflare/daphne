@@ -49,10 +49,10 @@ where
 {
     AxumDapResponse::from_result(
         match req.media_type {
-            DapMediaType::AggregationJobInitReq => {
+            Some(DapMediaType::AggregationJobInitReq) => {
                 helper::handle_agg_job_init_req(&*app, &req).await
             }
-            DapMediaType::AggregationJobContinueReq => {
+            Some(DapMediaType::AggregationJobContinueReq) => {
                 helper::handle_agg_job_cont_req(&*app, &req).await
             }
             m => Err(DapAbort::BadRequest(format!("unexpected media type: {m:?}")).into()),

@@ -90,7 +90,7 @@ pub trait BearerTokenProvider {
         task_config: &DapTaskConfig,
         media_type: &DapMediaType,
     ) -> Result<Self::WrappedBearerToken<'s>, DapError> {
-        if matches!(media_type.sender(), Some(DapSender::Leader)) {
+        if matches!(media_type.sender(), DapSender::Leader) {
             let token = self
                 .get_leader_bearer_token_for(task_id, task_config)
                 .await?
@@ -127,7 +127,7 @@ pub trait BearerTokenProvider {
         // following RFC 6750, Section 2.1. Note that we would also need to replace `From<String>
         // for BearerToken` with `TryFrom<String>` so that a `DapError` can be returned if the
         // token is not formatted properly.
-        if matches!(req.media_type.sender(), Some(DapSender::Leader)) {
+        if matches!(req.sender(), Some(DapSender::Leader)) {
             if let Some(ref got) = req.sender_auth {
                 if let Some(expected) = self
                     .get_leader_bearer_token_for(task_id, task_config)
@@ -142,7 +142,7 @@ pub trait BearerTokenProvider {
             }
         }
 
-        if matches!(req.media_type.sender(), Some(DapSender::Collector)) {
+        if matches!(req.sender(), Some(DapSender::Collector)) {
             if let Some(ref got) = req.sender_auth {
                 if let Some(expected) = self
                     .get_collector_bearer_token_for(task_id, task_config)

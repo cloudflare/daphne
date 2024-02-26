@@ -440,7 +440,6 @@ mod test {
     use super::{compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config};
     use crate::{
         auth::BearerToken,
-        constants::DapMediaType,
         error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
         messages::{self, encode_base64url, Extension, ReportId, ReportMetadata, TaskId},
@@ -663,7 +662,7 @@ mod test {
 
             let req = DapRequest::<()> {
                 version,
-                media_type: DapMediaType::Missing, // ignored by test
+                media_type: None, // ignored by test
                 task_id: Some(task_id),
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test

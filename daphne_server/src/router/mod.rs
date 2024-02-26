@@ -244,14 +244,25 @@ where
             })(),
         };
 
-        let media_type = DapMediaType::from_str_for_version(
-            version,
-            parts
-                .headers
-                .get(CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok()),
-        )
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?;
+        let media_type = if let Some(content_type) = parts.headers.get(CONTENT_TYPE) {
+            let content_type = content_type.to_str().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "header value contains non ascii or invisible characters".into(),
+                )
+            })?;
+            Some(
+                DapMediaType::from_str_for_version(version, content_type)
+                    .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?,
+            )
+        } else {
+            None
+        };
+        // let media_type = parts
+        //     .headers
+        //     .get(CONTENT_TYPE)
+        //     .and_then(|v| v.to_str().ok())
+        //     .and_then(|ct| )
 
         let taskprov = extract_header_as_string("dap-taskprov");
 
@@ -279,8 +290,10 @@ where
             }
             DapVersion::DraftLatest => {
                 let resource = match media_type {
-                    DapMediaType::AggregationJobInitReq
-                    | DapMediaType::AggregationJobContinueReq => {
+                    Some(
+                        DapMediaType::AggregationJobInitReq
+                        | DapMediaType::AggregationJobContinueReq,
+                    ) => {
                         if let Some(agg_job_id) = agg_job_id {
                             DapResource::AggregationJob(agg_job_id)
                         } else {
@@ -289,7 +302,7 @@ where
                             DapResource::Undefined
                         }
                     }
-                    DapMediaType::CollectReq => {
+                    Some(DapMediaType::CollectReq) => {
                         if let Some(collect_job_id) = collect_job_id {
                             DapResource::CollectionJob(collect_job_id)
                         } else {

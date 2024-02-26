@@ -151,7 +151,7 @@ impl crate::App {
 
         let content_type = req
             .media_type
-            .as_str_for_version(req.version)
+            .and_then(|mt| mt.as_str_for_version(req.version))
             .ok_or_else(|| {
                 fatal_error!(
                     err = "failed to construct content-type",
@@ -209,7 +209,7 @@ impl crate::App {
                 .get_all(reqwest::header::CONTENT_TYPE)
                 .into_iter()
                 .filter_map(|h| h.to_str().ok())
-                .find_map(|h| DapMediaType::from_str_for_version(req.version, Some(h)))
+                .find_map(|h| DapMediaType::from_str_for_version(req.version, h))
                 .ok_or_else(|| fatal_error!(err = INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?;
 
             let payload = reqwest_resp
