@@ -246,23 +246,15 @@ where
 
         let media_type = if let Some(content_type) = parts.headers.get(CONTENT_TYPE) {
             let content_type = content_type.to_str().map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "header value contains non ascii or invisible characters".into(),
-                )
+                let msg = "header value contains non ascii or invisible characters".into();
+                (StatusCode::BAD_REQUEST, msg)
             })?;
-            Some(
-                DapMediaType::from_str_for_version(version, content_type)
-                    .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?,
-            )
+            let mt = DapMediaType::from_str_for_version(version, content_type)
+                .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?;
+            Some(mt)
         } else {
             None
         };
-        // let media_type = parts
-        //     .headers
-        //     .get(CONTENT_TYPE)
-        //     .and_then(|v| v.to_str().ok())
-        //     .and_then(|ct| )
 
         let taskprov = extract_header_as_string("dap-taskprov");
 
