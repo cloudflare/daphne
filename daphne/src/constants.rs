@@ -60,6 +60,7 @@ impl DapMediaType {
 
     /// Parse the media type from the content-type HTTP header.
     pub fn from_str_for_version(version: DapVersion, content_type: &str) -> Option<Self> {
+        let (content_type, _) = content_type.split_once(';').unwrap_or((content_type, ""));
         let media_type = match (version, content_type) {
             (DapVersion::Draft02, DRAFT02_MEDIA_TYPE_AGG_CONT_REQ)
             | (DapVersion::DraftLatest, MEDIA_TYPE_AGG_JOB_CONT_REQ) => {
@@ -319,6 +320,17 @@ mod test {
         assert_eq!(
             DapMediaType::AggregationJobResp,
             DapMediaType::agg_job_cont_resp_for_version(DapVersion::DraftLatest)
+        );
+    }
+
+    #[test]
+    fn media_type_parsing_ignores_content_type_paramters() {
+        assert_eq!(
+            DapMediaType::from_str_for_version(
+                DapVersion::DraftLatest,
+                "application/dap-aggregation-job-init-req;version=09",
+            ),
+            Some(DapMediaType::AggregationJobInitReq),
         );
     }
 }
