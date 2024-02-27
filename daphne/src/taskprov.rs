@@ -264,12 +264,12 @@ impl VdafConfig {
                     },
                 ))
             }
-            (DapVersion::Draft02, var) => Err(DapAbort::InvalidTask {
-                detail: format!("draft02: unsupported VDAF: {var:?}"),
-                task_id: *task_id,
-            }),
             (.., VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
+                task_id: *task_id,
+            }),
+            (_, var) => Err(DapAbort::InvalidTask {
+                detail: format!("{version}: unsupported VDAF: {var:?}"),
                 task_id: *task_id,
             }),
         }
