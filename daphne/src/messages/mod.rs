@@ -377,7 +377,7 @@ impl ParameterizedDecode<DapVersion> for Report {
 /// An initial aggregate sub-request sent in an [`AggregationJobInitReq`]. The contents of this
 /// structure pertain to a single report.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReportShare {
     pub report_metadata: ReportMetadata,
     pub public_share: Vec<u8>,
@@ -523,6 +523,7 @@ impl Default for BatchSelector {
 
 /// The `PrepareInit` message consisting of the report share and the Leader's initial prep share.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct PrepareInit {
     pub report_share: ReportShare,
     pub draft_latest_payload: Option<Vec<u8>>,
