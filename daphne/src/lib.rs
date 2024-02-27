@@ -403,7 +403,7 @@ impl Extend<(DapBatchBucket, (ReportId, Time))> for DapAggregateSpan<()> {
 
 /// Method for configuring tasks.
 #[derive(Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Debug))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
 pub enum DapTaskConfigMethod {
     /// draft-wang-ppm-dap-taskprov
     Taskprov {
@@ -416,6 +416,7 @@ pub enum DapTaskConfigMethod {
 }
 
 /// Base parameters used to configure a DAP task.
+#[derive(Debug)]
 pub struct DapTaskParameters {
     /// The protocol version (i.e., which draft).
     pub version: DapVersion,
@@ -525,7 +526,7 @@ impl Default for DapTaskParameters {
 
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Debug))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
 #[serde(from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
     /// Same as [`DapTaskParameters`].
@@ -771,6 +772,7 @@ impl AsRef<DapTaskConfig> for DapTaskConfig {
 
 /// A measurement from which a Client generates a report.
 #[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
 #[serde(rename_all = "snake_case")]
 pub enum DapMeasurement {
     U64(u64),

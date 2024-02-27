@@ -50,6 +50,7 @@ impl std::fmt::Display for MasticWeightConfig {
 
 /// A weight.
 #[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
 pub enum MasticWeight {
     Bool(bool),
 }

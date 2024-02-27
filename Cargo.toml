@@ -15,8 +15,12 @@ members = [
 ]
 
 [profile.release]
-# Tell `rustc` to optimize for small code size.
 opt-level = "s"
+
+[profile.release-symbols]
+inherits = "release"
+opt-level = 3
+debug = 1
 
 [workspace.dependencies]
 anyhow = "1.0.79"

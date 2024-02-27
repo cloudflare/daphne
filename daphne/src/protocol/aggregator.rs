@@ -85,6 +85,7 @@ pub trait EarlyReportState {
 /// -> [`EarlyReportStateInitialized`]
 /// -> [`Transition`]
 #[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReportState {
     pub metadata: ReportMetadata,
     pub public_share: Vec<u8>,
@@ -95,6 +96,7 @@ pub struct ReportState {
 /// Report state during aggregation initialization after consuming the report share. This involves
 /// decryption as well a few validation steps.
 #[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateConsumed {
     Ready {
         state: ReportState,
@@ -263,6 +265,7 @@ impl EarlyReportState for EarlyReportStateConsumed {
 
 /// Report state during aggregation initialization after the VDAF preparation step.
 #[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateInitialized {
     Ready {
         state: ReportState,
