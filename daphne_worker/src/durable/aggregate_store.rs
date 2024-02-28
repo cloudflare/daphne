@@ -61,8 +61,8 @@ pub struct AggregateStore {
     collected: Option<bool>,
 }
 
-/// Minimum number of chunks needed to store 512K of aggregate share data.
-const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 4;
+/// Minimum number of chunks needed to store 1Mb of aggregate share data.
+const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 8;
 
 /// Minimum number of chunks needed to store `10_000` report ids.
 const MAX_REPORT_ID_CHUNK_KEY_COUNT: usize = 2;
