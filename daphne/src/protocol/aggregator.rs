@@ -32,6 +32,7 @@ use replace_with::replace_with_or_abort;
 use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
+    iter::zip,
 };
 
 use super::{
@@ -401,40 +402,39 @@ impl DapTaskConfig {
         reports: Vec<Report>,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError> {
-        let mut processed = HashSet::with_capacity(reports.len());
-        let mut states = Vec::with_capacity(reports.len());
-        let mut prep_inits = Vec::with_capacity(reports.len());
         let mut consumed_reports = Vec::with_capacity(reports.len());
         let mut helper_shares = Vec::with_capacity(reports.len());
-        for report in reports {
-            if processed.contains(&report.report_metadata.id) {
-                return Err(fatal_error!(
-                    err = "tried to process report sequence with non-unique report IDs",
-                    non_unique_id = %report.report_metadata.id,
-                ));
+        {
+            let mut processed = HashSet::with_capacity(reports.len());
+            for report in reports {
+                if processed.contains(&report.report_metadata.id) {
+                    return Err(fatal_error!(
+                        err = "tried to process report sequence with non-unique report IDs",
+                        non_unique_id = %report.report_metadata.id,
+                    ));
+                }
+                processed.insert(report.report_metadata.id);
+
+                let [leader_share, helper_share] = report.encrypted_input_shares;
+
+                consumed_reports.push(
+                    EarlyReportStateConsumed::consume(
+                        decrypter,
+                        true,
+                        task_id,
+                        self,
+                        ReportState {
+                            metadata: report.report_metadata,
+                            public_share: report.public_share,
+                            draft_latest_prep_init_payload: None,
+                        },
+                        leader_share,
+                    )
+                    .await?,
+                );
+                helper_shares.push(helper_share);
             }
-            processed.insert(report.report_metadata.id);
-
-            let [leader_share, helper_share] = report.encrypted_input_shares;
-
-            consumed_reports.push(
-                EarlyReportStateConsumed::consume(
-                    decrypter,
-                    true,
-                    task_id,
-                    self,
-                    ReportState {
-                        metadata: report.report_metadata,
-                        public_share: report.public_share,
-                        draft_latest_prep_init_payload: None,
-                    },
-                    leader_share,
-                )
-                .await?,
-            );
-            helper_shares.push(helper_share);
         }
-
         let initialized_reports = initializer
             .initialize_reports(
                 true,
@@ -447,10 +447,10 @@ impl DapTaskConfig {
             .await?;
 
         assert_eq!(initialized_reports.len(), helper_shares.len());
-        for (initialized_report, helper_share) in initialized_reports
-            .into_iter()
-            .zip(helper_shares.into_iter())
-        {
+
+        let mut states = Vec::with_capacity(initialized_reports.len());
+        let mut prep_inits = Vec::with_capacity(initialized_reports.len());
+        for (initialized_report, helper_share) in zip(initialized_reports, helper_shares) {
             match initialized_report {
                 EarlyReportStateInitialized::Ready {
                     state,
@@ -530,36 +530,38 @@ impl DapTaskConfig {
         agg_job_init_req: AggregationJobInitReq,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
-        let mut processed = HashSet::with_capacity(num_reports);
         let mut consumed_reports = Vec::with_capacity(num_reports);
-        for prep_init in agg_job_init_req.prep_inits {
-            if processed.contains(&prep_init.report_share.report_metadata.id) {
-                return Err(DapAbort::InvalidMessage {
-                    detail: format!(
-                        "report ID {} appears twice in the same aggregation job",
-                        prep_init.report_share.report_metadata.id.to_base64url()
-                    ),
-                    task_id: Some(*task_id),
+        {
+            let mut processed = HashSet::with_capacity(num_reports);
+            for prep_init in agg_job_init_req.prep_inits {
+                if processed.contains(&prep_init.report_share.report_metadata.id) {
+                    return Err(DapAbort::InvalidMessage {
+                        detail: format!(
+                            "report ID {} appears twice in the same aggregation job",
+                            prep_init.report_share.report_metadata.id.to_base64url()
+                        ),
+                        task_id: Some(*task_id),
+                    }
+                    .into());
                 }
-                .into());
-            }
-            processed.insert(prep_init.report_share.report_metadata.id);
+                processed.insert(prep_init.report_share.report_metadata.id);
 
-            consumed_reports.push(
-                EarlyReportStateConsumed::consume(
-                    decrypter,
-                    false,
-                    task_id,
-                    self,
-                    ReportState {
-                        metadata: prep_init.report_share.report_metadata,
-                        public_share: prep_init.report_share.public_share,
-                        draft_latest_prep_init_payload: prep_init.draft09_payload,
-                    },
-                    prep_init.report_share.encrypted_input_share,
-                )
-                .await?,
-            );
+                consumed_reports.push(
+                    EarlyReportStateConsumed::consume(
+                        decrypter,
+                        false,
+                        task_id,
+                        self,
+                        ReportState {
+                            metadata: prep_init.report_share.report_metadata,
+                            public_share: prep_init.report_share.public_share,
+                            draft_latest_prep_init_payload: prep_init.draft09_payload,
+                        },
+                        prep_init.report_share.encrypted_input_share,
+                    )
+                    .await?,
+                );
+            }
         }
 
         let agg_param =
@@ -816,11 +818,7 @@ impl DapTaskConfig {
 
         let mut transitions = Vec::with_capacity(state.seq.len());
         let mut out_shares = Vec::with_capacity(state.seq.len());
-        for (helper, leader) in agg_job_resp
-            .transitions
-            .into_iter()
-            .zip(state.seq.into_iter())
-        {
+        for (helper, leader) in zip(agg_job_resp.transitions, state.seq) {
             if helper.report_id != leader.report_id {
                 return Err(DapAbort::InvalidMessage {
                     detail: format!(
@@ -935,11 +933,7 @@ impl DapTaskConfig {
         }
 
         let mut agg_span = DapAggregateSpan::default();
-        for (helper, leader) in agg_job_resp
-            .transitions
-            .into_iter()
-            .zip(state.seq.into_iter())
-        {
+        for (helper, leader) in zip(agg_job_resp.transitions, state.seq) {
             if helper.report_id != leader.report_id {
                 return Err(DapAbort::InvalidMessage {
                     detail: format!(
@@ -1195,7 +1189,7 @@ impl DapTaskConfig {
         }
 
         let mut agg_span = DapAggregateSpan::default();
-        for (helper, out_share) in agg_job_resp.transitions.into_iter().zip(state.seq) {
+        for (helper, out_share) in zip(agg_job_resp.transitions, state.seq) {
             if helper.report_id != out_share.report_id {
                 return Err(DapAbort::InvalidMessage {
                     detail: format!(
