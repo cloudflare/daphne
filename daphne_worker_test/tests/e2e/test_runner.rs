@@ -819,7 +819,7 @@ async fn post_internal_delete_all(
     assert_eq!(
         200,
         resp.status(),
-        "unexpected response status: {:?}",
+        "request to {url} failed: response {:?}",
         resp.text().await.unwrap()
     );
 }

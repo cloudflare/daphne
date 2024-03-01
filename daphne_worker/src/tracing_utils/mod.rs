@@ -205,6 +205,7 @@ pub fn initialize_tracing(env: &Env) {
             Ok(_) | Err(_) => {
                 // Console output
                 let ansi = fmt::layer()
+                    .pretty()
                     .with_ansi(true)
                     .with_writer(LogWriter::new)
                     .with_timer(WasmTime::new());
