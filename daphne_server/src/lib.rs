@@ -83,7 +83,6 @@ pub struct App {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StorageProxyConfig {
     pub url: Url,
-    #[serde(with = "transparent_auth_token")]
     pub auth_token: BearerToken,
 }
 
@@ -119,43 +118,5 @@ impl App {
 
     pub(crate) fn kv(&self) -> Kv<'_> {
         Kv::new(&self.storage_proxy_config, &self.http, &self.cache)
-    }
-}
-
-mod transparent_auth_token {
-    //! For backwards compatibility reasons we can't add `#[serde(transparent)]` to
-    //! [`BearerToken`], as such we have to have a custom serializer for this field in order to
-    //! make the config file less verbose.
-    //!
-    //! # Example
-    //! Without the serializer
-    //! ```yaml
-    //! auth_token:
-    //!     raw: 'the-token'
-    //! ```
-    //!
-    //! With the serializer
-    //! ```yaml
-    //! auth_token: 'the-token'
-    //! ```
-    //!
-    //! TODO(mendes): Once the `dap_prototype` is removed we can make the change to remove this.
-
-    use daphne::auth::BearerToken;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(value: &BearerToken, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(value.as_ref())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BearerToken, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(BearerToken::from(s))
     }
 }

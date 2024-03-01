@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 /// A bearer token used for authorizing DAP requests.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+#[serde(transparent)]
 pub struct BearerToken {
     raw: String,
 }

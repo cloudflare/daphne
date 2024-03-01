@@ -91,14 +91,13 @@ impl AsRef<BearerToken> for DaphneAuth {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(try_from = "SerializedDaphneWorkerAuthMethod")]
 pub struct DaphneWorkerAuthMethod {
     /// Expected bearer token.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<BearerToken>,
 
     /// Details of trusted TLS client certificates.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cf_tls_client_auth: Option<Vec<TlsCertInfo>>,
 }
 
@@ -124,25 +123,6 @@ impl AsRef<BearerToken> for DaphneWorkerAuthMethod {
             // We would only try this method if we previously resolved to use a bearer token for
             // authorization.
             unreachable!("no bearer token provided by sender")
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-struct SerializedDaphneWorkerAuthMethod {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    bearer_token: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cf_tls_client_auth: Option<Vec<TlsCertInfo>>,
-}
-
-impl From<SerializedDaphneWorkerAuthMethod> for DaphneWorkerAuthMethod {
-    fn from(serialized: SerializedDaphneWorkerAuthMethod) -> Self {
-        Self {
-            bearer_token: serialized.bearer_token.map(BearerToken::from),
-            cf_tls_client_auth: serialized.cf_tls_client_auth,
         }
     }
 }
