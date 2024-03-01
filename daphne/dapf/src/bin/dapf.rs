@@ -7,7 +7,9 @@ use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
-    messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
+    messages::{
+        Base64Encode, BatchSelector, Collection, CollectionReq, HpkeConfigList, Query, TaskId,
+    },
     vdaf::VdafConfig,
     DapAggregationParam, DapMeasurement, DapVersion,
 };
@@ -16,8 +18,10 @@ use rand::prelude::*;
 use reqwest::{Client, ClientBuilder};
 use std::{
     io::{stdin, Read},
+    process::Command,
     time::SystemTime,
 };
+
 use url::Url;
 
 /// DAP Functions, a utility for interacting with DAP deployments.
@@ -42,15 +46,19 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Action {
+    /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
+    GetHpkeConfig {
+        aggregator_url: Url,
+    },
     /// Upload a report to a DAP Leader using the JSON-formatted measurement provided on stdin.
     Upload {
         /// Base URL of the Leader
         #[clap(long, action)]
-        leader_url: String,
+        leader_url: Url,
 
         /// Base URL of the Helper
         #[clap(long, action)]
-        helper_url: String,
+        helper_url: Url,
 
         /// JSON-formatted VDAF config
         #[clap(short, long, action)]
@@ -61,19 +69,26 @@ enum Action {
     Collect {
         /// Base URL of the Leader
         #[clap(long, action)]
-        leader_url: String,
+        leader_url: Url,
     },
     /// Poll the given collect URI for the aggregate result.
     CollectPoll {
         /// The collect URI
         #[clap(short, long, action)]
-        uri: String,
+        uri: Url,
 
         /// JSON-formatted VDAF config
         #[clap(short, long, action)]
         vdaf: VdafConfig,
     },
     GenerateHpkeReceiverConfig {
+        kem_alg: KemAlg,
+    },
+    /// Rotate the HPKE config advertised by the Aggregator.
+    DaphneWorkerRotateHpkeConfig {
+        wrangler_config: String,
+        wrangler_env: String,
+        dap_version: DapVersion,
         kem_alg: KemAlg,
     },
 }
@@ -101,7 +116,6 @@ impl ValueEnum for KemAlg {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut rng = thread_rng();
-    let version = DapVersion::Draft02; // TODO(bhalleycf) make a parameter
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
@@ -111,9 +125,22 @@ async fn main() -> Result<()> {
     // HTTP client should not handle redirects automatically.
     let http_client = ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
-        .build()?;
+        .build()
+        .with_context(|| "failed to create HTTP client")?;
 
     match &cli.action {
+        Action::GetHpkeConfig { aggregator_url } => {
+            let hpke_config = get_hpke_config(&http_client, aggregator_url)
+                .await
+                .with_context(|| "failed to fetch the HPKE config")?;
+            println!(
+                "{}",
+                serde_json::to_string(&hpke_config)
+                    .with_context(|| "failed to encode HPKE config")?
+            );
+
+            Ok(())
+        }
         Action::Upload {
             leader_url,
             helper_url,
@@ -131,13 +158,14 @@ async fn main() -> Result<()> {
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             // Get the Aggregators' HPKE configs.
-            let leader_hpke_config = get_hpke_config(&http_client, &task_id, leader_url)
+            let leader_hpke_config = get_hpke_config(&http_client, leader_url)
                 .await
                 .with_context(|| "failed to fetch the Leader's HPKE config")?;
-            let helper_hpke_config = get_hpke_config(&http_client, &task_id, helper_url)
+            let helper_hpke_config = get_hpke_config(&http_client, helper_url)
                 .await
                 .with_context(|| "failed to fetch the Helper's HPKE config")?;
 
+            let version = deduce_dap_version_from_url(leader_url)?;
             // Generate a report for the measurement.
             let report = vdaf
                 .produce_report(
@@ -161,7 +189,7 @@ async fn main() -> Result<()> {
                 .expect("failecd to construct content-type header"),
             );
             let resp = http_client
-                .post(Url::parse(leader_url)?.join("upload")?)
+                .post(leader_url.join("upload")?)
                 .body(report.get_encoded_with_param(&version)?)
                 .headers(headers)
                 .send()
@@ -188,6 +216,7 @@ async fn main() -> Result<()> {
             let query: Query =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
+            let version = deduce_dap_version_from_url(leader_url)?;
             // Construct collect request.
             let collect_req = CollectionReq {
                 draft02_task_id: if version == DapVersion::Draft02 {
@@ -217,7 +246,7 @@ async fn main() -> Result<()> {
             }
 
             let resp = http_client
-                .post(Url::parse(leader_url)?.join("collect")?)
+                .post(leader_url.join("collect")?)
                 .body(collect_req.get_encoded_with_param(&version)?)
                 .headers(headers)
                 .send()
@@ -253,7 +282,7 @@ async fn main() -> Result<()> {
             let batch_selector: BatchSelector =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
-            let resp = http_client.get(uri).send().await?;
+            let resp = http_client.get(uri.clone()).send().await?;
             if resp.status() == 202 {
                 return Err(anyhow!("aggregate result not ready"));
             } else if resp.status() != 200 {
@@ -262,6 +291,7 @@ async fn main() -> Result<()> {
             let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
+            let version = deduce_dap_version_from_url(uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
@@ -288,6 +318,105 @@ async fn main() -> Result<()> {
             );
             Ok(())
         }
+        Action::DaphneWorkerRotateHpkeConfig {
+            wrangler_config,
+            wrangler_env,
+            dap_version,
+            kem_alg,
+        } => {
+            let hpke_receiver_config_list_key = format!("hpke_receiver_config_set/{dap_version}");
+            let current_hpke_receiver_config_list_value = {
+                let get_current_hpke_receiver_config_list_result = Command::new("wrangler")
+                    .args([
+                        "kv:key",
+                        "get",
+                        &hpke_receiver_config_list_key,
+                        "-c",
+                        wrangler_config,
+                        "-e",
+                        wrangler_env,
+                        "--binding",
+                        "DAP_CONFIG",
+                    ])
+                    .output()
+                    .with_context(|| "wrangler kv:key get failed")?;
+                if !get_current_hpke_receiver_config_list_result
+                    .status
+                    .success()
+                {
+                    println!(
+                        "{}",
+                        String::from_utf8_lossy(
+                            &get_current_hpke_receiver_config_list_result.stderr
+                        )
+                    );
+                    return Err(anyhow!(
+                        "Failed to get current HPKE receiver config list (return status {})",
+                        get_current_hpke_receiver_config_list_result.status
+                    ));
+                }
+                get_current_hpke_receiver_config_list_result.stdout
+            };
+
+            let mut hpke_receiver_config_list = serde_json::from_slice::<Vec<HpkeReceiverConfig>>(
+                &current_hpke_receiver_config_list_value,
+            )
+            .with_context(|| "failed to parse the current HPKE receiver config list")?;
+
+            // Choose a fresh config ID.
+            let hpke_config_id = loop {
+                let id = rng.gen::<u8>();
+                if !hpke_receiver_config_list
+                    .iter()
+                    .any(|receiver_config| receiver_config.config.id == id)
+                {
+                    break id;
+                }
+            };
+
+            let new_hpke_receiver_config = HpkeReceiverConfig::gen(hpke_config_id, kem_alg.0)
+                .with_context(|| "failed to generate HPKE receiver config")?;
+
+            // Insert the new config at the front of the list. We expect that Daphne-Worker always
+            // advertises the first config in the list.
+            hpke_receiver_config_list.insert(0, new_hpke_receiver_config);
+
+            let updated_hpke_receiver_config_list_value =
+                serde_json::to_string(&hpke_receiver_config_list)
+                    .with_context(|| "failed to encode the updated HPKE receiver config list")?;
+
+            let put_updated_hpke_receiver_config_list_result = Command::new("wrangler")
+                .args([
+                    "kv:key",
+                    "put",
+                    &hpke_receiver_config_list_key,
+                    &updated_hpke_receiver_config_list_value,
+                    "-c",
+                    wrangler_config,
+                    "-e",
+                    wrangler_env,
+                    "--binding",
+                    "DAP_CONFIG",
+                ])
+                .output()
+                .with_context(|| "wrangler kv:key get failed")?;
+            if !put_updated_hpke_receiver_config_list_result
+                .status
+                .success()
+            {
+                println!(
+                    "{}",
+                    String::from_utf8_lossy(&put_updated_hpke_receiver_config_list_result.stderr)
+                );
+                return Err(anyhow!(
+                    "Failed to put updatedt HPKE receiver config list (return status {})",
+                    put_updated_hpke_receiver_config_list_result.status
+                ));
+            }
+
+            println!("ID of the new HPKE config: {hpke_config_id}");
+            Ok(())
+        }
     }
 }
 
@@ -301,29 +430,33 @@ fn parse_id(id_str: &Option<String>) -> Result<TaskId> {
     .with_context(|| "expected URL-safe, base64 string")
 }
 
-// TODO(cjpatton) Refactor integration tests to use this method.
-async fn get_hpke_config(
-    http_client: &Client,
-    task_id: &TaskId,
-    base_url: &str,
-) -> Result<HpkeConfig> {
-    let url = Url::parse(base_url)
-        .with_context(|| "failed to parse base URL")?
-        .join("hpke_config")?;
+async fn get_hpke_config(http_client: &Client, base_url: &Url) -> Result<HpkeConfig> {
+    let url = base_url.join("hpke_config")?;
 
     let resp = http_client
         .get(url.as_str())
-        .query(&[("task_id", task_id.to_base64url())])
         .send()
         .await
         .with_context(|| "request failed")?;
     if !resp.status().is_success() {
         return Err(anyhow!("unexpected response: {:?}", resp));
     }
+    let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
+    match deduce_dap_version_from_url(base_url)? {
+        DapVersion::Draft02 => Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?),
+        DapVersion::Latest | DapVersion::Draft09 => {
+            Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?
+                .hpke_configs
+                .swap_remove(0))
+        }
+    }
+}
 
-    let hpke_config_bytes = resp
-        .bytes()
-        .await
-        .with_context(|| "failed to read response")?;
-    Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?)
+fn deduce_dap_version_from_url(url: &Url) -> anyhow::Result<DapVersion> {
+    url.path_segments()
+        .context("no version specified in leader url")?
+        .next()
+        .unwrap()
+        .parse()
+        .context("failed to parse version parameter from url")
 }
