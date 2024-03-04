@@ -43,6 +43,10 @@ type Router<A, B> = axum::Router<Arc<A>, B>;
 pub trait DaphneService {
     /// The service metrics
     fn server_metrics(&self) -> &dyn DaphneServiceMetrics;
+
+    fn signing_key(&self) -> Option<&p256::ecdsa::SigningKey> {
+        None
+    }
 }
 
 pub fn new<B>(role: DapRole, aggregator: App) -> axum::Router<(), B>

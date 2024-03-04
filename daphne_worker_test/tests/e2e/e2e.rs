@@ -7,6 +7,7 @@ use daphne::{
     async_test_versions,
     constants::DapMediaType,
     messages::{
+        decode_base64url_vec,
         taskprov::{
             DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
         },
@@ -17,11 +18,17 @@ use daphne::{
     DapAggregateResult, DapAggregationParam, DapMeasurement, DapQueryConfig, DapTaskConfig,
     DapTaskParameters, DapVersion,
 };
+use daphne_service_utils::http_headers;
 use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    io::Cursor,
+};
+use webpki::{EndEntityCert, ECDSA_P256_SHA256};
+use x509_parser::pem::Pem;
 
 #[derive(Deserialize)]
 struct InternalTestEndpointForTaskResult {
@@ -1359,3 +1366,30 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
 }
 
 async_test_versions! { leader_collect_taskprov_ok }
+
+async fn helper_hpke_config_signature(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
+    let url = t.helper_url.join("hpke_config").unwrap();
+    let req = TestRunner::http_client().get(url.as_str());
+    let resp = req.send().await.unwrap();
+    let signature = resp
+        .headers()
+        .get(http_headers::HPKE_SIGNATURE)
+        .expect("signature header not present")
+        .clone();
+    let hpke_config_bytes = resp.bytes().await.unwrap();
+
+    let test_certificate = std::env::var("E2E_TEST_HPKE_SIGNING_CERTIFICATE").unwrap();
+
+    let signature_bytes = decode_base64url_vec(signature.as_bytes()).unwrap();
+    let (cert_pem, _bytes_read) = Pem::read(Cursor::new(test_certificate.as_bytes())).unwrap();
+    let cert = EndEntityCert::try_from(cert_pem.contents.as_ref()).unwrap();
+    cert.verify_signature(
+        &ECDSA_P256_SHA256,
+        &hpke_config_bytes,
+        signature_bytes.as_ref(),
+    )
+    .unwrap();
+}
+
+async_test_versions! { helper_hpke_config_signature }

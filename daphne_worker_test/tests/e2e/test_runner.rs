@@ -254,6 +254,7 @@ impl TestRunner {
             res.status, res.error
         );
 
+        println!("############ starting test ############");
         t
     }
 

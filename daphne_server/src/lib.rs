@@ -58,6 +58,7 @@ mod storage_proxy_connection;
 ///     default_version: DapVersion::Draft09,
 ///     report_storage_epoch_duration: 300,
 ///     report_storage_max_future_time_skew: 300,
+///     signing_key: None,
 /// };
 /// let app = App::new(storage_proxy_settings, daphne_service_metrics, service_config)?;
 ///
@@ -89,6 +90,10 @@ pub struct StorageProxyConfig {
 impl router::DaphneService for App {
     fn server_metrics(&self) -> &dyn DaphneServiceMetrics {
         &*self.metrics
+    }
+
+    fn signing_key(&self) -> Option<&p256::ecdsa::SigningKey> {
+        self.service_config.signing_key.as_ref()
     }
 }
 

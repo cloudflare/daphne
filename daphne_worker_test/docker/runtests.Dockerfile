@@ -15,9 +15,13 @@ COPY daphne_worker_test ./daphne_worker_test
 COPY daphne_worker ./daphne_worker
 COPY daphne_service_utils ./daphne_service_utils
 COPY daphne ./daphne
-COPY daphne_worker_test/docker/test.sh /
 RUN cargo new --lib daphne_server
-RUN chmod +x /test.sh
 
 ENV PATH="${PATH}:/root/.cargo/bin"
-CMD ["/test.sh"]
+ENV RUST_BACKTRACE=1
+CMD ["cargo", "test", \
+    "--features=test_e2e", \
+    "--", \
+    "--nocapture", \
+    "--test-threads=1", \
+    "e2e"]

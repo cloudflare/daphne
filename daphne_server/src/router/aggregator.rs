@@ -6,13 +6,18 @@ use std::sync::Arc;
 use axum::{
     body::HttpBody,
     extract::{Query, State},
+    response::{AppendHeaders, IntoResponse},
     routing::get,
 };
 use daphne::{
-    messages::TaskId,
+    constants::DapMediaType,
+    fatal_error,
+    messages::{encode_base64url, TaskId},
     roles::{aggregator, DapAggregator},
+    DapError, DapResponse,
 };
-use daphne_service_utils::auth::DaphneAuth;
+use daphne_service_utils::{auth::DaphneAuth, http_headers};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use serde::Deserialize;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
@@ -41,14 +46,38 @@ async fn hpke_config<A>(
     State(app): State<Arc<A>>,
     Query(QueryTaskId { task_id }): Query<QueryTaskId>,
     DapRequestExtractor(req): DapRequestExtractor,
-) -> AxumDapResponse
+) -> impl IntoResponse
 where
     A: DapAggregator<DaphneAuth> + DaphneService,
 {
-    AxumDapResponse::from_result(
-        aggregator::handle_hpke_config_req(&*app, &req, task_id).await,
-        app.server_metrics(),
-    )
+    match aggregator::handle_hpke_config_req(&*app, &req, task_id).await {
+        Ok(resp) => match app.signing_key().map(|k| sign_dap_response(k, &resp)) {
+            None => AxumDapResponse::new_success(resp, app.server_metrics()).into_response(),
+            Some(Ok(signed)) => (
+                AppendHeaders([(http_headers::HPKE_SIGNATURE, &signed)]),
+                AxumDapResponse::new_success(resp, app.server_metrics()),
+            )
+                .into_response(),
+            Some(Err(e)) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
+        },
+        Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
+    }
+}
+
+pub(crate) fn sign_dap_response(
+    signing_key: &SigningKey,
+    resp: &DapResponse,
+) -> Result<String, DapError> {
+    match resp.media_type {
+        DapMediaType::HpkeConfigList => {
+            let signature: Signature = signing_key.sign(&resp.payload);
+            Ok(encode_base64url(signature.to_der().as_bytes()))
+        }
+        _ => Err(fatal_error!(
+            err = "tried to sign invalid response",
+            ?resp.media_type
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -61,10 +90,16 @@ mod test {
         Router,
     };
     use daphne::messages::{Base64Encode, TaskId};
+    use daphne::{
+        constants::DapMediaType, messages::decode_base64url_vec, DapResponse, DapVersion,
+    };
+    use p256::pkcs8::EncodePrivateKey;
     use rand::{thread_rng, Rng};
+    use rcgen::CertificateParams;
     use tower::ServiceExt;
+    use webpki::{EndEntityCert, ECDSA_P256_SHA256};
 
-    use super::QueryTaskId;
+    use super::{sign_dap_response, QueryTaskId};
 
     #[tokio::test]
     async fn can_parse_task_id() {
@@ -106,5 +141,46 @@ mod test {
             .status();
 
         assert_eq!(status, StatusCode::OK);
+    }
+
+    // Check that a signature produced by Daphne-Worker will be verified properly by the Clients.
+    #[test]
+    fn rondtrip_sign_hpke_config() {
+        let signing_key =
+            p256::ecdsa::SigningKey::from(p256::SecretKey::random(&mut rand::rngs::OsRng));
+
+        // Create a self-signed certificate for the signing key.
+        let cert_der = {
+            let mut params = CertificateParams::new(["test-aggregator.example.com".to_string()]);
+            params.key_pair = Some(
+                rcgen::KeyPair::from_der(signing_key.to_pkcs8_der().unwrap().to_bytes().as_ref())
+                    .unwrap(),
+            );
+            params
+                .distinguished_name
+                .push(rcgen::DnType::LocalityName, "Braga");
+            params
+                .distinguished_name
+                .push(rcgen::DnType::OrganizationName, "Cloudflare Lda");
+
+            let cert = rcgen::Certificate::from_params(params).unwrap();
+            cert.serialize_der().unwrap()
+        };
+
+        const PAYLOAD: &[u8] = b"dummy HPKE configuration";
+        let resp = DapResponse {
+            version: DapVersion::default(),
+            media_type: DapMediaType::HpkeConfigList,
+            payload: PAYLOAD.to_vec(),
+        };
+
+        let signature = sign_dap_response(&signing_key, &resp).unwrap();
+
+        // Verify the signature.
+        let signature_bytes = decode_base64url_vec(signature.as_bytes()).unwrap();
+
+        let cert = EndEntityCert::try_from(cert_der.as_ref()).unwrap();
+        cert.verify_signature(&ECDSA_P256_SHA256, PAYLOAD, signature_bytes.as_ref())
+            .unwrap();
     }
 }

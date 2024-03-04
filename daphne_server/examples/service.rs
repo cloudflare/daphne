@@ -35,6 +35,11 @@ impl TryFrom<Args> for Config {
                 Some(path) => config::File::from(path.as_ref()),
                 None => config::File::with_name("configuration"),
             })
+            .add_source(
+                config::Environment::with_prefix("DAP")
+                    .prefix_separator("_")
+                    .separator("__"),
+            )
             .set_override_option(
                 "service.role",
                 role.map(|role| {
@@ -60,7 +65,6 @@ impl TryFrom<Args> for Config {
                     )
                 }),
             )?
-            .add_source(config::Environment::with_prefix("DAP"))
             .build()?
             .try_deserialize()
     }

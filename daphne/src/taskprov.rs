@@ -227,7 +227,7 @@ impl VdafConfig {
         var: VdafTypeVar,
     ) -> Result<Self, DapAbort> {
         match (version, var) {
-            (.., VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
+            (_, VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
                 dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
                     detail: "dimension is larger than the system's word size".to_string(),
                     task_id: *task_id,
@@ -264,7 +264,7 @@ impl VdafConfig {
                     },
                 ))
             }
-            (.., VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
+            (_, VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
                 task_id: *task_id,
             }),

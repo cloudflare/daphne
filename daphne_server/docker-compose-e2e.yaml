@@ -35,6 +35,8 @@ services:
       target: leader
     depends_on:
       - leader_storage
+    environment:
+      - RUST_LOG=info
   helper:
     networks:
       - dap_network
@@ -46,6 +48,9 @@ services:
       target: helper
     depends_on:
       - helper_storage
+    environment:
+      - DAP_SERVICE__SIGNING_KEY=${HPKE_SIGNING_KEY}
+      - RUST_LOG=info
   test:
     networks:
       - dap_network
@@ -55,3 +60,5 @@ services:
     depends_on:
       - leader
       - helper
+    environment:
+      - E2E_TEST_HPKE_SIGNING_CERTIFICATE=${E2E_TEST_HPKE_SIGNING_CERTIFICATE}
