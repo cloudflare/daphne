@@ -39,8 +39,35 @@ jobs:
     steps:
       - name: Checking out
         uses: actions/checkout@v3
+
+      - name: Generate HPKE Signing Key
+        id: hpke_signing_key
+        run: |
+          key=$(openssl ecparam -name prime256v1 -genkey -noout -out -)
+          {
+            echo "hpke_signing_key<<EEEEEOF"
+            echo "$key"
+            echo "EEEEEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate HPKE Signing Certificate
+        id: hpke_signing_cert
+        run: |
+          echo "${{ steps.hpke_signing_key.outputs.hpke_signing_key }}" > private-key
+          cert=$(openssl req -key private-key \
+                      -new -x509 -days 365 -out - \
+                      -subj '/C=PT/L=Braga/O=Cloudflare Lda/CN=helper.dap.cloudflare.com')
+          {
+            echo "hpke_signing_cert<<EEEEEOF"
+            echo "$cert"
+            echo "EEEEEOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run integration tests
         uses: isbang/compose-action@v1.4.1
         with:
           compose-file: "./daphne_server/docker-compose-e2e.yaml"
           up-flags: "--build --abort-on-container-exit --exit-code-from test"
+        env:
+          HPKE_SIGNING_KEY: ${{ steps.hpke_signing_key.outputs.hpke_signing_key }}
+          E2E_TEST_HPKE_SIGNING_CERTIFICATE: ${{ steps.hpke_signing_cert.outputs.hpke_signing_cert }}

@@ -54,11 +54,13 @@ hpke-rs-crypto = "0.2.0"
 hpke-rs-rust-crypto = "0.2.0"
 http = "0.2"
 matchit = "0.7.3"
+p256 = { version = "0.13.2", features = ["ecdsa-core", "ecdsa", "pem"] }
 paste = "1.0.14"
 prio = "0.16.0"
 prometheus = "0.13.3"
 rand = "0.8.5"
 rayon = "1.8.1"
+rcgen = "0.12.1"
 regex = "1.10.3"
 replace_with = "0.1.7"
 reqwest = { version = "0.11.24", default-features = false, features = ["rustls-tls-native-roots"] }
@@ -72,7 +74,9 @@ tracing = "0.1.40"
 tracing-core = "0.1.32"
 tracing-subscriber = "0.3.18"
 url = { version = "2.5.0", features = ["serde"] }
+webpki = "0.22.4"
 worker = "0.0.18"
+x509-parser = "0.15.1"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "warn"

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub mod auth;
 pub mod config;
 pub mod durable_requests;
+pub mod http_headers;
 pub mod metrics;
 pub mod test_route_types;
 

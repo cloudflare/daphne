@@ -50,6 +50,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 url.workspace = true
+webpki.workspace = true
+x509-parser.workspace = true
 
 [lints]
 workspace = true

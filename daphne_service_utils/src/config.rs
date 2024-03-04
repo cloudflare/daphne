@@ -5,6 +5,7 @@ use daphne::{
     hpke::{HpkeConfig, HpkeReceiverConfig},
     DapGlobalConfig, DapVersion,
 };
+use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -76,10 +77,125 @@ pub struct DaphneServiceConfig {
     /// current time plus this value will be rejected.
     #[serde(default = "default_report_storage_max_future_time_skew")]
     pub report_storage_max_future_time_skew: daphne::messages::Duration,
+
+    /// ECDSA signing key for signing messages. If set, then every response to HPKE
+    /// configuration endpoint will include a header "x-hpke-config-signature" with a
+    /// URL-safe, base64-encoded signature of the HPKE config.
+    ///
+    /// The expected payload is a is standard DER-encoded EC private key for use with
+    /// ECDSA-P256-SHA256, i.e., the output of
+    ///
+    /// ```text
+    /// $ openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
+    /// ```
+    #[serde(
+        default,
+        deserialize_with = "signing_key_serializer::deserialize_opt",
+        skip_serializing
+    )]
+    pub signing_key: Option<SigningKey>,
 }
 
 fn default_report_storage_max_future_time_skew() -> daphne::messages::Duration {
     300
+}
+
+mod signing_key_serializer {
+    use p256::ecdsa::SigningKey;
+    use serde::{de, Deserialize, Deserializer};
+
+    fn deserialize<'de, D>(deserializer: D) -> Result<SigningKey, D::Error>
+    where
+        D: Deserializer<'de>,
+        D::Error: serde::de::Error,
+    {
+        struct Visitor;
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = SigningKey;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a sec1 pem key")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(SigningKey::from(
+                    p256::SecretKey::from_sec1_pem(v).map_err(E::custom)?,
+                ))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+        deserializer.deserialize_str(Visitor)
+    }
+
+    pub(super) fn deserialize_opt<'de, D>(deserializer: D) -> Result<Option<SigningKey>, D::Error>
+    where
+        D: Deserializer<'de>,
+        D::Error: serde::de::Error,
+    {
+        #[derive(Deserialize)]
+        struct Wrapper(#[serde(deserialize_with = "deserialize")] SigningKey);
+        Option::<Wrapper>::deserialize(deserializer).map(|w| w.map(|w| w.0))
+    }
+
+    #[cfg(test)]
+    mod test {
+        use p256::ecdsa::SigningKey;
+        use serde::Deserialize;
+
+        #[test]
+        fn deserialize() {
+            #[derive(Deserialize)]
+            struct F {
+                #[serde(deserialize_with = "super::deserialize")]
+                key: SigningKey,
+            }
+
+            let test_key = p256::SecretKey::random(&mut rand::rngs::OsRng);
+            let F { key } = serde_json::from_value(
+                serde_json::json!({ "key": &*test_key.to_sec1_pem(Default::default()).unwrap() }),
+            )
+            .unwrap();
+            assert_eq!(key, SigningKey::from(test_key));
+        }
+
+        #[test]
+        fn deserialize_opt_some() {
+            #[derive(Deserialize)]
+            struct F {
+                #[serde(deserialize_with = "super::deserialize_opt")]
+                key: Option<SigningKey>,
+            }
+
+            let test_key = p256::SecretKey::random(&mut rand::rngs::OsRng);
+            let F { key } = serde_json::from_value(
+                serde_json::json!({ "key": &*test_key.to_sec1_pem(Default::default()).unwrap() }),
+            )
+            .unwrap();
+            assert_eq!(key.unwrap(), SigningKey::from(test_key));
+        }
+
+        #[test]
+        fn deserialize_opt_none() {
+            #[derive(Deserialize)]
+            struct F {
+                #[serde(default, deserialize_with = "super::deserialize_opt")]
+                key: Option<SigningKey>,
+            }
+
+            let F { key } = serde_json::from_value(serde_json::json!({})).unwrap();
+            assert_eq!(key, None);
+
+            let F { key } = serde_json::from_value(serde_json::json!({ "key": null })).unwrap();
+            assert_eq!(key, None);
+        }
+    }
 }
 
 /// Deployment types for Daphne-Worker. This defines overrides used to control inter-Aggregator

@@ -19,6 +19,7 @@ readme = "../README.md"
 capnp.workspace = true
 daphne = { path = "../daphne", default-features = false }
 hex.workspace = true
+p256.workspace = true
 prometheus = { workspace = true, optional = true }
 ring.workspace = true
 serde.workspace = true
@@ -28,6 +29,7 @@ url.workspace = true
 [dev-dependencies]
 daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
 prometheus.workspace = true
+rand.workspace = true
 
 [build-dependencies]
 capnpc = "0.18.1"

@@ -18,13 +18,14 @@ readme = "../README.md"
 
 [dependencies]
 axum.workspace = true
-http.workspace = true
-hyper = "0.14.28"
 bincode.workspace = true
 daphne = { path = "../daphne" }
 daphne_service_utils = { path = "../daphne_service_utils" }
 futures.workspace = true
 hex.workspace = true
+http.workspace = true
+hyper = "0.14.28"
+p256.workspace = true
 prio.workspace = true
 rayon.workspace = true
 reqwest = { workspace = true, features = ["json"] }
@@ -44,8 +45,11 @@ daphne_service_utils = { path = "../daphne_service_utils", features = ["promethe
 paste.workspace = true
 prometheus.workspace = true
 rand.workspace = true
+rcgen.workspace = true
 tower = "0.4.13"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+webpki.workspace = true
+x509-parser.workspace = true
 
 [features]
 test-utils = ["daphne/test-utils", "daphne_service_utils/test-utils"]
