@@ -184,6 +184,13 @@ mod test {
     use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
 
+    fn num_agg_job_reqs_for_version(version: DapVersion) -> usize {
+        match version {
+            DapVersion::Draft02 => 2,
+            DapVersion::Draft09 | DapVersion::Latest => 1,
+        }
+    }
+
     fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
         match version {
             DapVersion::Draft02 => Some(Vec::new()),
@@ -1197,9 +1204,8 @@ mod test {
         let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
         let report = t.gen_test_report(task_id).await;
-        let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
-            .await;
+        let req = t.gen_test_upload_req(report.clone(), task_id).await;
+        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
 
         // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
         // is released before running the test. Otherwise the test will deadlock.
@@ -1222,27 +1228,21 @@ mod test {
             );
         }
 
-        // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req)
-                .await
-                .unwrap()
-                .payload,
-        )
-        .unwrap();
-        let transition = &agg_job_resp.transitions[0];
+        let query = task_config.query_for_current_batch_window(t.now);
+        let req = t.gen_test_coll_job_req(query, task_id).await;
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
 
-        assert_eq!(t.helper.audit_log.invocations(), 1);
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
 
-        // Expect failure due to report store marked as collected.
-        assert_matches!(
-            transition.var,
-            TransitionVar::Failed(TransitionFailure::BatchCollected)
-        );
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_batch_collected"}"#: 1,
+        });
 
         assert_metrics_include!(t.helper_registry, {
             r#"report_counter{env="test_helper",host="helper.org",status="rejected_batch_collected"}"#: 1,
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
             r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
@@ -1826,13 +1826,8 @@ mod test {
             .await
             .unwrap();
 
-        let agg_job_req_count = match version {
-            DapVersion::Draft02 => 2,
-            DapVersion::Draft09 | DapVersion::Latest => 1,
-        };
-
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1875,13 +1870,8 @@ mod test {
             .await
             .unwrap();
 
-        let agg_job_req_count = match version {
-            DapVersion::Draft02 => 2,
-            DapVersion::Draft09 | DapVersion::Latest => 1,
-        };
-
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1981,13 +1971,8 @@ mod test {
             .await
             .unwrap();
 
-        let agg_job_req_count = match version {
-            DapVersion::Draft02 => 2,
-            DapVersion::Draft09 | DapVersion::Latest => 1,
-        };
-
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -2154,13 +2139,8 @@ mod test {
             .await
             .unwrap();
 
-        let agg_job_req_count = match version {
-            DapVersion::Draft02 => 2,
-            DapVersion::Draft09 | DapVersion::Latest => 1,
-        } * 2;
-
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: agg_job_req_count,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version) * 2,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 2,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 2,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 2,

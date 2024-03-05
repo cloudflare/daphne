@@ -436,14 +436,7 @@ impl DapTaskConfig {
             }
         }
         let initialized_reports = initializer
-            .initialize_reports(
-                true,
-                task_id,
-                self,
-                part_batch_sel,
-                agg_param,
-                consumed_reports,
-            )
+            .initialize_reports(true, self, agg_param, consumed_reports)
             .await?;
 
         assert_eq!(initialized_reports.len(), helper_shares.len());
@@ -569,14 +562,7 @@ impl DapTaskConfig {
                 .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         let initialized_reports = initializer
-            .initialize_reports(
-                false,
-                task_id,
-                self,
-                &agg_job_init_req.part_batch_sel,
-                &agg_param,
-                consumed_reports,
-            )
+            .initialize_reports(false, self, &agg_param, consumed_reports)
             .await?;
 
         Ok(initialized_reports)
