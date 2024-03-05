@@ -11,9 +11,7 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     hpke::{HpkeConfig, HpkeDecrypter},
-    messages::{
-        BatchId, BatchSelector, HpkeConfigList, PartialBatchSelector, ReportId, TaskId, Time,
-    },
+    messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
@@ -26,12 +24,10 @@ use crate::{
 pub trait DapReportInitializer {
     /// Initialize a sequence of reports that are in the "consumed" state by initializing VDAF
     /// preparation.
-    async fn initialize_reports<'req>(
+    async fn initialize_reports(
         &self,
         is_leader: bool,
-        task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;

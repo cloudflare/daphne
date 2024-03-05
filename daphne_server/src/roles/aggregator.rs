@@ -10,10 +10,7 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
-    messages::{
-        BatchId, BatchSelector, HpkeCiphertext, PartialBatchSelector, TaskId, Time,
-        TransitionFailure,
-    },
+    messages::{BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
@@ -357,12 +354,10 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
 #[async_trait]
 impl DapReportInitializer for crate::App {
-    async fn initialize_reports<'req>(
+    async fn initialize_reports(
         &self,
         is_leader: bool,
-        _task_id: &TaskId,
         task_config: &DapTaskConfig,
-        _part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {

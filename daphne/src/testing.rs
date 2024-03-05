@@ -15,9 +15,7 @@ use crate::{
         Report, ReportId, TaskId, Time, TransitionFailure,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
-    protocol::aggregator::{
-        EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
-    },
+    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     roles::{
         aggregator::MergeAggShareError,
         helper,
@@ -70,50 +68,38 @@ pub struct AggregationJobTest {
     pub(crate) helper_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphnePromMetrics,
     pub(crate) helper_metrics: DaphnePromMetrics,
-    pub(crate) leader_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
-    pub(crate) helper_reports_processed: Arc<Mutex<HashSet<ReportId>>>,
 }
 
-// NOTE(cjpatton) This implementation of the report initializer is not feature complete. Since
-// [`AggrregationJobTest`], is only used to test the aggregation flow, features that are not
-// directly relevant to the tests aren't implemented.
+fn initialize_reports(
+    is_leader: bool,
+    task_config: &DapTaskConfig,
+    agg_param: &DapAggregationParam,
+    consumed_reports: Vec<EarlyReportStateConsumed>,
+) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
+    consumed_reports
+        .into_iter()
+        .map(|consumed| {
+            EarlyReportStateInitialized::initialize(
+                is_leader,
+                &task_config.vdaf_verify_key,
+                &task_config.vdaf,
+                agg_param,
+                consumed,
+            )
+        })
+        .collect()
+}
+
 #[async_trait]
 impl DapReportInitializer for AggregationJobTest {
-    async fn initialize_reports<'req>(
+    async fn initialize_reports(
         &self,
         is_leader: bool,
-        _task_id: &TaskId,
         task_config: &DapTaskConfig,
-        _part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        let mut reports_processed = if is_leader {
-            self.leader_reports_processed.lock().unwrap()
-        } else {
-            self.helper_reports_processed.lock().unwrap()
-        };
-
-        Ok(consumed_reports
-            .into_iter()
-            .map(|consumed| {
-                if reports_processed.contains(&consumed.metadata().id) {
-                    Ok(
-                        consumed
-                            .into_initialized_rejected_due_to(TransitionFailure::ReportReplayed),
-                    )
-                } else {
-                    reports_processed.insert(consumed.metadata().id);
-                    EarlyReportStateInitialized::initialize(
-                        is_leader,
-                        &task_config.vdaf_verify_key,
-                        &task_config.vdaf,
-                        agg_param,
-                        consumed,
-                    )
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?)
+        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
     }
 }
 
@@ -179,8 +165,6 @@ impl AggregationJobTest {
             helper_registry,
             leader_metrics,
             helper_metrics,
-            leader_reports_processed: Default::default(),
-            helper_reports_processed: Default::default(),
         }
     }
 
@@ -701,24 +685,6 @@ impl MockAggregator {
         self.peer.is_some()
     }
 
-    /// Conducts checks on a received report to see whether:
-    /// 1) the report falls into a batch that has been already collected, or
-    fn check_report_has_been_collected(
-        &self,
-        task_id: &TaskId,
-        bucket: &DapBatchBucket,
-    ) -> Option<TransitionFailure> {
-        // Check AggStateStore to see whether the report is part of a batch that has already
-        // been collected.
-        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(*task_id).or_default();
-        if matches!(agg_store.get(bucket), Some(inner_agg_store) if inner_agg_store.collected) {
-            return Some(TransitionFailure::BatchCollected);
-        }
-
-        None
-    }
-
     fn get_hpke_receiver_config_for(&self, hpke_config_id: u8) -> Option<&HpkeReceiverConfig> {
         self.hpke_receiver_config_list
             .iter()
@@ -830,48 +796,14 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 
 #[async_trait]
 impl DapReportInitializer for MockAggregator {
-    async fn initialize_reports<'req>(
+    async fn initialize_reports(
         &self,
         is_leader: bool,
-        task_id: &TaskId,
         task_config: &DapTaskConfig,
-        part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        let span = task_config.batch_span_for_meta(
-            part_batch_sel,
-            consumed_reports.iter().filter(|report| report.is_ready()),
-        )?;
-
-        let mut early_fails = HashMap::new();
-        for (bucket, ((), report_ids_and_time)) in span.iter() {
-            for (id, _) in report_ids_and_time {
-                // Check whether Report has been collected or replayed.
-                if let Some(transition_failure) =
-                    self.check_report_has_been_collected(task_id, bucket)
-                {
-                    early_fails.insert(*id, transition_failure);
-                };
-            }
-        }
-
-        Ok(consumed_reports
-            .into_iter()
-            .map(|consumed| {
-                if let Some(failure) = early_fails.get(&consumed.metadata().id) {
-                    Ok(consumed.into_initialized_rejected_due_to(*failure))
-                } else {
-                    EarlyReportStateInitialized::initialize(
-                        is_leader,
-                        &task_config.vdaf_verify_key,
-                        &task_config.vdaf,
-                        agg_param,
-                        consumed,
-                    )
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?)
+        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
     }
 }
 
