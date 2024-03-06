@@ -603,7 +603,7 @@ impl InMemoryAggregateStore {
 
 /// An implementation of a DAP Aggregator without long-term storage. This is intended to be used
 /// for testing purposes only.
-pub struct MockAggregator {
+pub struct InMemoryAggregator {
     pub global_config: DapGlobalConfig,
     pub(crate) tasks: Arc<Mutex<HashMap<TaskId, DapTaskConfig>>>,
     pub hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
@@ -622,11 +622,11 @@ pub struct MockAggregator {
     pub taskprov_collector_token: Option<BearerToken>, // Not set by Helper
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
-    // implement `DapLeader::send_http_post()` for `MockAggregator`. Not set by the Helper.
-    pub peer: Option<Arc<MockAggregator>>,
+    // implement `DapLeader::send_http_post()` for `InMemoryAggregator`. Not set by the Helper.
+    pub peer: Option<Arc<InMemoryAggregator>>,
 }
 
-impl DeepSizeOf for MockAggregator {
+impl DeepSizeOf for InMemoryAggregator {
     fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
         self.global_config.deep_size_of_children(context)
                 + self.tasks.deep_size_of_children(context)
@@ -649,7 +649,7 @@ impl DeepSizeOf for MockAggregator {
     }
 }
 
-impl MockAggregator {
+impl InMemoryAggregator {
     #[allow(clippy::too_many_arguments)]
     pub fn new_helper(
         tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
@@ -732,7 +732,7 @@ impl MockAggregator {
 }
 
 #[async_trait]
-impl BearerTokenProvider for MockAggregator {
+impl BearerTokenProvider for InMemoryAggregator {
     type WrappedBearerToken<'a> = &'a BearerToken;
 
     async fn get_leader_bearer_token_for<'s>(
@@ -754,18 +754,18 @@ impl BearerTokenProvider for MockAggregator {
     ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
         if task_config.method_is_taskprov() {
             Ok(Some(self.taskprov_collector_token.as_ref().expect(
-                "MockAggregator not configured with taskprov collector token",
+                "InMemoryAggregator not configured with taskprov collector token",
             )))
         } else {
             Ok(Some(self.collector_token.as_ref().expect(
-                "MockAggregator not configured with collector token",
+                "InMemoryAggregator not configured with collector token",
             )))
         }
     }
 }
 
 #[async_trait]
-impl HpkeDecrypter for MockAggregator {
+impl HpkeDecrypter for InMemoryAggregator {
     type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
     async fn get_hpke_config_for<'s>(
@@ -778,9 +778,9 @@ impl HpkeDecrypter for MockAggregator {
         }
 
         // Aggregators MAY abort if the HPKE config request does not specify a task ID. While not
-        // required for MockAggregator, we simulate this behavior for testing purposes.
+        // required for InMemoryAggregator, we simulate this behavior for testing purposes.
         //
-        // TODO(cjpatton) To make this clearer, have MockAggregator store a map from task IDs to
+        // TODO(cjpatton) To make this clearer, have InMemoryAggregator store a map from task IDs to
         // HPKE receiver configs.
         if task_id.is_none() {
             return Err(DapError::Abort(DapAbort::MissingTaskId));
@@ -811,7 +811,7 @@ impl HpkeDecrypter for MockAggregator {
 }
 
 #[async_trait]
-impl DapAuthorizedSender<BearerToken> for MockAggregator {
+impl DapAuthorizedSender<BearerToken> for InMemoryAggregator {
     async fn authorize(
         &self,
         task_id: &TaskId,
@@ -827,7 +827,7 @@ impl DapAuthorizedSender<BearerToken> for MockAggregator {
 }
 
 #[async_trait]
-impl DapReportInitializer for MockAggregator {
+impl DapReportInitializer for InMemoryAggregator {
     async fn initialize_reports(
         &self,
         is_leader: bool,
@@ -840,9 +840,9 @@ impl DapReportInitializer for MockAggregator {
 }
 
 #[async_trait]
-impl DapAggregator<BearerToken> for MockAggregator {
+impl DapAggregator<BearerToken> for InMemoryAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
-    // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, MockAggregator
+    // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, InMemoryAggregator
     // clones the task config as needed.
     type WrappedDapTaskConfig<'a> = DapTaskConfig;
 
@@ -1054,7 +1054,7 @@ impl DapAggregator<BearerToken> for MockAggregator {
 }
 
 #[async_trait]
-impl DapHelper<BearerToken> for MockAggregator {
+impl DapHelper<BearerToken> for InMemoryAggregator {
     async fn put_helper_state_if_not_exists<Id>(
         &self,
         task_id: &TaskId,
@@ -1110,7 +1110,7 @@ impl DapHelper<BearerToken> for MockAggregator {
 }
 
 #[async_trait]
-impl DapLeader<BearerToken> for MockAggregator {
+impl DapLeader<BearerToken> for InMemoryAggregator {
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
