@@ -98,14 +98,7 @@ define_do_binding! {
 
     fn name((version, task_id_hex, bucket): (DapVersion, &'n str, &'n DapBatchBucket)) -> ObjectIdFrom {
         fn durable_name_bucket(bucket: &DapBatchBucket) -> String {
-            match bucket {
-                DapBatchBucket::TimeInterval { batch_window } => {
-                    format!("window/{batch_window}")
-                }
-                DapBatchBucket::FixedSize { batch_id } => {
-                    format!("batch/{}", batch_id.to_hex())
-                }
-            }
+            format!("{bucket}")
         }
         ObjectIdFrom::Name(format!(
             "{}/{}",
@@ -164,4 +157,28 @@ define_do_binding! {
         ))
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use daphne::{messages::BatchId, DapBatchBucket};
+
+    // We use `std::fmt::Display` for `DapBatchBucket` to format names for DO instances. Ensure
+    // that they are formatted the way we expect.
+    #[test]
+    fn bucket_display() {
+        assert_eq!(
+            "batch/1111111111111111111111111111111111111111111111111111111111111111",
+            format!(
+                "{}",
+                DapBatchBucket::FixedSize {
+                    batch_id: BatchId([17; 32])
+                }
+            )
+        );
+        assert_eq!(
+            "window/1337",
+            format!("{}", DapBatchBucket::TimeInterval { batch_window: 1337 })
+        );
+    }
 }
