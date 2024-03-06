@@ -166,7 +166,7 @@ mod test {
         },
         roles::leader::WorkItem,
         test_versions,
-        testing::MockAggregator,
+        testing::InMemoryAggregator,
         vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
         DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
@@ -419,8 +419,8 @@ mod test {
             task_id
         }
 
-        pub fn new_helper(&self) -> Arc<MockAggregator> {
-            Arc::new(MockAggregator::new_helper(
+        pub fn new_helper(&self) -> Arc<InMemoryAggregator> {
+            Arc::new(InMemoryAggregator::new_helper(
                 self.tasks.clone(),
                 self.global_config
                     .gen_hpke_receiver_config_list(thread_rng().gen())
@@ -434,8 +434,8 @@ mod test {
             ))
         }
 
-        pub fn with_leader(self, helper: Arc<MockAggregator>) -> Test {
-            let leader = Arc::new(MockAggregator::new_leader(
+        pub fn with_leader(self, helper: Arc<InMemoryAggregator>) -> Test {
+            let leader = Arc::new(InMemoryAggregator::new_leader(
                 self.tasks,
                 self.global_config
                     .gen_hpke_receiver_config_list(thread_rng().gen())
@@ -469,8 +469,8 @@ mod test {
 
     pub(super) struct Test {
         now: Time,
-        leader: Arc<MockAggregator>,
-        helper: Arc<MockAggregator>,
+        leader: Arc<InMemoryAggregator>,
+        helper: Arc<InMemoryAggregator>,
         collector_token: BearerToken,
         taskprov_collector_token: BearerToken,
         time_interval_task_id: TaskId,
