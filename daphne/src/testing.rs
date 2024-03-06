@@ -567,16 +567,51 @@ impl AuditLog for MockAuditLog {
     }
 }
 
+#[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub(crate) struct AggregateStoreForCollection {
+    /// The aggregate share.
+    pub(crate) agg_share: DapAggregateShare,
+    /// Indication of whether the aggregate share has been collected.
+    pub(crate) collected: bool,
+    /// The reports included in the aggregate share.
+    pub(crate) reports: HashSet<ReportId>,
+}
+
+#[derive(Default)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub(crate) struct InMemoryAggregateStore(HashMap<String, AggregateStoreForCollection>);
+
+impl InMemoryAggregateStore {
+    /// Return the aggregate store for the given "collection". A collection is the result of
+    /// aggregating a bucket of reports with a particular aggregation parameter.
+    pub(crate) fn for_collection(
+        &mut self,
+        task_id: &TaskId,
+        bucket: &DapBatchBucket,
+        agg_param: &DapAggregationParam,
+    ) -> &mut AggregateStoreForCollection {
+        let agg_level = agg_param.level();
+        // NOTE(cjpatton) `daphne_server::App` will use a similar naming scheme for instances of
+        // the `AggregateStore` DO. However, for backwards compatibility, if `agg_level == 0`, then
+        // we won't include it in the DO name.
+        self.0
+            .entry(format!("{task_id}/{bucket}/{agg_level}"))
+            .or_default()
+    }
+}
+
+/// An implementation of a DAP Aggregator without long-term storage. This is intended to be used
+/// for testing purposes only.
 pub struct MockAggregator {
     pub global_config: DapGlobalConfig,
     pub(crate) tasks: Arc<Mutex<HashMap<TaskId, DapTaskConfig>>>,
     pub hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
     pub leader_token: BearerToken,
     pub collector_token: Option<BearerToken>, // Not set by Helper
-    pub(crate) report_store: Arc<Mutex<HashMap<TaskId, HashSet<ReportId>>>>,
     pub(crate) leader_state_store: Arc<Mutex<InMemoryLeaderState>>,
-    pub(crate) helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
-    pub(crate) agg_store: Arc<Mutex<HashMap<TaskId, HashMap<DapBatchBucket, AggStore>>>>,
+    helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
+    pub(crate) agg_store: Arc<Mutex<InMemoryAggregateStore>>,
     pub collector_hpke_config: HpkeConfig,
     pub metrics: DaphnePromMetrics,
     pub(crate) audit_log: MockAuditLog,
@@ -600,7 +635,6 @@ impl DeepSizeOf for MockAggregator {
                     .deep_size_of_children(context)
                 + self.leader_token.deep_size_of_children(context)
                 + self.collector_token.deep_size_of_children(context)
-                + self.report_store.deep_size_of_children(context)
                 + self.helper_state_store.deep_size_of_children(context)
                 + self.agg_store.deep_size_of_children(context)
                 + self.collector_hpke_config.deep_size_of_children(context)
@@ -633,7 +667,6 @@ impl MockAggregator {
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
             leader_token,
             collector_token: None,
-            report_store: Default::default(),
             leader_state_store: Default::default(),
             helper_state_store: Default::default(),
             agg_store: Default::default(),
@@ -667,7 +700,6 @@ impl MockAggregator {
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
             leader_token,
             collector_token: collector_token.into(),
-            report_store: Default::default(),
             leader_state_store: Default::default(),
             helper_state_store: Default::default(),
             agg_store: Default::default(),
@@ -877,17 +909,16 @@ impl DapAggregator<BearerToken> for MockAggregator {
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-
-        let agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
-        let Some(agg_store_per_task) = agg_store.get(task_id) else {
-            return Ok(false);
-        };
+        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        // TODO heavy hitters: Replace this with the agg param specified by the Collector.
+        let agg_param = DapAggregationParam::Empty;
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store_per_task.get(&bucket) {
-                if inner_agg_store.collected {
-                    return Ok(true);
-                }
+            if agg_store
+                .for_collection(task_id, &bucket, &agg_param)
+                .collected
+            {
+                return Ok(true);
             }
         }
 
@@ -900,11 +931,13 @@ impl DapAggregator<BearerToken> for MockAggregator {
         };
 
         let aggregated = {
-            let agg_store_guard = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
-            agg_store_guard
-                .get(task_id)
-                .map(|agg_store| agg_store.get(&bucket))
-                .is_some()
+            let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+            // TODO heavy hitters: Replace this with the agg param specified by the Collector.
+            let agg_param = DapAggregationParam::Empty;
+            !agg_store
+                .for_collection(task_id, &bucket, &agg_param)
+                .agg_share
+                .empty()
         };
 
         let uploaded = {
@@ -924,31 +957,31 @@ impl DapAggregator<BearerToken> for MockAggregator {
         _task_config: &DapTaskConfig,
         agg_agg_span: DapAggregateSpan<DapAggregateShare>,
     ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
-        let mut report_store_guard = self
-            .report_store
-            .lock()
-            .expect("report_store: failed to lock");
-        let report_store = report_store_guard.entry(*task_id).or_default();
-        let mut agg_store_guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = agg_store_guard.entry(*task_id).or_default();
+        let mut agg_store = self.agg_store.lock().unwrap();
+        // TODO heavy hitters: Replace this with the agg param specified by the Collector.
+        let agg_param = DapAggregationParam::Empty;
 
         agg_agg_span
             .into_iter()
             .map(|(bucket, (agg_share_delta, report_metadatas))| {
+                let agg_store_for_collection =
+                    agg_store.for_collection(task_id, &bucket, &agg_param);
+
                 let replayed = report_metadatas
                     .iter()
                     .map(|(id, _)| *id)
-                    .filter(|id| report_store.contains(id))
+                    .filter(|id| agg_store_for_collection.reports.contains(id))
                     .collect::<HashSet<_>>();
 
                 let result = if replayed.is_empty() {
-                    report_store.extend(report_metadatas.iter().map(|(id, _)| *id));
+                    agg_store_for_collection
+                        .reports
+                        .extend(report_metadatas.iter().map(|(id, _)| *id));
                     // Add to aggregate share.
-                    let agg_share = agg_store.entry(bucket.clone()).or_default();
-                    if agg_share.collected {
+                    if agg_store_for_collection.collected {
                         Err(MergeAggShareError::AlreadyCollected)
                     } else {
-                        agg_share
+                        agg_store_for_collection
                             .agg_share
                             .merge(agg_share_delta.clone())
                             .map_err(MergeAggShareError::Other)
@@ -971,18 +1004,18 @@ impl DapAggregator<BearerToken> for MockAggregator {
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
-        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(*task_id).or_default();
+        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        // TODO heavy hitters: Replace this with the agg param specified by the Collector.
+        let agg_param = DapAggregationParam::Empty;
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get(&bucket) {
-                if inner_agg_store.collected {
-                    return Err(DapError::Abort(DapAbort::batch_overlap(task_id, batch_sel)));
-                }
-                agg_share.merge(inner_agg_store.agg_share.clone())?;
+            let agg_store_for_collection = agg_store.for_collection(task_id, &bucket, &agg_param);
+            if agg_store_for_collection.collected {
+                return Err(DapError::Abort(DapAbort::batch_overlap(task_id, batch_sel)));
             }
+            agg_share.merge(agg_store_for_collection.agg_share.clone())?;
         }
 
         Ok(agg_share)
@@ -994,13 +1027,14 @@ impl DapAggregator<BearerToken> for MockAggregator {
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
         let task_config = self.unchecked_get_task_config(task_id).await;
-        let mut guard = self.agg_store.lock().expect("agg_store: failed to lock");
-        let agg_store = guard.entry(*task_id).or_default();
+        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        // TODO heavy hitters: Replace this with the agg param specified by the Collector.
+        let agg_param = DapAggregationParam::Empty;
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            if let Some(inner_agg_store) = agg_store.get_mut(&bucket) {
-                inner_agg_store.collected = true;
-            }
+            agg_store
+                .for_collection(task_id, &bucket, &agg_param)
+                .collected = true;
         }
 
         Ok(())
@@ -1207,19 +1241,9 @@ impl DapLeader<BearerToken> for MockAggregator {
 /// Information associated to a certain helper state for a given task ID and aggregate job ID.
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct HelperStateInfo {
+struct HelperStateInfo {
     task_id: TaskId,
     agg_job_id_owned: MetaAggregationJobId,
-}
-
-/// `AggStore` keeps track of the following:
-/// * Aggregate share
-/// * Whether this aggregate share has been collected
-#[derive(Default)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct AggStore {
-    pub(crate) agg_share: DapAggregateShare,
-    pub(crate) collected: bool,
 }
 
 /// Helper macro used by `assert_metrics_include`.

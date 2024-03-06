@@ -269,6 +269,15 @@ pub struct DapAggregateSpan<T> {
     span: HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)>,
 }
 
+impl std::fmt::Display for DapBatchBucket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval { batch_window } => write!(f, "window/{batch_window}"),
+            Self::FixedSize { batch_id } => write!(f, "batch/{}", batch_id.to_hex()),
+        }
+    }
+}
+
 // We can't derive default because it will require T to be Default, which we don't need.
 impl<T> Default for DapAggregateSpan<T> {
     fn default() -> Self {
@@ -799,6 +808,20 @@ pub enum DapAggregationParam {
     Empty,
     #[cfg(any(test, feature = "test-utils"))]
     Mastic(Poplar1AggregationParam),
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl DapAggregationParam {
+    /// Return the aggregation level for the aggregation parameter. Replay protection is enforced
+    /// with respect to this value.
+    //
+    // TODO heavy hitters: Decide if we're comfortable with this level of abstraction.
+    pub(crate) fn level(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::Mastic(agg_param) => agg_param.level(),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]

@@ -151,7 +151,7 @@ async fn resolve_taskprov<S: Sync>(
 
 #[cfg(test)]
 mod test {
-    use super::{aggregator, helper, leader, DapAggregator, DapAuthorizedSender, DapLeader};
+    use super::{aggregator, helper, leader, DapAuthorizedSender, DapLeader};
     use crate::{
         assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
@@ -166,17 +166,17 @@ mod test {
         },
         roles::leader::WorkItem,
         test_versions,
-        testing::{AggStore, MockAggregator},
+        testing::MockAggregator,
         vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
-        DapAbort, DapAggregateShare, DapAggregationJobState, DapAggregationParam, DapBatchBucket,
-        DapCollectionJob, DapError, DapGlobalConfig, DapLeaderAggregationJobTransition,
-        DapMeasurement, DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters,
-        DapVersion, MetaAggregationJobId,
+        DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
+        DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
+        DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
+        MetaAggregationJobId,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
     use prio::{
-        codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+        codec::{Decode, Encode, ParameterizedEncode},
         idpf::IdpfInput,
         vdaf::poplar1::Poplar1AggregationParam,
     };
@@ -1108,90 +1108,40 @@ mod test {
     async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
+        let task_config = t.helper.unchecked_get_task_config(task_id).await;
 
         let report = t.gen_test_report(task_id).await;
-        let (leader_state, req) = t
-            .gen_test_agg_job_init_req(
-                task_id,
-                version,
-                DapAggregationParam::Empty,
-                vec![report.clone()],
-            )
-            .await;
+        let req = t.gen_test_upload_req(report.clone(), task_id).await;
+        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+
+        let query = task_config.query_for_current_batch_window(t.now);
+        let req = t.gen_test_coll_job_req(query, task_id).await;
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
 
         // Add dummy data to report store backend. This is done in a new scope so that the lock on the
         // report store is released before running the test.
         {
-            let mut guard = t
-                .helper
-                .report_store
-                .lock()
-                .expect("report_store: failed to lock");
-            let report_store = guard.entry(*task_id).or_default();
-            report_store.insert(report.report_metadata.id);
+            let bucket = DapBatchBucket::TimeInterval {
+                batch_window: task_config.quantized_time_lower_bound(t.now),
+            };
+            let mut agg_store = t.helper.agg_store.lock().unwrap();
+            agg_store
+                .for_collection(task_id, &bucket, &DapAggregationParam::Empty)
+                .reports
+                .insert(report.report_metadata.id);
         }
 
-        // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req)
-                .await
-                .unwrap()
-                .payload,
-        )
-        .unwrap();
-        let transitions = if version == DapVersion::Draft02 {
-            // in version 2 replays are only detected later.
-            let agg_job_id =
-                AggregationJobInitReq::get_decoded_with_param(&DapVersion::Draft02, &req.payload)
-                    .unwrap()
-                    .draft02_agg_job_id
-                    .unwrap();
-            let task_config = t.leader.unchecked_get_task_config(task_id).await;
-            let transition = task_config
-                .handle_agg_job_resp(
-                    task_id,
-                    &MetaAggregationJobId::Draft02(agg_job_id),
-                    leader_state,
-                    agg_job_resp,
-                    t.leader.metrics(),
-                )
-                .unwrap();
-            let DapLeaderAggregationJobTransition::Uncommitted(
-                _,
-                AggregationJobContinueReq { transitions, .. },
-            ) = transition
-            else {
-                panic!("expected uncommitted transition, was {transition:?}");
-            };
-            let req = t
-                .gen_test_agg_job_cont_req(
-                    task_id,
-                    &MetaAggregationJobId::Draft02(agg_job_id),
-                    transitions,
-                    version,
-                )
-                .await;
-            AggregationJobResp::get_decoded(
-                &helper::handle_agg_job_req(&*t.helper, &req)
-                    .await
-                    .unwrap()
-                    .payload,
-            )
-            .unwrap()
-            .transitions
-        } else {
-            agg_job_resp.transitions
-        };
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
 
-        // Expect failure due to report store marked as collected.
-        assert_matches!(
-            transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::ReportReplayed)
-        );
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_report_replayed"}"#: 1,
+        });
 
         assert_metrics_include!(t.helper_registry, {
             r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: if version == DapVersion::Draft02 { 2 } else { 1 },
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
             r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
@@ -1210,22 +1160,13 @@ mod test {
         // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
         // is released before running the test. Otherwise the test will deadlock.
         {
-            let mut guard = t
-                .helper
-                .agg_store
-                .lock()
-                .expect("agg_store: failed to lock");
-            let agg_store = guard.entry(*task_id).or_default();
-
-            agg_store.insert(
-                DapBatchBucket::TimeInterval {
-                    batch_window: task_config.quantized_time_lower_bound(t.now),
-                },
-                AggStore {
-                    agg_share: DapAggregateShare::default(),
-                    collected: true,
-                },
-            );
+            let bucket = DapBatchBucket::TimeInterval {
+                batch_window: task_config.quantized_time_lower_bound(t.now),
+            };
+            let mut agg_store = t.helper.agg_store.lock().unwrap();
+            agg_store
+                .for_collection(task_id, &bucket, &DapAggregationParam::Empty)
+                .collected = true;
         }
 
         let query = task_config.query_for_current_batch_window(t.now);
