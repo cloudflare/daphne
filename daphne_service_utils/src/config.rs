@@ -45,14 +45,6 @@ pub struct DaphneServiceConfig {
     #[serde(flatten)]
     pub global: DapGlobalConfig,
 
-    /// Sharding key, used to compute the ReportsPending or ReportsProcessed shard to map a report
-    /// to (based on the report ID).
-    #[serde(with = "hex")]
-    pub report_shard_key: [u8; 32],
-
-    /// Shard count, the number of report storage shards. This should be a power of 2.
-    pub report_shard_count: u64,
-
     /// draft-dcook-ppm-dap-interop-test-design: Base URL of the Aggregator (unversioned). If set,
     /// this field is used for endpoint configuration for interop testing.
     #[serde(default)]
