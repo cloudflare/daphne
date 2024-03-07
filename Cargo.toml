@@ -9,9 +9,6 @@ members = [
     # Core Daphne crate
     "daphne",
 
-    # CLI for interacting with DAP deployments
-    "daphne/dapf",
-
     # Daphne storage with Worker backend
     "daphne_worker",
 
@@ -23,6 +20,9 @@ members = [
 
     # Service utilities shared by the server and worker
     "daphne_service_utils",
+
+    # CLI for interacting with DAP deployments
+    "daphne_service_utils/dapf",
 ]
 
 [profile.release]

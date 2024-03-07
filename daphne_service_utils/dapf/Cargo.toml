@@ -14,10 +14,13 @@ license = "BSD-3-Clause"
 [dependencies]
 anyhow = "1.0.79"
 clap = { version = "4.4.18", features = ["derive"] }
-daphne = { path = "..", features = ["prometheus"] }
+daphne = { path = "../../daphne" }
+daphne_service_utils = { path = ".." }
 prio.workspace = true
 rand.workspace = true
-reqwest = { workspace = true, features = ["blocking"] }
+reqwest = { workspace = true }
 serde_json.workspace = true
 tokio.workspace = true
 url.workspace = true
+webpki.workspace = true
+x509-parser.workspace = true

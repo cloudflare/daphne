@@ -746,12 +746,15 @@ dependencies = [
  "anyhow",
  "clap",
  "daphne",
+ "daphne_service_utils",
  "prio",
  "rand",
  "reqwest",
  "serde_json",
  "tokio",
  "url",
+ "webpki",
+ "x509-parser",
 ]
 
 [[package]]
