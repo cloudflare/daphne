@@ -51,8 +51,6 @@ mod storage_proxy_connection;
 ///     env: "some-machine-identifier".into(),
 ///     role: DapRole::Helper,
 ///     global,
-///     report_shard_key: [1; 32],
-///     report_shard_count: 4,
 ///     base_url: None,
 ///     taskprov: None,
 ///     default_version: DapVersion::Draft09,
