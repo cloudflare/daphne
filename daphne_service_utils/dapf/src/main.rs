@@ -8,19 +8,24 @@ use daphne::{
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        Base64Encode, BatchSelector, Collection, CollectionReq, HpkeConfigList, Query, TaskId,
+        decode_base64url_vec, Base64Encode, BatchSelector, Collection, CollectionReq,
+        HpkeConfigList, Query, TaskId,
     },
     vdaf::VdafConfig,
     DapAggregationParam, DapMeasurement, DapVersion,
 };
+use daphne_service_utils::http_headers;
 use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use reqwest::{Client, ClientBuilder};
 use std::{
-    io::{stdin, Read},
+    io::{stdin, Cursor, Read},
+    path::{Path, PathBuf},
     process::Command,
     time::SystemTime,
 };
+use webpki::{EndEntityCert, ECDSA_P256_SHA256};
+use x509_parser::pem::Pem;
 
 use url::Url;
 
@@ -49,6 +54,9 @@ enum Action {
     /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
     GetHpkeConfig {
         aggregator_url: Url,
+        /// Path to the certificate file to use to verify the signature of the hpke config
+        #[arg(short, long)]
+        certificate_file: Option<PathBuf>,
     },
     /// Upload a report to a DAP Leader using the JSON-formatted measurement provided on stdin.
     Upload {
@@ -63,6 +71,10 @@ enum Action {
         /// JSON-formatted VDAF config
         #[clap(short, long, action)]
         vdaf: VdafConfig,
+
+        /// Path to the certificate file to use to verify the signature of the hpke config
+        #[arg(short, long)]
+        certificate_file: Option<PathBuf>,
     },
     /// Collect an aggregate result from the DAP Leader using the JSON-formatted batch selector
     /// provided on stdin.
@@ -129,10 +141,14 @@ async fn main() -> Result<()> {
         .with_context(|| "failed to create HTTP client")?;
 
     match &cli.action {
-        Action::GetHpkeConfig { aggregator_url } => {
-            let hpke_config = get_hpke_config(&http_client, aggregator_url)
-                .await
-                .with_context(|| "failed to fetch the HPKE config")?;
+        Action::GetHpkeConfig {
+            aggregator_url,
+            certificate_file,
+        } => {
+            let hpke_config =
+                get_hpke_config(&http_client, aggregator_url, certificate_file.as_deref())
+                    .await
+                    .with_context(|| "failed to fetch the HPKE config")?;
             println!(
                 "{}",
                 serde_json::to_string(&hpke_config)
@@ -145,6 +161,7 @@ async fn main() -> Result<()> {
             leader_url,
             helper_url,
             vdaf,
+            certificate_file,
         } => {
             let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
 
@@ -158,12 +175,14 @@ async fn main() -> Result<()> {
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             // Get the Aggregators' HPKE configs.
-            let leader_hpke_config = get_hpke_config(&http_client, leader_url)
-                .await
-                .with_context(|| "failed to fetch the Leader's HPKE config")?;
-            let helper_hpke_config = get_hpke_config(&http_client, helper_url)
-                .await
-                .with_context(|| "failed to fetch the Helper's HPKE config")?;
+            let leader_hpke_config =
+                get_hpke_config(&http_client, leader_url, certificate_file.as_deref())
+                    .await
+                    .with_context(|| "failed to fetch the Leader's HPKE config")?;
+            let helper_hpke_config =
+                get_hpke_config(&http_client, helper_url, certificate_file.as_deref())
+                    .await
+                    .with_context(|| "failed to fetch the Helper's HPKE config")?;
 
             let version = deduce_dap_version_from_url(leader_url)?;
             // Generate a report for the measurement.
@@ -430,7 +449,11 @@ fn parse_id(id_str: &Option<String>) -> Result<TaskId> {
     .with_context(|| "expected URL-safe, base64 string")
 }
 
-async fn get_hpke_config(http_client: &Client, base_url: &Url) -> Result<HpkeConfig> {
+async fn get_hpke_config(
+    http_client: &Client,
+    base_url: &Url,
+    certificate_file: Option<&Path>,
+) -> Result<HpkeConfig> {
     let url = base_url.join("hpke_config")?;
 
     let resp = http_client
@@ -441,7 +464,25 @@ async fn get_hpke_config(http_client: &Client, base_url: &Url) -> Result<HpkeCon
     if !resp.status().is_success() {
         return Err(anyhow!("unexpected response: {:?}", resp));
     }
+    let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
     let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
+    if let Some(cert_path) = certificate_file {
+        let cert = std::fs::read_to_string(cert_path).context("reading the certificate")?;
+        let Some(signature) = maybe_signature else {
+            anyhow::bail!("Helper did not provide a signature");
+        };
+        let signature_bytes = decode_base64url_vec(signature.as_bytes()).unwrap();
+        let (cert_pem, _bytes_read) = Pem::read(Cursor::new(cert.as_bytes())).unwrap();
+        let cert = EndEntityCert::try_from(cert_pem.contents.as_ref()).unwrap();
+
+        cert.verify_signature(
+            &ECDSA_P256_SHA256,
+            &hpke_config_bytes,
+            signature_bytes.as_ref(),
+        )
+        .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
+    }
+
     match deduce_dap_version_from_url(base_url)? {
         DapVersion::Draft02 => Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?),
         DapVersion::Latest | DapVersion::Draft09 => {
