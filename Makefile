@@ -1,4 +1,4 @@
-.PHONY: accept acceptance e2e
+.PHONY: accept acceptance e2e load
 
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
@@ -15,3 +15,5 @@ accept:
 	cargo test --features test_acceptance -- acceptance
 acceptance: accept
 
+load:
+	cargo run --bin load_testing --features test_acceptance
