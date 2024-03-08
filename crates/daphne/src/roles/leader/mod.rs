@@ -366,7 +366,7 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
             resp_media_type: DapMediaType::AggregationJobResp,
             resource: DapResource::AggregationJob(agg_job_id),
             req_data: agg_job_init_req
-                .get_encoded_with_param(&task_config.version)
+                .get_encoded_with_param(&(task_config.version, false))
                 .map_err(DapError::encoding)?,
             method: LeaderHttpRequestMethod::Put,
             taskprov: taskprov.clone(),

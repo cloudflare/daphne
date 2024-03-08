@@ -463,7 +463,7 @@ impl DapTaskConfig {
                         time: metadata.time,
                         report_id: metadata.id,
                     });
-                    prep_inits.push(PrepareInit {
+                    prep_inits.push(PrepareInit::New {
                         report_share: ReportShare {
                             report_metadata: metadata,
                             public_share,
@@ -508,30 +508,45 @@ impl DapTaskConfig {
         {
             let mut processed = HashSet::with_capacity(num_reports);
             for prep_init in agg_job_init_req.prep_inits {
-                if processed.contains(&prep_init.report_share.report_metadata.id) {
+                let report_id = prep_init.report_id();
+                if processed.contains(&report_id) {
                     return Err(DapAbort::InvalidMessage {
                         detail: format!(
                             "report ID {} appears twice in the same aggregation job",
-                            prep_init.report_share.report_metadata.id.to_base64url()
+                            report_id.to_base64url()
                         ),
                         task_id: Some(*task_id),
                     }
                     .into());
                 }
-                processed.insert(prep_init.report_share.report_metadata.id);
+                processed.insert(report_id);
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        decrypter,
-                        initializer,
-                        false,
-                        task_id,
-                        self,
-                        prep_init.report_share,
-                        Some(prep_init.payload),
-                    )
-                    .await?,
-                );
+                consumed_reports.push(match prep_init {
+                    PrepareInit::New {
+                        report_share,
+                        payload,
+                    } => {
+                        EarlyReportStateConsumed::consume(
+                            decrypter,
+                            initializer,
+                            false,
+                            task_id,
+                            self,
+                            report_share,
+                            Some(payload),
+                        )
+                        .await?
+                    }
+                    #[cfg(any(test, feature = "test-utils"))]
+                    PrepareInit::Stored {
+                        report_id: _,
+                        payload: _,
+                    } => {
+                        return Err(fatal_error!(
+                            err = "handling of stored reports is not yet implemented"
+                        ))
+                    }
+                });
             }
         }
 

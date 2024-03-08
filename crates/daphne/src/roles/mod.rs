@@ -499,7 +499,9 @@ mod test {
                     &task_config,
                     Some(&agg_job_id),
                     DapMediaType::AggregationJobInitReq,
-                    agg_job_init_req,
+                    agg_job_init_req
+                        .get_encoded_with_param(&(task_config.version, false))
+                        .unwrap(),
                 )
                 .await,
             )
@@ -523,7 +525,9 @@ mod test {
                     agg_param: Vec::default(),
                     report_count,
                     checksum,
-                },
+                }
+                .get_encoded_with_param(&task_config.version)
+                .unwrap(),
             )
             .await
         }
@@ -571,15 +575,14 @@ mod test {
                 .unwrap()
         }
 
-        pub async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
+        pub async fn leader_authorized_req(
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             agg_job_id: Option<&AggregationJobId>,
             media_type: DapMediaType,
-            msg: M,
+            payload: Vec<u8>,
         ) -> DapRequest<BearerToken> {
-            let payload = msg.get_encoded_with_param(&task_config.version).unwrap();
             let sender_auth = Some(
                 self.leader
                     .authorize(task_id, task_config, &media_type, &payload)
@@ -647,7 +650,9 @@ mod test {
                         batch_id: BatchId(rng.gen()),
                     },
                     prep_inits: Vec::default(),
-                },
+                }
+                .get_encoded_with_param(&(version, false))
+                .unwrap(),
             )
             .await;
         assert_matches!(
@@ -809,7 +814,9 @@ mod test {
                     agg_param: Vec::default(),
                     report_count: 0,
                     checksum: [0; 32],
-                },
+                }
+                .get_encoded_with_param(&version)
+                .unwrap(),
             )
             .await;
         assert_matches!(
@@ -837,7 +844,9 @@ mod test {
                     agg_param: Vec::default(),
                     report_count: 0,
                     checksum: [0; 32],
-                },
+                }
+                .get_encoded_with_param(&version)
+                .unwrap(),
             )
             .await;
         assert_matches!(
