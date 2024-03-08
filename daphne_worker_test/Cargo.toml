@@ -33,6 +33,10 @@ test_acceptance = [
     "dep:tokio",
     "dep:url",
 ]
+load_testing = [
+    "dep:chrono",
+    "dep:tracing-subscriber",
+]
 
 [dependencies]
 cap.workspace = true
@@ -54,6 +58,7 @@ worker.workspace = true
 # test_acceptance dependencies
 anyhow = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 dapf = { path = "../daphne_service_utils/dapf/", optional = true }
 futures = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
@@ -65,6 +70,7 @@ rayon = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -86,3 +92,8 @@ x509-parser.workspace = true
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "load_testing"
+path = "src/bin/load_testing.rs"
+required-features = ["load_testing", "test_acceptance"]
