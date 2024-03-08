@@ -17,7 +17,22 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["console_error_panic_hook"]
 test_e2e = []
-test_acceptance = []
+test_acceptance = [
+    "dep:anyhow",
+    "dep:async-trait",
+    "dep:dapf",
+    "dep:futures",
+    "dep:hex",
+    "dep:itertools",
+    "dep:prio",
+    "dep:prometheus",
+    "dep:rand",
+    "dep:rayon",
+    "dep:reqwest",
+    "dep:serde_json",
+    "dep:tokio",
+    "dep:url",
+]
 
 [dependencies]
 cap.workspace = true
@@ -27,6 +42,7 @@ cfg-if.workspace = true
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
+daphne = { path = "../daphne", features = ["test-utils"] }
 daphne_worker = { path = "../daphne_worker", features = ["test-utils"] }
 # We don't actually call into getrandom directly, but prio does, so we pretend
 # we depend on it just so we can activate the js feature. Idealy this would be
@@ -35,10 +51,25 @@ getrandom = { workspace = true, features = ["js", "std"] }
 tracing.workspace = true
 worker.workspace = true
 
+# test_acceptance dependencies
+anyhow = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+dapf = { path = "../daphne_service_utils/dapf/", optional = true }
+futures = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+itertools = { workspace = true, optional = true }
+prio = { workspace = true, optional = true }
+prometheus = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
 [dev-dependencies]
 assert_matches.workspace = true
 async-trait.workspace = true
-daphne = { path = "../daphne", features = ["test-utils"] }
 daphne_service_utils = { path = "../daphne_service_utils" }
 hex.workspace = true
 hpke-rs.workspace = true
@@ -48,7 +79,7 @@ rand.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["full"] }
+tokio.workspace = true
 url.workspace = true
 webpki.workspace = true
 x509-parser.workspace = true
