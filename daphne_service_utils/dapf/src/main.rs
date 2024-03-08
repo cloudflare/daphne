@@ -3,29 +3,24 @@
 
 use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
+use dapf::{deduce_dap_version_from_url, HttpClientExt};
 use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
-    hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
-    messages::{
-        decode_base64url_vec, Base64Encode, BatchSelector, Collection, CollectionReq,
-        HpkeConfigList, Query, TaskId,
-    },
+    hpke::{HpkeKemId, HpkeReceiverConfig},
+    messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
     vdaf::VdafConfig,
     DapAggregationParam, DapMeasurement, DapVersion,
 };
-use daphne_service_utils::http_headers;
-use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
+use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
-use reqwest::{Client, ClientBuilder};
+use reqwest::ClientBuilder;
 use std::{
-    io::{stdin, Cursor, Read},
-    path::{Path, PathBuf},
+    io::{stdin, Read},
+    path::PathBuf,
     process::Command,
     time::SystemTime,
 };
-use webpki::{EndEntityCert, ECDSA_P256_SHA256};
-use x509_parser::pem::Pem;
 
 use url::Url;
 
@@ -145,10 +140,10 @@ async fn main() -> Result<()> {
             aggregator_url,
             certificate_file,
         } => {
-            let hpke_config =
-                get_hpke_config(&http_client, aggregator_url, certificate_file.as_deref())
-                    .await
-                    .with_context(|| "failed to fetch the HPKE config")?;
+            let hpke_config = http_client
+                .get_hpke_config(aggregator_url, certificate_file.as_deref())
+                .await
+                .with_context(|| "failed to fetch the HPKE config")?;
             println!(
                 "{}",
                 serde_json::to_string(&hpke_config)
@@ -175,14 +170,14 @@ async fn main() -> Result<()> {
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
             // Get the Aggregators' HPKE configs.
-            let leader_hpke_config =
-                get_hpke_config(&http_client, leader_url, certificate_file.as_deref())
-                    .await
-                    .with_context(|| "failed to fetch the Leader's HPKE config")?;
-            let helper_hpke_config =
-                get_hpke_config(&http_client, helper_url, certificate_file.as_deref())
-                    .await
-                    .with_context(|| "failed to fetch the Helper's HPKE config")?;
+            let leader_hpke_config = http_client
+                .get_hpke_config(leader_url, certificate_file.as_deref())
+                .await
+                .with_context(|| "failed to fetch the Leader's HPKE config")?;
+            let helper_hpke_config = http_client
+                .get_hpke_config(helper_url, certificate_file.as_deref())
+                .await
+                .with_context(|| "failed to fetch the Helper's HPKE config")?;
 
             let version = deduce_dap_version_from_url(leader_url)?;
             // Generate a report for the measurement.
@@ -447,57 +442,4 @@ fn parse_id(id_str: &Option<String>) -> Result<TaskId> {
     )
     .ok_or_else(|| anyhow!("failed to decode ID"))
     .with_context(|| "expected URL-safe, base64 string")
-}
-
-async fn get_hpke_config(
-    http_client: &Client,
-    base_url: &Url,
-    certificate_file: Option<&Path>,
-) -> Result<HpkeConfig> {
-    let url = base_url.join("hpke_config")?;
-
-    let resp = http_client
-        .get(url.as_str())
-        .send()
-        .await
-        .with_context(|| "request failed")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("unexpected response: {:?}", resp));
-    }
-    let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
-    let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
-    if let Some(cert_path) = certificate_file {
-        let cert = std::fs::read_to_string(cert_path).context("reading the certificate")?;
-        let Some(signature) = maybe_signature else {
-            anyhow::bail!("Helper did not provide a signature");
-        };
-        let signature_bytes = decode_base64url_vec(signature.as_bytes()).unwrap();
-        let (cert_pem, _bytes_read) = Pem::read(Cursor::new(cert.as_bytes())).unwrap();
-        let cert = EndEntityCert::try_from(cert_pem.contents.as_ref()).unwrap();
-
-        cert.verify_signature(
-            &ECDSA_P256_SHA256,
-            &hpke_config_bytes,
-            signature_bytes.as_ref(),
-        )
-        .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
-    }
-
-    match deduce_dap_version_from_url(base_url)? {
-        DapVersion::Draft02 => Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?),
-        DapVersion::Latest | DapVersion::Draft09 => {
-            Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?
-                .hpke_configs
-                .swap_remove(0))
-        }
-    }
-}
-
-fn deduce_dap_version_from_url(url: &Url) -> anyhow::Result<DapVersion> {
-    url.path_segments()
-        .context("no version specified in leader url")?
-        .next()
-        .unwrap()
-        .parse()
-        .context("failed to parse version parameter from url")
 }

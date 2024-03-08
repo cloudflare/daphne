@@ -53,6 +53,7 @@ hpke-rs = "0.2.0"
 hpke-rs-crypto = "0.2.0"
 hpke-rs-rust-crypto = "0.2.0"
 http = "0.2"
+itertools = "0.12.1"
 matchit = "0.7.3"
 p256 = { version = "0.13.2", features = ["ecdsa-core", "ecdsa", "pem"] }
 paste = "1.0.14"

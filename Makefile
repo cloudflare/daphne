@@ -1,3 +1,5 @@
+.PHONY: accept acceptance e2e
+
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
 	export E2E_TEST_HPKE_SIGNING_CERTIFICATE="$$(cat /tmp/certificate)"; \
@@ -8,3 +10,8 @@ e2e: /tmp/private-key /tmp/certificate
 
 /tmp/certificate:
 	openssl req -key /tmp/private-key -new -x509 -days 1 -out /tmp/certificate -subj '/C=US/L=Palo Alto/O=Cloudflare Lda/CN=dap.cloudflare.com'
+
+accept:
+	cargo test --features test_acceptance -- acceptance
+acceptance: accept
+
