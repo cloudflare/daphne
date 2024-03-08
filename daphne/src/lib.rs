@@ -783,7 +783,7 @@ pub enum DapMeasurement {
 }
 
 /// An aggregation parameter.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DapAggregationParam {
     Empty,
     #[cfg(any(test, feature = "test-utils"))]
@@ -794,8 +794,6 @@ pub enum DapAggregationParam {
 impl DapAggregationParam {
     /// Return the aggregation level for the aggregation parameter. Replay protection is enforced
     /// with respect to this value.
-    //
-    // TODO heavy hitters: Decide if we're comfortable with this level of abstraction.
     pub(crate) fn level(&self) -> usize {
         match self {
             Self::Empty => 0,

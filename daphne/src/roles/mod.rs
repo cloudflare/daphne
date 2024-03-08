@@ -468,11 +468,11 @@ mod test {
             query: Query,
             task_id: &TaskId,
         ) -> DapRequest<BearerToken> {
-            self.gen_test_coll_job_req_for_agg_param(query, DapAggregationParam::Empty, task_id)
+            self.gen_test_coll_job_req_for_collection(query, DapAggregationParam::Empty, task_id)
                 .await
         }
 
-        pub async fn gen_test_coll_job_req_for_agg_param(
+        pub async fn gen_test_coll_job_req_for_collection(
             &self,
             query: Query,
             agg_param: DapAggregationParam,
@@ -990,7 +990,8 @@ mod test {
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
             agg_store
-                .for_collection(task_id, &bucket, &DapAggregationParam::Empty)
+                .for_bucket(task_id, &bucket, &DapAggregationParam::Empty)
+                .unwrap()
                 .reports
                 .insert(report.report_metadata.id);
         }
@@ -1029,7 +1030,8 @@ mod test {
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
             agg_store
-                .for_collection(task_id, &bucket, &DapAggregationParam::Empty)
+                .for_bucket(task_id, &bucket, &DapAggregationParam::Empty)
+                .unwrap()
                 .collected = true;
         }
 
@@ -1892,7 +1894,7 @@ mod test {
         );
         leader::handle_coll_job_req(
             &*t.leader,
-            &t.gen_test_coll_job_req_for_agg_param(query, agg_param, task_id)
+            &t.gen_test_coll_job_req_for_collection(query, agg_param, task_id)
                 .await,
         )
         .await
