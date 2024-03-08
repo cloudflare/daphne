@@ -453,37 +453,104 @@ impl AuditLog for MockAuditLog {
     }
 }
 
-#[derive(Default)]
+/// Aggregate share and associated book-keeping data for a bucket of reports.
+//
+// TODO heavy hitters: Move this code into a space where `daphne_server` can use it. We need the
+// same logic there.
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub(crate) struct AggregateStoreForCollection {
-    /// The aggregate share.
-    pub(crate) agg_share: DapAggregateShare,
-    /// Indication of whether the aggregate share has been collected.
-    pub(crate) collected: bool,
-    /// The reports included in the aggregate share.
-    pub(crate) reports: HashSet<ReportId>,
+pub struct AggregateStore {
+    pub agg_share: DapAggregateShare,
+
+    /// Indication of whether the bucket has been collected at least once. If set, new reports for
+    /// this bucket will be rejected.
+    pub collected: bool,
+
+    /// The reports included in the current aggregate share. If a report wants to be aggregated is
+    /// already in this set, it will be rejected.
+    pub reports: HashSet<ReportId>,
+
+    /// The current aggregation parameter.
+    pub(crate) agg_param: DapAggregationParam,
+}
+
+impl AggregateStore {
+    /// Check if the given aggregation parameter can be used to aggregate the reports in this bucket.
+    ///
+    /// For IDPF-based VDAFs (e.g., Mastic), this returns true only if the aggregation parameter
+    /// results in a valid tree traversal, that is, each prefix encoded by the aggregation
+    /// parameter is equal to or a child of a prefix in the current aggregation parameter.
+    ///
+    /// For simple VDAFs (e.g., Prio3), only the empty aggregation parameter is valid.
+    //
+    // TODO heavy hitters: Enforce the maximum tree depth.
+    fn is_valid(&self, next_agg_param: &DapAggregationParam) -> bool {
+        if matches!(self.agg_param, DapAggregationParam::Empty) {
+            return matches!(next_agg_param, DapAggregationParam::Empty);
+        }
+
+        let curr_level = self.agg_param.level();
+        let next_level = next_agg_param.level();
+
+        // Ensure the aggregation level increases monotonically.
+        if next_level < curr_level {
+            return false;
+        }
+
+        // If the level is the same, then ensure the parameter hasn't changed.
+        if next_level == curr_level && next_agg_param != &self.agg_param {
+            return false;
+        }
+
+        // If the next level is greater than the previous, then check that the next parameter is
+        // consistent with the current one.
+        if next_level > curr_level {
+            todo!("TODO heavy hitters: prefix consistency check")
+        }
+
+        true
+    }
+
+    /// If the given aggregation parameter is valid, then advance to it.
+    pub fn goto(&mut self, agg_param: &DapAggregationParam) -> Option<&mut Self> {
+        if !self.is_valid(agg_param) {
+            return None;
+        }
+
+        if agg_param.level() > self.agg_param.level() {
+            // Advance to the next level.
+            self.agg_share.reset();
+            self.collected = false;
+            self.reports.clear();
+            self.agg_param = agg_param.clone();
+        }
+
+        Some(self)
+    }
 }
 
 #[derive(Default)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub(crate) struct InMemoryAggregateStore(HashMap<String, AggregateStoreForCollection>);
+pub(crate) struct InMemoryAggregateStore(HashMap<String, AggregateStore>);
 
 impl InMemoryAggregateStore {
-    /// Return the aggregate store for the given "collection". A collection is the result of
-    /// aggregating a bucket of reports with a particular aggregation parameter.
-    pub(crate) fn for_collection(
+    /// Return the aggregate store for the given bucket.
+    pub(crate) fn for_bucket(
         &mut self,
         task_id: &TaskId,
         bucket: &DapBatchBucket,
         agg_param: &DapAggregationParam,
-    ) -> &mut AggregateStoreForCollection {
-        let agg_level = agg_param.level();
-        // NOTE(cjpatton) `daphne_server::App` will use a similar naming scheme for instances of
-        // the `AggregateStore` DO. However, for backwards compatibility, if `agg_level == 0`, then
-        // we won't include it in the DO name.
-        self.0
-            .entry(format!("{task_id}/{bucket}/{agg_level}"))
-            .or_default()
+    ) -> Option<&mut AggregateStore> {
+        let agg_store = self
+            .0
+            .entry(format!("{task_id}/{bucket}"))
+            .or_insert(AggregateStore {
+                agg_share: Default::default(),
+                collected: false,
+                reports: Default::default(),
+                agg_param: agg_param.clone(),
+            });
+
+        agg_store.goto(agg_param)
     }
 }
 
@@ -804,7 +871,8 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             if agg_store
-                .for_collection(task_id, &bucket, &agg_param)
+                .for_bucket(task_id, &bucket, &agg_param)
+                .ok_or_else(|| DapAbort::BadRequest("invalid aggregation parameter".into()))?
                 .collected
             {
                 return Ok(true);
@@ -824,7 +892,8 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
             // TODO heavy hitters: Replace this with the agg param specified by the Collector.
             let agg_param = DapAggregationParam::Empty;
             !agg_store
-                .for_collection(task_id, &bucket, &agg_param)
+                .for_bucket(task_id, &bucket, &agg_param)
+                .ok_or_else(|| DapAbort::BadRequest("invalid aggregation parameter".into()))?
                 .agg_share
                 .empty()
         };
@@ -844,33 +913,34 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         &self,
         task_id: &TaskId,
         _task_config: &DapTaskConfig,
-        agg_agg_span: DapAggregateSpan<DapAggregateShare>,
+        agg_span: DapAggregateSpan<DapAggregateShare>,
     ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
         let mut agg_store = self.agg_store.lock().unwrap();
         // TODO heavy hitters: Replace this with the agg param specified by the Collector.
         let agg_param = DapAggregationParam::Empty;
 
-        agg_agg_span
+        agg_span
             .into_iter()
             .map(|(bucket, (agg_share_delta, report_metadatas))| {
-                let agg_store_for_collection =
-                    agg_store.for_collection(task_id, &bucket, &agg_param);
+                let Some( agg_store_for_bucket) = agg_store.for_bucket(task_id, &bucket, &agg_param) else {
+                    todo!("TODO heavy hitters: reject all reports in the bucket due to invalid aggregation parameter");
+                };
 
                 let replayed = report_metadatas
                     .iter()
                     .map(|(id, _)| *id)
-                    .filter(|id| agg_store_for_collection.reports.contains(id))
+                    .filter(|id| agg_store_for_bucket.reports.contains(id))
                     .collect::<HashSet<_>>();
 
                 let result = if replayed.is_empty() {
-                    agg_store_for_collection
+                    agg_store_for_bucket
                         .reports
                         .extend(report_metadatas.iter().map(|(id, _)| *id));
                     // Add to aggregate share.
-                    if agg_store_for_collection.collected {
+                    if agg_store_for_bucket.collected {
                         Err(MergeAggShareError::AlreadyCollected)
                     } else {
-                        agg_store_for_collection
+                        agg_store_for_bucket
                             .agg_share
                             .merge(agg_share_delta.clone())
                             .map_err(MergeAggShareError::Other)
@@ -900,11 +970,17 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
-            let agg_store_for_collection = agg_store.for_collection(task_id, &bucket, &agg_param);
-            if agg_store_for_collection.collected {
+            let agg_store_for_bucket = agg_store
+                .for_bucket(task_id, &bucket, &agg_param)
+                .ok_or_else(|| {
+                    DapError::Abort(DapAbort::BadRequest(
+                        "unexpected aggregation parameter".to_string(),
+                    ))
+                })?;
+            if agg_store_for_bucket.collected {
                 return Err(DapError::Abort(DapAbort::batch_overlap(task_id, batch_sel)));
             }
-            agg_share.merge(agg_store_for_collection.agg_share.clone())?;
+            agg_share.merge(agg_store_for_bucket.agg_share.clone())?;
         }
 
         Ok(agg_share)
@@ -922,7 +998,12 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             agg_store
-                .for_collection(task_id, &bucket, &agg_param)
+                .for_bucket(task_id, &bucket, &agg_param)
+                .ok_or_else(|| {
+                    DapError::Abort(DapAbort::BadRequest(
+                        "unexpected aggregation parameter".to_string(),
+                    ))
+                })?
                 .collected = true;
         }
 
