@@ -146,7 +146,6 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
         DapVersion::Draft02 => {
             let DapHelperAggregationJobTransition::Continued(state, agg_job_resp) = task_config
                 .handle_agg_job_init_req(
-                    task_id,
                     &HashMap::default(), // no reports have been processed yet
                     &part_batch_sel,
                     &initialized_reports,
@@ -160,7 +159,6 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
                 .put_helper_state_if_not_exists(task_id, agg_job_id, &state)
                 .await?
             {
-                // TODO spec: Consider an explicit abort for this case.
                 return Err(DapAbort::BadRequest(
                     "unexpected message for aggregation job (already exists)".into(),
                 )
@@ -179,7 +177,6 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
                 |report_status| {
                     let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
                         task_config.handle_agg_job_init_req(
-                            task_id,
                             report_status,
                             &part_batch_sel,
                             &initialized_reports,

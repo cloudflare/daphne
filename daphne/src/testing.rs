@@ -223,7 +223,6 @@ impl AggregationJobTest {
     ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
         self.task_config
             .handle_agg_job_init_req(
-                &self.task_id,
                 &HashMap::default(),
                 &agg_job_init_req.part_batch_sel.clone(),
                 &self
