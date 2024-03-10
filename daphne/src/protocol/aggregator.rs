@@ -78,31 +78,19 @@ pub trait EarlyReportState {
     fn is_ready(&self) -> bool;
 }
 
-/// The state of a report that is unchanged during the initialization flow:
-///
-/// [`Report`]/[`PrepareInit`]
-/// -> [`EarlyReportStateConsumed`]
-/// -> [`EarlyReportStateInitialized`]
-/// -> [`Transition`]
-#[derive(Clone)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct ReportState {
-    pub metadata: ReportMetadata,
-    pub public_share: Vec<u8>,
-    // Set by the Helper.
-    //
-    // draft02 compatibility: This is only set set in the latest raft.
-    pub leader_prep_share: Option<Vec<u8>>,
-}
-
 /// Report state during aggregation initialization after consuming the report share. This involves
 /// decryption as well a few validation steps.
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateConsumed {
     Ready {
-        state: ReportState,
+        metadata: ReportMetadata,
+        public_share: Vec<u8>,
         input_share: Vec<u8>,
+        // Set by the Helper.
+        //
+        // draft02 compatibility: This is only set set in the latest draft.
+        leader_prep_share: Option<Vec<u8>>,
     },
     Rejected {
         metadata: ReportMetadata,
@@ -249,11 +237,9 @@ impl EarlyReportStateConsumed {
         };
 
         Ok(Self::Ready {
-            state: ReportState {
-                metadata: report_share.report_metadata,
-                public_share: report_share.public_share,
-                leader_prep_share,
-            },
+            metadata: report_share.report_metadata,
+            public_share: report_share.public_share,
+            leader_prep_share,
             input_share,
         })
     }
@@ -266,11 +252,7 @@ impl EarlyReportStateConsumed {
         failure: TransitionFailure,
     ) -> EarlyReportStateInitialized {
         let metadata = match self {
-            Self::Ready {
-                state: ReportState { metadata, .. },
-                ..
-            }
-            | Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         };
         EarlyReportStateInitialized::Rejected { metadata, failure }
     }
@@ -279,11 +261,7 @@ impl EarlyReportStateConsumed {
 impl EarlyReportState for EarlyReportStateConsumed {
     fn metadata(&self) -> &ReportMetadata {
         match self {
-            Self::Ready {
-                state: ReportState { metadata, .. },
-                ..
-            }
-            | Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         }
     }
 
@@ -297,7 +275,9 @@ impl EarlyReportState for EarlyReportStateConsumed {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateInitialized {
     Ready {
-        state: ReportState,
+        metadata: ReportMetadata,
+        public_share: Vec<u8>,
+        leader_prep_share: Option<Vec<u8>>,
         vdaf_state: VdafPrepState,
         message: VdafPrepMessage,
     },
@@ -321,12 +301,18 @@ impl EarlyReportStateInitialized {
         // when the feature "test-utils" is enabled.
         let _ = agg_param;
 
-        let (state, input_share) = match early_report_state_consumed {
-            EarlyReportStateConsumed::Ready { state, input_share } => (state, input_share),
-            EarlyReportStateConsumed::Rejected { metadata, failure } => {
-                return Ok(Self::Rejected { metadata, failure })
-            }
-        };
+        let (metadata, public_share, input_share, leader_prep_share) =
+            match early_report_state_consumed {
+                EarlyReportStateConsumed::Ready {
+                    metadata,
+                    public_share,
+                    input_share,
+                    leader_prep_share,
+                } => (metadata, public_share, input_share, leader_prep_share),
+                EarlyReportStateConsumed::Rejected { metadata, failure } => {
+                    return Ok(Self::Rejected { metadata, failure })
+                }
+            };
 
         let agg_id = usize::from(!is_leader);
         let res = match vdaf_config {
@@ -334,16 +320,16 @@ impl EarlyReportStateInitialized {
                 prio3_config,
                 vdaf_verify_key,
                 agg_id,
-                &state.metadata.id.0,
-                &state.public_share,
+                &metadata.id.0,
+                &public_share,
                 &input_share,
             ),
             VdafConfig::Prio2 { dimension } => prio2_prep_init(
                 *dimension,
                 vdaf_verify_key,
                 agg_id,
-                &state.metadata.id.0,
-                &state.public_share,
+                &metadata.id.0,
+                &public_share,
                 &input_share,
             ),
             #[cfg(any(test, feature = "test-utils"))]
@@ -355,19 +341,21 @@ impl EarlyReportStateInitialized {
                 *weight_config,
                 vdaf_verify_key,
                 agg_param,
-                &state.public_share,
+                &public_share,
                 input_share.as_ref(),
             ),
         };
 
         let early_report_state_initialized = match res {
             Ok((vdaf_state, message)) => Self::Ready {
-                state,
+                metadata,
+                public_share,
+                leader_prep_share,
                 vdaf_state,
                 message,
             },
             Err(..) => Self::Rejected {
-                metadata: state.metadata,
+                metadata,
                 failure: TransitionFailure::VdafPrepError,
             },
         };
@@ -379,11 +367,7 @@ impl EarlyReportStateInitialized {
         // this never aborts because the closure never panics
         replace_with_or_abort(self, |self_| {
             let metadata = match self_ {
-                Self::Rejected { metadata, .. }
-                | Self::Ready {
-                    state: ReportState { metadata, .. },
-                    ..
-                } => metadata,
+                Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
             };
             Self::Rejected { metadata, failure }
         });
@@ -393,11 +377,7 @@ impl EarlyReportStateInitialized {
 impl EarlyReportState for EarlyReportStateInitialized {
     fn metadata(&self) -> &ReportMetadata {
         match self {
-            Self::Ready {
-                state: ReportState { metadata, .. },
-                ..
-            }
-            | Self::Rejected { metadata, .. } => metadata,
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
         }
     }
 
@@ -475,7 +455,9 @@ impl DapTaskConfig {
         for (initialized_report, helper_share) in zip(initialized_reports, helper_shares) {
             match initialized_report {
                 EarlyReportStateInitialized::Ready {
-                    state,
+                    metadata,
+                    public_share,
+                    leader_prep_share: _,
                     vdaf_state,
                     message: prep_share,
                 } => {
@@ -502,13 +484,13 @@ impl DapTaskConfig {
                     states.push(AggregationJobReportState {
                         draft02_prep_share,
                         prep_state: vdaf_state,
-                        time: state.metadata.time,
-                        report_id: state.metadata.id,
+                        time: metadata.time,
+                        report_id: metadata.id,
                     });
                     prep_inits.push(PrepareInit {
                         report_share: ReportShare {
-                            report_metadata: state.metadata,
-                            public_share: state.public_share,
+                            report_metadata: metadata,
+                            public_share,
                             encrypted_input_share: helper_share,
                         },
                         draft09_payload,
@@ -598,21 +580,19 @@ impl DapTaskConfig {
     /// run by the Helper.
     pub(crate) fn handle_agg_job_init_req(
         &self,
-        task_id: &TaskId,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[EarlyReportStateInitialized],
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         match self.version {
-            DapVersion::Draft02 => Ok(Self::draft02_handle_agg_job_init_req(
+            DapVersion::Draft02 => Self::draft02_handle_agg_job_init_req(
                 report_status,
                 part_batch_sel,
                 initialized_reports,
                 metrics,
-            )),
+            ),
             DapVersion::Draft09 | DapVersion::Latest => self.draft09_handle_agg_job_init_req(
-                task_id,
                 report_status,
                 part_batch_sel,
                 initialized_reports,
@@ -625,7 +605,7 @@ impl DapTaskConfig {
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[EarlyReportStateInitialized],
         metrics: &dyn DaphneMetrics,
-    ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
+    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
         let num_reports = initialized_reports.len();
         let mut states = Vec::with_capacity(num_reports);
         let mut transitions = Vec::with_capacity(num_reports);
@@ -636,21 +616,30 @@ impl DapTaskConfig {
                 Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
                 None => match initialized_report {
                     EarlyReportStateInitialized::Ready {
-                        state,
+                        metadata,
+                        public_share: _,
+                        leader_prep_share: None,
                         vdaf_state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
                         states.push(AggregationJobReportState {
                             draft02_prep_share: None,
                             prep_state: helper_prep_state.clone(),
-                            time: state.metadata.time,
-                            report_id: state.metadata.id,
+                            time: metadata.time,
+                            report_id: metadata.id,
                         });
                         helper_prep_share
                             .get_encoded()
                             .map(TransitionVar::Continued)
                             .expect("failed to encode prep share")
                     }
+
+                    EarlyReportStateInitialized::Ready {
+                        metadata: _,
+                        public_share: _,
+                        leader_prep_share: Some(_),
+                        ..
+                    } => return Err(fatal_error!(err = "draft02: unexpected leader prep share")),
 
                     EarlyReportStateInitialized::Rejected {
                         metadata: _,
@@ -668,18 +657,17 @@ impl DapTaskConfig {
             });
         }
 
-        DapHelperAggregationJobTransition::Continued(
+        Ok(DapHelperAggregationJobTransition::Continued(
             DapAggregationJobState {
                 part_batch_sel: part_batch_sel.clone(),
                 seq: states,
             },
             AggregationJobResp { transitions },
-        )
+        ))
     }
 
     fn draft09_handle_agg_job_init_req(
         &self,
-        task_id: &TaskId,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[EarlyReportStateInitialized],
@@ -694,18 +682,12 @@ impl DapTaskConfig {
                 Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
                 None => match initialized_report {
                     EarlyReportStateInitialized::Ready {
-                        state,
+                        metadata,
+                        public_share: _,
+                        leader_prep_share: Some(leader_prep_share),
                         vdaf_state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
-                        let Some(leader_prep_share) = &state.leader_prep_share else {
-                            return Err(DapAbort::InvalidMessage {
-                                detail: "PrepareInit with missing payload".to_string(),
-                                task_id: Some(*task_id),
-                            }
-                            .into());
-                        };
-
                         let res = match &self.vdaf {
                             VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
                                 prio3_config,
@@ -737,8 +719,8 @@ impl DapTaskConfig {
                                 agg_span.add_out_share(
                                     self,
                                     part_batch_sel,
-                                    state.metadata.id,
-                                    state.metadata.time,
+                                    metadata.id,
+                                    metadata.time,
                                     data,
                                 )?;
 
@@ -759,6 +741,11 @@ impl DapTaskConfig {
                             Err(VdafError::Dap(e)) => return Err(e),
                         }
                     }
+
+                    EarlyReportStateInitialized::Ready {
+                        leader_prep_share: None,
+                        ..
+                    } => return Err(fatal_error!(err = "expected leader prep share, got none")),
 
                     EarlyReportStateInitialized::Rejected {
                         metadata: _,
