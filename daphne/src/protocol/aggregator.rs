@@ -89,8 +89,10 @@ pub trait EarlyReportState {
 pub struct ReportState {
     pub metadata: ReportMetadata,
     pub public_share: Vec<u8>,
-    // comes from [`PrepareInit::draft_latest_payload`]
-    pub draft_latest_prep_init_payload: Option<Vec<u8>>,
+    // Set by the Helper.
+    //
+    // draft02 compatibility: This is only set set in the latest raft.
+    pub leader_prep_share: Option<Vec<u8>>,
 }
 
 /// Report state during aggregation initialization after consuming the report share. This involves
@@ -114,12 +116,12 @@ impl EarlyReportStateConsumed {
         is_leader: bool,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        state: ReportState,
-        encrypted_input_share: HpkeCiphertext,
+        report_share: ReportShare,
+        prep_init_payload: Option<Vec<u8>>,
     ) -> Result<EarlyReportStateConsumed, DapError> {
-        if state.metadata.time >= task_config.expiration {
+        if report_share.report_metadata.time >= task_config.expiration {
             return Ok(Self::Rejected {
-                metadata: state.metadata,
+                metadata: report_share.report_metadata,
                 failure: TransitionFailure::TaskExpired,
             });
         }
@@ -140,20 +142,20 @@ impl EarlyReportStateConsumed {
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
-        state
-            .metadata
+        report_share
+            .report_metadata
             .encode_with_param(&task_config.version, &mut aad)
             .map_err(DapError::encoding)?;
-        encode_u32_bytes(&mut aad, &state.public_share).map_err(DapError::encoding)?;
+        encode_u32_bytes(&mut aad, &report_share.public_share).map_err(DapError::encoding)?;
 
         let encoded_input_share = match decrypter
-            .hpke_decrypt(task_id, &info, &aad, &encrypted_input_share)
+            .hpke_decrypt(task_id, &info, &aad, &report_share.encrypted_input_share)
             .await
         {
             Ok(encoded_input_share) => encoded_input_share,
             Err(DapError::Transition(failure)) => {
                 return Ok(Self::Rejected {
-                    metadata: state.metadata,
+                    metadata: report_share.report_metadata,
                     failure,
                 })
             }
@@ -172,7 +174,7 @@ impl EarlyReportStateConsumed {
                     Ok(input_share) => (input_share.payload, Some(input_share.extensions)),
                     Err(..) => {
                         return Ok(Self::Rejected {
-                            metadata: state.metadata,
+                            metadata: report_share.report_metadata,
                             failure: TransitionFailure::InvalidMessage,
                         })
                     }
@@ -184,7 +186,11 @@ impl EarlyReportStateConsumed {
         {
             let extensions = match task_config.version {
                 DapVersion::Draft09 | DapVersion::Latest => draft09_extensions.as_ref().unwrap(),
-                DapVersion::Draft02 => state.metadata.draft02_extensions.as_ref().unwrap(),
+                DapVersion::Draft02 => report_share
+                    .report_metadata
+                    .draft02_extensions
+                    .as_ref()
+                    .unwrap(),
             };
 
             let mut taskprov_indicated = false;
@@ -193,7 +199,7 @@ impl EarlyReportStateConsumed {
                 // Reject reports with duplicated extensions.
                 if !seen.insert(extension.type_code()) {
                     return Ok(Self::Rejected {
-                        metadata: state.metadata,
+                        metadata: report_share.report_metadata,
                         failure: TransitionFailure::InvalidMessage,
                     });
                 }
@@ -206,7 +212,7 @@ impl EarlyReportStateConsumed {
                     // Reject reports with unrecognized extensions.
                     (DapVersion::Draft09 | DapVersion::Latest, ..) => {
                         return Ok(Self::Rejected {
-                            metadata: state.metadata,
+                            metadata: report_share.report_metadata,
                             failure: TransitionFailure::InvalidMessage,
                         })
                     }
@@ -220,13 +226,36 @@ impl EarlyReportStateConsumed {
                 // taskprov: If the task configuration method is taskprov, then we expect each
                 // report to indicate support.
                 return Ok(Self::Rejected {
-                    metadata: state.metadata,
+                    metadata: report_share.report_metadata,
                     failure: TransitionFailure::InvalidMessage,
                 });
             }
         }
 
-        Ok(Self::Ready { state, input_share })
+        // Decode the ping-pong "initialize" message framing.
+        // (draft-irtf-cfrg-vdaf-08, Section 5.8).
+        let leader_prep_share = match prep_init_payload
+            .as_ref()
+            .map(|payload| decode_ping_pong_framed(payload, PingPongMessageType::Initialize))
+            .transpose()
+        {
+            Ok(leader_prep_share) => leader_prep_share.map(|bytes| bytes.to_vec()),
+            Err(_) => {
+                return Ok(Self::Rejected {
+                    metadata: report_share.report_metadata,
+                    failure: TransitionFailure::VdafPrepError,
+                })
+            }
+        };
+
+        Ok(Self::Ready {
+            state: ReportState {
+                metadata: report_share.report_metadata,
+                public_share: report_share.public_share,
+                leader_prep_share,
+            },
+            input_share,
+        })
     }
 
     /// Convert this `EarlyReportStateConsumed` into a rejected [`EarlyReportStateInitialized`] using
@@ -423,12 +452,12 @@ impl DapTaskConfig {
                         true,
                         task_id,
                         self,
-                        ReportState {
-                            metadata: report.report_metadata,
+                        ReportShare {
+                            report_metadata: report.report_metadata,
                             public_share: report.public_share,
-                            draft_latest_prep_init_payload: None,
+                            encrypted_input_share: leader_share,
                         },
-                        leader_share,
+                        None,
                     )
                     .await?,
                 );
@@ -545,12 +574,8 @@ impl DapTaskConfig {
                         false,
                         task_id,
                         self,
-                        ReportState {
-                            metadata: prep_init.report_share.report_metadata,
-                            public_share: prep_init.report_share.public_share,
-                            draft_latest_prep_init_payload: prep_init.draft09_payload,
-                        },
-                        prep_init.report_share.encrypted_input_share,
+                        prep_init.report_share,
+                        prep_init.draft09_payload,
                     )
                     .await?,
                 );
@@ -673,7 +698,7 @@ impl DapTaskConfig {
                         vdaf_state: helper_prep_state,
                         message: helper_prep_share,
                     } => {
-                        let Some(leader_inbound) = &state.draft_latest_prep_init_payload else {
+                        let Some(leader_prep_share) = &state.leader_prep_share else {
                             return Err(DapAbort::InvalidMessage {
                                 detail: "PrepareInit with missing payload".to_string(),
                                 task_id: Some(*task_id),
@@ -681,40 +706,31 @@ impl DapTaskConfig {
                             .into());
                         };
 
-                        // Decode the ping-pong "initialize" message framing.
-                        // (draft-irtf-cfrg-vdaf-08, Section 5.8).
-                        let leader_prep_share = decode_ping_pong_framed(
-                            leader_inbound,
-                            PingPongMessageType::Initialize,
-                        )
-                        .map_err(VdafError::Codec);
-
-                        let res =
-                            leader_prep_share.and_then(|leader_prep_share| match &self.vdaf {
-                                VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
-                                    prio3_config,
-                                    1,
-                                    helper_prep_state.clone(),
-                                    helper_prep_share.clone(),
-                                    leader_prep_share,
-                                ),
-                                VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
-                                    *dimension,
-                                    helper_prep_state.clone(),
-                                    helper_prep_share.clone(),
-                                    leader_prep_share,
-                                ),
-                                #[cfg(any(test, feature = "test-utils"))]
-                                VdafConfig::Mastic {
-                                    input_size: _,
-                                    weight_config,
-                                } => mastic_prep_finish_from_shares(
-                                    *weight_config,
-                                    helper_prep_state.clone(),
-                                    helper_prep_share.clone(),
-                                    leader_prep_share,
-                                ),
-                            });
+                        let res = match &self.vdaf {
+                            VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
+                                prio3_config,
+                                1,
+                                helper_prep_state.clone(),
+                                helper_prep_share.clone(),
+                                leader_prep_share,
+                            ),
+                            VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
+                                *dimension,
+                                helper_prep_state.clone(),
+                                helper_prep_share.clone(),
+                                leader_prep_share,
+                            ),
+                            #[cfg(any(test, feature = "test-utils"))]
+                            VdafConfig::Mastic {
+                                input_size: _,
+                                weight_config,
+                            } => mastic_prep_finish_from_shares(
+                                *weight_config,
+                                helper_prep_state.clone(),
+                                helper_prep_share.clone(),
+                                leader_prep_share,
+                            ),
+                        };
 
                         match res {
                             Ok((data, prep_msg)) => {

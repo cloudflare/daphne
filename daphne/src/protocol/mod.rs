@@ -49,8 +49,6 @@ mod test {
     use rand::prelude::*;
     use std::{fmt::Debug, iter::zip};
 
-    use super::aggregator::ReportState;
-
     impl<M: Debug> DapLeaderAggregationJobTransition<M> {
         fn unwrap_continued(self) -> (DapAggregationJobState, M) {
             let Self::Continued(state, message) = self else {
@@ -120,12 +118,12 @@ mod test {
             true, // is_leader
             &t.task_id,
             &t.task_config,
-            ReportState {
-                metadata: report.report_metadata.clone(),
+            ReportShare {
+                report_metadata: report.report_metadata.clone(),
                 public_share: report.public_share.clone(),
-                draft_latest_prep_init_payload: None,
+                encrypted_input_share: leader_share,
             },
-            leader_share,
+            None,
         )
         .await
         .unwrap();
@@ -150,12 +148,12 @@ mod test {
             false, // is_helper
             &t.task_id,
             &t.task_config,
-            ReportState {
-                metadata: report.report_metadata,
+            ReportShare {
+                report_metadata: report.report_metadata,
                 public_share: report.public_share,
-                draft_latest_prep_init_payload: None,
+                encrypted_input_share: helper_share,
             },
-            helper_share,
+            None,
         )
         .await
         .unwrap();
@@ -885,12 +883,12 @@ mod test {
             true,
             &t.task_id,
             &t.task_config,
-            ReportState {
-                metadata: report.report_metadata,
+            ReportShare {
+                report_metadata: report.report_metadata,
                 public_share: report.public_share,
-                draft_latest_prep_init_payload: None,
+                encrypted_input_share: leader_share,
             },
-            leader_share,
+            None,
         )
         .await
         .unwrap();
@@ -940,12 +938,12 @@ mod test {
             true,
             &t.task_id,
             &t.task_config,
-            ReportState {
-                metadata: report.report_metadata,
+            ReportShare {
+                report_metadata: report.report_metadata,
                 public_share: report.public_share,
-                draft_latest_prep_init_payload: None,
+                encrypted_input_share: leader_share,
             },
-            leader_share,
+            None,
         )
         .await
         .unwrap();
