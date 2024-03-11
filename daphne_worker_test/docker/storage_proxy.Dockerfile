@@ -28,6 +28,5 @@ RUN apk add --update npm bash
 RUN npm install -g miniflare@2.14.0
 COPY --from=builder /tmp/dap_test/daphne_worker_test/wrangler.toml /wrangler.toml
 COPY --from=builder /tmp/dap_test/daphne_worker_test/build/worker/* /build/worker/
-EXPOSE 8080
 # `-B ""` to skip build command.
 ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", ""]

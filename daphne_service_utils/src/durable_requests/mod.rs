@@ -71,6 +71,9 @@ pub const DO_PATH_PREFIX: &str = "/v1/do";
 #[cfg(feature = "test-utils")]
 /// The path of the purge request, which wipes all storage. This is meant for tests only.
 pub const PURGE_STORAGE: &str = "/v1/purge";
+#[cfg(feature = "test-utils")]
+/// The path used to check for readyness
+pub const STORAGE_READY: &str = "/v1/ready";
 
 /// The way the target object's id will be obtained.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

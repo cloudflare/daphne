@@ -136,7 +136,12 @@ pub async fn handle_request(
         #[cfg(feature = "test-utils")]
         if let Some("") = path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE) {
             return storage_purge(env).await;
+        } else if let Some("") =
+            path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
+        {
+            return Response::ok("");
         }
+
         tracing::error!("path {path:?} was invalid");
         Response::error("invalid base path", 400)
     }
