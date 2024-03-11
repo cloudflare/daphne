@@ -46,7 +46,7 @@ where
 
     router
         .route("/internal/delete_all", post(delete_all))
-        .route("/internal/test/ready", post(StatusCode::OK))
+        .route("/internal/test/ready", post(check_storage_readyness))
         .route(
             "/internal/test/endpoint_for_task",
             post(endpoint_for_task_default),
@@ -62,6 +62,14 @@ where
             "/:version/internal/test/add_hpke_config",
             post(add_hpke_config),
         )
+}
+
+#[tracing::instrument(skip(app))]
+async fn check_storage_readyness(State(app): State<Arc<App>>) -> Response {
+    match app.storage_ready_check().await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
+    }
 }
 
 #[tracing::instrument(skip(app))]

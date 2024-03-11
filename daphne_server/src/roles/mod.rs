@@ -63,6 +63,24 @@ mod test_utils {
             Ok(())
         }
 
+        pub(crate) async fn storage_ready_check(&self) -> Result<(), DapError> {
+            use daphne_service_utils::durable_requests::STORAGE_READY;
+            self.http
+                .get(self.storage_proxy_config.url.join(STORAGE_READY).unwrap())
+                .header(
+                    DAP_STORAGE_AUTH_TOKEN,
+                    self.storage_proxy_config
+                        .auth_token
+                        .to_standard_header_value(),
+                )
+                .send()
+                .await
+                .map_err(|e| fatal_error!(err = ?e))?
+                .error_for_status()
+                .map_err(|e| fatal_error!(err  = ?e))?;
+            Ok(())
+        }
+
         pub(crate) fn internal_endpoint_for_task(
             &self,
             version: DapVersion,
