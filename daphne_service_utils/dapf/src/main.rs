@@ -3,7 +3,10 @@
 
 use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
-use dapf::{deduce_dap_version_from_url, HttpClientExt};
+use dapf::{
+    acceptance::{load_testing, TestOptions},
+    deduce_dap_version_from_url, HttpClientExt,
+};
 use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
@@ -98,6 +101,48 @@ enum Action {
         dap_version: DapVersion,
         kem_alg: KemAlg,
     },
+    /// Perform one full aggregation job against a helper using taskprov to provide the task.
+    ///
+    /// This command requires `VDAF_VERIFY_INIT` to be exported to the environment containing the
+    /// hex encoded VDAF verification key initializer, as specified in the Task prov extension.
+    ///
+    /// In addition to this an authentication method must be used:
+    ///
+    /// - Bearer Token: Export `LEADER_BEARER_TOKEN` containing the bearer token to use.
+    ///
+    /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
+    /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
+    Aggregate {
+        helper_url: Url,
+        hpke_signing_certificate_path: Option<PathBuf>,
+    },
+    /// Perform multiple aggregation jobs against a helper.
+    ///
+    /// This command requires `VDAF_VERIFY_INIT` to be exported to the environment containing the
+    /// hex encoded VDAF verification key initializer, as specified in the Task prov extension.
+    ///
+    /// In addition to this an authentication method must be used:
+    ///
+    /// - Bearer Token: Export `LEADER_BEARER_TOKEN` containing the bearer token to use.
+    ///
+    /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
+    /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
+    LoadTest {
+        helper_url: Url,
+        #[command(subcommand)]
+        params: LoadTestParameters,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub enum LoadTestParameters {
+    /// Test multiple sets of parameters.
+    Multiple,
+    /// Test a single set of parameters multiple times.
+    Single {
+        reports_per_batch: usize,
+        reports_per_agg_job: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -122,6 +167,10 @@ impl ValueEnum for KemAlg {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .compact()
+        .with_writer(std::io::stderr)
+        .init();
     let mut rng = thread_rng();
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
@@ -135,13 +184,13 @@ async fn main() -> Result<()> {
         .build()
         .with_context(|| "failed to create HTTP client")?;
 
-    match &cli.action {
+    match cli.action {
         Action::GetHpkeConfig {
             aggregator_url,
             certificate_file,
         } => {
             let hpke_config = http_client
-                .get_hpke_config(aggregator_url, certificate_file.as_deref())
+                .get_hpke_config(&aggregator_url, certificate_file.as_deref())
                 .await
                 .with_context(|| "failed to fetch the HPKE config")?;
             println!(
@@ -171,15 +220,15 @@ async fn main() -> Result<()> {
 
             // Get the Aggregators' HPKE configs.
             let leader_hpke_config = http_client
-                .get_hpke_config(leader_url, certificate_file.as_deref())
+                .get_hpke_config(&leader_url, certificate_file.as_deref())
                 .await
                 .with_context(|| "failed to fetch the Leader's HPKE config")?;
             let helper_hpke_config = http_client
-                .get_hpke_config(helper_url, certificate_file.as_deref())
+                .get_hpke_config(&helper_url, certificate_file.as_deref())
                 .await
                 .with_context(|| "failed to fetch the Helper's HPKE config")?;
 
-            let version = deduce_dap_version_from_url(leader_url)?;
+            let version = deduce_dap_version_from_url(&leader_url)?;
             // Generate a report for the measurement.
             let report = vdaf
                 .produce_report(
@@ -230,7 +279,7 @@ async fn main() -> Result<()> {
             let query: Query =
                 serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
 
-            let version = deduce_dap_version_from_url(leader_url)?;
+            let version = deduce_dap_version_from_url(&leader_url)?;
             // Construct collect request.
             let collect_req = CollectionReq {
                 draft02_task_id: if version == DapVersion::Draft02 {
@@ -305,7 +354,7 @@ async fn main() -> Result<()> {
             let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
-            let version = deduce_dap_version_from_url(uri)?;
+            let version = deduce_dap_version_from_url(&uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
             let agg_res = vdaf
                 .consume_encrypted_agg_shares(
@@ -346,9 +395,9 @@ async fn main() -> Result<()> {
                         "get",
                         &hpke_receiver_config_list_key,
                         "-c",
-                        wrangler_config,
+                        &wrangler_config,
                         "-e",
-                        wrangler_env,
+                        &wrangler_env,
                         "--binding",
                         "DAP_CONFIG",
                     ])
@@ -406,9 +455,9 @@ async fn main() -> Result<()> {
                     &hpke_receiver_config_list_key,
                     &updated_hpke_receiver_config_list_value,
                     "-c",
-                    wrangler_config,
+                    &wrangler_config,
                     "-e",
-                    wrangler_env,
+                    &wrangler_env,
                     "--binding",
                     "DAP_CONFIG",
                 ])
@@ -429,6 +478,50 @@ async fn main() -> Result<()> {
             }
 
             println!("ID of the new HPKE config: {hpke_config_id}");
+            Ok(())
+        }
+        Action::Aggregate {
+            helper_url,
+            hpke_signing_certificate_path,
+        } => {
+            let t = dapf::acceptance::Test::from_env(helper_url, hpke_signing_certificate_path)?;
+
+            tracing::info!("using vdaf: {:?}", t.vdaf_config);
+
+            let res = t
+                .test_helper(
+                    &TestOptions {
+                        bearer_token: t.leader_bearer_token.clone(),
+                        ..Default::default()
+                    },
+                    deduce_dap_version_from_url(&t.helper_url)?,
+                )
+                .await
+                .map(|_| ());
+            println!("\n\nMETRICS:\n{}\n\n", t.encode_metrics());
+            res
+        }
+        Action::LoadTest {
+            helper_url,
+            params: LoadTestParameters::Multiple,
+        } => {
+            load_testing::execute_multiple_combinations(helper_url).await;
+            Ok(())
+        }
+        Action::LoadTest {
+            helper_url,
+            params:
+                LoadTestParameters::Single {
+                    reports_per_batch,
+                    reports_per_agg_job,
+                },
+        } => {
+            load_testing::execute_single_combination_from_env(
+                helper_url,
+                reports_per_batch,
+                reports_per_agg_job,
+            )
+            .await;
             Ok(())
         }
     }

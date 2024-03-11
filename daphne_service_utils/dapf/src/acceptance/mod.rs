@@ -1,15 +1,26 @@
-// Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 
 //! Acceptance tests for live Daphne deployments. These tests assume the following
 //! environment variables are defined:
 //!
-//! * `$HELPER_URL` - The base URL for the Helper.
-//! * `$LEADER_BEARER_TOKEN` - The bearer token (a string)
-//! * `$VDAF_VERIFY_INIT` - The hex encoded VDAF verification key initializer, as specified in the
+//! * `$VDAF_VERIFY_INIT`: The hex encoded VDAF verification key initializer, as specified in the
 //!   Task prov extension.
+//!
+//! * either:
+//!     - `$LEADER_BEARER_TOKEN`: The bearer token (a string)
+//!     - `$LEADER_TLS_CLIENT_CERT` and `$LEADER_TLS_CLIENT_KEY`: The client certificate and client
+//!     private key.
+//!
+//! Optionally the following variables can also be defined to override default values:
+//! * `$VDAF_CONFIG`: A json serialized vdaf configuration to run.
+//!
+
+pub mod load_testing;
+
+use crate::{test_durations::TestDurations, HttpClientExt};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
-use dapf::HttpClientExt;
 use daphne::{
     auth::BearerToken,
     constants::DapMediaType,
@@ -37,7 +48,6 @@ use reqwest::Client;
 use std::{
     convert::TryFrom,
     env,
-    ops::{Add, Div},
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
@@ -50,7 +60,6 @@ pub struct Test {
     pub leader_bearer_token: Option<BearerToken>,
     vdaf_verify_init: [u8; 32],
     http_client: Client,
-    #[allow(dead_code)]
     prometheus_registry: Registry,
     daphne_metrics: DaphnePromMetrics,
     pub vdaf_config: VdafConfig,
@@ -59,7 +68,6 @@ pub struct Test {
     pub hpke_signing_certificate_path: Option<PathBuf>,
 }
 
-#[derive(Debug)]
 pub struct TestOptions {
     /// Bearer token to offer the Helper. If not provided, then only mutual TLS is used.
     pub bearer_token: Option<BearerToken>,
@@ -94,76 +102,11 @@ impl Default for TestOptions {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct TestDurations {
-    pub hpke_config_fetch: Duration,
-    pub report_generation: Duration,
-    pub aggregate_init_req: Duration,
-    pub aggregate_cont_req: Duration,
-    pub aggregate_share_req: Duration,
-}
-
-impl Add<&Self> for TestDurations {
-    type Output = Self;
-    fn add(self, rhs: &Self) -> Self::Output {
-        Self {
-            hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
-            report_generation: self.report_generation + rhs.report_generation,
-            aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
-            aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
-            aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
-        }
-    }
-}
-
-impl Add for TestDurations {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
-            report_generation: self.report_generation + rhs.report_generation,
-            aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
-            aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
-            aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
-        }
-    }
-}
-
-impl Div<u32> for TestDurations {
-    type Output = Self;
-
-    fn div(self, rhs: u32) -> Self::Output {
-        Self {
-            hpke_config_fetch: self.hpke_config_fetch / rhs,
-            report_generation: self.report_generation / rhs,
-            aggregate_init_req: self.aggregate_init_req / rhs,
-            aggregate_cont_req: self.aggregate_cont_req / rhs,
-            aggregate_share_req: self.aggregate_share_req / rhs,
-        }
-    }
-}
-
-impl AsRef<Self> for TestDurations {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
-
-impl TestDurations {
-    pub fn total_service_time(&self) -> Duration {
-        self.hpke_config_fetch
-            + self.aggregate_init_req
-            + self.aggregate_cont_req
-            + self.aggregate_share_req
-    }
-}
-
-pub struct TestTaskConfig {
+struct TestTaskConfig {
     pub task_id: TaskId,
     pub hpke_config_list: [HpkeConfig; 2],
     pub fake_leader_hpke_receiver_config: HpkeReceiverConfig,
     pub task_config: DapTaskConfig,
-    pub hpke_config_fetch_time: Duration,
     pub taskprov_advertisement: Option<String>,
     pub taskprov_report_extension_payload: Option<Vec<u8>>,
 }
@@ -171,13 +114,12 @@ pub struct TestTaskConfig {
 impl Test {
     pub fn new(
         http_client: reqwest::Client,
-        helper_url: &str,
+        helper_url: Url,
         leader_bearer_token: Option<String>,
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
         hpke_signing_certificate_path: Option<PathBuf>,
     ) -> Result<Self> {
-        let helper_url = Url::parse(helper_url).context("failed to parse helper URL")?;
         let leader_bearer_token = leader_bearer_token.map(BearerToken::from);
 
         let vdaf_verify_init =
@@ -193,8 +135,6 @@ impl Test {
         let daphne_metrics = DaphnePromMetrics::register(&prometheus_registry)
             .with_context(|| "failed to register Prometheus metrics")?;
 
-        info!("using vdaf: {vdaf_config:?}");
-
         Ok(Self {
             helper_url,
             leader_bearer_token,
@@ -207,17 +147,15 @@ impl Test {
         })
     }
 
-    pub fn from_env() -> Result<Self> {
-        const HELPER_URL_VAR: &str = "HELPER_URL";
+    pub fn from_env(
+        helper_url: Url,
+        hpke_signing_certificate_path: Option<PathBuf>,
+    ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
         const LEADER_TLS_CLIENT_CERT_VAR: &str = "LEADER_TLS_CLIENT_CERT";
         const LEADER_TLS_CLIENT_KEY_VAR: &str = "LEADER_TLS_CLIENT_KEY";
         const VDAF_VERIFY_INIT_VAR: &str = "VDAF_VERIFY_INIT";
         const VDAF_CONFIG: &str = "VDAF_CONFIG";
-        const HPKE_SIGNING_CERTIFICATE_PATH: &str = "HPKE_SIGNING_CERTIFICATE_PATH";
-
-        let helper_url =
-            env::var(HELPER_URL_VAR).with_context(|| format!("failed to load {HELPER_URL_VAR}"))?;
 
         let leader_bearer_token = env::var(LEADER_BEARER_TOKEN_VAR).ok();
         let leader_tls_client_cert = env::var(LEADER_TLS_CLIENT_CERT_VAR).ok();
@@ -271,13 +209,9 @@ impl Test {
                 )
             });
 
-        let hpke_signing_certificate_path = env::var(HPKE_SIGNING_CERTIFICATE_PATH)
-            .ok()
-            .map(PathBuf::from);
-
         Test::new(
             http_client,
-            &helper_url,
+            helper_url,
             leader_bearer_token,
             &vdaf_verify_init,
             vdaf_config,
@@ -312,13 +246,13 @@ impl Test {
             .await
     }
 
-    pub async fn generate_task_config(
+    async fn generate_task_config(
         &self,
         version: DapVersion,
         helper_hpke_config: Option<&HpkeConfig>,
         reports_per_batch: usize,
         now: Now,
-    ) -> anyhow::Result<TestTaskConfig> {
+    ) -> anyhow::Result<(TestTaskConfig, TestDurations)> {
         // We generate a fake Leader and Collector HPKE configs for testing purposes. In practice
         // the Collector HPKE config used by the Leader needs to match the one useed by the Helper.
         // The Helper's is configured by the DAP_TASKPROV_HPKE_COLLECTOR_CONFIG variable in the
@@ -374,19 +308,24 @@ impl Test {
                 &fake_collector_hpke_receiver_config.config,
             )?;
 
-        Ok(TestTaskConfig {
-            task_id,
-            hpke_config_list,
-            fake_leader_hpke_receiver_config,
-            task_config,
-            hpke_config_fetch_time,
-            taskprov_advertisement,
-            taskprov_report_extension_payload,
-        })
+        Ok((
+            TestTaskConfig {
+                task_id,
+                hpke_config_list,
+                fake_leader_hpke_receiver_config,
+                task_config,
+                taskprov_advertisement,
+                taskprov_report_extension_payload,
+            },
+            TestDurations {
+                hpke_config_fetch: hpke_config_fetch_time,
+                ..Default::default()
+            },
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn generate_reports(
+    fn generate_reports(
         &self,
         test_task_config: &TestTaskConfig,
         reports_per_batch: usize,
@@ -429,7 +368,7 @@ impl Test {
             .collect::<Result<Vec<_>, _>>()
     }
 
-    pub async fn run_agg_jobs(
+    async fn run_agg_jobs(
         &self,
         reports: Vec<messages::Report>,
         test_task_config: &TestTaskConfig,
@@ -712,18 +651,17 @@ impl Test {
         version: DapVersion,
     ) -> Result<TestDurations> {
         let mut rng = thread_rng();
-        let mut durations = TestDurations::default();
         let now = now();
 
-        let test_task_config @ TestTaskConfig {
-            task_id,
-            hpke_config_fetch_time,
-            taskprov_advertisement,
-            ..
-        } = &self
+        let (test_task_config, mut durations) = self
             .generate_task_config(version, None, opt.reports_per_batch, now)
             .await?;
-        durations.hpke_config_fetch = *hpke_config_fetch_time;
+
+        let TestTaskConfig {
+            task_id,
+            taskprov_advertisement,
+            ..
+        } = &test_task_config;
 
         info!("task id: {}", task_id.to_hex());
 
@@ -734,7 +672,7 @@ impl Test {
             None => std::borrow::Cow::Owned(self.gen_measurement().unwrap()),
         };
         let reports = self.generate_reports(
-            test_task_config,
+            &test_task_config,
             opt.reports_per_batch,
             measurement.as_ref(),
             version,
@@ -757,7 +695,7 @@ impl Test {
         let (out_shares_for_batch, agg_job_duration) = self
             .run_agg_jobs(
                 reports,
-                test_task_config,
+                &test_task_config,
                 &part_batch_sel,
                 opt.reports_per_agg_job,
                 opt.bearer_token.as_ref(),
@@ -901,12 +839,6 @@ where
             reqwest::header::HeaderValue::from_str(token.as_ref())?,
         );
     }
-    if let Ok(worker_host) = std::env::var("DAP_WORKER_HOST") {
-        headers.insert(
-            reqwest::header::HeaderName::from_static("worker-host"),
-            reqwest::header::HeaderValue::from_str(&worker_host)?,
-        );
-    }
     Ok(headers)
 }
 
@@ -952,42 +884,4 @@ pub fn now() -> Now {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs())
-}
-
-#[cfg(all(test, feature = "test_acceptance"))]
-mod test {
-    use super::{Test, TestOptions};
-    use anyhow::Result;
-    use daphne::DapVersion;
-
-    #[tokio::test]
-    async fn get_hpke_config() {
-        let t = Test::from_env().expect("failed to load test environment");
-        t.get_hpke_config(&t.helper_url, t.hpke_signing_certificate_path.as_deref())
-            .await
-            .expect("test failed");
-    }
-
-    #[tokio::test]
-    async fn aggregate_then_collect() -> Result<()> {
-        let t = Test::from_env()?;
-        let res = t
-            .test_helper(
-                &TestOptions {
-                    bearer_token: t.leader_bearer_token.clone(),
-                    ..Default::default()
-                },
-                if t.helper_url.path().contains("/v02") {
-                    DapVersion::Draft02
-                } else if t.helper_url.path().contains("/v09") {
-                    DapVersion::Draft09
-                } else {
-                    DapVersion::Latest
-                },
-            )
-            .await
-            .map(|_| ());
-        println!("\n\nMETRICS:\n{}\n\n", t.encode_metrics());
-        res
-    }
 }

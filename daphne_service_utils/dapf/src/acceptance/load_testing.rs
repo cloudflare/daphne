@@ -1,4 +1,5 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
     collections::HashMap,
@@ -6,15 +7,19 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::{
+    acceptance::{gen_measurement_for, now, Test, TestOptions},
+    test_durations::TestDurations,
+};
 use chrono::{DateTime, Utc};
 use daphne::{
     messages::{BatchId, PartialBatchSelector},
     vdaf::VdafConfig,
     DapVersion,
 };
-use daphne_worker_test::acceptance::{gen_measurement_for, now, Test, TestDurations, TestOptions};
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct MeasurementParameters {
@@ -308,8 +313,8 @@ async fn execute(t: &Test, test_config: &TestOptions, version: DapVersion) -> Te
     }
 }
 
-async fn execute_multiple_combinations() {
-    let mut t = Test::from_env().expect("env to be present");
+pub async fn execute_multiple_combinations(helper_url: Url) {
+    let mut t = Test::from_env(helper_url, None).expect("env to be present");
     let config = t
         .get_hpke_config(&t.helper_url, None)
         .await
@@ -357,27 +362,18 @@ async fn execute_multiple_combinations() {
     }
 }
 
-async fn execute_single_combination_from_env() {
+pub async fn execute_single_combination_from_env(
+    helper_url: Url,
+    reports_per_batch: usize,
+    reports_per_agg_job: usize,
+) {
     const VERSION: daphne::DapVersion = daphne::DapVersion::Latest;
 
-    let t = Test::from_env().expect("env to be present");
-    let config = t
-        .get_hpke_config(&t.helper_url, None)
-        .await
-        .expect("test failed");
-
-    let reports_per_batch = std::env::var("REPORTS_PER_BATCH")
-        .expect("REPORTS_PER_BATCH env var missing")
-        .parse()
-        .expect("REPORTS_PER_BATCH should be a number");
-    let reports_per_agg_job = std::env::var("REPORTS_PER_AGG_JOB")
-        .expect("REPORTS_PER_AGG_JOB env var missing")
-        .parse()
-        .expect("REPORTS_PER_AGG_JOB should be a number");
+    let t = Test::from_env(helper_url, None).expect("env to be present");
 
     let system_now = now();
-    let test_task_config = t
-        .generate_task_config(VERSION, Some(&config), reports_per_batch, system_now)
+    let (test_task_config, hpke_config_fetch_time) = t
+        .generate_task_config(VERSION, None, reports_per_batch, system_now)
         .await
         .expect("failed to generate task config");
 
@@ -422,7 +418,7 @@ async fn execute_single_combination_from_env() {
         match r {
             Ok((_, times)) => {
                 success_count += 1;
-                println!("durations: {times:?}");
+                println!("durations: {:?}", times + hpke_config_fetch_time);
             }
             Err(e) => {
                 println!("run failed: {e:?}");
@@ -432,20 +428,19 @@ async fn execute_single_combination_from_env() {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt()
-        .compact()
-        .with_writer(std::io::stderr)
-        .init();
-    match std::env::args().nth(1) {
-        Some(arg) if arg == "bench" => execute_multiple_combinations().await,
-        Some(arg) => eprintln!("invalid arg {arg}. Only nothing and 'bench' are supported"),
-        None => match std::env::var("TARGET").as_deref() {
-            Ok("bench") => execute_multiple_combinations().await,
-            _ => loop {
-                execute_single_combination_from_env().await;
-            },
-        },
-    }
-}
+// async fn main() {
+//     tracing_subscriber::fmt()
+//         .compact()
+//         .with_writer(std::io::stderr)
+//         .init();
+//     match std::env::args().nth(1) {
+//         Some(arg) if arg == "bench" => execute_multiple_combinations().await,
+//         Some(arg) => eprintln!("invalid arg {arg}. Only nothing and 'bench' are supported"),
+//         None => match std::env::var("TARGET").as_deref() {
+//             Ok("bench") => execute_multiple_combinations().await,
+//             _ => loop {
+//                 execute_single_combination_from_env().await;
+//             },
+//         },
+//     }
+// }

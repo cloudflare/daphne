@@ -16,8 +16,11 @@ repository = "https://github.com/cloudflare/daphne"
 readme = "../README.md"
 
 [dependencies]
+async-trait.workspace = true
 capnp.workspace = true
 daphne = { path = "../daphne", default-features = false }
+futures.workspace = true
+itertools.workspace = true
 hex.workspace = true
 p256.workspace = true
 prometheus = { workspace = true, optional = true }
@@ -25,6 +28,8 @@ ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
+tracing.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
@@ -37,6 +42,7 @@ capnpc = "0.18.1"
 [features]
 test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
 prometheus = ["dep:prometheus", "daphne/prometheus"]
+test_acceptance = ["dep:prometheus"]
 
 [lints]
 workspace = true
