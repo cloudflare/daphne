@@ -5,8 +5,6 @@ use daphne_worker::{initialize_tracing, DapWorkerMode};
 use tracing::info;
 use worker::{event, Env, Request, Response, Result};
 
-#[cfg(feature = "test_acceptance")]
-pub mod acceptance;
 mod utils;
 
 #[global_allocator]

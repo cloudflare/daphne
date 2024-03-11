@@ -1,6 +1,9 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub mod acceptance;
+mod test_durations;
+
 use std::{io::Cursor, path::Path};
 
 use anyhow::{anyhow, Context};
@@ -45,11 +48,15 @@ impl HttpClientExt for Client {
         if let Some(cert_path) = certificate_file {
             let cert = std::fs::read_to_string(cert_path).context("reading the certificate")?;
             let Some(signature) = maybe_signature else {
-                anyhow::bail!("Helper did not provide a signature");
+                anyhow::bail!("Aggregator did not sign its response");
             };
-            let signature_bytes = decode_base64url_vec(signature.as_bytes()).unwrap();
-            let (cert_pem, _bytes_read) = Pem::read(Cursor::new(cert.as_bytes())).unwrap();
-            let cert = EndEntityCert::try_from(cert_pem.contents.as_ref()).unwrap();
+            let signature_bytes =
+                decode_base64url_vec(signature.as_bytes()).context("decoding the signature")?;
+            let (cert_pem, _bytes_read) =
+                Pem::read(Cursor::new(cert.as_bytes())).context("reading PEM certificate")?;
+            let cert = EndEntityCert::try_from(cert_pem.contents.as_ref())
+                .map_err(|e| anyhow!("{e:?}")) // webpki::Error does not implement std::error::Error
+                .context("parsing PEM certificate")?;
 
             cert.verify_signature(
                 &ECDSA_P256_SHA256,
@@ -74,7 +81,7 @@ pub fn deduce_dap_version_from_url(url: &Url) -> anyhow::Result<DapVersion> {
     url.path_segments()
         .context("no version specified in leader url")?
         .next()
-        .unwrap()
+        .unwrap() // when path_segments returns Some it's guaranteed to contain at least one segment
         .parse()
         .context("failed to parse version parameter from url")
 }

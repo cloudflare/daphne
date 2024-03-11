@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 .PHONY: accept acceptance e2e load
 
 e2e: /tmp/private-key /tmp/certificate
@@ -10,10 +13,3 @@ e2e: /tmp/private-key /tmp/certificate
 
 /tmp/certificate:
 	openssl req -key /tmp/private-key -new -x509 -days 1 -out /tmp/certificate -subj '/C=US/L=Palo Alto/O=Cloudflare Lda/CN=dap.cloudflare.com'
-
-accept:
-	cargo test --features test_acceptance -- acceptance
-acceptance: accept
-
-load:
-	cargo run --bin load_testing --features test_acceptance
