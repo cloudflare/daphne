@@ -3,6 +3,15 @@
 
 .PHONY: accept acceptance e2e load
 
+leader:
+	cargo run --features test-utils --example service -- -c ./daphne_server/examples/configuration-leader.toml
+
+helper:
+	cargo run --features test-utils --example service -- -c ./daphne_server/examples/configuration-helper.toml
+
+storage_proxy:
+	docker-compose -f ./daphne_worker_test/docker-compose-storage-proxy.yaml up
+
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
 	export E2E_TEST_HPKE_SIGNING_CERTIFICATE="$$(cat /tmp/certificate)"; \

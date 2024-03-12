@@ -3,6 +3,7 @@
 
 pub mod acceptance;
 mod test_durations;
+pub mod test_routes;
 
 use std::{io::Cursor, path::Path};
 
