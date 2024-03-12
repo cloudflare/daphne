@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    acceptance::{gen_measurement_for, now, Test, TestOptions},
+    acceptance::{now, Test, TestOptions},
     test_durations::TestDurations,
 };
 use chrono::{DateTime, Utc};
@@ -314,7 +314,10 @@ async fn execute(t: &Test, test_config: &TestOptions, version: DapVersion) -> Te
 }
 
 pub async fn execute_multiple_combinations(helper_url: Url) {
-    let mut t = Test::from_env(helper_url, None).expect("env to be present");
+    // This vdaf config is later replaced on each of the runs
+    let mut t = Test::from_env(helper_url, VdafConfig::Prio2 { dimension: 44 }, None)
+        .expect("env to be present");
+
     let config = t
         .get_hpke_config(&t.helper_url, None)
         .await
@@ -337,8 +340,8 @@ pub async fn execute_multiple_combinations(helper_url: Url) {
             // configure the test
             test_config.reports_per_batch = reports_per_batch;
             test_config.reports_per_agg_job = reports_per_agg_job;
-            test_config.measurement = Some(gen_measurement_for(&vdaf_config).unwrap());
             t.vdaf_config = vdaf_config;
+            test_config.measurement = Some(t.gen_measurement().unwrap());
 
             println!("===== Performance Report =====");
             println!("parameters:");
@@ -364,12 +367,13 @@ pub async fn execute_multiple_combinations(helper_url: Url) {
 
 pub async fn execute_single_combination_from_env(
     helper_url: Url,
+    vdaf_config: VdafConfig,
     reports_per_batch: usize,
     reports_per_agg_job: usize,
 ) {
     const VERSION: daphne::DapVersion = daphne::DapVersion::Latest;
 
-    let t = Test::from_env(helper_url, None).expect("env to be present");
+    let t = Test::from_env(helper_url, vdaf_config, None).expect("env to be present");
 
     let system_now = now();
     let (test_task_config, hpke_config_fetch_time) = t

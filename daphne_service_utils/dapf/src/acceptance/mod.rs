@@ -149,13 +149,13 @@ impl Test {
 
     pub fn from_env(
         helper_url: Url,
+        vdaf_config: VdafConfig,
         hpke_signing_certificate_path: Option<PathBuf>,
     ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
         const LEADER_TLS_CLIENT_CERT_VAR: &str = "LEADER_TLS_CLIENT_CERT";
         const LEADER_TLS_CLIENT_KEY_VAR: &str = "LEADER_TLS_CLIENT_KEY";
         const VDAF_VERIFY_INIT_VAR: &str = "VDAF_VERIFY_INIT";
-        const VDAF_CONFIG: &str = "VDAF_CONFIG";
 
         let leader_bearer_token = env::var(LEADER_BEARER_TOKEN_VAR).ok();
         let leader_tls_client_cert = env::var(LEADER_TLS_CLIENT_CERT_VAR).ok();
@@ -196,18 +196,6 @@ impl Test {
         let http_client = http_client_builder
             .build()
             .with_context(|| "failed to build HTTP client")?;
-
-        let vdaf_config = env::var(VDAF_CONFIG)
-            .ok()
-            .map_or(Ok(VdafConfig::Prio2 { dimension: 44 }), |c| {
-                serde_json::from_str(&c)
-            })
-            .unwrap_or_else(|_| {
-                panic!(
-                    "VDAF_CONFIG {:?} is not a valid config type",
-                    env::var(VDAF_CONFIG)
-                )
-            });
 
         Test::new(
             http_client,
