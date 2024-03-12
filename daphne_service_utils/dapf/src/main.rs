@@ -36,7 +36,27 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+enum TestAction {
+    /// Add an hpke config to a test-utils enabled `daphne_server`.
+    AddHpkeConfig {
+        aggregator_url: Url,
+        #[arg(short, long)]
+        kem_alg: KemAlg,
+    },
+    /// Clear all storage of an aggregator.
+    ClearStorage {
+        aggregator_url: Url,
+        /// If a new hpke config should be inserted after clearing all storage, use this flag to
+        /// specify the key algorithm to use for the new hpke config
+        #[arg(short, long)]
+        set_hpke_key: Option<KemAlg>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum Action {
+    #[command(flatten)]
+    Test(TestAction),
     /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
     GetHpkeConfig {
         #[clap(short = 'u', long, env)]
@@ -551,6 +571,21 @@ async fn main() -> Result<()> {
             )
             .await;
             Ok(())
+        }
+        Action::Test(TestAction::AddHpkeConfig {
+            aggregator_url,
+            kem_alg,
+        }) => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
+        Action::Test(TestAction::ClearStorage {
+            aggregator_url,
+            set_hpke_key,
+        }) => {
+            dapf::test_routes::delete_all_storage(
+                &http_client,
+                &aggregator_url,
+                set_hpke_key.map(|k| k.0),
+            )
+            .await
         }
     }
 }
