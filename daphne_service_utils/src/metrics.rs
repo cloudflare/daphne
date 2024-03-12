@@ -12,6 +12,7 @@ pub trait DaphneServiceMetrics: DaphneMetrics {
     fn auth_method_inc(&self, method: AuthMethod);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthMethod {
     BearerToken,
     TlsClientAuth,
