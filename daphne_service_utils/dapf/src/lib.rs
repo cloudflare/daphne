@@ -24,7 +24,7 @@ pub trait HttpClientExt {
         &self,
         base_url: &Url,
         certificate_file: Option<&Path>,
-    ) -> impl std::future::Future<Output = anyhow::Result<HpkeConfig>> + Send;
+    ) -> impl std::future::Future<Output = anyhow::Result<HpkeConfigList>> + Send;
 }
 
 impl HttpClientExt for Client {
@@ -32,7 +32,7 @@ impl HttpClientExt for Client {
         &self,
         base_url: &Url,
         certificate_file: Option<&Path>,
-    ) -> anyhow::Result<HpkeConfig> {
+    ) -> anyhow::Result<HpkeConfigList> {
         let url = base_url.join("hpke_config")?;
 
         let resp = self
@@ -67,11 +67,11 @@ impl HttpClientExt for Client {
         }
 
         match deduce_dap_version_from_url(base_url)? {
-            DapVersion::Draft02 => Ok(HpkeConfig::get_decoded(&hpke_config_bytes)?),
+            DapVersion::Draft02 => Ok(HpkeConfigList {
+                hpke_configs: vec![HpkeConfig::get_decoded(&hpke_config_bytes)?],
+            }),
             DapVersion::Latest | DapVersion::Draft09 => {
-                Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?
-                    .hpke_configs
-                    .swap_remove(0))
+                Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
             }
         }
     }

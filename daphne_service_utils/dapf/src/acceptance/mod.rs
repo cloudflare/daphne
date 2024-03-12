@@ -229,9 +229,12 @@ impl Test {
         aggregator: &Url,
         hpke_signing_certificate_path: Option<&Path>,
     ) -> anyhow::Result<HpkeConfig> {
-        self.http_client
+        Ok(self
+            .http_client
             .get_hpke_config(aggregator, hpke_signing_certificate_path)
-            .await
+            .await?
+            .hpke_configs
+            .swap_remove(0))
     }
 
     async fn generate_task_config(
@@ -264,7 +267,9 @@ impl Test {
                     self.hpke_signing_certificate_path.as_deref(),
                 )
                 .await
-                .with_context(|| "failed to fetch Helper's HPKE confitg")?;
+                .context("failed to fetch Helper's HPKE confitg")?
+                .hpke_configs
+                .swap_remove(0);
             let duration = start.elapsed();
             info!("fetched HPKE config from Helper in {duration:#?}");
 

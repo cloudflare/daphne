@@ -209,7 +209,7 @@ async fn main() -> Result<()> {
                 .with_context(|| "failed to fetch the HPKE config")?;
             println!(
                 "{}",
-                serde_json::to_string(&hpke_config)
+                serde_json::to_string(&hpke_config.hpke_configs)
                     .with_context(|| "failed to encode HPKE config")?
             );
 
@@ -235,11 +235,15 @@ async fn main() -> Result<()> {
             let leader_hpke_config = http_client
                 .get_hpke_config(&leader_url, certificate_file.as_deref())
                 .await
-                .with_context(|| "failed to fetch the Leader's HPKE config")?;
+                .with_context(|| "failed to fetch the Leader's HPKE config")?
+                .hpke_configs
+                .swap_remove(0);
             let helper_hpke_config = http_client
                 .get_hpke_config(&helper_url, certificate_file.as_deref())
                 .await
-                .with_context(|| "failed to fetch the Helper's HPKE config")?;
+                .with_context(|| "failed to fetch the Helper's HPKE config")?
+                .hpke_configs
+                .swap_remove(0);
 
             let version = deduce_dap_version_from_url(&leader_url)?;
             // Generate a report for the measurement.
