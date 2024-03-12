@@ -28,7 +28,7 @@ use daphne::{
 };
 use daphne_service_utils::{
     auth::{DaphneAuth, TlsClientAuth},
-    metrics::DaphneServiceMetrics,
+    metrics::{self, DaphneServiceMetrics},
     DapRole,
 };
 use http::Request;
@@ -46,6 +46,19 @@ pub trait DaphneService {
 
     fn signing_key(&self) -> Option<&p256::ecdsa::SigningKey> {
         None
+    }
+}
+
+impl<S> DaphneService for Arc<S>
+where
+    S: DaphneService,
+{
+    fn server_metrics(&self) -> &dyn DaphneServiceMetrics {
+        S::server_metrics(&**self)
+    }
+
+    fn signing_key(&self) -> Option<&p256::ecdsa::SigningKey> {
+        S::signing_key(&**self)
     }
 }
 
@@ -207,7 +220,7 @@ struct DapRequestExtractor(pub DapRequest<DaphneAuth>);
 #[async_trait]
 impl<S, B> FromRequest<S, B> for DapRequestExtractor
 where
-    S: Send + Sync,
+    S: DaphneService + Send + Sync,
     B: HttpBody + Send + 'static,
     <B as HttpBody>::Data: Send,
 {
@@ -266,6 +279,17 @@ where
                 })
             })(),
         };
+
+        if sender_auth.bearer_token.is_some() {
+            state
+                .server_metrics()
+                .auth_method_inc(metrics::AuthMethod::BearerToken);
+        }
+        if sender_auth.cf_tls_client_auth.is_some() {
+            state
+                .server_metrics()
+                .auth_method_inc(metrics::AuthMethod::TlsClientAuth);
+        }
 
         let media_type = if let Some(content_type) = parts.headers.get(CONTENT_TYPE) {
             let content_type = content_type.to_str().map_err(|_| {
@@ -347,7 +371,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
 
     use axum::{
         body::{Body, HttpBody},
@@ -362,7 +386,7 @@ mod test {
         messages::{AggregationJobId, Base64Encode, TaskId},
         DapRequest, DapResource, DapVersion,
     };
-    use daphne_service_utils::auth::DaphneAuth;
+    use daphne_service_utils::{auth::DaphneAuth, metrics::DaphnePromServiceMetrics};
     use futures::future::BoxFuture;
     use rand::{thread_rng, Rng};
     use tokio::sync::mpsc::{self, Sender};
@@ -385,6 +409,21 @@ mod test {
         B::Error: Send + Sync + std::error::Error,
     {
         type Channel = Sender<DapRequest<DaphneAuth>>;
+
+        impl super::DaphneService for Channel {
+            fn server_metrics(&self) -> &dyn daphne_service_utils::metrics::DaphneServiceMetrics {
+                // These tests don't care about metrics so we just store a static instance here so I
+                // can implement the DaphneService trait for Channel.
+                static METRICS: OnceLock<DaphnePromServiceMetrics> = OnceLock::new();
+                METRICS.get_or_init(|| {
+                    DaphnePromServiceMetrics::register(prometheus::default_registry()).unwrap()
+                })
+            }
+
+            fn signing_key(&self) -> Option<&p256::ecdsa::SigningKey> {
+                None
+            }
+        }
 
         async fn handler(
             State(ch): State<Arc<Channel>>,

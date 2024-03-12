@@ -9,6 +9,12 @@ pub trait DaphneServiceMetrics: DaphneMetrics {
     fn abort_count_inc(&self, label: &str);
     fn count_http_status_code(&self, status_code: u16);
     fn daphne(&self) -> &dyn DaphneMetrics;
+    fn auth_method_inc(&self, method: AuthMethod);
+}
+
+pub enum AuthMethod {
+    BearerToken,
+    TlsClientAuth,
 }
 
 #[cfg(any(feature = "prometheus", feature = "test-utils", test))]
@@ -58,6 +64,14 @@ mod prometheus {
                 .inc();
         }
 
+        fn auth_method_inc(&self, method: super::AuthMethod) {
+            let method = match method {
+                super::AuthMethod::TlsClientAuth => "mutual_tls",
+                super::AuthMethod::BearerToken => "tls_client_auth",
+            };
+            self.auth_method.with_label_values(&[method]);
+        }
+
         fn daphne(&self) -> &dyn DaphneMetrics {
             self
         }
@@ -73,6 +87,9 @@ mod prometheus {
 
         /// DAP aborts.
         dap_abort_counter: IntCounterVec,
+
+        /// Counts the used authentication methods
+        auth_method: IntCounterVec,
     }
 
     impl DaphnePromServiceMetrics {
@@ -93,12 +110,21 @@ mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to register dap_abort"))?;
 
+            let auth_method = register_int_counter_vec_with_registry!(
+                "auth_method",
+                "The authentication method used",
+                &["method"],
+                registry
+            )
+            .map_err(|e| fatal_error!(err = ?e, "failed to register dap_abort"))?;
+
             let daphne = DaphnePromMetrics::register(registry)?;
 
             Ok(Self {
                 daphne,
                 http_status_code_counter,
                 dap_abort_counter,
+                auth_method,
             })
         }
     }
