@@ -426,7 +426,7 @@ impl HpkeDecrypter for crate::App {
             })
             .await
             .map_err(|e| fatal_error!(err = ?e))?
-            .ok_or_else(|| fatal_error!(err = "there ar eno hpke configs in kv!!", %version))
+            .ok_or_else(|| fatal_error!(err = "there are no hpke configs in kv!!", %version))
     }
 
     async fn can_hpke_decrypt(&self, task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
