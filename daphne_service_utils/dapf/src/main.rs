@@ -16,7 +16,7 @@ use daphne::{
     DapAggregationParam, DapMeasurement, DapVersion,
 };
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
-use rand::prelude::*;
+use rand::{thread_rng, Rng};
 use reqwest::ClientBuilder;
 use std::{
     io::{stdin, Read},
@@ -33,63 +33,68 @@ use url::Url;
 struct Cli {
     #[clap(subcommand)]
     action: Action,
-
-    /// DAP task ID (base64, URL-safe encoding)
-    #[clap(short, long, action)]
-    task_id: Option<String>,
-
-    /// Bearer token for authorizing request
-    #[clap(short, long, action)]
-    bearer_token: Option<String>,
-
-    /// HPKE receiver configuration for decrypting response
-    #[clap(long, action)]
-    hpke_receiver: Option<HpkeReceiverConfig>,
 }
 
 #[derive(Debug, Subcommand)]
 enum Action {
     /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
     GetHpkeConfig {
+        #[clap(short = 'u', long, env)]
         aggregator_url: Url,
         /// Path to the certificate file to use to verify the signature of the hpke config
-        #[arg(short, long)]
+        #[arg(short, long, env)]
         certificate_file: Option<PathBuf>,
     },
     /// Upload a report to a DAP Leader using the JSON-formatted measurement provided on stdin.
     Upload {
         /// Base URL of the Leader
-        #[clap(long, action)]
+        #[clap(long, env)]
         leader_url: Url,
 
         /// Base URL of the Helper
-        #[clap(long, action)]
+        #[clap(long, env)]
         helper_url: Url,
 
         /// JSON-formatted VDAF config
-        #[clap(short, long, action)]
-        vdaf: VdafConfig,
+        #[clap(short, long, env)]
+        vdaf_config: VdafConfig,
 
         /// Path to the certificate file to use to verify the signature of the hpke config
-        #[arg(short, long)]
+        #[arg(short, long, env)]
         certificate_file: Option<PathBuf>,
+
+        /// DAP task ID (base64, URL-safe encoding)
+        #[arg(short, long, env, value_parser = parse_id)]
+        task_id: TaskId,
     },
     /// Collect an aggregate result from the DAP Leader using the JSON-formatted batch selector
     /// provided on stdin.
     Collect {
         /// Base URL of the Leader
-        #[clap(long, action)]
+        #[clap(long, env)]
         leader_url: Url,
+
+        /// DAP task ID (base64, URL-safe encoding)
+        #[clap(short, long, env, value_parser = parse_id)]
+        task_id: TaskId,
     },
     /// Poll the given collect URI for the aggregate result.
     CollectPoll {
         /// The collect URI
-        #[clap(short, long, action)]
+        #[clap(short, long, env)]
         uri: Url,
 
         /// JSON-formatted VDAF config
-        #[clap(short, long, action)]
-        vdaf: VdafConfig,
+        #[clap(short, long, env)]
+        vdaf_config: VdafConfig,
+
+        /// HPKE receiver configuration for decrypting response
+        #[clap(long, env)]
+        hpke_receiver: Option<HpkeReceiverConfig>,
+
+        /// DAP task ID (base64, URL-safe encoding)
+        #[clap(short, long, env, value_parser = parse_id)]
+        task_id: TaskId,
     },
     GenerateHpkeReceiverConfig {
         kem_alg: KemAlg,
@@ -113,7 +118,11 @@ enum Action {
     /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
     /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
     Aggregate {
+        #[arg(env)]
         helper_url: Url,
+        #[arg(long, env)]
+        vdaf_config: VdafConfig,
+        #[arg(long, env)]
         hpke_signing_certificate_path: Option<PathBuf>,
     },
     /// Perform multiple aggregation jobs against a helper.
@@ -128,6 +137,7 @@ enum Action {
     /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
     /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
     LoadTest {
+        #[arg(env)]
         helper_url: Url,
         #[command(subcommand)]
         params: LoadTestParameters,
@@ -140,8 +150,12 @@ pub enum LoadTestParameters {
     Multiple,
     /// Test a single set of parameters multiple times.
     Single {
+        #[arg(env)]
         reports_per_batch: usize,
+        #[arg(env)]
         reports_per_agg_job: usize,
+        #[arg(short, long, env)]
+        vdaf_config: VdafConfig,
     },
 }
 
@@ -204,11 +218,10 @@ async fn main() -> Result<()> {
         Action::Upload {
             leader_url,
             helper_url,
-            vdaf,
+            vdaf_config,
             certificate_file,
+            task_id,
         } => {
-            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
-
             // Read the measurement from stdin.
             let mut buf = String::new();
             stdin()
@@ -230,7 +243,7 @@ async fn main() -> Result<()> {
 
             let version = deduce_dap_version_from_url(&leader_url)?;
             // Generate a report for the measurement.
-            let report = vdaf
+            let report = vdaf_config
                 .produce_report(
                     &[leader_hpke_config, helper_hpke_config],
                     now,
@@ -267,9 +280,10 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
-        Action::Collect { leader_url } => {
-            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
-
+        Action::Collect {
+            leader_url,
+            task_id,
+        } => {
             // Read the batch selector from stdin.
             let mut buf = String::new();
             stdin()
@@ -301,10 +315,10 @@ async fn main() -> Result<()> {
                 )
                 .expect("failed to construct content-type hader"),
             );
-            if let Some(ref token) = cli.bearer_token {
+            if let Ok(token) = std::env::var("LEADER_BEARER_TOKEN") {
                 headers.insert(
                     reqwest::header::HeaderName::from_static("dap-auth-token"),
-                    reqwest::header::HeaderValue::from_str(token)?,
+                    reqwest::header::HeaderValue::from_str(&token)?,
                 );
             }
 
@@ -333,9 +347,12 @@ async fn main() -> Result<()> {
             println!("{uri}");
             Ok(())
         }
-        Action::CollectPoll { uri, vdaf } => {
-            let task_id = parse_id(&cli.task_id).with_context(|| "failed to parse task ID")?;
-
+        Action::CollectPoll {
+            uri,
+            vdaf_config,
+            hpke_receiver,
+            task_id,
+        } => {
             // Read the batch selector from stdin.
             let mut buf = String::new();
             stdin()
@@ -351,12 +368,12 @@ async fn main() -> Result<()> {
             } else if resp.status() != 200 {
                 return Err(anyhow!("unexpected response: {:?}", resp));
             }
-            let receiver = cli.hpke_receiver.as_ref().ok_or_else(|| {
+            let receiver = hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")
             })?;
             let version = deduce_dap_version_from_url(&uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
-            let agg_res = vdaf
+            let agg_res = vdaf_config
                 .consume_encrypted_agg_shares(
                     receiver,
                     &task_id,
@@ -482,9 +499,14 @@ async fn main() -> Result<()> {
         }
         Action::Aggregate {
             helper_url,
+            vdaf_config,
             hpke_signing_certificate_path,
         } => {
-            let t = dapf::acceptance::Test::from_env(helper_url, hpke_signing_certificate_path)?;
+            let t = dapf::acceptance::Test::from_env(
+                helper_url,
+                vdaf_config,
+                hpke_signing_certificate_path,
+            )?;
 
             tracing::info!("using vdaf: {:?}", t.vdaf_config);
 
@@ -514,10 +536,12 @@ async fn main() -> Result<()> {
                 LoadTestParameters::Single {
                     reports_per_batch,
                     reports_per_agg_job,
+                    vdaf_config,
                 },
         } => {
             load_testing::execute_single_combination_from_env(
                 helper_url,
+                vdaf_config,
                 reports_per_batch,
                 reports_per_agg_job,
             )
@@ -527,12 +551,8 @@ async fn main() -> Result<()> {
     }
 }
 
-fn parse_id(id_str: &Option<String>) -> Result<TaskId> {
-    TaskId::try_from_base64url(
-        id_str
-            .as_deref()
-            .ok_or_else(|| anyhow!("expected task ID argument"))?,
-    )
-    .ok_or_else(|| anyhow!("failed to decode ID"))
-    .with_context(|| "expected URL-safe, base64 string")
+fn parse_id(id_str: &str) -> Result<TaskId> {
+    TaskId::try_from_base64url(id_str)
+        .ok_or_else(|| anyhow!("failed to decode ID"))
+        .context("expected URL-safe, base64 string")
 }
