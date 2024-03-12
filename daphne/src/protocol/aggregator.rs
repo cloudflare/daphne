@@ -89,8 +89,8 @@ pub enum EarlyReportStateConsumed {
         input_share: Vec<u8>,
         // Set by the Helper.
         //
-        // draft02 compatibility: This is only set set in the latest draft.
-        leader_prep_share: Option<Vec<u8>>,
+        // draft02 compatibility: This is only set in the latest draft.
+        peer_prep_share: Option<Vec<u8>>,
     },
     Rejected {
         metadata: ReportMetadata,
@@ -222,12 +222,12 @@ impl EarlyReportStateConsumed {
 
         // Decode the ping-pong "initialize" message framing.
         // (draft-irtf-cfrg-vdaf-08, Section 5.8).
-        let leader_prep_share = match prep_init_payload
+        let peer_prep_share = match prep_init_payload
             .as_ref()
             .map(|payload| decode_ping_pong_framed(payload, PingPongMessageType::Initialize))
             .transpose()
         {
-            Ok(leader_prep_share) => leader_prep_share.map(|bytes| bytes.to_vec()),
+            Ok(peer_prep_share) => peer_prep_share.map(|bytes| bytes.to_vec()),
             Err(_) => {
                 return Ok(Self::Rejected {
                     metadata: report_share.report_metadata,
@@ -239,7 +239,7 @@ impl EarlyReportStateConsumed {
         Ok(Self::Ready {
             metadata: report_share.report_metadata,
             public_share: report_share.public_share,
-            leader_prep_share,
+            peer_prep_share,
             input_share,
         })
     }
@@ -277,9 +277,12 @@ pub enum EarlyReportStateInitialized {
     Ready {
         metadata: ReportMetadata,
         public_share: Vec<u8>,
-        leader_prep_share: Option<Vec<u8>>,
-        vdaf_state: VdafPrepState,
-        message: VdafPrepMessage,
+        // Set by the Helper.
+        //
+        // draft02 compatibility: This is only set in the latest draft.
+        peer_prep_share: Option<Vec<u8>>,
+        prep_share: VdafPrepMessage,
+        prep_state: VdafPrepState,
     },
     Rejected {
         metadata: ReportMetadata,
@@ -301,14 +304,14 @@ impl EarlyReportStateInitialized {
         // when the feature "test-utils" is enabled.
         let _ = agg_param;
 
-        let (metadata, public_share, input_share, leader_prep_share) =
+        let (metadata, public_share, input_share, peer_prep_share) =
             match early_report_state_consumed {
                 EarlyReportStateConsumed::Ready {
                     metadata,
                     public_share,
                     input_share,
-                    leader_prep_share,
-                } => (metadata, public_share, input_share, leader_prep_share),
+                    peer_prep_share,
+                } => (metadata, public_share, input_share, peer_prep_share),
                 EarlyReportStateConsumed::Rejected { metadata, failure } => {
                     return Ok(Self::Rejected { metadata, failure })
                 }
@@ -347,12 +350,12 @@ impl EarlyReportStateInitialized {
         };
 
         let early_report_state_initialized = match res {
-            Ok((vdaf_state, message)) => Self::Ready {
+            Ok((prep_state, prep_share)) => Self::Ready {
                 metadata,
                 public_share,
-                leader_prep_share,
-                vdaf_state,
-                message,
+                peer_prep_share,
+                prep_share,
+                prep_state,
             },
             Err(..) => Self::Rejected {
                 metadata,
@@ -457,9 +460,9 @@ impl DapTaskConfig {
                 EarlyReportStateInitialized::Ready {
                     metadata,
                     public_share,
-                    leader_prep_share: _,
-                    vdaf_state,
-                    message: prep_share,
+                    peer_prep_share: _,
+                    prep_share,
+                    prep_state,
                 } => {
                     // draft02 compatibility: In the latest version, the Leader sends the Helper
                     // its initial prep share in the first request.
@@ -483,7 +486,7 @@ impl DapTaskConfig {
 
                     states.push(AggregationJobReportState {
                         draft02_prep_share,
-                        prep_state: vdaf_state,
+                        prep_state,
                         time: metadata.time,
                         report_id: metadata.id,
                     });
@@ -618,9 +621,9 @@ impl DapTaskConfig {
                     EarlyReportStateInitialized::Ready {
                         metadata,
                         public_share: _,
-                        leader_prep_share: None,
-                        vdaf_state: helper_prep_state,
-                        message: helper_prep_share,
+                        peer_prep_share: None,
+                        prep_share: helper_prep_share,
+                        prep_state: helper_prep_state,
                     } => {
                         states.push(AggregationJobReportState {
                             draft02_prep_share: None,
@@ -637,7 +640,7 @@ impl DapTaskConfig {
                     EarlyReportStateInitialized::Ready {
                         metadata: _,
                         public_share: _,
-                        leader_prep_share: Some(_),
+                        peer_prep_share: Some(_),
                         ..
                     } => return Err(fatal_error!(err = "draft02: unexpected leader prep share")),
 
@@ -684,9 +687,9 @@ impl DapTaskConfig {
                     EarlyReportStateInitialized::Ready {
                         metadata,
                         public_share: _,
-                        leader_prep_share: Some(leader_prep_share),
-                        vdaf_state: helper_prep_state,
-                        message: helper_prep_share,
+                        peer_prep_share: Some(leader_prep_share),
+                        prep_share: helper_prep_share,
+                        prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
                             VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
@@ -743,7 +746,7 @@ impl DapTaskConfig {
                     }
 
                     EarlyReportStateInitialized::Ready {
-                        leader_prep_share: None,
+                        peer_prep_share: None,
                         ..
                     } => return Err(fatal_error!(err = "expected leader prep share, got none")),
 

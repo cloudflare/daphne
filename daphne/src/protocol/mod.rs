@@ -128,8 +128,8 @@ mod test {
         .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
-            vdaf_state: leader_step,
-            message: leader_share,
+            prep_share: leader_prep_share,
+            prep_state: leader_prep_state,
             ..
         } = EarlyReportStateInitialized::initialize(
             true,
@@ -158,8 +158,8 @@ mod test {
         .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
-            vdaf_state: helper_step,
-            message: helper_share,
+            prep_share: helper_prep_share,
+            prep_state: helper_prep_state,
             ..
         } = EarlyReportStateInitialized::initialize(
             false,
@@ -173,7 +173,12 @@ mod test {
             panic!("rejected unexpectedly");
         };
 
-        match (leader_step, helper_step, leader_share, helper_share) {
+        match (
+            leader_prep_state,
+            helper_prep_state,
+            leader_prep_share,
+            helper_prep_share,
+        ) {
             (
                 VdafPrepState::Prio3Field64(leader_step),
                 VdafPrepState::Prio3Field64(helper_step),
