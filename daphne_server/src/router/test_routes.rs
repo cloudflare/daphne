@@ -46,7 +46,7 @@ where
 
     router
         .route("/internal/delete_all", post(delete_all))
-        .route("/internal/test/ready", get(check_storage_readyness))
+        .route("/internal/test/ready", post(check_storage_readyness))
         .route(
             "/internal/test/endpoint_for_task",
             post(endpoint_for_task_default),
@@ -55,9 +55,12 @@ where
             "/:version/internal/test/endpoint_for_task",
             post(endpoint_for_task),
         )
-        // TODO: could be removed after we add the divviup api
-        .route("/internal/test/add_task", post(add_task))
+        .route("/internal/test/add_task", post(add_task_default))
         .route("/:version/internal/test/add_task", post(add_task))
+        .route(
+            "/internal/test/add_hpke_config",
+            post(add_hpke_config_default),
+        )
         .route(
             "/:version/internal/test/add_hpke_config",
             post(add_hpke_config),
@@ -145,6 +148,15 @@ async fn add_task(
     }
 }
 
+#[tracing::instrument(skip(app, json))]
+async fn add_task_default(
+    State(app): State<Arc<App>>,
+    json: Json<InternalTestAddTask>,
+) -> impl IntoResponse {
+    let version = app.service_config.default_version;
+    add_task(State(app), Path(version), json).await
+}
+
 #[tracing::instrument(skip(app, hpke))]
 async fn add_hpke_config(
     State(app): State<Arc<App>>,
@@ -159,4 +171,13 @@ async fn add_hpke_config(
             .into_response(),
         Err(e) => AxumDapResponse::new_error(e, &*app.metrics).into_response(),
     }
+}
+
+#[tracing::instrument(skip(app, json))]
+async fn add_hpke_config_default(
+    State(app): State<Arc<App>>,
+    json: Json<HpkeReceiverConfig>,
+) -> impl IntoResponse {
+    let version = app.service_config.default_version;
+    add_hpke_config(State(app), Path(version), json).await
 }

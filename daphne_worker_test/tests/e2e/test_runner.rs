@@ -179,7 +179,7 @@ impl TestRunner {
                 .then(|url| async {
                     (
                         t.http_client
-                            .get(url.join("/internal/test/ready").unwrap())
+                            .post(url.join("/internal/test/ready").unwrap())
                             .send()
                             .await
                             .map(|r| r.status()),
