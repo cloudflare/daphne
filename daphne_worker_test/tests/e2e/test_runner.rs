@@ -14,6 +14,7 @@ use daphne::{
     vdaf::{Prio3Config, VdafConfig},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
 };
+use futures::StreamExt;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
@@ -51,6 +52,7 @@ pub struct TestRunner {
     pub taskprov_vdaf_verify_key_init: [u8; 32],
     pub taskprov_collector_hpke_receiver: HpkeReceiverConfig,
     pub version: DapVersion,
+    pub http_client: reqwest::Client,
 }
 
 impl TestRunner {
@@ -147,6 +149,10 @@ impl TestRunner {
             taskprov_vdaf_verify_key_init,
             taskprov_collector_hpke_receiver,
             version,
+            http_client: reqwest::ClientBuilder::new()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
         };
 
         let vdaf_verify_key_base64url = encode_base64url(t.task_config.vdaf_verify_key.as_ref());
@@ -166,6 +172,37 @@ impl TestRunner {
             DapQueryConfig::TimeInterval => (1, None),
             DapQueryConfig::FixedSize { max_batch_size } => (2, Some(max_batch_size)),
         };
+
+        const MAX_ATTEMPTS: usize = 10;
+        for attempt in 1..=MAX_ATTEMPTS {
+            let failed_connections = futures::stream::iter([&t.leader_url, &t.helper_url])
+                .then(|url| async {
+                    (
+                        t.http_client
+                            .get(url.join("/internal/test/ready").unwrap())
+                            .send()
+                            .await
+                            .map(|r| r.status()),
+                        url.clone(),
+                    )
+                })
+                .filter_map(|(result, url)| async move {
+                    match result {
+                        Ok(s) if s.is_success() => None,
+                        Ok(s) => Some(format!("status code for {url} was {s}")),
+                        Err(e) => Some(format!("connection to {url} failed: {e:?}")),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await;
+            match failed_connections.first() {
+                Some(failure) if attempt == MAX_ATTEMPTS => {
+                    panic!("One of the aggregators was not ready in time: {failure}")
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
 
         // Configure the endpoints.
         //
@@ -258,11 +295,8 @@ impl TestRunner {
         t
     }
 
-    pub fn http_client() -> reqwest::Client {
-        reqwest::ClientBuilder::new()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap()
+    pub fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
     }
 
     pub fn batch_interval(&self) -> Interval {
@@ -622,7 +656,7 @@ impl TestRunner {
         path: &str,
         data: &I,
     ) -> O {
-        let client = Self::http_client();
+        let client = self.http_client();
         let mut url = if is_leader {
             self.leader_url.clone()
         } else {
@@ -678,13 +712,13 @@ impl TestRunner {
     }
 
     pub async fn internal_delete_all(&self, batch_interval: &Interval) {
-        let client = Self::http_client();
-        post_internal_delete_all(&client, &self.leader_url, batch_interval).await;
-        post_internal_delete_all(&client, &self.helper_url, batch_interval).await;
+        let client = self.http_client();
+        post_internal_delete_all(client, &self.leader_url, batch_interval).await;
+        post_internal_delete_all(client, &self.helper_url, batch_interval).await;
     }
 
     pub async fn internal_current_batch(&self, task_id: &TaskId) -> BatchId {
-        let client = Self::http_client();
+        let client = self.http_client();
         let mut url = self.leader_url.clone();
         url.set_path(&format!(
             "internal/current_batch/task/{}",

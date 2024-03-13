@@ -46,7 +46,7 @@ where
 
     router
         .route("/internal/delete_all", post(delete_all))
-        .route("/internal/test/ready", post(check_storage_readyness))
+        .route("/internal/test/ready", get(check_storage_readyness))
         .route(
             "/internal/test/endpoint_for_task",
             post(endpoint_for_task_default),

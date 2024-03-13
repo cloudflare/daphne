@@ -1,3 +1,4 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
@@ -38,6 +39,7 @@ worker.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 daphne_service_utils = { path = "../daphne_service_utils" }
+futures.workspace = true
 hex.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true
