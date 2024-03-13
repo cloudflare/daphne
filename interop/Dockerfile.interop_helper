@@ -1,0 +1,55 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
+# A container for running interop tests against the Helper:
+# https://datatracker.ietf.org/doc/draft-dcook-ppm-dap-interop-test-design/
+FROM rust:1.76-bookworm AS interop_helper
+WORKDIR /build
+
+# Dependencies:
+#
+# - capnproto: required by a workspace dependency (`capnp`)
+#
+# - colorized-logs: asni2txt is used to remove color from the output of
+#   `wrangler dev`
+#
+# - clang: required to a workspace dependency (`ring`)
+#
+# - make
+#
+# - npm: required to install `wrangler`
+RUN apt update && \
+    apt install -y \
+        capnproto \
+        colorized-logs \
+        clang \
+        make \
+        npm
+
+RUN npm install -g wrangler@3.33.0
+
+# Install worker-build, used to build the storage proxy.
+RUN cargo install --git https://github.com/cloudflare/workers-rs
+
+# Install the WASM target, as required for the storage proxy Worker.
+RUN rustup target add wasm32-unknown-unknown
+
+COPY Cargo.toml Cargo.lock ./
+COPY daphne ./daphne
+COPY daphne_server ./daphne_server
+COPY daphne_service_utils ./daphne_service_utils
+COPY daphne_worker ./daphne_worker
+COPY daphne_worker_test ./daphne_worker_test
+
+# Build the storage proxy.
+WORKDIR /build/daphne_worker_test
+RUN wrangler deploy --dry-run -c wrangler.storage_proxy.toml
+
+# Build the service.
+WORKDIR /build/daphne_server
+RUN cargo build --example service --features test-utils --release
+
+COPY interop/run_interop_helper.sh /run_interop_helper.sh
+
+EXPOSE 8788
+ENTRYPOINT ["/bin/bash", "/run_interop_helper.sh"]
