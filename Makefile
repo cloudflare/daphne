@@ -17,6 +17,12 @@ e2e: /tmp/private-key /tmp/certificate
 	export E2E_TEST_HPKE_SIGNING_CERTIFICATE="$$(cat /tmp/certificate)"; \
 	docker-compose -f daphne_server/docker-compose-e2e.yaml up --build --abort-on-container-exit --exit-code-from test
 
+make_interop:
+	docker build . -f ./interop/Dockerfile.interop_helper --tag daphne_interop
+
+run_interop: make_interop
+	docker run -it -p 8788:8788 -P daphne_interop --name daphne_interop
+
 /tmp/private-key:
 	openssl ecparam -name prime256v1 -genkey -noout -out $@
 
