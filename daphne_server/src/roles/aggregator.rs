@@ -416,9 +416,8 @@ impl HpkeDecrypter for crate::App {
             .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
                 // Assume the first HPKE config in the receiver list has the highest preference.
                 //
-                // NOTE draft02 compatibility: The spec allows us to return multiple configs, but
-                // draft02 does not. In order to keep things imple we preserve the semantics of the old
-                // version for now.
+                // TODO draft02 cleanup: Return the entire list and not just a single HPKE config.
+                // Note that we previously returned one because this was required in draft02.
                 config_list
                     .iter()
                     .next()

@@ -58,8 +58,8 @@ use crate::{
     error::DapAbort,
     hpke::HpkeReceiverConfig,
     messages::{
-        AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId,
-        Draft02AggregationJobId, Duration, Interval, PartialBatchSelector, ReportId, TaskId, Time,
+        AggregationJobId, BatchId, BatchSelector, Collection, CollectionJobId, Duration, Interval,
+        PartialBatchSelector, ReportId, TaskId, Time,
     },
     vdaf::{
         Prio3Config, VdafAggregateShare, VdafConfig, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
@@ -69,14 +69,13 @@ use constants::DapMediaType;
 pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
-use messages::{encode_base64url, Base64Encode};
+use messages::encode_base64url;
 #[cfg(any(test, feature = "test-utils"))]
 use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
 };
-use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},
@@ -96,9 +95,6 @@ pub use protocol::aggregator::{
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapVersion {
-    #[serde(rename = "v02")]
-    Draft02,
-
     #[serde(rename = "v09")]
     #[default]
     Draft09,
@@ -111,7 +107,6 @@ impl FromStr for DapVersion {
     type Err = DapAbort;
     fn from_str(version: &str) -> Result<Self, Self::Err> {
         match version {
-            "v02" => Ok(DapVersion::Draft02),
             "v09" => Ok(DapVersion::Draft09),
             "v10" => Ok(DapVersion::Latest),
             _ => Err(DapAbort::version_unknown()),
@@ -122,7 +117,6 @@ impl FromStr for DapVersion {
 impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
-            DapVersion::Draft02 => "v02",
             DapVersion::Draft09 => "v09",
             DapVersion::Latest => "v10",
         }
@@ -460,8 +454,8 @@ pub struct DapTaskParameters {
 
 #[cfg(any(test, feature = "test-utils"))]
 impl DapTaskParameters {
-    /// Construct a new task config using the taskprov extension. Return the task ID, the taskprov
-    /// advertisement (if applicable), and the payload of the report extension.
+    /// Construct a new task config using the taskprov extension. Return the task ID and the
+    /// taskprov advertisement encoded as a base64url string.
     #[allow(clippy::type_complexity)]
     pub fn to_config_with_taskprov(
         &self,
@@ -469,7 +463,7 @@ impl DapTaskParameters {
         now: Time,
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
-    ) -> Result<(DapTaskConfig, TaskId, Option<String>, Option<Vec<u8>>), DapError> {
+    ) -> Result<(DapTaskConfig, TaskId, String), DapError> {
         let taskprov_config = messages::taskprov::TaskConfig {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
@@ -494,7 +488,7 @@ impl DapTaskParameters {
         let encoded_taskprov_config = taskprov_config
             .get_encoded_with_param(&self.version)
             .map_err(DapError::encoding)?;
-        let task_id = taskprov::compute_task_id(self.version, &encoded_taskprov_config);
+        let task_id = taskprov::compute_task_id(&encoded_taskprov_config);
 
         // Compute the DAP task config.
         let task_config = DapTaskConfig::try_from_taskprov(
@@ -506,21 +500,9 @@ impl DapTaskParameters {
         )
         .unwrap();
 
-        let (taskprov_advertisement, taskprov_report_extension_payload) = match self.version {
-            DapVersion::Draft09 | DapVersion::Latest => {
-                (Some(encode_base64url(&encoded_taskprov_config)), None)
-            }
-            // draft02 compatibility: The taskprov config is advertised in an HTTP header in
-            // the latest draft. In draft02, it is carried by a report extension.
-            DapVersion::Draft02 => (None, Some(encoded_taskprov_config)),
-        };
+        let taskprov_advertisement = encode_base64url(&encoded_taskprov_config);
 
-        Ok((
-            task_config,
-            task_id,
-            taskprov_advertisement,
-            taskprov_report_extension_payload,
-        ))
+        Ok((task_config, task_id, taskprov_advertisement))
     }
 }
 
@@ -755,11 +737,9 @@ impl DapTaskConfig {
     /// Leader: Resolve taskprov advertisement to send in a request to the Helper.
     pub(crate) fn resolve_taskprove_advertisement(&self) -> Result<Option<String>, DapError> {
         if let DapTaskConfigMethod::Taskprov { info } = &self.method {
-            if info.is_none() && self.version != DapVersion::Draft02 {
+            if info.is_none() {
                 // The task config indicates that the configuration method was taskprov, but we
-                // don't have enough information to construct the advertisement. This is not a
-                // problem for draft02, however, because the task config was encoded by the report
-                // extensions in that version.
+                // don't have enough information to construct the advertisement.
                 return Err(fatal_error!(
                     err = "not enough information to resolve taskprov advertisement"
                 ));
@@ -874,8 +854,6 @@ pub enum DapAggregateResult {
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug, deepsize::DeepSizeOf))]
 pub(crate) struct AggregationJobReportState {
-    // draft02 compatibility: The Leader does not transmit its prep share.
-    draft02_prep_share: Option<VdafPrepMessage>,
     prep_state: VdafPrepState,
     time: Time,
     report_id: ReportId,
@@ -889,26 +867,11 @@ pub struct DapAggregationJobState {
     part_batch_sel: PartialBatchSelector,
 }
 
-/// Leader state during an aggregation job in which it has computed the output shares but is
-/// waiting for the Helper's response before it commits them.
-#[derive(Debug)]
-pub struct DapAggregationJobUncommitted {
-    pub(crate) seq: Vec<DapOutputShare>,
-    part_batch_sel: PartialBatchSelector,
-}
-
+// TODO draft02 cleanup: Remove this.
 impl Encode for DapAggregationJobState {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         self.part_batch_sel.encode(bytes)?;
         for report_state in &self.seq {
-            if report_state.draft02_prep_share.is_some() {
-                // draft02 compatibility: The prep share is kept in this data structure for
-                // backwards compatibility. It's only used by the Leader, so we don't ever expect
-                // to encode it.
-                return Err(CodecError::Other(
-                    "Tried to encode DapAggregationJobState with leader prep share".into(),
-                ));
-            }
             report_state.prep_state.encode(bytes)?;
             report_state.time.encode(bytes)?;
             report_state.report_id.encode(bytes)?;
@@ -934,7 +897,6 @@ impl DapAggregationJobState {
             let report_id =
                 ReportId::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
             seq.push(AggregationJobReportState {
-                draft02_prep_share: None,
                 prep_state,
                 time,
                 report_id,
@@ -946,15 +908,6 @@ impl DapAggregationJobState {
             seq,
         })
     }
-}
-
-#[derive(Debug)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-/// An ouptut share produced by an Aggregator for a single report.
-pub struct DapOutputShare {
-    pub report_id: ReportId, // Value from report
-    pub time: u64,           // Value from the report
-    pub(crate) data: VdafAggregateShare,
 }
 
 /// An aggregate share computed by combining a set of output shares.
@@ -972,8 +925,6 @@ pub struct DapAggregateShare {
 
 impl DapAggregateShare {
     /// Merge two aggregate shares. This method is run by an Aggregator.
-    //
-    // TODO Add unit tests.
     pub fn merge(&mut self, other: DapAggregateShare) -> Result<(), DapError> {
         // Update the aggregate share data.
         match (self.data.as_mut(), other.data) {
@@ -1052,13 +1003,12 @@ impl DapAggregateShare {
 }
 
 /// Leader state transition during the aggregation flow.
+//
+// TODO draft02 clean up: Hard-code `M`.
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
 pub enum DapLeaderAggregationJobTransition<M: Debug> {
     /// Waiting for a response from the Helper.
     Continued(DapAggregationJobState, M),
-
-    /// Output shares computed, but waiting for a response from the Helper before committing.
-    Uncommitted(DapAggregationJobUncommitted, M),
 
     /// Committed to the output shares.
     Finished(DapAggregateSpan<DapAggregateShare>),
@@ -1084,7 +1034,7 @@ pub enum DapSender {
 }
 
 /// Types of resources associated with DAP tasks.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DapResource {
     /// Aggregation job resource.
     AggregationJob(AggregationJobId),
@@ -1102,11 +1052,6 @@ pub enum DapResource {
     ///
     /// The resource of a DAP request is undetermined if its identifier could not be parsed from
     /// request path.
-    ///
-    /// draft02 compatibility: In draft02, the resource of a DAP request is usually undetermined
-    /// until the request payload is parsed, so defer determination of the resource until then. The
-    /// exception is the GET request to the collection URI. The format of this endpoint is
-    /// unspecified, but we use a version that matches the latest draft.
     #[default]
     Undefined,
 }
@@ -1157,14 +1102,6 @@ impl<S> DapRequest<S> {
     pub fn task_id(&self) -> Result<&TaskId, DapAbort> {
         if let Some(ref id) = self.task_id {
             Ok(id)
-        } else if self.version == DapVersion::Draft02 {
-            // draft02: Handle missing task ID as decoding failure. Normally the task ID would be
-            // encoded by the message payload; it may be missing becvause parsing failed earlier on
-            // in the request.
-            Err(DapAbort::InvalidMessage {
-                detail: "missing or malformed task ID".into(),
-                task_id: None,
-            })
         } else {
             // Handle missing task ID as a bad request. The task ID is normally conveyed by the
             // request path; if missing at this point, it is because it was missing or couldn't be
@@ -1174,10 +1111,6 @@ impl<S> DapRequest<S> {
     }
 
     /// Return the collection job ID, handling a missing ID as a user error.
-    ///
-    /// Note: the semantics of this method is only well-defined if the caller is the Collector and
-    /// the version in use is not draft02. If the caller is not the Collector, or draft02 is in
-    /// use, we exepct the collection job ID to be missing.
     pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
         if let DapResource::CollectionJob(collection_job_id) = &self.resource {
             Ok(collection_job_id)
@@ -1224,80 +1157,4 @@ pub struct DapLeaderProcessTelemetry {
 
     /// The number of reports processed.
     pub reports_processed: u64,
-}
-
-/// draft02 compatibility: A logical aggregation job ID. In the latest draft, this is a 32-byte
-/// string included in the HTTP request payload; in the latest draft, this is a 16-byte string
-/// included in the HTTP request path. This type unifies these into one type so that any protocol
-/// logic that is agnostic to these details can use the same object.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum MetaAggregationJobId {
-    Draft02(Draft02AggregationJobId),
-    Draft09(AggregationJobId),
-}
-
-macro_rules! generate_from_id_impls_for_meta_agg_job_id {
-    ($draft:ident => $t:ty) => {
-        impl From<&$t> for MetaAggregationJobId {
-            fn from(id: &$t) -> Self {
-                Self::$draft(*id)
-            }
-        }
-
-        impl From<$t> for MetaAggregationJobId {
-            fn from(id: $t) -> Self {
-                Self::$draft(id)
-            }
-        }
-    };
-}
-
-generate_from_id_impls_for_meta_agg_job_id!(Draft02 => Draft02AggregationJobId);
-generate_from_id_impls_for_meta_agg_job_id!(Draft09 => AggregationJobId);
-
-impl MetaAggregationJobId {
-    /// Generate a random ID of the type required for the version.
-    pub(crate) fn gen_for_version(version: DapVersion) -> Self {
-        let mut rng = thread_rng();
-        match version {
-            DapVersion::Draft02 => Self::Draft02(Draft02AggregationJobId(rng.gen())),
-            DapVersion::Draft09 | DapVersion::Latest => Self::Draft09(AggregationJobId(rng.gen())),
-        }
-    }
-
-    /// Convert this aggregation job ID into to the type that would be included in the payload of
-    /// the HTTP request request.
-    pub(crate) fn for_request_payload(&self) -> Option<Draft02AggregationJobId> {
-        match self {
-            Self::Draft02(agg_job_id) => Some(*agg_job_id),
-            Self::Draft09(..) => None,
-        }
-    }
-
-    /// Convert this aggregation job ID into the type taht would be included in the HTTP request
-    /// path.
-    pub(crate) fn for_request_path(&self) -> DapResource {
-        match self {
-            // In draft02, the aggregation job ID is not determined until the payload is parsed.
-            Self::Draft02(..) => DapResource::Undefined,
-            Self::Draft09(agg_job_id) => DapResource::AggregationJob(*agg_job_id),
-        }
-    }
-
-    /// Convert this aggregation job ID into hex.
-    pub fn to_hex(&self) -> String {
-        match self {
-            Self::Draft02(agg_job_id) => agg_job_id.to_hex(),
-            Self::Draft09(agg_job_id) => agg_job_id.to_hex(),
-        }
-    }
-
-    /// Convert this aggregation job ID into base64url form.
-    pub fn to_base64url(&self) -> String {
-        match self {
-            Self::Draft02(agg_job_id) => agg_job_id.to_base64url(),
-            Self::Draft09(agg_job_id) => agg_job_id.to_base64url(),
-        }
-    }
 }

@@ -8,10 +8,10 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
     messages::{
-        encode_u32_bytes, encode_u32_prefixed, AggregationJobContinueReq, AggregationJobInitReq,
-        AggregationJobResp, Base64Encode, BatchSelector, Extension, HpkeCiphertext,
-        PartialBatchSelector, PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata,
-        ReportShare, TaskId, Transition, TransitionFailure, TransitionVar,
+        encode_u32_bytes, encode_u32_prefixed, AggregationJobInitReq, AggregationJobResp,
+        Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
+        PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
+        Transition, TransitionFailure, TransitionVar,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
@@ -21,9 +21,8 @@ use crate::{
         VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationJobUncommitted, DapAggregationParam, DapError, DapHelperAggregationJobTransition,
-    DapLeaderAggregationJobTransition, DapOutputShare, DapTaskConfig, DapVersion,
-    MetaAggregationJobId, VdafConfig,
+    DapAggregationParam, DapError, DapHelperAggregationJobTransition,
+    DapLeaderAggregationJobTransition, DapTaskConfig, DapVersion, VdafConfig,
 };
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
@@ -36,8 +35,8 @@ use std::{
 };
 
 use super::{
-    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT02, CTX_INPUT_SHARE_DRAFT09,
-    CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER, CTX_ROLE_LEADER,
+    CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR,
+    CTX_ROLE_HELPER, CTX_ROLE_LEADER,
 };
 
 // Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
@@ -88,8 +87,6 @@ pub enum EarlyReportStateConsumed {
         public_share: Vec<u8>,
         input_share: Vec<u8>,
         // Set by the Helper.
-        //
-        // draft02 compatibility: This is only set in the latest draft.
         peer_prep_share: Option<Vec<u8>>,
     },
     Rejected {
@@ -114,10 +111,7 @@ impl EarlyReportStateConsumed {
             });
         }
 
-        let input_share_text = match task_config.version {
-            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft09 | DapVersion::Latest => CTX_INPUT_SHARE_DRAFT09,
-        };
+        let input_share_text = CTX_INPUT_SHARE_DRAFT09;
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(input_share_text);
@@ -150,37 +144,23 @@ impl EarlyReportStateConsumed {
             Err(e) => return Err(e),
         };
 
-        // draft02 compatibility: The plaintext is passed to the VDAF directly. In the latest
-        // draft, the plaintext also encodes the report extensions.
-        let (input_share, draft09_extensions) = match task_config.version {
-            DapVersion::Draft02 => (encoded_input_share, None),
-            DapVersion::Draft09 | DapVersion::Latest => {
-                match PlaintextInputShare::get_decoded_with_param(
-                    &task_config.version,
-                    &encoded_input_share,
-                ) {
-                    Ok(input_share) => (input_share.payload, Some(input_share.extensions)),
-                    Err(..) => {
-                        return Ok(Self::Rejected {
-                            metadata: report_share.report_metadata,
-                            failure: TransitionFailure::InvalidMessage,
-                        })
-                    }
+        let (input_share, extensions) = {
+            match PlaintextInputShare::get_decoded_with_param(
+                &task_config.version,
+                &encoded_input_share,
+            ) {
+                Ok(input_share) => (input_share.payload, input_share.extensions),
+                Err(..) => {
+                    return Ok(Self::Rejected {
+                        metadata: report_share.report_metadata,
+                        failure: TransitionFailure::InvalidMessage,
+                    })
                 }
             }
         };
 
         // Handle report extensions.
         {
-            let extensions = match task_config.version {
-                DapVersion::Draft09 | DapVersion::Latest => draft09_extensions.as_ref().unwrap(),
-                DapVersion::Draft02 => report_share
-                    .report_metadata
-                    .draft02_extensions
-                    .as_ref()
-                    .unwrap(),
-            };
-
             let mut taskprov_indicated = false;
             let mut seen: HashSet<u16> = HashSet::with_capacity(extensions.len());
             for extension in extensions {
@@ -192,21 +172,18 @@ impl EarlyReportStateConsumed {
                     });
                 }
 
-                match (task_config.version, extension) {
-                    (.., Extension::Taskprov { .. }) if task_config.method_is_taskprov() => {
+                match extension {
+                    Extension::Taskprov { .. } if task_config.method_is_taskprov() => {
                         taskprov_indicated = true;
                     }
 
                     // Reject reports with unrecognized extensions.
-                    (DapVersion::Draft09 | DapVersion::Latest, ..) => {
+                    _ => {
                         return Ok(Self::Rejected {
                             metadata: report_share.report_metadata,
                             failure: TransitionFailure::InvalidMessage,
                         })
                     }
-
-                    // draft02 compatibility: Ignore unrecognized extensions.
-                    (DapVersion::Draft02, ..) => (),
                 }
             }
 
@@ -278,8 +255,6 @@ pub enum EarlyReportStateInitialized {
         metadata: ReportMetadata,
         public_share: Vec<u8>,
         // Set by the Helper.
-        //
-        // draft02 compatibility: This is only set in the latest draft.
         peer_prep_share: Option<Vec<u8>>,
         prep_share: VdafPrepMessage,
         prep_state: VdafPrepState,
@@ -408,7 +383,6 @@ impl DapTaskConfig {
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
         part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
         reports: Vec<Report>,
@@ -464,28 +438,22 @@ impl DapTaskConfig {
                     prep_share,
                     prep_state,
                 } => {
-                    // draft02 compatibility: In the latest version, the Leader sends the Helper
-                    // its initial prep share in the first request.
-                    let (draft02_prep_share, draft09_payload) = match self.version {
-                        DapVersion::Draft02 => (Some(prep_share), None),
-                        DapVersion::Draft09 | DapVersion::Latest => {
-                            let mut outbound = Vec::with_capacity(
-                                prep_share
-                                    .encoded_len_with_param(&self.version)
-                                    .unwrap_or(0)
-                                    + 5,
-                            );
-                            // Add the ping-pong "initialize" message framing
-                            // (draft-irtf-cfrg-vdaf-08, Section 5.8).
-                            outbound.push(PingPongMessageType::Initialize as u8);
-                            encode_u32_items(&mut outbound, &self.version, &[prep_share])
-                                .map_err(DapError::encoding)?;
-                            (None, Some(outbound))
-                        }
+                    let payload = {
+                        let mut outbound = Vec::with_capacity(
+                            prep_share
+                                .encoded_len_with_param(&self.version)
+                                .unwrap_or(0)
+                                + 5,
+                        );
+                        // Add the ping-pong "initialize" message framing
+                        // (draft-irtf-cfrg-vdaf-08, Section 5.8).
+                        outbound.push(PingPongMessageType::Initialize as u8);
+                        encode_u32_items(&mut outbound, &self.version, &[prep_share])
+                            .map_err(DapError::encoding)?;
+                        outbound
                     };
 
                     states.push(AggregationJobReportState {
-                        draft02_prep_share,
                         prep_state,
                         time: metadata.time,
                         report_id: metadata.id,
@@ -496,7 +464,7 @@ impl DapTaskConfig {
                             public_share,
                             encrypted_input_share: helper_share,
                         },
-                        draft09_payload,
+                        payload,
                     });
                 }
 
@@ -520,8 +488,6 @@ impl DapTaskConfig {
                 part_batch_sel: part_batch_sel.clone(),
             },
             AggregationJobInitReq {
-                draft02_task_id: task_id.for_request_payload(&self.version),
-                draft02_agg_job_id: agg_job_id.for_request_payload(),
                 agg_param: agg_param.get_encoded().map_err(DapError::encoding)?,
                 part_batch_sel: part_batch_sel.clone(),
                 prep_inits,
@@ -560,7 +526,7 @@ impl DapTaskConfig {
                         task_id,
                         self,
                         prep_init.report_share,
-                        prep_init.draft09_payload,
+                        Some(prep_init.payload),
                     )
                     .await?,
                 );
@@ -582,94 +548,6 @@ impl DapTaskConfig {
     /// for the aggregation flow and the aggregate response to send to the Leader. This method is
     /// run by the Helper.
     pub(crate) fn handle_agg_job_init_req(
-        &self,
-        report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        part_batch_sel: &PartialBatchSelector,
-        initialized_reports: &[EarlyReportStateInitialized],
-        metrics: &dyn DaphneMetrics,
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
-        match self.version {
-            DapVersion::Draft02 => Self::draft02_handle_agg_job_init_req(
-                report_status,
-                part_batch_sel,
-                initialized_reports,
-                metrics,
-            ),
-            DapVersion::Draft09 | DapVersion::Latest => self.draft09_handle_agg_job_init_req(
-                report_status,
-                part_batch_sel,
-                initialized_reports,
-            ),
-        }
-    }
-
-    fn draft02_handle_agg_job_init_req(
-        report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        part_batch_sel: &PartialBatchSelector,
-        initialized_reports: &[EarlyReportStateInitialized],
-        metrics: &dyn DaphneMetrics,
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
-        let num_reports = initialized_reports.len();
-        let mut states = Vec::with_capacity(num_reports);
-        let mut transitions = Vec::with_capacity(num_reports);
-
-        for initialized_report in initialized_reports {
-            let var = match report_status.get(&initialized_report.metadata().id) {
-                Some(ReportProcessedStatus::Rejected(failure)) => TransitionVar::Failed(*failure),
-                Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
-                None => match initialized_report {
-                    EarlyReportStateInitialized::Ready {
-                        metadata,
-                        public_share: _,
-                        peer_prep_share: None,
-                        prep_share: helper_prep_share,
-                        prep_state: helper_prep_state,
-                    } => {
-                        states.push(AggregationJobReportState {
-                            draft02_prep_share: None,
-                            prep_state: helper_prep_state.clone(),
-                            time: metadata.time,
-                            report_id: metadata.id,
-                        });
-                        helper_prep_share
-                            .get_encoded()
-                            .map(TransitionVar::Continued)
-                            .expect("failed to encode prep share")
-                    }
-
-                    EarlyReportStateInitialized::Ready {
-                        metadata: _,
-                        public_share: _,
-                        peer_prep_share: Some(_),
-                        ..
-                    } => return Err(fatal_error!(err = "draft02: unexpected leader prep share")),
-
-                    EarlyReportStateInitialized::Rejected {
-                        metadata: _,
-                        failure,
-                    } => {
-                        metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                        TransitionVar::Failed(*failure)
-                    }
-                },
-            };
-
-            transitions.push(Transition {
-                report_id: initialized_report.metadata().id,
-                var,
-            });
-        }
-
-        Ok(DapHelperAggregationJobTransition::Continued(
-            DapAggregationJobState {
-                part_batch_sel: part_batch_sel.clone(),
-                seq: states,
-            },
-            AggregationJobResp { transitions },
-        ))
-    }
-
-    fn draft09_handle_agg_job_init_req(
         &self,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
@@ -773,145 +651,10 @@ impl DapTaskConfig {
     pub fn handle_agg_job_resp(
         &self,
         task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
-        match self.version {
-            DapVersion::Draft02 => self
-                .draft02_handle_agg_job_resp(task_id, agg_job_id, state, agg_job_resp, metrics)
-                .map_err(Into::into),
-            DapVersion::Draft09 | DapVersion::Latest => {
-                self.draft09_handle_agg_job_resp(task_id, state, agg_job_resp, metrics)
-            }
-        }
-    }
-
-    fn draft02_handle_agg_job_resp(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &MetaAggregationJobId,
-        state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
-        metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
-        if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::InvalidMessage {
-                detail: format!(
-                    "aggregation job response has {} reports; expected {}",
-                    agg_job_resp.transitions.len(),
-                    state.seq.len(),
-                ),
-                task_id: Some(*task_id),
-            }
-            .into());
-        }
-
-        let mut transitions = Vec::with_capacity(state.seq.len());
-        let mut out_shares = Vec::with_capacity(state.seq.len());
-        for (helper, leader) in zip(agg_job_resp.transitions, state.seq) {
-            if helper.report_id != leader.report_id {
-                return Err(DapAbort::InvalidMessage {
-                    detail: format!(
-                        "report ID {} appears out of order in aggregation job response",
-                        helper.report_id.to_base64url()
-                    ),
-                    task_id: Some(*task_id),
-                }
-                .into());
-            }
-
-            let helper_prep_share = match &helper.var {
-                TransitionVar::Continued(payload) => payload,
-
-                // Skip report that can't be processed any further.
-                TransitionVar::Failed(failure) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                    continue;
-                }
-
-                TransitionVar::Finished => {
-                    return Err(DapAbort::InvalidMessage {
-                        detail: "helper sent unexpected `Finished` message".to_string(),
-                        task_id: Some(*task_id),
-                    }
-                    .into())
-                }
-            };
-
-            let res = match &self.vdaf {
-                VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
-                    prio3_config,
-                    0,
-                    leader.prep_state,
-                    leader.draft02_prep_share.unwrap(),
-                    helper_prep_share,
-                ),
-                VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
-                    *dimension,
-                    leader.prep_state,
-                    leader.draft02_prep_share.unwrap(),
-                    helper_prep_share,
-                ),
-                #[cfg(any(test, feature = "test-utils"))]
-                // draft02 compatibility: In theory we should be able to support Mastic (or
-                // Poplar1) in a limited capacity. However, this would probably overcomplicate the
-                // code. Since we don't plan to use it, don't support it.
-                VdafConfig::Mastic { .. } => unreachable!("draft02: Mastic is not supported"),
-            };
-
-            match res {
-                Ok((data, prep_msg)) => {
-                    out_shares.push(DapOutputShare {
-                        report_id: leader.report_id,
-                        time: leader.time,
-                        data,
-                    });
-
-                    transitions.push(Transition {
-                        report_id: leader.report_id,
-                        var: TransitionVar::Continued(prep_msg),
-                    });
-                }
-
-                // Skip report that can't be processed any further.
-                Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
-                    let failure = TransitionFailure::VdafPrepError;
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                }
-
-                Err(VdafError::Dap(e)) => return Err(e),
-            }
-        }
-
-        if transitions.is_empty() {
-            return Ok(DapLeaderAggregationJobTransition::Finished(
-                DapAggregateSpan::default(),
-            ));
-        }
-
-        Ok(DapLeaderAggregationJobTransition::Uncommitted(
-            DapAggregationJobUncommitted {
-                seq: out_shares,
-                part_batch_sel: state.part_batch_sel,
-            },
-            AggregationJobContinueReq {
-                draft02_task_id: task_id.for_request_payload(&self.version),
-                draft02_agg_job_id: agg_job_id.for_request_payload(),
-                round: None,
-                transitions,
-            },
-        ))
-    }
-
-    fn draft09_handle_agg_job_resp(
-        &self,
-        task_id: &TaskId,
-        state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
-        metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobContinueReq>, DapError> {
+    ) -> Result<DapLeaderAggregationJobTransition<()>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
@@ -1005,222 +748,6 @@ impl DapTaskConfig {
         Ok(DapLeaderAggregationJobTransition::Finished(agg_span))
     }
 
-    /// Handle an aggregate request from the Leader. This method is called by the Helper.
-    ///
-    /// Note: This method does not compute the message authentication tag. It is up to the caller
-    /// to do so.
-    ///
-    /// # Inputs
-    ///
-    /// * `state` is the helper's current state.
-    ///
-    /// * `agg_cont_req` is the aggregate request sent by the Leader.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn handle_agg_job_cont_req(
-        &self,
-        task_id: &TaskId,
-        state: &DapAggregationJobState,
-        report_status: &HashMap<ReportId, ReportProcessedStatus>,
-        agg_job_id: &MetaAggregationJobId,
-        agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
-        match agg_job_cont_req.round {
-            Some(1) | None => {}
-            Some(0) => {
-                return Err(DapAbort::InvalidMessage {
-                    detail: "request shouldn't indicate round 0".into(),
-                    task_id: Some(*task_id),
-                }
-                .into())
-            }
-            // TODO(bhalleycf) For now, there is only ever one round, and we don't try to do
-            // aggregation-round-skew-recovery.
-            Some(r) => {
-                return Err(DapAbort::RoundMismatch {
-                    detail: format!("The request indicates round {r}; round 1 was expected."),
-                    task_id: *task_id,
-                    agg_job_id_base64url: agg_job_id.to_base64url(),
-                }
-                .into())
-            }
-        }
-        let mut processed = HashSet::with_capacity(state.seq.len());
-        let recognized = state
-            .seq
-            .iter()
-            .map(|report_state| report_state.report_id)
-            .collect::<HashSet<_>>();
-        let mut transitions = Vec::with_capacity(state.seq.len());
-        let mut agg_span = DapAggregateSpan::default();
-        let mut helper_iter = state.seq.iter();
-        for leader in &agg_job_cont_req.transitions {
-            // If the report ID is not recognized, then respond with a transition failure.
-            //
-            // TODO spec: Having to enforce this is awkward because, in order to disambiguate the
-            // trigger condition from the leader skipping a report that can't be processed, we have
-            // to make two passes of the request. (The first step is to compute `recognized`). It
-            // would be nice if we didn't have to keep track of the set of processed reports. One
-            // way to avoid this would be to require the leader to send the reports in a well-known
-            // order, say, in ascending order by ID.
-            if !recognized.contains(&leader.report_id) {
-                return Err(DapAbort::InvalidMessage {
-                    detail: format!(
-                        "report ID {} does not appear in the Helper's reports",
-                        leader.report_id.to_base64url()
-                    ),
-                    task_id: Some(*task_id),
-                }
-                .into());
-            }
-            if processed.contains(&leader.report_id) {
-                return Err(DapAbort::InvalidMessage {
-                    detail: format!(
-                        "report ID {} appears twice in the same aggregation job",
-                        leader.report_id.to_base64url()
-                    ),
-                    task_id: Some(*task_id),
-                }
-                .into());
-            }
-
-            // Find the next helper report that matches leader.report_id.
-            let next_helper_report = helper_iter.by_ref().find(|report_state| {
-                // Presumably the report was removed from the candidate set by the Leader.
-                processed.insert(report_state.report_id);
-                report_state.report_id == leader.report_id
-            });
-
-            let Some(AggregationJobReportState {
-                draft02_prep_share: _,
-                prep_state,
-                time,
-                report_id,
-            }) = next_helper_report
-            else {
-                // If the Helper iterator is empty, it means the leader passed in more report ids
-                // than we know about.
-                break;
-            };
-
-            let TransitionVar::Continued(leader_message) = &leader.var else {
-                return Err(DapAbort::InvalidMessage {
-                    detail: "helper sent unexpected message instead of `Continued`".to_string(),
-                    task_id: Some(*task_id),
-                }
-                .into());
-            };
-
-            let var = match report_status.get(&leader.report_id) {
-                Some(ReportProcessedStatus::Rejected(failure)) => TransitionVar::Failed(*failure),
-                Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
-                None => {
-                    let res = match &self.vdaf {
-                        VdafConfig::Prio3(prio3_config) => {
-                            prio3_prep_finish(prio3_config, prep_state.clone(), leader_message)
-                        }
-                        VdafConfig::Prio2 { dimension } => {
-                            prio2_prep_finish(*dimension, prep_state.clone(), leader_message)
-                        }
-                        #[cfg(any(test, feature = "test-utils"))]
-                        // draft02 compatibility: In theory we should be able to support Mastic (or
-                        // Poplar1) in a limited capacity. However, this would probably
-                        // overcomplicate the code.
-                        VdafConfig::Mastic { .. } => {
-                            unreachable!("draft02: Mastic is not supported")
-                        }
-                    };
-
-                    match res {
-                        Ok(data) => {
-                            agg_span.add_out_share(
-                                self,
-                                &state.part_batch_sel,
-                                *report_id,
-                                *time,
-                                data,
-                            )?;
-                            TransitionVar::Finished
-                        }
-
-                        Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
-                            let failure = TransitionFailure::VdafPrepError;
-                            TransitionVar::Failed(failure)
-                        }
-
-                        Err(VdafError::Dap(e)) => return Err(e),
-                    }
-                }
-            };
-
-            transitions.push(Transition {
-                report_id: *report_id,
-                var,
-            });
-        }
-
-        Ok((agg_span, AggregationJobResp { transitions }))
-    }
-
-    /// Handle the last aggregate response from the Helper. This method is run by the Leader.
-    pub fn handle_final_agg_job_resp(
-        &self,
-        state: DapAggregationJobUncommitted,
-        agg_job_resp: AggregationJobResp,
-        metrics: &dyn DaphneMetrics,
-    ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
-        if agg_job_resp.transitions.len() != state.seq.len() {
-            return Err(DapAbort::InvalidMessage {
-                detail: format!(
-                    "the Leader has {} reports, but it received {} reports from the Helper",
-                    state.seq.len(),
-                    agg_job_resp.transitions.len()
-                ),
-                task_id: None,
-            }
-            .into());
-        }
-
-        let mut agg_span = DapAggregateSpan::default();
-        for (helper, out_share) in zip(agg_job_resp.transitions, state.seq) {
-            if helper.report_id != out_share.report_id {
-                return Err(DapAbort::InvalidMessage {
-                    detail: format!(
-                        "report ID {} appears out of order in aggregation job response",
-                        helper.report_id.to_base64url()
-                    ),
-                    task_id: None,
-                }
-                .into());
-            }
-
-            match &helper.var {
-                TransitionVar::Continued(..) => {
-                    return Err(DapAbort::InvalidMessage {
-                        detail: "helper sent unexpected `Continued` message".to_string(),
-                        task_id: None,
-                    }
-                    .into())
-                }
-
-                // Skip report that can't be processed any further.
-                TransitionVar::Failed(failure) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
-                    continue;
-                }
-
-                TransitionVar::Finished => agg_span.add_out_share(
-                    self,
-                    &state.part_batch_sel,
-                    out_share.report_id,
-                    out_share.time,
-                    out_share.data,
-                )?,
-            };
-        }
-
-        Ok(agg_span)
-    }
-
     /// Encrypt an aggregate share under the Collector's public key. This method is run by the
     /// Leader in reponse to a collect request.
     pub fn produce_leader_encrypted_agg_share(
@@ -1282,10 +809,7 @@ fn produce_encrypted_agg_share(
         .get_encoded()
         .map_err(DapError::encoding)?;
 
-    let agg_share_text = match version {
-        DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-        DapVersion::Draft09 | DapVersion::Latest => CTX_AGG_SHARE_DRAFT09,
-    };
+    let agg_share_text = CTX_AGG_SHARE_DRAFT09;
     let n: usize = agg_share_text.len();
     let mut info = Vec::with_capacity(n + 2);
     info.extend_from_slice(agg_share_text);
@@ -1298,10 +822,8 @@ fn produce_encrypted_agg_share(
 
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad).map_err(DapError::encoding)?;
-    if version != DapVersion::Draft02 {
-        encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
-            .map_err(DapError::encoding)?;
-    }
+    encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
+        .map_err(DapError::encoding)?;
     batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
     let (enc, payload) = hpke_config.encrypt(&info, &aad, &agg_share_data)?;

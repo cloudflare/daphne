@@ -12,10 +12,7 @@ use crate::{
 };
 use prio::codec::Encode;
 
-use super::{
-    CTX_AGG_SHARE_DRAFT02, CTX_AGG_SHARE_DRAFT09, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER,
-    CTX_ROLE_LEADER,
-};
+use super::{CTX_AGG_SHARE_DRAFT09, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER, CTX_ROLE_LEADER};
 
 impl VdafConfig {
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -50,10 +47,7 @@ impl VdafConfig {
             ));
         }
 
-        let agg_share_text = match version {
-            DapVersion::Draft02 => CTX_AGG_SHARE_DRAFT02,
-            DapVersion::Draft09 | DapVersion::Latest => CTX_AGG_SHARE_DRAFT09,
-        };
+        let agg_share_text = CTX_AGG_SHARE_DRAFT09;
         let n: usize = agg_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(agg_share_text);
@@ -62,10 +56,8 @@ impl VdafConfig {
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
-        if version != DapVersion::Draft02 {
-            encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
-                .map_err(DapError::encoding)?;
-        }
+        encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
+            .map_err(DapError::encoding)?;
         batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());

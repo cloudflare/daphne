@@ -7,16 +7,11 @@ use daphne::{
     async_test_versions,
     constants::DapMediaType,
     messages::{
-        decode_base64url_vec,
-        taskprov::{
-            DpConfig, QueryConfig, QueryConfigVar, TaskConfig, UrlBytes, VdafConfig, VdafTypeVar,
-        },
-        BatchSelector, Collection, CollectionReq, Extension, HpkeCiphertext, Interval, Query,
-        Report, ReportId, ReportMetadata, TaskId,
+        decode_base64url_vec, Base64Encode, BatchSelector, Collection, CollectionReq, Extension,
+        HpkeCiphertext, Interval, Query, Report, ReportId, ReportMetadata, TaskId,
     },
-    taskprov::compute_task_id,
-    DapAggregateResult, DapAggregationParam, DapMeasurement, DapQueryConfig, DapTaskConfig,
-    DapTaskParameters, DapVersion,
+    DapAggregateResult, DapAggregationParam, DapMeasurement, DapQueryConfig, DapTaskParameters,
+    DapVersion,
 };
 use daphne_service_utils::http_headers;
 use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
@@ -153,6 +148,7 @@ async fn hpke_configs_are_cached(version: DapVersion) {
 
 async_test_versions! { hpke_configs_are_cached }
 
+// TODO draft02 cleanup: In draft09, the client is meant to PUT its report, not POST it.
 async fn leader_upload(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
@@ -183,7 +179,7 @@ async fn leader_upload(version: DapVersion) {
 
     // Try uploading a report with the incorrect task ID.
     let bad_id = TaskId(rng.gen());
-    let bad_path = t.upload_path_for_task(&bad_id);
+    let bad_path = TestRunner::upload_path_for_task(&bad_id);
     t.leader_put_expect_abort(
         client,
         None, // dap_auth_token
@@ -278,21 +274,13 @@ async fn leader_upload(version: DapVersion) {
             .parse()
             .unwrap(),
     );
-    let builder = match t.version {
-        DapVersion::Draft02 => client.post(url.as_str()),
-        DapVersion::Draft09 | DapVersion::Latest => client.put(url.as_str()),
-    };
+    let builder = client.put(url.as_str());
     let resp = builder
         .body(
             Report {
-                draft02_task_id: t.task_id.for_request_payload(&version),
                 report_metadata: ReportMetadata {
                     id: ReportId([1; 16]),
                     time: t.now,
-                    draft02_extensions: match version {
-                        DapVersion::Draft02 => Some(Vec::default()),
-                        DapVersion::Draft09 | DapVersion::Latest => None,
-                    },
                 },
                 public_share: b"public share".to_vec(),
                 encrypted_input_shares: [
@@ -328,57 +316,26 @@ async_test_versions! { leader_upload }
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn leader_upload_taskprov() {
-    let version = DapVersion::Draft02;
+    let version = DapVersion::Draft09;
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await;
-    let path = "upload";
 
-    let taskprov_vdaf_config = VdafConfig {
-        dp_config: DpConfig::None,
-        var: VdafTypeVar::Prio2 { dimension: 10 },
-    };
-
-    // Generate and upload a report with taskprov.
-    //
-    // We have to make this by hand as if we cut and paste a pre-serialized one it
-    // will have an expiring task.
-    let (task_config, task_id, taskprov_task_config) = {
-        let taskprov_task_config = TaskConfig {
-            task_info: "Hi".as_bytes().to_vec(),
-            leader_url: UrlBytes {
-                bytes: "https://test1".as_bytes().to_vec(),
-            },
-            helper_url: UrlBytes {
-                bytes: "https://test2".as_bytes().to_vec(),
-            },
-            query_config: QueryConfig {
-                time_precision: 0x01,
-                max_batch_query_count: 1,
-                min_batch_size: 1024,
-                var: QueryConfigVar::FixedSize {
-                    max_batch_size: 2048,
-                },
-            },
-            task_expiration: t.now + 86400,
-            vdaf_config: taskprov_vdaf_config.clone(),
-        };
-        let task_id = compute_task_id(
-            version,
-            &taskprov_task_config
-                .get_encoded_with_param(&version)
-                .unwrap(),
-        );
-        let task_config = DapTaskConfig::try_from_taskprov(
-            version,
-            &task_id,
-            taskprov_task_config.clone(),
-            &t.taskprov_vdaf_verify_key_init,
-            &t.taskprov_collector_hpke_receiver.config,
-        )
-        .unwrap();
-        (task_config, task_id, taskprov_task_config)
-    };
+    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+        version,
+        min_batch_size: 10,
+        query: DapQueryConfig::TimeInterval,
+        leader_url: t.task_config.leader_url.clone(),
+        helper_url: t.task_config.helper_url.clone(),
+        ..Default::default()
+    }
+    .to_config_with_taskprov(
+        b"cool task".to_vec(),
+        t.now,
+        &t.taskprov_vdaf_verify_key_init,
+        &t.taskprov_collector_hpke_receiver.config,
+    )
+    .unwrap();
 
     let report = task_config
         .vdaf
@@ -387,34 +344,20 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
-            vec![Extension::Taskprov {
-                draft02_payload: Some(
-                    taskprov_task_config
-                        .get_encoded_with_param(&version)
-                        .unwrap(),
-                ),
-            }],
+            vec![Extension::Taskprov],
             version,
         )
         .unwrap();
     t.leader_post_expect_ok(
         client,
-        path,
+        &format!("tasks/{}/reports", task_id.to_base64url()),
         DapMediaType::Report,
+        Some(&taskprov_advertisement),
         report.get_encoded_with_param(&version).unwrap(),
     )
     .await;
 
-    // Generate and upload a report with taskprov but with the wrong id
-    let payload = taskprov_task_config
-        .get_encoded_with_param(&version)
-        .unwrap();
-    let mut bad_payload = payload.clone();
-    bad_payload[0] = u8::wrapping_add(bad_payload[0], 1);
-    let task_id = compute_task_id(DapVersion::Draft02, &bad_payload);
-    let extensions = vec![Extension::Taskprov {
-        draft02_payload: Some(payload),
-    }];
+    // Generate and upload a report with the wrong task ID.
     let report = task_config
         .vdaf
         .produce_report_with_extensions(
@@ -422,15 +365,20 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
-            extensions,
+            vec![Extension::Taskprov],
             version,
         )
         .unwrap();
     t.leader_post_expect_abort(
         client,
-        None, // dap_auth_token
-        path,
+        None,
+        // Generate a random ID.
+        &format!(
+            "tasks/{}/reports",
+            TaskId(thread_rng().gen()).to_base64url()
+        ),
         DapMediaType::Report,
+        Some(&taskprov_advertisement),
         report.get_encoded_with_param(&version).unwrap(),
         400,
         "unrecognizedTask",
@@ -471,7 +419,6 @@ async fn internal_leader_process(version: DapVersion) {
     }
 
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -550,7 +497,6 @@ async fn leader_collect_ok(version: DapVersion) {
     // Get the collect URI.
     let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -610,15 +556,13 @@ async fn leader_collect_ok(version: DapVersion) {
         DapAggregateResult::U128(u128::from(t.task_config.min_batch_size))
     );
 
-    if version != DapVersion::Draft02 {
-        // Check that the time interval for the reports is correct.
-        let interval = collection.draft09_interval.as_ref().unwrap();
-        let low = t.task_config.quantized_time_lower_bound(time_min);
-        let high = t.task_config.quantized_time_upper_bound(time_max);
-        assert!(low < high);
-        assert_eq!(interval.start, low);
-        assert_eq!(interval.duration, high - low);
-    }
+    // Check that the time interval for the reports is correct.
+    let interval = &collection.interval;
+    let low = t.task_config.quantized_time_lower_bound(time_min);
+    let high = t.task_config.quantized_time_upper_bound(time_max);
+    assert!(low < high);
+    assert_eq!(interval.start, low);
+    assert_eq!(interval.duration, high - low);
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
     // GET semantics.
@@ -688,7 +632,6 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
 
     // ... the result is requested ...
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -749,7 +692,6 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
 
     // Get the collect URI.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -789,16 +731,8 @@ async fn leader_collect_abort_unknown_request(version: DapVersion) {
     // Poll collect URI for an unknown collect request.
     let fake_task_id = TaskId([0; 32]);
     let fake_collection_job_id = TaskId([0; 32]);
-    let url_suffix = if t.version == DapVersion::Draft02 {
-        format!("collect/task/{fake_task_id}/req/{fake_collection_job_id}")
-    } else {
-        format!("/tasks/{fake_task_id}/collection_jobs/{fake_collection_job_id}")
-    };
-    let expected_status = if t.version == DapVersion::Draft02 {
-        400
-    } else {
-        404
-    };
+    let url_suffix = format!("/tasks/{fake_task_id}/collection_jobs/{fake_collection_job_id}");
+    let expected_status = 404;
     let collect_uri = t.leader_url.join(&url_suffix).unwrap();
     let resp = t.poll_collection_url(client, &collect_uri).await;
     assert_eq!(resp.status(), expected_status);
@@ -817,7 +751,6 @@ async fn leader_collect_accept_global_config_max_batch_duration(version: DapVers
 
     // Maximum allowed batch duration.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval { batch_interval },
         agg_param: Vec::new(),
     };
@@ -835,11 +768,10 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
     let batch_interval = t.batch_interval();
-    let path = &t.collect_path_for_task(&t.task_id);
+    let path = &TestRunner::collect_path_for_task(&t.task_id);
 
     // Start of batch interval does not align with time_precision.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start + 1,
@@ -848,33 +780,19 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    if t.version == DapVersion::Draft02 {
-        t.leader_post_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchInvalid",
-        )
-        .await;
-    } else {
-        t.leader_put_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchInvalid",
-        )
-        .await;
-    }
+    t.leader_put_expect_abort(
+        client,
+        Some(&t.collector_bearer_token),
+        path,
+        DapMediaType::CollectReq,
+        collect_req.get_encoded_with_param(&t.version).unwrap(),
+        400,
+        "batchInvalid",
+    )
+    .await;
 
     // Batch interval duration does not align wiht min_batch_duration.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start,
@@ -883,29 +801,16 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    if t.version == DapVersion::Draft02 {
-        t.leader_post_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchInvalid",
-        )
-        .await;
-    } else {
-        t.leader_put_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchInvalid",
-        )
-        .await;
-    }
+    t.leader_put_expect_abort(
+        client,
+        Some(&t.collector_bearer_token),
+        path,
+        DapMediaType::CollectReq,
+        collect_req.get_encoded_with_param(&t.version).unwrap(),
+        400,
+        "batchInvalid",
+    )
+    .await;
 }
 
 async_test_versions! { leader_collect_abort_invalid_batch_interval }
@@ -944,7 +849,6 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
 
     // Get the collect URI.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -978,7 +882,6 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
     // with the EXACT SAME content as previous requests, we need to tweak the request
     // a little bit.
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
         query: Query::TimeInterval {
             batch_interval: Interval {
                 start: batch_interval.start,
@@ -987,30 +890,17 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    let path = &t.collect_path_for_task(&t.task_id);
-    if t.version == DapVersion::Draft02 {
-        t.leader_post_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchOverlap",
-        )
-        .await;
-    } else {
-        t.leader_put_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            path,
-            DapMediaType::CollectReq,
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-            400,
-            "batchOverlap",
-        )
-        .await;
-    }
+    let path = &TestRunner::collect_path_for_task(&t.task_id);
+    t.leader_put_expect_abort(
+        client,
+        Some(&t.collector_bearer_token),
+        path,
+        DapMediaType::CollectReq,
+        collect_req.get_encoded_with_param(&t.version).unwrap(),
+        400,
+        "batchOverlap",
+    )
+    .await;
 }
 
 async_test_versions! { leader_collect_abort_overlapping_batch_interval }
@@ -1052,11 +942,7 @@ async fn fixed_size() {
     // Collector: Get the collect URI.
     let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
-        query: match version {
-            DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
-            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
-        },
+        query: Query::FixedSizeCurrentBatch,
         agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
@@ -1152,11 +1038,7 @@ async fn fixed_size() {
     // Collector: Get the collect URI.
     let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
-        draft02_task_id: t.collect_task_id_field(),
-        query: match version {
-            DapVersion::Draft02 => Query::FixedSizeByBatchId { batch_id },
-            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
-        },
+        query: Query::FixedSizeCurrentBatch,
         agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
@@ -1174,45 +1056,23 @@ async fn fixed_size() {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
     // Collector: Try CollectReq with out-dated batch ID.
-    if t.version == DapVersion::Draft02 {
-        t.leader_post_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            &t.collect_path_for_task(&t.task_id),
-            DapMediaType::CollectReq,
-            CollectionReq {
-                draft02_task_id: t.collect_task_id_field(),
-                query: Query::FixedSizeByBatchId {
-                    batch_id: prev_batch_id,
-                },
-                agg_param: Vec::new(),
-            }
-            .get_encoded_with_param(&t.version)
-            .unwrap(),
-            400,
-            "batchOverlap",
-        )
-        .await;
-    } else {
-        t.leader_put_expect_abort(
-            client,
-            Some(&t.collector_bearer_token),
-            &t.collect_path_for_task(&t.task_id),
-            DapMediaType::CollectReq,
-            CollectionReq {
-                draft02_task_id: t.collect_task_id_field(),
-                query: Query::FixedSizeByBatchId {
-                    batch_id: prev_batch_id,
-                },
-                agg_param: Vec::new(),
-            }
-            .get_encoded_with_param(&t.version)
-            .unwrap(),
-            400,
-            "batchOverlap",
-        )
-        .await;
-    }
+    t.leader_put_expect_abort(
+        client,
+        Some(&t.collector_bearer_token),
+        &TestRunner::collect_path_for_task(&t.task_id),
+        DapMediaType::CollectReq,
+        CollectionReq {
+            query: Query::FixedSizeByBatchId {
+                batch_id: prev_batch_id,
+            },
+            agg_param: Vec::new(),
+        }
+        .get_encoded_with_param(&t.version)
+        .unwrap(),
+        400,
+        "batchOverlap",
+    )
+    .await;
 }
 
 async fn leader_collect_taskprov_ok(version: DapVersion) {
@@ -1222,40 +1082,34 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await;
 
-    let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
-        DapTaskParameters {
-            version,
-            min_batch_size: 10,
-            query: DapQueryConfig::TimeInterval,
-            leader_url: t.task_config.leader_url.clone(),
-            helper_url: t.task_config.helper_url.clone(),
-            ..Default::default()
-        }
-        .to_config_with_taskprov(
-            b"cool task".to_vec(),
-            t.now,
-            &t.taskprov_vdaf_verify_key_init,
-            &t.taskprov_collector_hpke_receiver.config,
-        )
-        .unwrap();
+    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+        version,
+        min_batch_size: 10,
+        query: DapQueryConfig::TimeInterval,
+        leader_url: t.task_config.leader_url.clone(),
+        helper_url: t.task_config.helper_url.clone(),
+        ..Default::default()
+    }
+    .to_config_with_taskprov(
+        b"cool task".to_vec(),
+        t.now,
+        &t.taskprov_vdaf_verify_key_init,
+        &t.taskprov_collector_hpke_receiver.config,
+    )
+    .unwrap();
 
-    let path = t.upload_path_for_task(&task_id);
+    let path = TestRunner::upload_path_for_task(&task_id);
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
-        let extensions = vec![Extension::Taskprov {
-            draft02_payload: match version {
-                DapVersion::Draft09 | DapVersion::Latest => None,
-                DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
-            },
-        }];
+        let extensions = vec![Extension::Taskprov];
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         t.leader_put_expect_ok(
             client,
             &path,
             DapMediaType::Report,
-            taskprov_advertisement.as_deref(),
+            Some(&taskprov_advertisement),
             task_config
                 .vdaf
                 .produce_report_with_extensions(
@@ -1277,7 +1131,6 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
 
     // Get the collect URI.
     let collect_req = CollectionReq {
-        draft02_task_id: Some(task_id),
         query: Query::TimeInterval {
             batch_interval: batch_interval.clone(),
         },
@@ -1287,7 +1140,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         .leader_post_collect_using_token(
             client,
             "I-am-the-collector", // DAP_TASKPROV_COLLECTOR_AUTH
-            taskprov_advertisement.as_deref(),
+            Some(&taskprov_advertisement),
             Some(&task_id),
             collect_req.get_encoded_with_param(&t.version).unwrap(),
         )

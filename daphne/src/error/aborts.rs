@@ -70,10 +70,7 @@ pub enum DapAbort {
     RoundMismatch {
         detail: String,
         task_id: TaskId,
-        // draft02 compatibility: The ID's definition (i.e., length in bytes) depends on which
-        // protocol is in use, hence the need for the `MetaAggregationJobId` type for representing
-        // the union of both To avoid having to propgate the lifetime parameter to `DapAbort`, we
-        // encode it right away.
+        // TODO draft02 cleanup: Use `AggregationJobId`
         agg_job_id_base64url: String,
     },
 
@@ -86,10 +83,7 @@ pub enum DapAbort {
     #[error("unrecognizedAggregationJob")]
     UnrecognizedAggregationJob {
         task_id: TaskId,
-        // draft02 compatibility: The ID's definition (i.e., length in bytes) depends on which
-        // protocol is in use, hence the need for the `MetaAggregationJobId` type for representing
-        // the union of both To avoid having to propgate the lifetime parameter to `DapAbort`, we
-        // encode it right away.
+        // TODO draft02 cleanup: Use `AggregationJobId`
         agg_job_id_base64url: String,
     },
 
@@ -155,20 +149,26 @@ impl DapAbort {
 
     /// Abort due to unexpected value for HTTP content-type header.
     pub fn content_type<S>(req: &DapRequest<S>, expected: DapMediaType) -> Self {
-        let want_str = expected
-            .as_str_for_version(req.version)
-            .expect("could not resolve content-type for expected media type");
+        let want_content_type = expected.as_str_for_version(req.version).unwrap_or_else(|| {
+            unreachable!("unexpected content-type for DAP version {:?}", req.version)
+        });
 
-        if let Some(got_str) = req
-            .media_type
-            .and_then(|mt| mt.as_str_for_version(req.version))
-        {
-            Self::BadRequest(format!(
-                "unexpected content-type: got {got_str}; want {want_str}"
-            ))
-        } else {
-            Self::BadRequest(format!("missing content-type: expected {want_str}"))
-        }
+        let Some(media_type) = req.media_type else {
+            return Self::BadRequest("missing content-type".into());
+        };
+
+        let got_content_type = media_type
+            .as_str_for_version(req.version)
+            .unwrap_or_else(|| {
+                unreachable!(
+                    "missing or unexpected content type for DAP version {:?}",
+                    req.version
+                )
+            });
+
+        Self::BadRequest(format!(
+            "unexpected content-type: got {got_content_type}; want {want_content_type}"
+        ))
     }
 
     #[inline]

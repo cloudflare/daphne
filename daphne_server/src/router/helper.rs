@@ -54,15 +54,8 @@ where
             AxumDapResponse::from_result_with_success_code(
                 resp,
                 app.server_metrics(),
-                match req.version {
-                    daphne::DapVersion::Draft02 => StatusCode::OK,
-                    daphne::DapVersion::Draft09 | daphne::DapVersion::Latest => StatusCode::CREATED,
-                },
+                StatusCode::CREATED,
             )
-        }
-        Some(DapMediaType::AggregationJobContinueReq) => {
-            let resp = helper::handle_agg_job_cont_req(&*app, &req).await;
-            AxumDapResponse::from_result(resp, app.server_metrics())
         }
         m => AxumDapResponse::new_error(
             DapAbort::BadRequest(format!("unexpected media type: {m:?}")),

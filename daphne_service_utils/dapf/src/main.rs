@@ -284,7 +284,7 @@ async fn main() -> Result<()> {
                 reqwest::header::HeaderValue::from_str(
                     DapMediaType::Report
                         .as_str_for_version(version)
-                        .expect("failed to construct content-type value"),
+                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
                 )
                 .expect("failecd to construct content-type header"),
             );
@@ -306,7 +306,7 @@ async fn main() -> Result<()> {
         }
         Action::Collect {
             leader_url,
-            task_id,
+            task_id: _,
         } => {
             // Read the batch selector from stdin.
             let mut buf = String::new();
@@ -320,11 +320,6 @@ async fn main() -> Result<()> {
             let version = deduce_dap_version_from_url(&leader_url)?;
             // Construct collect request.
             let collect_req = CollectionReq {
-                draft02_task_id: if version == DapVersion::Draft02 {
-                    Some(task_id)
-                } else {
-                    None
-                },
                 query,
                 agg_param: Vec::default(),
             };
@@ -335,7 +330,7 @@ async fn main() -> Result<()> {
                 reqwest::header::HeaderValue::from_str(
                     DapMediaType::CollectReq
                         .as_str_for_version(version)
-                        .expect("failed to construct content-type value"),
+                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
                 )
                 .expect("failed to construct content-type hader"),
             );

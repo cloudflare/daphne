@@ -9,7 +9,6 @@ use std::{io::Cursor, path::Path};
 
 use anyhow::{anyhow, Context};
 use daphne::{
-    hpke::HpkeConfig,
     messages::{decode_base64url_vec, HpkeConfigList},
     DapVersion,
 };
@@ -67,14 +66,7 @@ impl HttpClientExt for Client {
             .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
         }
 
-        match deduce_dap_version_from_url(base_url)? {
-            DapVersion::Draft02 => Ok(HpkeConfigList {
-                hpke_configs: vec![HpkeConfig::get_decoded(&hpke_config_bytes)?],
-            }),
-            DapVersion::Latest | DapVersion::Draft09 => {
-                Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
-            }
-        }
+        Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
     }
 }
 

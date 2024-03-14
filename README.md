@@ -6,12 +6,11 @@ under active development in the PPM working group of the IETF.
 
 Daphne currently implements:
 
-* draft-ietf-ppm-dap-02
-    * VDAF: draft-irtf-cfrg-vdaf-03
-    * Taskprov extension: draft-wang-ppm-dap-taskprov-02
 * draft-ietf-ppm-dap-09
     * VDAF: draft-irtf-cfrg-vdaf-08
     * Taskprov extension: draft-wang-ppm-dap-taskprov-06
+    * Interop test API: draft-dcook-ppm-dap-interop-test-design-07
+* draft-ietf-ppm-dap-10 (work-in-progress)
 
 This software is intended to support experimental DAP deployments and is not yet
 suitable for use in production. Daphne will evolve along with the DAP draft:

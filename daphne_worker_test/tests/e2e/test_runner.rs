@@ -316,32 +316,25 @@ impl TestRunner {
 
     pub async fn get_hpke_configs(
         &self,
-        version: DapVersion,
+        _version: DapVersion,
         client: &reqwest::Client,
     ) -> [HpkeConfig; 2] {
         let raw_leader_hpke_config = self.leader_get_raw_hpke_config(client).await;
         let raw_helper_hpke_config = self.helper_get_raw_hpke_config(client).await;
-        match version {
-            DapVersion::Draft02 => [
-                HpkeConfig::get_decoded(&raw_leader_hpke_config).unwrap(),
-                HpkeConfig::get_decoded(&raw_helper_hpke_config).unwrap(),
-            ],
-            DapVersion::Draft09 | DapVersion::Latest => {
-                let mut leader_hpke_config_list =
-                    HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
-                let mut helper_hpke_config_list =
-                    HpkeConfigList::get_decoded(&raw_helper_hpke_config).unwrap();
-                if leader_hpke_config_list.hpke_configs.len() != 1
-                    || helper_hpke_config_list.hpke_configs.len() != 1
-                {
-                    panic!("only a length 1 HpkeConfList is currently supported by the test suite")
-                }
-                [
-                    leader_hpke_config_list.hpke_configs.pop().unwrap(),
-                    helper_hpke_config_list.hpke_configs.pop().unwrap(),
-                ]
-            }
+
+        let mut leader_hpke_config_list =
+            HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
+        let mut helper_hpke_config_list =
+            HpkeConfigList::get_decoded(&raw_helper_hpke_config).unwrap();
+        if leader_hpke_config_list.hpke_configs.len() != 1
+            || helper_hpke_config_list.hpke_configs.len() != 1
+        {
+            panic!("only a length 1 HpkeConfList is currently supported by the test suite")
         }
+        [
+            leader_hpke_config_list.hpke_configs.pop().unwrap(),
+            helper_hpke_config_list.hpke_configs.pop().unwrap(),
+        ]
     }
 
     pub async fn leader_get_raw_hpke_config(&self, client: &reqwest::Client) -> Vec<u8> {
@@ -357,6 +350,7 @@ impl TestRunner {
         client: &reqwest::Client,
         path: &str,
         media_type: DapMediaType,
+        taskprov: Option<&str>,
         data: Vec<u8>,
     ) {
         let url = self.leader_url.join(path).unwrap();
@@ -369,6 +363,12 @@ impl TestRunner {
                 .parse()
                 .unwrap(),
         );
+        if let Some(taskprov_advertisement) = taskprov {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+            );
+        }
         let resp = client
             .post(url.as_str())
             .body(data)
@@ -392,6 +392,7 @@ impl TestRunner {
         dap_auth_token: Option<&str>,
         path: &str,
         media_type: DapMediaType,
+        taskprov: Option<&str>,
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
@@ -411,6 +412,12 @@ impl TestRunner {
             headers.insert(
                 reqwest::header::HeaderName::from_static("dap-auth-token"),
                 reqwest::header::HeaderValue::from_str(token).unwrap(),
+            );
+        }
+        if let Some(taskprov_advertisement) = taskprov {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
             );
         }
 
@@ -442,7 +449,6 @@ impl TestRunner {
         );
     }
 
-    /// Send a PUT request or, if draft02 is in use, a POST request.
     pub async fn leader_put_expect_ok(
         &self,
         client: &reqwest::Client,
@@ -451,12 +457,6 @@ impl TestRunner {
         taskprov: Option<&str>,
         data: Vec<u8>,
     ) {
-        // draft02 always POSTs
-        if self.version == DapVersion::Draft02 {
-            return self
-                .leader_post_expect_ok(client, path, media_type, data)
-                .await;
-        }
         let url = self.leader_url.join(path).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -490,7 +490,6 @@ impl TestRunner {
         );
     }
 
-    /// Send a PUT request or, if draft02 is in use, a POST request, and expect an abort.
     #[allow(clippy::too_many_arguments)]
     pub async fn leader_put_expect_abort(
         &self,
@@ -502,21 +501,6 @@ impl TestRunner {
         expected_status: u16,
         expected_err_type: &str,
     ) {
-        // draft02 always POSTs
-        if self.version == DapVersion::Draft02 {
-            return self
-                .leader_post_expect_abort(
-                    client,
-                    dap_auth_token,
-                    path,
-                    media_type,
-                    data,
-                    expected_status,
-                    expected_err_type,
-                )
-                .await;
-        }
-
         let url = self.leader_url.join(path).unwrap();
 
         let mut headers = reqwest::header::HeaderMap::new();
@@ -571,7 +555,7 @@ impl TestRunner {
         task_id: Option<&TaskId>,
         data: Vec<u8>,
     ) -> Url {
-        let path = self.collect_path_for_task(task_id.unwrap_or(&self.task_id));
+        let path = Self::collect_path_for_task(task_id.unwrap_or(&self.task_id));
         let url = self.leader_url.join(&path).unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -594,11 +578,7 @@ impl TestRunner {
             );
         }
 
-        let builder = if self.version == DapVersion::Draft02 {
-            client.post(url.as_str())
-        } else {
-            client.put(url.as_str())
-        };
+        let builder = client.put(url.as_str());
         let resp = builder
             .body(data)
             .headers(headers)
@@ -606,24 +586,14 @@ impl TestRunner {
             .await
             .expect("request failed");
 
-        let expected_status = if self.version == DapVersion::Draft02 {
-            303
-        } else {
-            201
-        };
-
+        let expected_status = 201;
         assert_eq!(
             resp.status(),
             expected_status,
             "request failed: {:?}",
             resp.text().await.unwrap()
         );
-        if self.version == DapVersion::Draft02 {
-            let collect_uri = resp.headers().get("Location").unwrap().to_str().unwrap();
-            collect_uri.parse().unwrap()
-        } else {
-            url
-        }
+        url
     }
 
     pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
@@ -738,31 +708,21 @@ impl TestRunner {
         }
     }
 
-    pub fn upload_path_for_task(&self, id: &TaskId) -> String {
-        match self.version {
-            DapVersion::Draft02 => "upload".to_string(),
-            DapVersion::Draft09 | DapVersion::Latest => {
-                format!("tasks/{}/reports", id.to_base64url())
-            }
-        }
+    pub fn upload_path_for_task(id: &TaskId) -> String {
+        format!("tasks/{}/reports", id.to_base64url())
     }
 
-    pub fn collect_path_for_task(&self, task_id: &TaskId) -> String {
-        match self.version {
-            DapVersion::Draft02 => "collect".to_string(),
-            DapVersion::Draft09 | DapVersion::Latest => {
-                let collection_job_id = CollectionJobId(thread_rng().gen());
-                format!(
-                    "tasks/{}/collection_jobs/{}",
-                    task_id.to_base64url(),
-                    collection_job_id.to_base64url()
-                )
-            }
-        }
+    pub fn collect_path_for_task(task_id: &TaskId) -> String {
+        let collection_job_id = CollectionJobId(thread_rng().gen());
+        format!(
+            "tasks/{}/collection_jobs/{}",
+            task_id.to_base64url(),
+            collection_job_id.to_base64url()
+        )
     }
 
     pub fn upload_path(&self) -> String {
-        self.upload_path_for_task(&self.task_id)
+        Self::upload_path_for_task(&self.task_id)
     }
 
     pub async fn poll_collection_url(
@@ -770,11 +730,7 @@ impl TestRunner {
         client: &reqwest::Client,
         url: &Url,
     ) -> reqwest::Response {
-        let builder = if self.version == DapVersion::Draft02 {
-            client.get(url.as_str())
-        } else {
-            client.post(url.as_str())
-        };
+        let builder = client.post(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -786,14 +742,6 @@ impl TestRunner {
             .unwrap(),
         );
         builder.headers(headers).send().await.unwrap()
-    }
-
-    pub fn collect_task_id_field(&self) -> Option<TaskId> {
-        if self.version == DapVersion::Draft02 {
-            Some(self.task_id)
-        } else {
-            None
-        }
     }
 }
 

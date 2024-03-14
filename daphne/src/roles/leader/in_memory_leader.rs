@@ -115,14 +115,13 @@ impl InMemoryLeaderState {
         &mut self,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
-        coll_job_id: &Option<CollectionJobId>,
+        coll_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
     ) -> Result<Url, DapError> {
         let per_task = self.per_task.entry(*task_id).or_default();
 
         // Construct the collection URI for this collection job.
-        let coll_job_id = (*coll_job_id).unwrap_or(CollectionJobId(thread_rng().gen()));
         let coll_job_uri = task_config
             .leader_url
             .join(&format!(
@@ -133,7 +132,7 @@ impl InMemoryLeaderState {
             .map_err(|e| fatal_error!(err = ?e))?;
 
         // Store the collection job in the pending state.
-        if per_task.coll_jobs.get(&coll_job_id).is_some() {
+        if per_task.coll_jobs.get(coll_job_id).is_some() {
             return Err(DapError::Abort(DapAbort::BadRequest(format!(
                 "tried to overwrite collection job {}",
                 coll_job_id.to_base64url()
@@ -142,7 +141,7 @@ impl InMemoryLeaderState {
 
         per_task
             .coll_jobs
-            .insert(coll_job_id, DapCollectionJob::Pending);
+            .insert(*coll_job_id, DapCollectionJob::Pending);
 
         // Fill the work queue. Queue an aggregation job for each bucket of pending reports
         // incident to the collection job.
@@ -167,7 +166,7 @@ impl InMemoryLeaderState {
         // Queue processing of the collection job.
         self.work_queue.push_back(WorkItem::CollectionJob {
             task_id: *task_id,
-            coll_job_id,
+            coll_job_id: *coll_job_id,
             batch_sel,
             agg_param,
         });

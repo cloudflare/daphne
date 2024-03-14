@@ -28,7 +28,7 @@ use daphne::{
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
         self, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
-        BatchSelector, Draft02AggregationJobId, PartialBatchSelector, ReportId, TaskId,
+        BatchSelector, PartialBatchSelector, ReportId, TaskId,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::DapReportInitializer,
@@ -36,7 +36,6 @@ use daphne::{
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
     DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapTaskConfig,
     DapTaskParameters, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
-    MetaAggregationJobId,
 };
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
@@ -108,7 +107,6 @@ struct TestTaskConfig {
     pub fake_leader_hpke_receiver_config: HpkeReceiverConfig,
     pub task_config: DapTaskConfig,
     pub taskprov_advertisement: Option<String>,
-    pub taskprov_report_extension_payload: Option<Vec<u8>>,
 }
 
 impl Test {
@@ -281,25 +279,24 @@ impl Test {
             helper_hpke_config,
         ];
 
-        let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
-            DapTaskParameters {
-                version,
-                leader_url: Url::parse("https://exampe.com/").unwrap(),
-                helper_url: self.helper_url.clone(),
-                time_precision: 3600,
-                lifetime: 60,
-                min_batch_size: reports_per_batch.try_into().unwrap(),
-                query: DapQueryConfig::FixedSize {
-                    max_batch_size: Some(reports_per_batch.try_into().unwrap()),
-                },
-                vdaf: self.vdaf_config,
-            }
-            .to_config_with_taskprov(
-                b"cool task".to_vec(),
-                now.0,
-                &self.vdaf_verify_init,
-                &fake_collector_hpke_receiver_config.config,
-            )?;
+        let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+            version,
+            leader_url: Url::parse("https://exampe.com/").unwrap(),
+            helper_url: self.helper_url.clone(),
+            time_precision: 3600,
+            lifetime: 60,
+            min_batch_size: reports_per_batch.try_into().unwrap(),
+            query: DapQueryConfig::FixedSize {
+                max_batch_size: Some(reports_per_batch.try_into().unwrap()),
+            },
+            vdaf: self.vdaf_config,
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            now.0,
+            &self.vdaf_verify_init,
+            &fake_collector_hpke_receiver_config.config,
+        )?;
 
         Ok((
             TestTaskConfig {
@@ -307,8 +304,7 @@ impl Test {
                 hpke_config_list,
                 fake_leader_hpke_receiver_config,
                 task_config,
-                taskprov_advertisement,
-                taskprov_report_extension_payload,
+                taskprov_advertisement: Some(taskprov_advertisement),
             },
             TestDurations {
                 hpke_config_fetch: hpke_config_fetch_time,
@@ -331,7 +327,6 @@ impl Test {
             task_config,
             hpke_config_list,
             task_id,
-            taskprov_report_extension_payload,
             ..
         } = test_task_config;
 
@@ -346,14 +341,7 @@ impl Test {
                         report_time_dist.sample(&mut rng),
                         task_id,
                         measurement.clone(),
-                        vec![messages::Extension::Taskprov {
-                            draft02_payload: matches!(version, DapVersion::Draft02).then(|| {
-                                taskprov_report_extension_payload
-                                    .as_ref()
-                                    .expect("should be present if version is draft02")
-                                    .clone()
-                            }),
-                        }],
+                        vec![messages::Extension::Taskprov],
                         version,
                     )
                     .with_context(|| "failed to generate report")
@@ -434,22 +422,14 @@ impl Test {
         let mut durations = TestDurations::default();
         let mut rng = thread_rng();
 
-        // Prepare AggregateInitReq.
-        let agg_job_id = match task_config.version {
-            DapVersion::Draft02 => {
-                MetaAggregationJobId::Draft02(Draft02AggregationJobId(rng.gen()))
-            }
-            DapVersion::Latest | DapVersion::Draft09 => {
-                MetaAggregationJobId::Draft09(AggregationJobId(rng.gen()))
-            }
-        };
+        // Prepare AggregationJobInitReq.
+        let agg_job_id = AggregationJobId(rng.gen());
         let report_count = reports_for_agg_job.len();
         let transition = task_config
             .produce_agg_job_init_req(
                 fake_leader_hpke_receiver_config,
                 self,
                 task_id,
-                &agg_job_id,
                 part_batch_sel,
                 &DapAggregationParam::Empty,
                 reports_for_agg_job,
@@ -465,32 +445,24 @@ impl Test {
             DapLeaderAggregationJobTransition::Finished(..) => {
                 return Err(anyhow!("unexpected state transition (finished)"));
             }
-            DapLeaderAggregationJobTransition::Uncommitted(..) => {
-                return Err(anyhow!("unexpected state transition (uncommitted)"));
-            }
         };
 
-        // Send AggregateInitReq.
+        // Send AggregationJobInitReq.
         let headers = construct_request_headers(
-            DapMediaType::AggregationJobInitReq
-                .as_str_for_version(task_config.version)
-                .unwrap(),
+            DapMediaType::AggregationJobInitReq.as_str_for_version(task_config.version),
             taskprov_advertisement.as_deref(),
             bearer_token,
         )
         .context("constructing request headers for AggregationJobInitReq")?;
-        let url = match task_config.version {
-            DapVersion::Latest | DapVersion::Draft09 => self.helper_url.join(&format!(
-                "tasks/{}/aggregation_jobs/{}",
-                task_id.to_base64url(),
-                agg_job_id.to_base64url()
-            ))?,
-            DapVersion::Draft02 => self.helper_url.join("aggregate")?,
-        };
+        let url = self.helper_url.join(&format!(
+            "tasks/{}/aggregation_jobs/{}",
+            task_id.to_base64url(),
+            agg_job_id.to_base64url()
+        ))?;
 
         // wait for all agg jobs to be ready to fire.
         barrier.wait().await;
-        info!("Starting AggregateInitReq");
+        info!("Starting AggregationJobInitReq");
         let start = Instant::now();
         let resp = send(
             self.http_client
@@ -505,7 +477,7 @@ impl Test {
         .await?;
         {
             let duration = start.elapsed();
-            info!("Finished AggregateInitReq in {duration:#?}");
+            info!("Finished AggregationJobInitReq in {duration:#?}");
             durations.aggregate_init_req = duration;
         }
         if resp.status() == 400 {
@@ -526,7 +498,7 @@ impl Test {
             ));
         }
 
-        // Prepare AggregateContinueReq.
+        // Handle AggregationJobResp..
         let agg_resp = AggregationJobResp::get_decoded(
             &resp
                 .bytes()
@@ -534,103 +506,23 @@ impl Test {
                 .context("transfering bytes from the AggregateInitReq")?,
         )
         .with_context(|| "failed to parse response to AggregateInitReq from Helper")?;
-        let transition = task_config.handle_agg_job_resp(
-            task_id,
-            &agg_job_id,
-            state,
-            agg_resp,
-            self.metrics(),
-        )?;
-        let (uncommited, agg_cont_req) = match transition {
-            DapLeaderAggregationJobTransition::Uncommitted(uncommited, agg_cont_req) => {
-                (uncommited, agg_cont_req)
-            }
-            DapLeaderAggregationJobTransition::Finished(_)
-                if task_config.version == DapVersion::Draft02 =>
-            {
-                return Err(anyhow!(
-                    "Aggregation job completed early due to empty AggregateContinueReq"
-                ));
-            }
-            DapLeaderAggregationJobTransition::Finished(agg_share_span) => {
-                let aggregated_report_count = agg_share_span
-                    .iter()
-                    .map(|(_bucket, (_agg_share, report_ids))| report_ids.len())
-                    .sum::<usize>();
+        let transition =
+            task_config.handle_agg_job_resp(task_id, state, agg_resp, self.metrics())?;
 
-                if aggregated_report_count < report_count {
-                    bail!(
-                        "aggregated report count ({aggregated_report_count}) < expected count ({report_count})",
-                    );
-                }
-
-                return Ok((agg_share_span, durations));
-            }
-            DapLeaderAggregationJobTransition::Continued(..) => {
-                return Err(anyhow!("unexpected state transition (continue)"));
-            }
+        let DapLeaderAggregationJobTransition::Finished(agg_share_span) = transition else {
+            bail!("unexpected transition");
         };
 
-        // Send AggregateContinueReq.
-        let start = Instant::now();
-        let headers = construct_request_headers(
-            DapMediaType::AggregationJobContinueReq
-                .as_str_for_version(task_config.version)
-                .unwrap(),
-            taskprov_advertisement.as_deref(),
-            bearer_token,
-        )
-        .context("constructing request headers for AggregationJobContinueReq")?;
-        info!("Starting AggregateContinueReq");
-        let resp = send(
-            self.http_client
-                .post(self.helper_url.join("aggregate")?)
-                .body(
-                    agg_cont_req
-                        .get_encoded_with_param(&task_config.version)
-                        .unwrap(),
-                )
-                .headers(headers),
-        )
-        .await?;
-        {
-            let duration = start.elapsed();
-            info!("Finished AggregateContinueReq in {duration:#?}");
-            durations.aggregate_cont_req = duration;
-        }
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails = serde_json::from_str(
-                &resp
-                    .text()
-                    .await
-                    .context("transfering bytes from AggregationJobContinueReq")?,
-            )
-            .with_context(|| "400 Bad Request: failed to parse problem details document")?;
-            return Err(anyhow!("400 Bad Request: {problem_details:?}"));
-        } else if resp.status() == 500 {
-            return Err(anyhow::anyhow!(
-                "500 Internal Server Error: {}",
-                resp.text().await?
-            ));
-        } else if !resp.status().is_success() {
-            return Err(anyhow!(
-                "unexpected response while running an AggregateContinueReq: {resp:?}"
-            ));
+        let aggregated_report_count = agg_share_span
+            .iter()
+            .map(|(_bucket, (_agg_share, report_ids))| report_ids.len())
+            .sum::<usize>();
+
+        if aggregated_report_count < report_count {
+            bail!("aggregated report count ({aggregated_report_count}) < expected count ({report_count})");
         }
 
-        // Complete aggregation job.
-        let agg_resp = AggregationJobResp::get_decoded(
-            &resp
-                .bytes()
-                .await
-                .context("transfering bytes from AggregationJobContinueReq")?,
-        )
-        .with_context(|| "failed to parse response to AggregateContinueReq")?;
-        let out_shares = task_config
-            .handle_final_agg_job_resp(uncommited, agg_resp, self.metrics())
-            .with_context(|| "error while handling response to AggregateContinueReq")?;
-
-        Ok((out_shares, durations))
+        Ok((agg_share_span, durations))
     }
 
     /// Mock the Leader aggregating and collecting a batch.
@@ -707,7 +599,6 @@ impl Test {
             })
             .unwrap();
         let agg_share_req = AggregateShareReq {
-            draft02_task_id: task_id.for_request_payload(&version),
             batch_sel: BatchSelector::FixedSizeByBatchId { batch_id },
             agg_param: Vec::new(),
             report_count: leader_agg_share.report_count,
@@ -717,19 +608,14 @@ impl Test {
         // Send AggregateShareReq.
         let start = Instant::now();
         let headers = construct_request_headers(
-            DapMediaType::AggregateShareReq
-                .as_str_for_version(version)
-                .unwrap(),
+            DapMediaType::AggregateShareReq.as_str_for_version(version),
             taskprov_advertisement.as_deref(),
             opt.bearer_token.as_ref(),
         )?;
-        let url = match version {
-            DapVersion::Draft02 => self.helper_url.join("aggregate_share")?,
-            DapVersion::Latest | DapVersion::Draft09 => self.helper_url.join(&format!(
-                "tasks/{}/aggregate_shares",
-                task_id.to_base64url()
-            ))?,
-        };
+        let url = self.helper_url.join(&format!(
+            "tasks/{}/aggregate_shares",
+            task_id.to_base64url()
+        ))?;
         let resp = send(
             self.http_client
                 .post(url)

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
+use rand::{thread_rng, Rng};
 use tracing::{debug, error};
 use url::Url;
 
@@ -20,14 +21,13 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        AggregateShare, AggregateShareReq, AggregationJobResp, Base64Encode, BatchId,
-        BatchSelector, Collection, CollectionJobId, CollectionReq, Interval, PartialBatchSelector,
-        Query, Report, TaskId,
+        AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode,
+        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
+        PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::DaphneRequestType,
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderAggregationJobTransition,
-    DapLeaderProcessTelemetry, DapRequest, DapResource, DapResponse, DapTaskConfig, DapVersion,
-    MetaAggregationJobId,
+    DapLeaderProcessTelemetry, DapRequest, DapResource, DapResponse, DapTaskConfig,
 };
 
 struct LeaderHttpRequestOptions<'p> {
@@ -135,13 +135,15 @@ pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError>;
 
     /// Fixed-size tasks: Return the ID of the batch currently being filled.
+    //
+    // TODO draft02 cleanup: Consider removing this.
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
 
     /// Initialize a collection job.
     async fn init_collect_job(
         &self,
         task_id: &TaskId,
-        collect_job_id: &Option<CollectionJobId>,
+        collect_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
     ) -> Result<Url, DapError>;
@@ -191,7 +193,7 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
     debug!("report id is {}", report.report_metadata.id);
 
     if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, Some(&report.report_metadata)).await?;
+        resolve_taskprov(aggregator, task_id, req).await?;
     }
     let task_config = aggregator
         .get_task_config_for(task_id)
@@ -253,7 +255,7 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     check_request_content_type(req, DapMediaType::CollectReq)?;
 
     if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, None).await?;
+        resolve_taskprov(aggregator, task_id, req).await?;
     }
 
     let wrapped_task_config = aggregator
@@ -295,21 +297,8 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     )
     .await?;
 
-    // draft02 compatibility: In draft02, the collection job ID is generated as a result of the
-    // initial collection request, whereas in the latest draft, the collection job ID is parsed
-    // from the request path.
-    let collect_job_id = match (req.version, &req.resource) {
-        (DapVersion::Draft02, DapResource::Undefined) => None,
-        (
-            DapVersion::Draft09 | DapVersion::Latest,
-            DapResource::CollectionJob(ref collect_job_id),
-        ) => Some(*collect_job_id),
-        (_, DapResource::Undefined) => {
-            return Err(DapAbort::BadRequest("missing collection ID".into()).into())
-        }
-        (_, resource) => {
-            return Err(DapAbort::BadRequest(format!("unexpected resource {resource:?}")).into())
-        }
+    let DapResource::CollectionJob(coll_job_id) = &req.resource else {
+        return Err(DapAbort::BadRequest("missing collection ID".into()).into());
     };
 
     let batch_sel = match coll_job_req.query {
@@ -321,7 +310,7 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     };
 
     let collect_job_uri = aggregator
-        .init_collect_job(task_id, &collect_job_id, batch_sel, agg_param)
+        .init_collect_job(task_id, coll_job_id, batch_sel, agg_param)
         .await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Collect);
@@ -343,13 +332,12 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
     let taskprov = task_config.resolve_taskprove_advertisement()?;
 
     // Prepare AggregationJobInitReq.
-    let agg_job_id = MetaAggregationJobId::gen_for_version(task_config.version);
+    let agg_job_id = AggregationJobId(thread_rng().gen());
     let transition = task_config
         .produce_agg_job_init_req(
             aggregator,
             aggregator,
             task_id,
-            &agg_job_id,
             part_batch_sel,
             agg_param,
             reports,
@@ -364,27 +352,17 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         DapLeaderAggregationJobTransition::Finished(agg_span) if agg_span.report_count() == 0 => {
             return Ok(0)
         }
-        DapLeaderAggregationJobTransition::Finished(..)
-        | DapLeaderAggregationJobTransition::Uncommitted(..) => {
+        DapLeaderAggregationJobTransition::Finished(..) => {
             return Err(fatal_error!(
                 err = "unexpected state transition (uncommitted)"
-            ))
+            ));
         }
     };
-    let method = if task_config.version != DapVersion::Draft02 {
-        LeaderHttpRequestMethod::Put
-    } else {
-        LeaderHttpRequestMethod::Post
-    };
-    let url_path = if task_config.version == DapVersion::Draft02 {
-        "aggregate".to_string()
-    } else {
-        format!(
-            "tasks/{}/aggregation_jobs/{}",
-            task_id.to_base64url(),
-            agg_job_id.to_base64url()
-        )
-    };
+    let url_path = format!(
+        "tasks/{}/aggregation_jobs/{}",
+        task_id.to_base64url(),
+        agg_job_id.to_base64url()
+    );
 
     // Send AggregationJobInitReq and receive AggregationJobResp.
     let resp = leader_send_http_request(
@@ -395,11 +373,11 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
             path: &url_path,
             req_media_type: DapMediaType::AggregationJobInitReq,
             resp_media_type: DapMediaType::AggregationJobResp,
-            resource: agg_job_id.for_request_path(),
+            resource: DapResource::AggregationJob(agg_job_id),
             req_data: agg_job_init_req
                 .get_encoded_with_param(&task_config.version)
                 .map_err(DapError::encoding)?,
-            method,
+            method: LeaderHttpRequestMethod::Put,
             taskprov: taskprov.clone(),
         },
     )
@@ -408,49 +386,16 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Handle AggregationJobResp.
-    let transition =
-        task_config.handle_agg_job_resp(task_id, &agg_job_id, state, agg_job_resp, metrics)?;
-    let agg_span = match transition {
-        DapLeaderAggregationJobTransition::Uncommitted(uncommited, agg_job_cont_req) => {
-            // Send AggregationJobContinueReq and receive AggregationJobResp.
-            let resp = leader_send_http_request(
-                aggregator,
-                task_id,
-                task_config,
-                LeaderHttpRequestOptions {
-                    path: &url_path,
-                    req_media_type: DapMediaType::AggregationJobContinueReq,
-                    resp_media_type: DapMediaType::agg_job_cont_resp_for_version(
-                        task_config.version,
-                    ),
-                    resource: agg_job_id.for_request_path(),
-                    req_data: agg_job_cont_req
-                        .get_encoded_with_param(&task_config.version)
-                        .map_err(DapError::encoding)?,
-                    method: LeaderHttpRequestMethod::Post,
-                    taskprov,
-                },
-            )
-            .await?;
-            let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
-
-            // Handle AggregationJobResp.
-            task_config.handle_final_agg_job_resp(uncommited, agg_job_resp, metrics)?
-        }
-        DapLeaderAggregationJobTransition::Finished(agg_span) => {
-            if agg_span.report_count() > 0 {
-                agg_span
-            } else {
-                return Ok(0);
-            }
-        }
-        DapLeaderAggregationJobTransition::Continued(..) => {
-            return Err(fatal_error!(err = "unexpected state transition (continue)"))
-        }
+    let DapLeaderAggregationJobTransition::Finished(agg_span) =
+        task_config.handle_agg_job_resp(task_id, state, agg_job_resp, metrics)?
+    else {
+        return Err(fatal_error!(err = "unexpected state transition"));
     };
 
     let out_shares_count = agg_span.report_count() as u64;
+    if out_shares_count == 0 {
+        return Ok(0);
+    }
 
     // At this point we're committed to aggregating the reports: if we do detect an error (a
     // report was replayed at this stage or the span overlaps with a collected batch), then we
@@ -526,7 +471,6 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
 
     // Prepare AggregateShareReq.
     let agg_share_req = AggregateShareReq {
-        draft02_task_id: task_id.for_request_payload(&task_config.version),
         batch_sel: batch_sel.clone(),
         agg_param: agg_param
             .get_encoded()
@@ -535,11 +479,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
         checksum: leader_agg_share.checksum,
     };
 
-    let url_path = if task_config.version == DapVersion::Draft02 {
-        "aggregate_share".to_string()
-    } else {
-        format!("tasks/{}/aggregate_shares", task_id.to_base64url())
-    };
+    let url_path = format!("tasks/{}/aggregate_shares", task_id.to_base64url());
 
     // Send AggregateShareReq and receive AggregateShareResp.
     let resp = leader_send_http_request(
@@ -561,22 +501,19 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
     .await?;
     let agg_share_resp = AggregateShare::get_decoded(&resp.payload)
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
-    // In the latest draft, the Collection message includes the smallest quantized time
-    // interval containing all reports in the batch.
-    let draft09_interval = match task_config.version {
-        DapVersion::Draft02 => None,
-        DapVersion::Draft09 | DapVersion::Latest => {
-            let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
-            let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
-            Some(Interval {
-                start: low,
-                duration: if high > low {
-                    high - low
-                } else {
-                    // This should never happen!
-                    task_config.time_precision
-                },
-            })
+    // The Collection message includes the smallest quantized time interval containing all reports
+    // in the batch.
+    let interval = {
+        let low = task_config.quantized_time_lower_bound(leader_agg_share.min_time);
+        let high = task_config.quantized_time_upper_bound(leader_agg_share.max_time);
+        Interval {
+            start: low,
+            duration: if high > low {
+                high - low
+            } else {
+                // This should never happen!
+                task_config.time_precision
+            },
         }
     };
 
@@ -584,7 +521,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
     let collection = Collection {
         part_batch_sel: batch_sel.clone().into(),
         report_count: leader_agg_share.report_count,
-        draft09_interval,
+        interval,
         encrypted_agg_shares: [leader_enc_agg_share, agg_share_resp.encrypted_agg_share],
     };
     aggregator
@@ -715,23 +652,12 @@ pub async fn process<S: Sync, A: DapLeader<S>>(
 }
 
 fn check_response_content_type(resp: &DapResponse, expected: DapMediaType) -> Result<(), DapError> {
-    let want_str = expected
-        .as_str_for_version(resp.version)
-        .expect("could not determine string representation for expected content-type");
-
     if resp.media_type != expected {
-        if let Some(got_str) = resp.media_type.as_str_for_version(resp.version) {
-            Err(fatal_error!(
-                err = "response from peer has unexpected content-type",
-                got = got_str,
-                want = want_str,
-            ))
-        } else {
-            Err(fatal_error!(
-                err = "response from peer has no content-type",
-                expected = want_str,
-            ))
-        }
+        Err(fatal_error!(
+            err = "response from peer has unexpected content-type",
+            got = resp.media_type.as_str_for_version(resp.version),
+            want = expected.as_str_for_version(resp.version),
+        ))
     } else {
         Ok(())
     }

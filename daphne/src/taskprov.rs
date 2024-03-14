@@ -11,7 +11,7 @@ use crate::{
     messages::{
         self, decode_base64url_vec,
         taskprov::{QueryConfigVar, TaskConfig, VdafTypeVar},
-        Extension, ReportMetadata, TaskId,
+        TaskId,
     },
     vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
@@ -22,7 +22,6 @@ use ring::{
     digest,
     hkdf::{Prk, Salt, HKDF_SHA256},
 };
-use std::{borrow::Cow, str};
 use url::Url;
 
 /// SHA-256 of "dap-taskprov"
@@ -32,17 +31,13 @@ pub(crate) const TASKPROV_SALT: [u8; 32] = [
     0x74, 0x01, 0x7a, 0x52, 0xcb, 0x4c, 0xf6, 0x39, 0xfb, 0x83, 0xe0, 0x47, 0x72, 0x3a, 0x0f, 0xfe,
 ];
 
-fn compute_task_id_draft02(serialized: &[u8]) -> TaskId {
+/// Compute the task id of a serialized task config.
+pub(crate) fn compute_task_id(serialized: &[u8]) -> TaskId {
     let d = digest::digest(&digest::SHA256, serialized);
     let dref = d.as_ref();
     let mut b: [u8; 32] = [0; 32];
     b[..32].copy_from_slice(&dref[..32]);
     TaskId(b)
-}
-
-/// Compute the task id of a serialized task config.
-pub fn compute_task_id(_version: DapVersion, serialized: &[u8]) -> TaskId {
-    compute_task_id_draft02(serialized)
 }
 
 // The documentation for ring::hkdf says computing the Salt is expensive, and we use the same PRK all the
@@ -104,21 +99,13 @@ fn malformed_task_config(task_id: &TaskId, detail: String) -> DapAbort {
 ///
 /// The `task_id` is the task ID indicated by the request; if this does not match the derived task
 /// ID, then we return `Err(DapError::Abort(DapAbort::UnrecognizedTask))`.
-///
-/// We first look for the taskprov advertisement first in the request header (`req.taskprov`, which
-/// is set to the value of the "dap-taskprov" HTTP header, if available). We then look for the
-/// advertisement in the metadata of one of the reports incident to the request
-/// (`report_metadata_advertisement.extensions`). If not found, then we return `Ok(None)`.
 pub fn resolve_advertised_task_config<S>(
     req: &'_ DapRequest<S>,
     verify_key_init: &[u8; 32],
     collector_hpke_config: &HpkeConfig,
     task_id: &TaskId,
-    report_metadata_advertisement: Option<&ReportMetadata>,
 ) -> Result<Option<DapTaskConfig>, DapAbort> {
-    let Some(advertised_task_config) =
-        get_taskprov_task_config(req, task_id, report_metadata_advertisement)?
-    else {
+    let Some(advertised_task_config) = get_taskprov_task_config(req, task_id)? else {
         return Ok(None);
     };
 
@@ -137,45 +124,19 @@ pub fn resolve_advertised_task_config<S>(
 fn get_taskprov_task_config<S>(
     req: &'_ DapRequest<S>,
     task_id: &TaskId,
-    report_metadata_advertisement: Option<&ReportMetadata>,
 ) -> Result<Option<TaskConfig>, DapAbort> {
     let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
-        Cow::Owned(decode_base64url_vec(taskprov_base64url).ok_or_else(|| {
+        decode_base64url_vec(taskprov_base64url).ok_or_else(|| {
             DapAbort::BadRequest(
                 r#"Invalid advertisement in "dap-taskprov" header: base64url parsing failed"#
                     .to_string(),
             )
-        })?)
-    } else if let Some(metadata) = report_metadata_advertisement {
-        if matches!(req.version, DapVersion::Draft09 | DapVersion::Latest) {
-            return Ok(None);
-        }
-        let taskprovs: Vec<&Extension> = metadata
-            .draft02_extensions
-            .as_ref()
-            .expect("draft02: encountered report metadata with no extensions")
-            .iter()
-            .filter(|x| matches!(x, Extension::Taskprov { .. }))
-            .collect();
-        match taskprovs.len() {
-            0 => return Ok(None),
-            1 => match &taskprovs[0] {
-                Extension::Taskprov {
-                    draft02_payload: Some(payload),
-                } => Cow::Borrowed(payload),
-                _ => panic!("cannot happen"),
-            },
-            _ => {
-                // The decoder already returns an error if an extension of a give type occurs more
-                // than once.
-                panic!("should not happen")
-            }
-        }
+        })?
     } else {
         return Ok(None);
     };
 
-    if compute_task_id(req.version, taskprov_data.as_ref()) != *task_id {
+    if compute_task_id(taskprov_data.as_ref()) != *task_id {
         // Return unrecognizedTask following section 5.1 of the taskprov draft.
         return Err(DapAbort::UnrecognizedTask);
     }
@@ -188,7 +149,7 @@ fn get_taskprov_task_config<S>(
 }
 
 fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
-    let url_string = str::from_utf8(url_bytes).map_err(|e| {
+    let url_string = std::str::from_utf8(url_bytes).map_err(|e| {
         malformed_task_config(
             task_id,
             format!("Encountered error while parsing URL bytes as string: {e}"),
@@ -266,10 +227,6 @@ impl VdafConfig {
             }
             (_, VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
-                task_id: *task_id,
-            }),
-            (_, var) => Err(DapAbort::InvalidTask {
-                detail: format!("{version}: unsupported VDAF: {var:?}"),
                 task_id: *task_id,
             }),
         }
@@ -419,30 +376,15 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
     }
 }
 
-impl ReportMetadata {
-    /// Does this metatdata have a taskprov extension and does it match the specified id?
-    pub(crate) fn is_taskprov(&self, version: DapVersion, task_id: &TaskId) -> bool {
-        return self.draft02_extensions.as_ref().is_some_and(|extensions| {
-            extensions.iter().any(|x| match x {
-                Extension::Taskprov {
-                    draft02_payload: Some(payload),
-                } => *task_id == compute_task_id(version, payload),
-                _ => false,
-            })
-        });
-    }
-}
-
 #[cfg(test)]
 mod test {
     use prio::codec::ParameterizedEncode;
 
     use super::{compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config};
     use crate::{
-        auth::BearerToken,
         error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
-        messages::{self, encode_base64url, Extension, ReportId, ReportMetadata, TaskId},
+        messages::{self, encode_base64url, TaskId},
         test_versions,
         vdaf::{VdafConfig, VdafVerifyKey},
         DapRequest, DapResource, DapTaskConfig, DapVersion,
@@ -471,10 +413,7 @@ mod test {
             },
         };
 
-        let task_id = compute_task_id(
-            version,
-            &taskprov_config.get_encoded_with_param(&version).unwrap(),
-        );
+        let task_id = compute_task_id(&taskprov_config.get_encoded_with_param(&version).unwrap());
 
         let task_config = DapTaskConfig::try_from_taskprov(
             version,
@@ -495,8 +434,7 @@ mod test {
 
     test_versions! { try_from_taskprov }
 
-    #[test]
-    fn check_vdaf_key_computation() {
+    fn check_vdaf_key_computation(version: DapVersion) {
         let task_id = TaskId([
             0xb4, 0x76, 0x9b, 0xb0, 0x63, 0xa8, 0xb3, 0x31, 0x2a, 0xf7, 0x42, 0x97, 0xf3, 0x0f,
             0xdb, 0xf8, 0xe0, 0xb7, 0x1c, 0x2e, 0xb2, 0x48, 0x1f, 0x59, 0x1d, 0x1d, 0x7d, 0xe6,
@@ -508,7 +446,7 @@ mod test {
             0xa7, 0xda, 0x76, 0x1d,
         ];
         let vk = compute_vdaf_verify_key(
-            DapVersion::Draft02,
+            version,
             &verify_key_init,
             &task_id,
             &VdafConfig::Prio2 { dimension: 10 },
@@ -523,110 +461,7 @@ mod test {
         }
     }
 
-    // Ensure that the task config is computed the same way whether it was advertised in the request
-    // header or the report metadata.
-    #[test]
-    fn test_resolve_advertised_task_config() {
-        let version = DapVersion::Draft02;
-        let taskprov_task_config = messages::taskprov::TaskConfig {
-            task_info: "Hi".as_bytes().to_vec(),
-            leader_url: messages::taskprov::UrlBytes {
-                bytes: "https://leader.com".as_bytes().to_vec(),
-            },
-            helper_url: messages::taskprov::UrlBytes {
-                bytes: "https://helper.com".as_bytes().to_vec(),
-            },
-            query_config: messages::taskprov::QueryConfig {
-                time_precision: 0x01,
-                max_batch_query_count: 1,
-                min_batch_size: 1024,
-                var: messages::taskprov::QueryConfigVar::FixedSize {
-                    max_batch_size: 2048,
-                },
-            },
-            task_expiration: 0x6352_f9a5,
-            vdaf_config: messages::taskprov::VdafConfig {
-                dp_config: messages::taskprov::DpConfig::None,
-                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
-            },
-        };
-
-        let taskprov_task_config_data = taskprov_task_config
-            .get_encoded_with_param(&version)
-            .unwrap();
-        let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_data);
-        let task_id = compute_task_id(version, &taskprov_task_config_data);
-        let collector_hpke_config = HpkeReceiverConfig::gen(1, HpkeKemId::X25519HkdfSha256)
-            .unwrap()
-            .config;
-
-        let from_request_header = resolve_advertised_task_config(
-            &DapRequest::<BearerToken> {
-                version,
-                task_id: Some(task_id),
-                taskprov: Some(taskprov_task_config_base64url),
-                ..Default::default()
-            },
-            &[0; 32],
-            &collector_hpke_config,
-            &task_id,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-
-        let from_report_metadata = resolve_advertised_task_config(
-            &DapRequest::<BearerToken> {
-                version,
-                task_id: Some(task_id),
-                ..Default::default()
-            },
-            &[0; 32],
-            &collector_hpke_config,
-            &task_id,
-            Some(&ReportMetadata {
-                id: ReportId([0; 16]),
-                time: 0,
-                draft02_extensions: Some(vec![Extension::Taskprov {
-                    draft02_payload: Some(taskprov_task_config_data),
-                }]),
-            }),
-        )
-        .unwrap()
-        .unwrap();
-
-        assert_eq!(from_request_header.version, from_report_metadata.version);
-        assert_eq!(
-            from_request_header.leader_url,
-            from_report_metadata.leader_url
-        );
-        assert_eq!(
-            from_request_header.helper_url,
-            from_report_metadata.helper_url
-        );
-        assert_eq!(
-            from_request_header.time_precision,
-            from_report_metadata.time_precision
-        );
-        assert_eq!(
-            from_request_header.expiration,
-            from_report_metadata.expiration
-        );
-        assert_eq!(
-            from_request_header.min_batch_size,
-            from_report_metadata.min_batch_size
-        );
-        assert_eq!(from_request_header.query, from_report_metadata.query);
-        assert_eq!(from_request_header.vdaf, from_report_metadata.vdaf);
-        assert_eq!(
-            from_request_header.vdaf_verify_key.as_ref(),
-            from_report_metadata.vdaf_verify_key.as_ref()
-        );
-        assert_eq!(
-            from_request_header.collector_hpke_config,
-            from_report_metadata.collector_hpke_config
-        );
-    }
+    test_versions! { check_vdaf_key_computation }
 
     fn resolve_advertised_task_config_expect_abort_unrecognized_vdaf(version: DapVersion) {
         // Create a request for a taskprov task with an unrecognized VDAF.
@@ -657,7 +492,7 @@ mod test {
             }
             .get_encoded_with_param(&version)
             .unwrap();
-            let task_id = compute_task_id(version, &taskprov_task_config_bytes);
+            let task_id = compute_task_id(&taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
             let req = DapRequest::<()> {
@@ -679,12 +514,12 @@ mod test {
 
         match (
             version,
-            resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id, None),
+            resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id),
         ) {
-            (DapVersion::Draft02, Err(DapAbort::InvalidMessage { detail, .. })) => {
-                assert_eq!(detail, "codec error: unexpected value");
-            }
-            (DapVersion::Draft09, Err(DapAbort::InvalidTask { detail, .. })) => {
+            (
+                DapVersion::Draft09 | DapVersion::Latest,
+                Err(DapAbort::InvalidTask { detail, .. }),
+            ) => {
                 assert_eq!(detail, "unimplemented VDAF type (1337)");
             }
             (_, r) => panic!("unexpected result: {r:?} ({version})"),

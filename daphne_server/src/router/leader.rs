@@ -5,10 +5,9 @@ use std::sync::Arc;
 
 use axum::{
     body::HttpBody,
-    extract::{Path, State},
-    http::{header, Request, StatusCode},
-    middleware::{self, Next},
-    response::{AppendHeaders, IntoResponse, Response},
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use daphne::{
@@ -19,29 +18,8 @@ use daphne::{
 };
 use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::ParameterizedEncode;
-use serde::Deserialize;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
-
-#[derive(Deserialize, Debug)]
-struct PathVersion {
-    version: DapVersion,
-}
-
-async fn require_draft02<B>(
-    Path(PathVersion { version }): Path<PathVersion>,
-    request: Request<B>,
-    next: Next<B>,
-) -> Response {
-    if version != DapVersion::Draft02 {
-        return (
-            StatusCode::NOT_FOUND,
-            format!("route not implemented for version {version}"),
-        )
-            .into_response();
-    }
-    next.run(request).await
-}
 
 pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
@@ -51,17 +29,11 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route(
-            "/:version/upload",
-            post(upload).layer(middleware::from_fn(require_draft02)),
-        )
-        .route(
-            "/:version/collect",
-            post(get_collect_uri).layer(middleware::from_fn(require_draft02)),
-        )
+        .route("/:version/tasks/:task_id/reports", post(upload))
+        .route("/:version/collect", post(get_collect_uri))
         .route(
             "/:version/collect/task/:task_id/req/:collect_job_id",
-            get(collect).layer(middleware::from_fn(require_draft02)),
+            get(collect),
         )
         .route("/:version/tasks/:task_id/reports", put(upload))
         .route(
@@ -105,11 +77,6 @@ where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
 {
     match (leader::handle_coll_job_req(&*app, &req).await, req.version) {
-        (Ok(uri), DapVersion::Draft02) => (
-            StatusCode::SEE_OTHER,
-            AppendHeaders([(header::LOCATION, uri.as_str())]),
-        )
-            .into_response(),
         (Ok(_), DapVersion::Draft09 | DapVersion::Latest) => StatusCode::CREATED.into_response(),
         (Err(e), _) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
