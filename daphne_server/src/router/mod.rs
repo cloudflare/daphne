@@ -7,7 +7,7 @@ mod leader;
 #[cfg(feature = "test-utils")]
 pub mod test_routes;
 
-use std::{io::Cursor, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     async_trait,
@@ -32,7 +32,6 @@ use daphne_service_utils::{
     DapRole,
 };
 use http::Request;
-use prio::codec::Decode;
 use serde::Deserialize;
 
 use crate::App;
@@ -127,14 +126,10 @@ impl AxumDapResponse {
     ) -> Self {
         let Some(media_type) = response.media_type.as_str_for_version(response.version) else {
             return AxumDapResponse::new_error(
-                fatal_error!(err = "failed to construct content-type",
-                    ?response.media_type,
-                    ?response.version
-                ),
+                fatal_error!(err = "invalid content-type for DAP version"),
                 metrics,
             );
         };
-
         let media_type = match HeaderValue::from_str(media_type) {
             Ok(media_type) => media_type,
             Err(e) => {
@@ -316,45 +311,30 @@ where
             ));
         };
 
-        let (task_id, resource) = match version {
-            DapVersion::Draft02 => {
-                let mut r = Cursor::new(payload.as_ref());
-                let task_id = task_id.or_else(|| TaskId::decode(&mut r).ok());
-
-                // If the collection job ID was found in the request path, then this must be a
-                // request for a collection job result from the Collector.
-                let resource =
-                    collect_job_id.map_or(DapResource::Undefined, DapResource::CollectionJob);
-                (task_id, resource)
-            }
-            DapVersion::Draft09 | DapVersion::Latest => {
-                let resource = match media_type {
-                    Some(
-                        DapMediaType::AggregationJobInitReq
-                        | DapMediaType::AggregationJobContinueReq,
-                    ) => {
-                        if let Some(agg_job_id) = agg_job_id {
-                            DapResource::AggregationJob(agg_job_id)
-                        } else {
-                            // Missing or invalid agg job ID. This should be handled as a bad
-                            // request (undefined resource) by the caller.
-                            DapResource::Undefined
-                        }
+        let (task_id, resource) = {
+            let resource = match media_type {
+                Some(DapMediaType::AggregationJobInitReq) => {
+                    if let Some(agg_job_id) = agg_job_id {
+                        DapResource::AggregationJob(agg_job_id)
+                    } else {
+                        // Missing or invalid agg job ID. This should be handled as a bad
+                        // request (undefined resource) by the caller.
+                        DapResource::Undefined
                     }
-                    Some(DapMediaType::CollectReq) => {
-                        if let Some(collect_job_id) = collect_job_id {
-                            DapResource::CollectionJob(collect_job_id)
-                        } else {
-                            // Missing or invalid agg job ID. This should be handled as a bad
-                            // request (undefined resource) by the caller.
-                            DapResource::Undefined
-                        }
+                }
+                Some(DapMediaType::CollectReq) => {
+                    if let Some(collect_job_id) = collect_job_id {
+                        DapResource::CollectionJob(collect_job_id)
+                    } else {
+                        // Missing or invalid agg job ID. This should be handled as a bad
+                        // request (undefined resource) by the caller.
+                        DapResource::Undefined
                     }
-                    _ => DapResource::Undefined,
-                };
+                }
+                _ => DapResource::Undefined,
+            };
 
-                (task_id, resource)
-            }
+            (task_id, resource)
         };
 
         Ok(DapRequestExtractor(DapRequest {

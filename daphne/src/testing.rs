@@ -10,9 +10,9 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        AggregationJobContinueReq, AggregationJobInitReq, AggregationJobResp, BatchId,
-        BatchSelector, Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector,
-        Report, ReportId, TaskId, Time, TransitionFailure,
+        AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
+        Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
+        ReportId, TaskId, Time, TransitionFailure,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -23,14 +23,12 @@ use crate::{
         DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationJobUncommitted, DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError,
-    DapGlobalConfig, DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition,
-    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
-    MetaAggregationJobId, VdafConfig,
+    DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
+    DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition, DapMeasurement,
+    DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
-use prio::codec::Encode;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -55,19 +53,13 @@ pub struct AggregationJobTest {
     pub(crate) client_hpke_config_list: Vec<HpkeConfig>,
     pub(crate) collector_hpke_receiver_config: HpkeReceiverConfig,
 
-    // aggregation job ID
-    pub(crate) agg_job_id: MetaAggregationJobId,
-
     // the current time
     pub(crate) now: Time,
 
     // operational parameters
     #[allow(dead_code)]
     pub(crate) leader_registry: prometheus::Registry,
-    #[allow(dead_code)]
-    pub(crate) helper_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphnePromMetrics,
-    pub(crate) helper_metrics: DaphnePromMetrics,
 }
 
 fn initialize_reports(
@@ -113,7 +105,6 @@ impl AggregationJobTest {
             .unwrap()
             .as_secs();
         let task_id = TaskId(rng.gen());
-        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
         let vdaf_verify_key = vdaf.gen_verify_key();
         let leader_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
         let helper_hpke_receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_id).unwrap();
@@ -129,21 +120,11 @@ impl AggregationJobTest {
             ])),
         )
         .unwrap();
-        let helper_registry = prometheus::Registry::new_custom(
-            Option::None,
-            Option::Some(HashMap::from([
-                ("env".to_string(), "test_helper".to_string()),
-                ("host".to_string(), "helper.org".to_string()),
-            ])),
-        )
-        .unwrap();
         let leader_metrics = DaphnePromMetrics::register(&leader_registry).unwrap();
-        let helper_metrics = DaphnePromMetrics::register(&helper_registry).unwrap();
 
         Self {
             now,
             task_id,
-            agg_job_id,
             leader_hpke_receiver_config,
             helper_hpke_receiver_config,
             client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
@@ -162,9 +143,7 @@ impl AggregationJobTest {
                 method: Default::default(),
             },
             leader_registry,
-            helper_registry,
             leader_metrics,
-            helper_metrics,
         }
     }
 
@@ -204,7 +183,6 @@ impl AggregationJobTest {
                 &self.leader_hpke_receiver_config,
                 self,
                 &self.task_id,
-                &self.agg_job_id,
                 &PartialBatchSelector::TimeInterval,
                 agg_param,
                 reports,
@@ -235,7 +213,6 @@ impl AggregationJobTest {
                     )
                     .await
                     .unwrap(),
-                &self.helper_metrics,
             )
             .unwrap()
     }
@@ -247,11 +224,10 @@ impl AggregationJobTest {
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-    ) -> DapLeaderAggregationJobTransition<AggregationJobContinueReq> {
+    ) -> DapLeaderAggregationJobTransition<()> {
         self.task_config
             .handle_agg_job_resp(
                 &self.task_id,
-                &self.agg_job_id,
                 leader_state,
                 agg_job_resp,
                 &self.leader_metrics,
@@ -267,64 +243,8 @@ impl AggregationJobTest {
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
-            .handle_agg_job_resp(
-                &self.task_id,
-                &self.agg_job_id,
-                leader_state,
-                agg_job_resp,
-                metrics,
-            )
+            .handle_agg_job_resp(&self.task_id, leader_state, agg_job_resp, metrics)
             .expect_err("handle_agg_job_resp() succeeded; expected failure")
-    }
-
-    /// Helper: Handle `AggregationJobContinueReq`, produce second `AggregationJobResp`.
-    ///
-    /// Panics if the Helper aborts.
-    pub fn handle_agg_job_cont_req(
-        &self,
-        helper_state: &DapAggregationJobState,
-        agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
-        self.task_config
-            .handle_agg_job_cont_req(
-                &self.task_id,
-                helper_state,
-                &HashMap::default(),
-                &self.agg_job_id,
-                agg_job_cont_req,
-            )
-            .expect("error while handling request")
-    }
-
-    /// Like [`handle_agg_job_cont_req`] but expect the Helper to abort.
-    pub fn handle_agg_job_cont_req_expect_err(
-        &self,
-        helper_state: DapAggregationJobState,
-        agg_job_cont_req: &AggregationJobContinueReq,
-    ) -> DapError {
-        self.task_config
-            .handle_agg_job_cont_req(
-                &self.task_id,
-                &helper_state,
-                &HashMap::default(),
-                &self.agg_job_id,
-                agg_job_cont_req,
-            )
-            .expect_err("handle_agg_job_cont_req() succeeded; expected failure")
-    }
-
-    /// Leader: Handle the last `AggregationJobResp`.
-    ///
-    /// Panics if the Leader aborts.
-    pub fn handle_final_agg_job_resp(
-        &self,
-        leader_uncommitted: DapAggregationJobUncommitted,
-        agg_job_resp: AggregationJobResp,
-    ) -> DapAggregateSpan<DapAggregateShare> {
-        let metrics = &self.leader_metrics;
-        self.task_config
-            .handle_final_agg_job_resp(leader_uncommitted, agg_job_resp, metrics)
-            .unwrap()
     }
 
     /// Produce the Leader's encrypted aggregate share.
@@ -411,38 +331,20 @@ impl AggregationJobTest {
             panic!("unexpected transition");
         };
 
-        let (leader_agg_span, helper_agg_span) =
-            match self.handle_agg_job_init_req(agg_job_init_req).await {
-                DapHelperAggregationJobTransition::Continued(helper_state, agg_job_resp) => {
-                    let got = DapAggregationJobState::get_decoded(
-                        &self.task_config.vdaf,
-                        &helper_state.get_encoded().unwrap(),
-                    )
-                    .expect("failed to decode helper state");
-                    assert_eq!(
-                        got.get_encoded().unwrap(),
-                        helper_state.get_encoded().unwrap()
-                    );
-
-                    let DapLeaderAggregationJobTransition::Uncommitted(uncommitted, agg_cont) =
-                        self.handle_agg_job_resp(leader_state, agg_job_resp)
-                    else {
-                        panic!("unexpected transition");
-                    };
-                    let (helper_agg_span, transitions) =
-                        self.handle_agg_job_cont_req(&helper_state, &agg_cont);
-                    let leader_agg_span = self.handle_final_agg_job_resp(uncommitted, transitions);
-                    (leader_agg_span, helper_agg_span)
-                }
-                DapHelperAggregationJobTransition::Finished(helper_agg_span, agg_job_resp) => {
-                    let DapLeaderAggregationJobTransition::Finished(leader_agg_span) =
-                        self.handle_agg_job_resp(leader_state, agg_job_resp)
-                    else {
-                        panic!("unexpected transition");
-                    };
-                    (leader_agg_span, helper_agg_span)
-                }
+        let (leader_agg_span, helper_agg_span) = {
+            let DapHelperAggregationJobTransition::Finished(helper_agg_span, agg_job_resp) =
+                self.handle_agg_job_init_req(agg_job_init_req).await
+            else {
+                unreachable!("unexpected transition")
             };
+
+            let DapLeaderAggregationJobTransition::Finished(leader_agg_span) =
+                self.handle_agg_job_resp(leader_state, agg_job_resp)
+            else {
+                panic!("unexpected transition");
+            };
+            (leader_agg_span, helper_agg_span)
+        };
 
         let report_count = u64::try_from(leader_agg_span.report_count()).unwrap();
 
@@ -478,11 +380,11 @@ impl AggregationJobTest {
 //
 // would generate async tests named
 //
-//     something_draft02
+//     something_draft09
 //
 // and
 //
-//     something_draft09
+//     something_latest
 //
 // that called something(version) with the appropriate version.
 //
@@ -504,8 +406,8 @@ macro_rules! test_version {
 macro_rules! test_versions {
     ($($fname:ident),*) => {
         $(
-            $crate::test_version! { $fname, Draft02 }
             $crate::test_version! { $fname, Draft09 }
+            $crate::test_version! { $fname, Latest }
         )*
     };
 }
@@ -526,7 +428,6 @@ macro_rules! async_test_version {
 macro_rules! async_test_versions {
     ($($fname:ident),*) => {
         $(
-            $crate::async_test_version! { $fname, Draft02 }
             $crate::async_test_version! { $fname, Draft09 }
             $crate::async_test_version! { $fname, Latest }
         )*
@@ -1054,18 +955,15 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 
 #[async_trait]
 impl DapHelper<BearerToken> for InMemoryAggregator {
-    async fn put_helper_state_if_not_exists<Id>(
+    async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
-        agg_job_id: Id,
+        agg_job_id: &AggregationJobId,
         helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError>
-    where
-        Id: Into<MetaAggregationJobId> + Send,
-    {
+    ) -> Result<bool, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: *task_id,
-            agg_job_id_owned: agg_job_id.into(),
+            agg_job_id: *agg_job_id,
         };
 
         let mut helper_state_store = self
@@ -1084,17 +982,14 @@ impl DapHelper<BearerToken> for InMemoryAggregator {
         Ok(true)
     }
 
-    async fn get_helper_state<Id>(
+    async fn get_helper_state(
         &self,
         task_id: &TaskId,
-        agg_job_id: Id,
-    ) -> Result<Option<DapAggregationJobState>, DapError>
-    where
-        Id: Into<MetaAggregationJobId> + Send,
-    {
+        agg_job_id: &AggregationJobId,
+    ) -> Result<Option<DapAggregationJobState>, DapError> {
         let helper_state_info = HelperStateInfo {
             task_id: *task_id,
-            agg_job_id_owned: agg_job_id.into(),
+            agg_job_id: *agg_job_id,
         };
 
         let helper_state_store = self
@@ -1157,7 +1052,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
     async fn init_collect_job(
         &self,
         task_id: &TaskId,
-        coll_job_id: &Option<CollectionJobId>,
+        coll_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
     ) -> Result<Url, DapError> {
@@ -1201,14 +1096,12 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
         _url: Url,
     ) -> Result<DapResponse, DapError> {
         match req.media_type {
-            Some(DapMediaType::AggregationJobInitReq | DapMediaType::AggregationJobContinueReq) => {
-                Ok(helper::handle_agg_job_req(
-                    &**self.peer.as_ref().expect("peer not configured"),
-                    &req,
-                )
-                .await
-                .expect("peer aborted unexpectedly"))
-            }
+            Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_req(
+                &**self.peer.as_ref().expect("peer not configured"),
+                &req,
+            )
+            .await
+            .expect("peer aborted unexpectedly")),
             Some(DapMediaType::AggregateShareReq) => Ok(helper::handle_agg_share_req(
                 &**self.peer.as_ref().expect("peer not configured"),
                 &req,
@@ -1242,7 +1135,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 struct HelperStateInfo {
     task_id: TaskId,
-    agg_job_id_owned: MetaAggregationJobId,
+    agg_job_id: AggregationJobId,
 }
 
 /// Helper macro used by `assert_metrics_include`.

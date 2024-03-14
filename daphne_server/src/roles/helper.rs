@@ -5,24 +5,21 @@ use axum::async_trait;
 use daphne::{
     error::DapAbort,
     fatal_error,
-    messages::TaskId,
+    messages::{AggregationJobId, TaskId},
     roles::{DapAggregator, DapHelper},
-    DapAggregationJobState, DapError, MetaAggregationJobId,
+    DapAggregationJobState, DapError,
 };
 use daphne_service_utils::{auth::DaphneAuth, durable_requests::bindings};
 use prio::codec::Encode;
 
 #[async_trait]
 impl DapHelper<DaphneAuth> for crate::App {
-    async fn put_helper_state_if_not_exists<Id>(
+    async fn put_helper_state_if_not_exists(
         &self,
         task_id: &TaskId,
-        agg_job_id: Id,
+        agg_job_id: &AggregationJobId,
         helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError>
-    where
-        Id: Into<MetaAggregationJobId> + Send,
-    {
+    ) -> Result<bool, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
@@ -33,7 +30,7 @@ impl DapHelper<DaphneAuth> for crate::App {
             .with_retry()
             .request(
                 bindings::HelperState::PutIfNotExists,
-                (task_config.as_ref().version, task_id, &agg_job_id.into()),
+                (task_config.as_ref().version, task_id, agg_job_id),
             )
             .encode_bincode(helper_state_hex)
             .send()
@@ -41,14 +38,11 @@ impl DapHelper<DaphneAuth> for crate::App {
             .map_err(|e| fatal_error!(err = ?e))?)
     }
 
-    async fn get_helper_state<Id>(
+    async fn get_helper_state(
         &self,
         task_id: &TaskId,
-        agg_job_id: Id,
-    ) -> Result<Option<DapAggregationJobState>, DapError>
-    where
-        Id: Into<MetaAggregationJobId> + Send,
-    {
+        agg_job_id: &AggregationJobId,
+    ) -> Result<Option<DapAggregationJobState>, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
@@ -60,7 +54,7 @@ impl DapHelper<DaphneAuth> for crate::App {
             .with_retry()
             .request(
                 bindings::HelperState::Get,
-                (task_config.as_ref().version, task_id, &agg_job_id.into()),
+                (task_config.as_ref().version, task_id, agg_job_id),
             )
             .send()
             .await

@@ -15,7 +15,7 @@ use crate::{
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapResponse, DapTaskConfig, DapVersion,
+    DapRequest, DapResponse, DapTaskConfig,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -187,17 +187,11 @@ where
         }
     }
 
-    let payload = match req.version {
-        DapVersion::Draft02 => hpke_config
-            .as_ref()
-            .get_encoded()
-            .map_err(DapError::encoding)?,
-        DapVersion::Draft09 | DapVersion::Latest => {
-            let hpke_config_list = HpkeConfigList {
-                hpke_configs: vec![hpke_config.as_ref().clone()],
-            };
-            hpke_config_list.get_encoded().map_err(DapError::encoding)?
-        }
+    let payload = {
+        let hpke_config_list = HpkeConfigList {
+            hpke_configs: vec![hpke_config.as_ref().clone()],
+        };
+        hpke_config_list.get_encoded().map_err(DapError::encoding)?
     };
 
     metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);

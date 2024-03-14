@@ -47,6 +47,7 @@ paste.workspace = true
 prio = { workspace = true, features = ["test-util"] }
 prometheus.workspace = true
 regex.workspace = true
+strum.workspace = true
 tokio.workspace = true
 
 [features]

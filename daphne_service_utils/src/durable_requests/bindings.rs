@@ -9,8 +9,8 @@
 use std::collections::HashSet;
 
 use daphne::{
-    messages::{ReportId, TaskId},
-    DapAggregateShare, DapBatchBucket, DapVersion, MetaAggregationJobId,
+    messages::{AggregationJobId, ReportId, TaskId},
+    DapAggregateShare, DapBatchBucket, DapVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -148,7 +148,7 @@ define_do_binding! {
         Get = "/internal/do/helper_state/get",
     }
 
-    fn name((version, task_id, agg_job_id): (DapVersion, &'n TaskId, &'n MetaAggregationJobId)) -> ObjectIdFrom {
+    fn name((version, task_id, agg_job_id): (DapVersion, &'n TaskId, &'n AggregationJobId)) -> ObjectIdFrom {
         ObjectIdFrom::Name(format!(
             "{}/task/{}/agg_job/{}",
             version.as_ref(),

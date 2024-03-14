@@ -16,10 +16,7 @@ use crate::{
 use prio::codec::{Encode, ParameterizedEncode};
 use rand::prelude::*;
 
-use super::{
-    CTX_INPUT_SHARE_DRAFT02, CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_HELPER,
-    CTX_ROLE_LEADER,
-};
+use super::{CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_HELPER, CTX_ROLE_LEADER};
 
 impl VdafConfig {
     /// Generate a report for a measurement. This method is run by the Client.
@@ -84,36 +81,22 @@ impl VdafConfig {
             return Err(fatal_error!(err = "unexpected number of HPKE configs"));
         }
 
-        let (draft02_extensions, mut draft09_plaintext_input_share) = match version {
-            DapVersion::Draft09 | DapVersion::Latest => (
-                None,
-                Some(PlaintextInputShare {
-                    extensions,
-                    payload: Vec::default(),
-                }),
-            ),
-            DapVersion::Draft02 => (Some(extensions), None),
+        let mut plaintext_input_share = PlaintextInputShare {
+            extensions,
+            payload: Vec::default(),
         };
 
         let metadata = ReportMetadata {
             id: *report_id,
             time,
-            draft02_extensions,
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
-            if let Some(ref mut plaintext_input_share) = draft09_plaintext_input_share {
-                plaintext_input_share.payload = input_share;
-                plaintext_input_share.get_encoded_with_param(&version)
-            } else {
-                Ok(input_share)
-            }
+            plaintext_input_share.payload = input_share;
+            plaintext_input_share.get_encoded_with_param(&version)
         });
 
-        let input_share_text = match version {
-            DapVersion::Draft02 => CTX_INPUT_SHARE_DRAFT02,
-            DapVersion::Draft09 | DapVersion::Latest => CTX_INPUT_SHARE_DRAFT09,
-        };
+        let input_share_text = CTX_INPUT_SHARE_DRAFT09;
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(input_share_text);
@@ -125,10 +108,6 @@ impl VdafConfig {
         metadata
             .encode_with_param(&version, &mut aad)
             .map_err(DapError::encoding)?;
-        // draft02 compatibility: In draft02, the tag-length prefix is not specified. However, the
-        // intent was to include the prefix, and it is specified unambiguoiusly in the latest
-        // version. All of our partners for interop have agreed to include the prefix for draft02,
-        // so we have hard-coded it here.
         encode_u32_bytes(&mut aad, &public_share).map_err(DapError::encoding)?;
 
         let mut encrypted_input_shares = Vec::with_capacity(2);
@@ -154,7 +133,6 @@ impl VdafConfig {
         }
 
         Ok(Report {
-            draft02_task_id: task_id.for_request_payload(&version),
             report_metadata: metadata,
             public_share,
             encrypted_input_shares: encrypted_input_shares.try_into().unwrap(),

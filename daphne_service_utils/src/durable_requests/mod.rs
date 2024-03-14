@@ -297,7 +297,7 @@ mod test {
         let (want, _) = DurableRequest::new(
             AggregateStore::Merge,
             (
-                DapVersion::Draft02,
+                DapVersion::Draft09,
                 "some-task-id-hex",
                 &DapBatchBucket::TimeInterval { batch_window: 0 },
             ),
@@ -314,7 +314,7 @@ mod test {
         let (want, _) = DurableRequest::new(
             bindings::AggregateStore::Merge,
             (
-                DapVersion::Draft02,
+                DapVersion::Draft09,
                 "some-task-id-hex",
                 &DapBatchBucket::TimeInterval { batch_window: 0 },
             ),

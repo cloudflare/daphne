@@ -72,7 +72,7 @@ impl DapLeader<DaphneAuth> for crate::App {
     async fn init_collect_job(
         &self,
         task_id: &TaskId,
-        coll_job_id: &Option<CollectionJobId>,
+        coll_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
     ) -> Result<url::Url, DapError> {

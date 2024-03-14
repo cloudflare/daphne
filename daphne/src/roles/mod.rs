@@ -9,7 +9,7 @@ pub mod leader;
 
 use crate::{
     constants::DapMediaType,
-    messages::{Base64Encode, Query, ReportMetadata, TaskId, Time},
+    messages::{Base64Encode, Query, TaskId, Time},
     taskprov, DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
 };
 use tracing::warn;
@@ -108,7 +108,6 @@ async fn resolve_taskprov<S: Sync>(
     agg: &impl DapAggregator<S>,
     task_id: &TaskId,
     req: &DapRequest<S>,
-    report_metadata_advertisement: Option<&ReportMetadata>,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
         // Task already configured, so nothing to do.
@@ -130,7 +129,6 @@ async fn resolve_taskprov<S: Sync>(
         vdaf_verify_key_init,
         collector_hpke_config,
         task_id,
-        report_metadata_advertisement,
     )?
     else {
         // No task configuration advertised, so nothing to do.
@@ -158,11 +156,10 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
         messages::{
-            AggregateShareReq, AggregationJobContinueReq, AggregationJobInitReq,
-            AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-            CollectionReq, Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query,
-            Report, ReportId, ReportMetadata, TaskId, Time, Transition, TransitionFailure,
-            TransitionVar,
+            AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
+            Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportId,
+            ReportMetadata, TaskId, Time, TransitionFailure, TransitionVar,
         },
         roles::leader::WorkItem,
         test_versions,
@@ -171,7 +168,6 @@ mod test {
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
         DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
         DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
-        MetaAggregationJobId,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -183,20 +179,6 @@ mod test {
     use rand::{thread_rng, Rng};
     use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
-
-    fn num_agg_job_reqs_for_version(version: DapVersion) -> usize {
-        match version {
-            DapVersion::Draft02 => 2,
-            DapVersion::Draft09 | DapVersion::Latest => 1,
-        }
-    }
-
-    fn empty_report_extensions_for_version(version: DapVersion) -> Option<Vec<Extension>> {
-        match version {
-            DapVersion::Draft02 => Some(Vec::new()),
-            DapVersion::Draft09 | DapVersion::Latest => None,
-        }
-    }
 
     /// Check for transition failures due to:
     ///
@@ -394,31 +376,6 @@ mod test {
             }
         }
 
-        pub fn insert_task(&mut self, version: DapVersion, vdaf: VdafConfig) -> TaskId {
-            let mut rng = thread_rng();
-            let task_id = TaskId(rng.gen());
-            let leader_url = Url::parse("https://leader.com/v02/").unwrap();
-            let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
-
-            self.tasks.insert(
-                task_id,
-                DapTaskConfig {
-                    version,
-                    collector_hpke_config: self.collector_hpke_receiver_config.config.clone(),
-                    leader_url,
-                    helper_url,
-                    time_precision: Self::TASK_TIME_PRECISION,
-                    expiration: self.now + Self::TASK_TIME_PRECISION,
-                    min_batch_size: 1,
-                    query: DapQueryConfig::TimeInterval,
-                    vdaf_verify_key: vdaf.gen_verify_key(),
-                    vdaf,
-                    method: Default::default(),
-                },
-            );
-            task_id
-        }
-
         pub fn new_helper(&self) -> Arc<InMemoryAggregator> {
             Arc::new(InMemoryAggregator::new_helper(
                 self.tasks.clone(),
@@ -528,7 +485,6 @@ mod test {
                 &task_config,
                 DapMediaType::CollectReq,
                 CollectionReq {
-                    draft02_task_id: task_id.for_request_payload(&task_config.version),
                     query,
                     agg_param: agg_param.get_encoded().unwrap(),
                 },
@@ -538,7 +494,6 @@ mod test {
         pub async fn gen_test_agg_job_init_req(
             &self,
             task_id: &TaskId,
-            version: DapVersion,
             agg_param: DapAggregationParam,
             reports: Vec<Report>,
         ) -> (DapAggregationJobState, DapRequest<BearerToken>) {
@@ -551,7 +506,7 @@ mod test {
                 },
             };
 
-            let agg_job_id = MetaAggregationJobId::gen_for_version(version);
+            let agg_job_id = AggregationJobId(rng.gen());
 
             let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
                 task_config
@@ -559,7 +514,6 @@ mod test {
                         self.leader.as_ref(),
                         self.leader.as_ref(),
                         task_id,
-                        &agg_job_id,
                         &part_batch_sel,
                         &agg_param,
                         reports,
@@ -584,46 +538,6 @@ mod test {
             )
         }
 
-        pub async fn gen_test_agg_job_cont_req_with_round(
-            &self,
-            task_id: &TaskId,
-            agg_job_id: &MetaAggregationJobId,
-            transitions: Vec<Transition>,
-            round: Option<u16>,
-        ) -> DapRequest<BearerToken> {
-            let task_config = self.leader.unchecked_get_task_config(task_id).await;
-
-            self.leader_authorized_req(
-                task_id,
-                &task_config,
-                Some(agg_job_id),
-                DapMediaType::AggregationJobContinueReq,
-                AggregationJobContinueReq {
-                    draft02_task_id: task_id.for_request_payload(&task_config.version),
-                    draft02_agg_job_id: agg_job_id.for_request_payload(),
-                    round,
-                    transitions,
-                },
-            )
-            .await
-        }
-
-        pub async fn gen_test_agg_job_cont_req(
-            &self,
-            task_id: &TaskId,
-            agg_job_id: &MetaAggregationJobId,
-            transitions: Vec<Transition>,
-            version: DapVersion,
-        ) -> DapRequest<BearerToken> {
-            let round = if version == DapVersion::Draft02 {
-                None
-            } else {
-                Some(1)
-            };
-            self.gen_test_agg_job_cont_req_with_round(task_id, agg_job_id, transitions, round)
-                .await
-        }
-
         pub async fn gen_test_agg_share_req(
             &self,
             report_count: u64,
@@ -638,7 +552,6 @@ mod test {
                 None,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
-                    draft02_task_id: task_id.for_request_payload(&task_config.version),
                     batch_sel: BatchSelector::default(),
                     agg_param: Vec::default(),
                     report_count,
@@ -697,7 +610,7 @@ mod test {
             &self,
             task_id: &TaskId,
             task_config: &DapTaskConfig,
-            agg_job_id: Option<&MetaAggregationJobId>,
+            agg_job_id: Option<&AggregationJobId>,
             media_type: DapMediaType,
             msg: M,
         ) -> DapRequest<BearerToken> {
@@ -712,7 +625,9 @@ mod test {
                 version: task_config.version,
                 media_type: Some(media_type),
                 task_id: Some(*task_id),
-                resource: agg_job_id.map_or(DapResource::Undefined, |id| id.for_request_path()),
+                resource: agg_job_id.map_or(DapResource::Undefined, |id| {
+                    DapResource::AggregationJob(*id)
+                }),
                 payload,
                 sender_auth,
                 ..Default::default()
@@ -738,11 +653,7 @@ mod test {
                 version: task_config.version,
                 media_type: Some(media_type),
                 task_id: Some(*task_id),
-                resource: if task_config.version == DapVersion::Draft02 {
-                    DapResource::Undefined
-                } else {
-                    DapResource::CollectionJob(coll_job_id)
-                },
+                resource: DapResource::CollectionJob(coll_job_id),
                 payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
                 sender_auth,
                 ..Default::default()
@@ -756,7 +667,7 @@ mod test {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
-        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
+        let agg_job_id = AggregationJobId(rng.gen());
 
         // Helper expects "time_interval" query, but Leader indicates "fixed_size".
         let req = t
@@ -766,8 +677,6 @@ mod test {
                 Some(&agg_job_id),
                 DapMediaType::AggregationJobInitReq,
                 AggregationJobInitReq {
-                    draft02_task_id: task_id.for_request_payload(&version),
-                    draft02_agg_job_id: agg_job_id.for_request_payload(),
                     agg_param: Vec::default(),
                     part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
                         batch_id: BatchId(rng.gen()),
@@ -802,7 +711,7 @@ mod test {
     //            encrypted_input_share: report.encrypted_input_shares[1].clone(),
     //        };
     //        let req = t
-    //            .gen_test_agg_job_init_req(&t.expired_task_id, version, vec![report_share])
+    //            .gen_test_agg_job_init_req(&t.expired_task_id, vec![report_share])
     //            .await;
     //
     //        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
@@ -824,7 +733,6 @@ mod test {
         let (_, mut req) = t
             .gen_test_agg_job_init_req(
                 &t.time_interval_task_id,
-                version,
                 DapAggregationParam::Empty,
                 vec![report],
             )
@@ -854,7 +762,7 @@ mod test {
         let mut rng = thread_rng();
         let task_id = TaskId(rng.gen());
         let req = DapRequest {
-            version: DapVersion::Draft02,
+            version,
             media_type: Some(DapMediaType::HpkeConfigList),
             payload: Vec::new(),
             task_id: Some(task_id),
@@ -873,7 +781,7 @@ mod test {
     async fn handle_hpke_config_req_missing_task_id(version: DapVersion) {
         let t = Test::new(version);
         let req = DapRequest {
-            version: DapVersion::Draft02,
+            version,
             media_type: Some(DapMediaType::HpkeConfigList),
             task_id: Some(t.time_interval_task_id),
             resource: DapResource::Undefined,
@@ -891,37 +799,6 @@ mod test {
     }
 
     async_test_versions! { handle_hpke_config_req_missing_task_id }
-
-    async fn handle_agg_job_cont_req_unauthorized_request(version: DapVersion) {
-        let t = Test::new(version);
-        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
-        let mut req = t
-            .gen_test_agg_job_cont_req(
-                &t.time_interval_task_id,
-                &agg_job_id,
-                Vec::default(),
-                version,
-            )
-            .await;
-        req.sender_auth = None;
-
-        // Expect failure due to missing bearer token.
-        assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        // Expect failure due to incorrect bearer token.
-        req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-        assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        assert_eq!(t.helper.audit_log.invocations(), 0);
-    }
-
-    async_test_versions! { handle_agg_job_cont_req_unauthorized_request }
 
     async fn handle_agg_share_req_unauthorized_request(version: DapVersion) {
         let t = Test::new(version);
@@ -961,7 +838,6 @@ mod test {
                 None,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
-                    draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
                     batch_sel: BatchSelector::FixedSizeByBatchId {
                         batch_id: BatchId(rng.gen()),
                     },
@@ -990,7 +866,6 @@ mod test {
                 None,
                 DapMediaType::AggregateShareReq,
                 AggregateShareReq {
-                    draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
                     batch_sel: BatchSelector::FixedSizeByBatchId {
                         batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                     },
@@ -1020,13 +895,8 @@ mod test {
             version: task_config.version,
             media_type: Some(DapMediaType::CollectReq),
             task_id: Some(*task_id),
-            resource: if version == DapVersion::Draft02 {
-                DapResource::Undefined
-            } else {
-                DapResource::CollectionJob(collect_job_id)
-            },
+            resource: DapResource::CollectionJob(collect_job_id),
             payload: CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: Query::default(),
                 agg_param: Vec::default(),
             }
@@ -1058,7 +928,7 @@ mod test {
         let mut report = t.gen_test_report(task_id).await;
         report.encrypted_input_shares[1].payload[0] ^= 0xff; // Cause decryption to fail
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
+            .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1086,7 +956,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, version, DapAggregationParam::Empty, vec![report])
+            .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -1141,7 +1011,7 @@ mod test {
 
         assert_metrics_include!(t.helper_registry, {
             r#"report_counter{env="test_helper",host="helper.org",status="rejected_report_replayed"}"#: 1,
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
             r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
@@ -1183,73 +1053,12 @@ mod test {
 
         assert_metrics_include!(t.helper_registry, {
             r#"report_counter{env="test_helper",host="helper.org",status="rejected_batch_collected"}"#: 1,
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
             r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
         });
     }
 
     async_test_versions! { handle_agg_job_req_failure_batch_collected }
-
-    #[tokio::test]
-    async fn handle_agg_job_req_abort_helper_state_overwritten_draft02() {
-        let t = Test::new(DapVersion::Draft02);
-        let task_id = &t.time_interval_task_id;
-
-        let report = t.gen_test_report(task_id).await;
-        let (_, req) = t
-            .gen_test_agg_job_init_req(
-                task_id,
-                DapVersion::Draft02,
-                DapAggregationParam::Empty,
-                vec![report],
-            )
-            .await;
-
-        // Send aggregate request.
-        let _ = helper::handle_agg_job_req(&*t.helper, &req).await;
-
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-
-        // Send another aggregate request.
-        let err = helper::handle_agg_job_req(&*t.helper, &req)
-            .await
-            .unwrap_err();
-
-        assert_eq!(t.helper.audit_log.invocations(), 1);
-
-        // Expect failure due to overwriting existing helper state.
-        assert_matches!(err, DapError::Abort(DapAbort::BadRequest(e)) =>
-            assert_eq!(e, "unexpected message for aggregation job (already exists)")
-        );
-    }
-
-    async fn handle_agg_job_req_fail_send_cont_req(version: DapVersion) {
-        let t = Test::new(version);
-        let agg_job_id = MetaAggregationJobId::gen_for_version(version);
-        let req = t
-            .gen_test_agg_job_cont_req(
-                &t.time_interval_task_id,
-                &agg_job_id,
-                Vec::default(),
-                version,
-            )
-            .await;
-
-        assert_eq!(t.helper.audit_log.invocations(), 0);
-
-        // Send aggregate continue request to helper.
-        let err = helper::handle_agg_job_req(&*t.helper, &req)
-            .await
-            .unwrap_err();
-
-        // Expect failure due to sending continue request before initialization request.
-        assert_matches!(
-            err,
-            DapError::Abort(DapAbort::UnrecognizedAggregationJob { .. })
-        );
-    }
-
-    async_test_versions! { handle_agg_job_req_fail_send_cont_req }
 
     async fn handle_upload_req_fail_send_invalid_report(version: DapVersion) {
         let t = Test::new(version);
@@ -1362,13 +1171,11 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq.
-        let version = task_config.version;
         let req = t.collector_authorized_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: task_config.query_for_current_batch_window(t.now),
                 agg_param: Vec::default(),
             },
@@ -1399,13 +1206,9 @@ mod test {
         let collection = Collection {
             part_batch_sel: PartialBatchSelector::TimeInterval,
             report_count: 0,
-            draft09_interval: if version == DapVersion::Draft02 {
-                None
-            } else {
-                Some(Interval {
-                    start: 0,
-                    duration: 2_000_000_000,
-                })
+            interval: Interval {
+                start: 0,
+                duration: 2_000_000_000,
             },
             encrypted_agg_shares: [
                 HpkeCiphertext {
@@ -1459,7 +1262,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: Query::TimeInterval {
                     batch_interval: Interval {
                         start: task_config.quantized_time_lower_bound(t.now),
@@ -1485,7 +1287,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: Query::TimeInterval {
                     batch_interval: Interval {
                         start: task_config.quantized_time_lower_bound(t.now)
@@ -1512,7 +1313,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: Query::TimeInterval {
                     batch_interval: Interval {
                         start: task_config.quantized_time_lower_bound(t.now)
@@ -1547,7 +1347,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: task_id.for_request_payload(&version),
                 query: Query::TimeInterval {
                     batch_interval: Interval {
                         start: task_config.quantized_time_lower_bound(t.now)
@@ -1626,7 +1425,6 @@ mod test {
 
         // Collector: Create a CollectReq.
         let collector_collect_req = CollectionReq {
-            draft02_task_id: task_id.for_request_payload(&version),
             query: task_config.query_for_current_batch_window(t.now),
             agg_param: Vec::default(),
         };
@@ -1688,7 +1486,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: t.time_interval_task_id.for_request_payload(&version),
                 query: Query::FixedSizeByBatchId {
                     batch_id: BatchId(rng.gen()),
                 },
@@ -1712,7 +1509,6 @@ mod test {
             &task_config,
             DapMediaType::CollectReq,
             CollectionReq {
-                draft02_task_id: t.fixed_size_task_id.for_request_payload(&version),
                 query: Query::FixedSizeByBatchId {
                     batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                 },
@@ -1768,7 +1564,7 @@ mod test {
             .unwrap();
 
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1794,15 +1590,7 @@ mod test {
             .unwrap();
 
         // Collector: Request result from the Leader.
-        let query = match version {
-            DapVersion::Draft02 => {
-                let batch_id = t.leader.current_batch(task_id).await.unwrap();
-                println!("hella {}", batch_id.to_base64url());
-
-                Query::FixedSizeByBatchId { batch_id }
-            }
-            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
-        };
+        let query = Query::FixedSizeCurrentBatch;
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
             .await
             .unwrap();
@@ -1812,7 +1600,7 @@ mod test {
             .unwrap();
 
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1834,23 +1622,22 @@ mod test {
     ) {
         let t = Test::new(version);
 
-        let (task_config, task_id, taskprov_advertisement, taskprov_report_extension_payload) =
-            DapTaskParameters {
-                version,
-                min_batch_size: 1,
-                query: DapQueryConfig::FixedSize {
-                    max_batch_size: Some(2),
-                },
-                vdaf: vdaf_config,
-                ..Default::default()
-            }
-            .to_config_with_taskprov(
-                b"cool task".to_vec(),
-                t.now,
-                &t.leader.taskprov_vdaf_verify_key_init,
-                &t.leader.collector_hpke_config,
-            )
-            .unwrap();
+        let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+            version,
+            min_batch_size: 1,
+            query: DapQueryConfig::FixedSize {
+                max_batch_size: Some(2),
+            },
+            vdaf: vdaf_config,
+            ..Default::default()
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            t.now,
+            &t.leader.taskprov_vdaf_verify_key_init,
+            &t.leader.collector_hpke_config,
+        )
+        .unwrap();
 
         // Clients: Send upload request to Leader.
         let hpke_config_list = [
@@ -1875,12 +1662,7 @@ mod test {
                     t.now,
                     &task_id,
                     test_measurement.clone(),
-                    vec![Extension::Taskprov {
-                        draft02_payload: match version {
-                            DapVersion::Draft09 | DapVersion::Latest => None,
-                            DapVersion::Draft02 => taskprov_report_extension_payload.clone(),
-                        },
-                    }],
+                    vec![Extension::Taskprov],
                     task_config.version,
                 )
                 .unwrap();
@@ -1891,19 +1673,14 @@ mod test {
                 task_id: Some(task_id),
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),
-                taskprov: taskprov_advertisement.clone(),
+                taskprov: Some(taskprov_advertisement.clone()),
                 ..Default::default()
             };
             leader::handle_upload_req(&*t.leader, &req).await.unwrap();
         }
 
         // Collector: Request result from the Leader.
-        let query = match version {
-            DapVersion::Draft02 => Query::FixedSizeByBatchId {
-                batch_id: t.leader.current_batch(&task_id).await.unwrap(),
-            },
-            DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
-        };
+        let query = Query::FixedSizeCurrentBatch;
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
             .await
             .unwrap();
@@ -1913,7 +1690,7 @@ mod test {
             .unwrap();
 
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version),
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
@@ -1960,7 +1737,6 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now,
-            draft02_extensions: empty_report_extensions_for_version(version),
         };
         // We declare these so the first call to early_metadata_check() is more readable.
         let processed = false;
@@ -1989,7 +1765,6 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now + 100,
-            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -1999,7 +1774,6 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now + 101,
-            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -2009,7 +1783,6 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now - 100,
-            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -2019,7 +1792,6 @@ mod test {
         let metadata = ReportMetadata {
             id: ReportId(rng.gen()),
             time: t.now - 101,
-            draft02_extensions: empty_report_extensions_for_version(version),
         };
         assert_matches!(
             early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
@@ -2062,15 +1834,7 @@ mod test {
                 .unwrap();
 
             // Collector: Request result from the Leader.
-            let query = match version {
-                DapVersion::Draft02 => {
-                    let batch_id = t.leader.current_batch(task_id).await.unwrap();
-                    println!("hella {}", batch_id.to_base64url());
-
-                    Query::FixedSizeByBatchId { batch_id }
-                }
-                DapVersion::Draft09 | DapVersion::Latest => Query::FixedSizeCurrentBatch,
-            };
+            let query = Query::FixedSizeCurrentBatch;
             leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
                 .await
                 .unwrap();
@@ -2081,7 +1845,7 @@ mod test {
             .unwrap();
 
         assert_metrics_include!(t.helper_registry, {
-            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: num_agg_job_reqs_for_version(version) * 2,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 2,
             r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 2,
             r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 2,
             r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 2,
