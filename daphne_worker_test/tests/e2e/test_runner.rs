@@ -199,7 +199,7 @@ impl TestRunner {
                 Some(failure) if attempt == MAX_ATTEMPTS => {
                     panic!("One of the aggregators was not ready in time: {failure}")
                 }
-                Some(_) => {}
+                Some(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
                 None => break,
             }
         }
