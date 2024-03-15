@@ -1286,7 +1286,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let collect_uri = t
         .leader_post_collect_using_token(
             client,
-            "I am the collector!", // DAP_TASKPROV_COLLECTOR_AUTH
+            "I-am-the-collector", // DAP_TASKPROV_COLLECTOR_AUTH
             taskprov_advertisement.as_deref(),
             Some(&task_id),
             collect_req.get_encoded_with_param(&t.version).unwrap(),
