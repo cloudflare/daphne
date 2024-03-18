@@ -826,10 +826,5 @@ fn produce_encrypted_agg_share(
         .map_err(DapError::encoding)?;
     batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
 
-    let (enc, payload) = hpke_config.encrypt(&info, &aad, &agg_share_data)?;
-    Ok(HpkeCiphertext {
-        config_id: hpke_config.id,
-        enc,
-        payload,
-    })
+    hpke_config.encrypt(&info, &aad, &agg_share_data)
 }

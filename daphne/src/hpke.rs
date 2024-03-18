@@ -183,11 +183,15 @@ impl HpkeConfig {
         info: &[u8],
         aad: &[u8],
         plaintext: &[u8],
-    ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
+    ) -> Result<HpkeCiphertext, DapError> {
         let mut sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
         let (enc, mut ctx) = sender.setup_sender(&self.public_key, info, None, None, None)?;
         let ciphertext = ctx.seal(aad, plaintext)?;
-        Ok((enc, ciphertext))
+        Ok(HpkeCiphertext {
+            config_id: self.id,
+            enc,
+            payload: ciphertext,
+        })
     }
 
     pub(crate) fn decrypt(
@@ -195,12 +199,15 @@ impl HpkeConfig {
         private_key: &HpkePrivateKey,
         info: &[u8],
         aad: &[u8],
-        enc: &[u8],
-        ciphertext: &[u8],
+        ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
+        if self.id != ciphertext.config_id {
+            return Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId));
+        }
         let receiver: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
-        let mut ctx = receiver.setup_receiver(enc, private_key, info, None, None, None)?;
-        let plaintext = ctx.open(aad, ciphertext)?;
+        let mut ctx =
+            receiver.setup_receiver(&ciphertext.enc, private_key, info, None, None, None)?;
+        let plaintext = ctx.open(aad, &ciphertext.payload)?;
         Ok(plaintext)
     }
 }
@@ -255,7 +262,7 @@ impl HpkeReceiverConfig {
         info: &[u8],
         aad: &[u8],
         plaintext: &[u8],
-    ) -> Result<(Vec<u8>, Vec<u8>), DapError> {
+    ) -> Result<HpkeCiphertext, DapError> {
         self.config.encrypt(info, aad, plaintext)
     }
 
@@ -265,11 +272,10 @@ impl HpkeReceiverConfig {
         &self,
         info: &[u8],
         aad: &[u8],
-        enc: &[u8],
-        ciphertext: &[u8],
+        ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         self.config
-            .decrypt(&self.private_key, info, aad, enc, ciphertext)
+            .decrypt(&self.private_key, info, aad, ciphertext)
     }
 
     /// Generate and return a new HPKE receiver context given a HPKE config ID and HPKE KEM.
@@ -352,10 +358,8 @@ impl HpkeDecrypter for HpkeReceiverConfig {
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        if ciphertext.config_id != self.config.id {
-            return Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId));
-        }
-        self.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)
+        self.config
+            .decrypt(&self.private_key, info, aad, ciphertext)
     }
 }
 
@@ -432,11 +436,8 @@ mod test {
         let plaintext = b"plaintext";
         let config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256).unwrap();
         println!("{}", serde_json::to_string(&config).unwrap());
-        let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
-        assert_eq!(
-            config.decrypt(info, aad, &enc, &ciphertext).unwrap(),
-            plaintext
-        );
+        let ciphertext = config.encrypt(info, aad, plaintext).unwrap();
+        assert_eq!(config.decrypt(info, aad, &ciphertext).unwrap(), plaintext);
     }
 
     #[test]
@@ -446,11 +447,8 @@ mod test {
         let plaintext = b"plaintext";
         let config = HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256).unwrap();
         println!("{}", serde_json::to_string(&config).unwrap());
-        let (enc, ciphertext) = config.encrypt(info, aad, plaintext).unwrap();
-        assert_eq!(
-            config.decrypt(info, aad, &enc, &ciphertext).unwrap(),
-            plaintext
-        );
+        let ciphertext = config.encrypt(info, aad, plaintext).unwrap();
+        assert_eq!(config.decrypt(info, aad, &ciphertext).unwrap(), plaintext);
     }
 
     #[test]

@@ -467,9 +467,7 @@ impl HpkeDecrypter for crate::App {
                 config_list
                     .iter()
                     .find(|receiver| receiver.config.id == ciphertext.config_id)
-                    .map(|receiver| {
-                        receiver.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)
-                    })
+                    .map(|receiver| receiver.decrypt(info, aad, ciphertext))
             })
             .await
             .map_err(|e| fatal_error!(err = ?e))?
