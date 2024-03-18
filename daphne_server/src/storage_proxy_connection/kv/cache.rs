@@ -3,6 +3,8 @@
 
 use std::{any::Any, collections::HashMap};
 
+use mappable_rc::Marc;
+
 use super::KvPrefix;
 
 #[derive(Default, Debug)]
@@ -10,22 +12,25 @@ pub struct Cache {
     /// This map follows the same structure of KV queries.
     /// The first key (&'static str) is a KvPrefix::PREFIX
     /// The second key (String) is the key that is associated with this value
-    kv: HashMap<&'static str, HashMap<String, Box<dyn Any + Send + Sync + 'static>>>,
+    kv: HashMap<&'static str, HashMap<String, Marc<dyn Any + Send + Sync + 'static>>>,
 }
 
-pub enum GetResult<T> {
+pub enum GetResult<T: 'static> {
     NoFound,
     MismatchedType,
-    Found(T),
+    Found(Marc<T>),
 }
 
 impl Cache {
-    pub fn get<'s, P>(&'s self, key: &str) -> GetResult<&'s P::Value>
+    pub fn get<P>(&self, key: &str) -> GetResult<P::Value>
     where
         P: KvPrefix,
     {
         match self.kv.get(P::PREFIX) {
-            Some(cache) => match cache.get(key).map(|t| t.downcast_ref::<P::Value>()) {
+            Some(cache) => match cache
+                .get(key)
+                .map(|t| Marc::try_map(t.clone(), |t| t.downcast_ref::<P::Value>()).ok())
+            {
                 Some(Some(t)) => GetResult::Found(t),
                 Some(None) => GetResult::MismatchedType,
                 None => GetResult::NoFound,
@@ -34,14 +39,14 @@ impl Cache {
         }
     }
 
-    pub fn put<P>(&mut self, key: String, value: P::Value)
+    pub(super) fn put<P>(&mut self, key: String, value: Marc<P::Value>)
     where
         P: KvPrefix,
     {
         self.kv
             .entry(P::PREFIX)
             .or_default()
-            .insert(key, Box::new(value));
+            .insert(key, Marc::map(value, |v| v as &(dyn Any + Send + Sync)));
     }
 
     pub fn delete<P>(&mut self, key: &str) -> GetResult<P::Value>
@@ -49,8 +54,11 @@ impl Cache {
         P: KvPrefix,
     {
         match self.kv.get_mut(P::PREFIX) {
-            Some(cache) => match cache.remove(key).map(|t| t.downcast::<P::Value>().ok()) {
-                Some(Some(t)) => GetResult::Found(*t),
+            Some(cache) => match cache
+                .remove(key)
+                .map(|t| Marc::try_map(t, |t| t.downcast_ref::<P::Value>()).ok())
+            {
+                Some(Some(t)) => GetResult::Found(t),
                 Some(None) => GetResult::MismatchedType,
                 None => GetResult::NoFound,
             },

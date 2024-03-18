@@ -248,7 +248,7 @@ mod test_utils {
         ) -> Result<(), DapError> {
             let mut config_list = self
                 .kv()
-                .get::<kv::prefix::HpkeReceiverConfigSet>(&version)
+                .get_cloned::<kv::prefix::HpkeReceiverConfigSet>(&version)
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?
                 .unwrap_or_default();
