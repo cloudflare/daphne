@@ -13,11 +13,10 @@ use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
 use crate::{
     fatal_error,
-    messages::{decode_u16_bytes, encode_u16_bytes, HpkeCiphertext, TaskId, TransitionFailure},
+    messages::{HpkeCiphertext, TaskId, TransitionFailure},
     DapError, DapVersion,
 };
 use async_trait::async_trait;
-use prio::codec::{CodecError, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
@@ -360,23 +359,6 @@ impl HpkeDecrypter for HpkeReceiverConfig {
     ) -> Result<Vec<u8>, DapError> {
         self.config
             .decrypt(&self.private_key, info, aad, ciphertext)
-    }
-}
-
-impl Encode for HpkeReceiverConfig {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        self.config.encode(bytes)?;
-        encode_u16_bytes(bytes, self.private_key.as_slice())?;
-        Ok(())
-    }
-}
-
-impl Decode for HpkeReceiverConfig {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        Ok(Self {
-            config: HpkeConfig::decode(bytes)?,
-            private_key: HpkePrivateKey::from(decode_u16_bytes(bytes)?),
-        })
     }
 }
 
