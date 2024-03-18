@@ -22,10 +22,93 @@ use std::{
     io::{stdin, Read},
     path::PathBuf,
     process::Command,
+    str::FromStr,
     time::SystemTime,
 };
-
 use url::Url;
+
+#[derive(Debug, Clone, Copy)]
+enum DefaultVdafConfigs {
+    Prio2Dimension99k,
+    Prio3NumProofs2,
+    Prio3NumProofs3,
+}
+
+impl ValueEnum for DefaultVdafConfigs {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            Self::Prio2Dimension99k,
+            Self::Prio3NumProofs2,
+            Self::Prio3NumProofs3,
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        match self {
+            Self::Prio2Dimension99k => Some(PossibleValue::new("prio2-dimension-99k")),
+            Self::Prio3NumProofs2 => Some(PossibleValue::new("prio3-num-proofs-2")),
+            Self::Prio3NumProofs3 => Some(PossibleValue::new("prio3-num-proofs-3")),
+        }
+    }
+}
+
+impl DefaultVdafConfigs {
+    fn into_vdaf(self) -> VdafConfig {
+        match self {
+            Self::Prio2Dimension99k => VdafConfig::Prio2 { dimension: 99_992 },
+            Self::Prio3NumProofs2 => VdafConfig::Prio3(
+                daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits: 1,
+                    length: 100_000,
+                    chunk_length: 320,
+                    num_proofs: 2,
+                },
+            ),
+            Self::Prio3NumProofs3 => VdafConfig::Prio3(
+                daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits: 1,
+                    length: 100_000,
+                    chunk_length: 320,
+                    num_proofs: 3,
+                },
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum CliVdafConfig {
+    Default(DefaultVdafConfigs),
+    Custom(VdafConfig),
+}
+
+impl FromStr for CliVdafConfig {
+    type Err = String;
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        DefaultVdafConfigs::from_str(s, false)
+            .map(Self::Default)
+            .or_else(|default_err| {
+                serde_json::from_str(s)
+                    .map(Self::Custom)
+                    .map_err(|json_err| {
+                        if s.contains('{') {
+                            json_err.to_string()
+                        } else {
+                            default_err
+                        }
+                    })
+            })
+    }
+}
+
+impl CliVdafConfig {
+    fn into_vdaf(self) -> VdafConfig {
+        match self {
+            Self::Default(d) => d.into_vdaf(),
+            Self::Custom(v) => v,
+        }
+    }
+}
 
 /// DAP Functions, a utility for interacting with DAP deployments.
 #[derive(Parser, Debug)]
@@ -40,7 +123,7 @@ enum TestAction {
     /// Add an hpke config to a test-utils enabled `daphne_server`.
     AddHpkeConfig {
         aggregator_url: Url,
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "x25519_hkdf_sha256")]
         kem_alg: KemAlg,
     },
     /// Clear all storage of an aggregator.
@@ -77,7 +160,7 @@ enum Action {
 
         /// JSON-formatted VDAF config
         #[clap(short, long, env)]
-        vdaf_config: VdafConfig,
+        vdaf_config: CliVdafConfig,
 
         /// Path to the certificate file to use to verify the signature of the hpke config
         #[arg(short, long, env)]
@@ -106,7 +189,7 @@ enum Action {
 
         /// JSON-formatted VDAF config
         #[clap(short, long, env)]
-        vdaf_config: VdafConfig,
+        vdaf_config: CliVdafConfig,
 
         /// HPKE receiver configuration for decrypting response
         #[clap(long, env)]
@@ -141,9 +224,13 @@ enum Action {
         #[arg(env)]
         helper_url: Url,
         #[arg(long, env)]
-        vdaf_config: VdafConfig,
+        vdaf_config: CliVdafConfig,
         #[arg(long, env)]
         hpke_signing_certificate_path: Option<PathBuf>,
+        #[arg(env, default_value_t = 50)]
+        reports_per_batch: usize,
+        #[arg(env, default_value_t = 10)]
+        reports_per_agg_job: usize,
     },
     /// Perform multiple aggregation jobs against a helper.
     ///
@@ -164,8 +251,8 @@ enum Action {
     },
 }
 
-#[derive(Debug, Clone, Copy, Subcommand)]
-pub enum LoadTestParameters {
+#[derive(Debug, Clone, Subcommand)]
+enum LoadTestParameters {
     /// Test multiple sets of parameters.
     Multiple,
     /// Test a single set of parameters multiple times.
@@ -175,7 +262,7 @@ pub enum LoadTestParameters {
         #[arg(env)]
         reports_per_agg_job: usize,
         #[arg(short, long, env)]
-        vdaf_config: VdafConfig,
+        vdaf_config: CliVdafConfig,
     },
 }
 
@@ -268,6 +355,7 @@ async fn main() -> Result<()> {
             let version = deduce_dap_version_from_url(&leader_url)?;
             // Generate a report for the measurement.
             let report = vdaf_config
+                .into_vdaf()
                 .produce_report(
                     &[leader_hpke_config, helper_hpke_config],
                     now,
@@ -393,6 +481,7 @@ async fn main() -> Result<()> {
             let version = deduce_dap_version_from_url(&uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
             let agg_res = vdaf_config
+                .into_vdaf()
                 .consume_encrypted_agg_shares(
                     receiver,
                     &task_id,
@@ -520,10 +609,12 @@ async fn main() -> Result<()> {
             helper_url,
             vdaf_config,
             hpke_signing_certificate_path,
+            reports_per_batch,
+            reports_per_agg_job,
         } => {
             let t = dapf::acceptance::Test::from_env(
                 helper_url,
-                vdaf_config,
+                vdaf_config.into_vdaf(),
                 hpke_signing_certificate_path,
             )?;
 
@@ -533,6 +624,8 @@ async fn main() -> Result<()> {
                 .test_helper(
                     &TestOptions {
                         bearer_token: t.leader_bearer_token.clone(),
+                        reports_per_agg_job,
+                        reports_per_batch,
                         ..Default::default()
                     },
                     deduce_dap_version_from_url(&t.helper_url)?,
@@ -560,7 +653,7 @@ async fn main() -> Result<()> {
         } => {
             load_testing::execute_single_combination_from_env(
                 helper_url,
-                vdaf_config,
+                vdaf_config.into_vdaf(),
                 reports_per_batch,
                 reports_per_agg_job,
             )
