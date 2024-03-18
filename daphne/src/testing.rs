@@ -185,7 +185,7 @@ impl AggregationJobTest {
                 &self.task_id,
                 &PartialBatchSelector::TimeInterval,
                 agg_param,
-                reports,
+                futures::stream::iter(reports),
                 &self.leader_metrics,
             )
             .await

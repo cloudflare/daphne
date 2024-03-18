@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    acceptance::{now, Test, TestOptions},
+    acceptance::{now, report_generator::ReportGenerator, Test, TestOptions},
     test_durations::TestDurations,
 };
 use chrono::{DateTime, Utc};
@@ -383,6 +383,8 @@ pub async fn execute_single_combination_from_env(
 
     println!("Generating reports");
 
+    let measurment = t.gen_measurement().unwrap();
+
     let mut success_count = 0;
     let mut run_count = 0;
     loop {
@@ -391,29 +393,26 @@ pub async fn execute_single_combination_from_env(
         println!("\t- reports_per_agg_job: {reports_per_agg_job}");
         println!("\t- vdaf_config:         {:?}", t.vdaf_config);
 
-        let now = Instant::now();
-        let reports = t
-            .generate_reports(
-                &test_task_config,
-                reports_per_batch,
-                &t.gen_measurement().unwrap(),
-                VERSION,
-                system_now,
-            )
-            .expect("failed to generate reports");
-        println!("reports generated in {:?}", now.elapsed());
-
         let batch_id = BatchId(thread_rng().gen());
         let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
 
         let now = Instant::now();
         let r = t
             .run_agg_jobs(
-                reports,
+                reports_per_batch,
                 &test_task_config,
                 &part_batch_sel,
                 reports_per_agg_job,
                 t.leader_bearer_token.as_ref(),
+                |reports_per_job| {
+                    ReportGenerator::new(
+                        &test_task_config,
+                        reports_per_job,
+                        &measurment,
+                        VERSION,
+                        system_now,
+                    )
+                },
             )
             .await;
 
