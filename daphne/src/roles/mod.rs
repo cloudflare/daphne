@@ -516,7 +516,7 @@ mod test {
                         task_id,
                         &part_batch_sel,
                         &agg_param,
-                        reports,
+                        futures::stream::iter(reports),
                         &self.leader.metrics,
                     )
                     .await

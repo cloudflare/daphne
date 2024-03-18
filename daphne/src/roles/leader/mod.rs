@@ -340,7 +340,7 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
             task_id,
             part_batch_sel,
             agg_param,
-            reports,
+            futures::stream::iter(reports),
             metrics,
         )
         .await?;

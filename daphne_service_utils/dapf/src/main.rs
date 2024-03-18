@@ -25,6 +25,8 @@ use std::{
     str::FromStr,
     time::SystemTime,
 };
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::EnvFilter;
 use url::Url;
 
 #[derive(Debug, Clone, Copy)]
@@ -291,6 +293,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .compact()
         .with_writer(std::io::stderr)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .init();
     let mut rng = thread_rng();
     let now = SystemTime::now()

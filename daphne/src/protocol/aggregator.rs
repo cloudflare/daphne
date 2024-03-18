@@ -24,6 +24,7 @@ use crate::{
     DapAggregationParam, DapError, DapHelperAggregationJobTransition,
     DapLeaderAggregationJobTransition, DapTaskConfig, DapVersion, VdafConfig,
 };
+use futures::{Stream, StreamExt};
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
@@ -32,6 +33,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
     iter::zip,
+    pin::pin,
 };
 
 use super::{
@@ -378,21 +380,26 @@ impl DapTaskConfig {
     /// state for the aggregation flow and the initial aggregate request to be sent to the Helper.
     /// This method is called by the Leader.
     #[allow(clippy::too_many_arguments)]
-    pub async fn produce_agg_job_init_req(
+    pub async fn produce_agg_job_init_req<S>(
         &self,
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
-        reports: Vec<Report>,
+        reports: S,
         metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError> {
-        let mut consumed_reports = Vec::with_capacity(reports.len());
-        let mut helper_shares = Vec::with_capacity(reports.len());
+    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError>
+    where
+        S: Stream<Item = Report>,
+    {
+        let (report_count_hint, _upper_bound) = reports.size_hint();
+        let mut consumed_reports = Vec::with_capacity(report_count_hint);
+        let mut helper_shares = Vec::with_capacity(report_count_hint);
         {
-            let mut processed = HashSet::with_capacity(reports.len());
-            for report in reports {
+            let mut processed = HashSet::with_capacity(report_count_hint);
+            let mut reports = pin!(reports);
+            while let Some(report) = reports.next().await {
                 if processed.contains(&report.report_metadata.id) {
                     return Err(fatal_error!(
                         err = "tried to process report sequence with non-unique report IDs",

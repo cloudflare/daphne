@@ -9,7 +9,6 @@ use std::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TestDurations {
     pub hpke_config_fetch: Duration,
-    pub report_generation: Duration,
     pub aggregate_init_req: Duration,
     pub aggregate_cont_req: Duration,
     pub aggregate_share_req: Duration,
@@ -20,7 +19,6 @@ impl Add<&Self> for TestDurations {
     fn add(self, rhs: &Self) -> Self::Output {
         Self {
             hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
-            report_generation: self.report_generation + rhs.report_generation,
             aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
             aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
             aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
@@ -33,7 +31,6 @@ impl Add for TestDurations {
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
-            report_generation: self.report_generation + rhs.report_generation,
             aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
             aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
             aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
@@ -47,7 +44,6 @@ impl Div<u32> for TestDurations {
     fn div(self, rhs: u32) -> Self::Output {
         Self {
             hpke_config_fetch: self.hpke_config_fetch / rhs,
-            report_generation: self.report_generation / rhs,
             aggregate_init_req: self.aggregate_init_req / rhs,
             aggregate_cont_req: self.aggregate_cont_req / rhs,
             aggregate_share_req: self.aggregate_share_req / rhs,

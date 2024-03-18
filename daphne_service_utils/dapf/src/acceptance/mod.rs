@@ -17,6 +17,7 @@
 //!
 
 pub mod load_testing;
+pub mod report_generator;
 
 use crate::{test_durations::TestDurations, HttpClientExt};
 use anyhow::{anyhow, bail, Context, Result};
@@ -27,7 +28,7 @@ use daphne::{
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        self, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
+        AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
         BatchSelector, PartialBatchSelector, ReportId, TaskId,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
@@ -38,10 +39,9 @@ use daphne::{
     DapTaskParameters, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
 use futures::{StreamExt, TryStreamExt};
-use itertools::Itertools;
 use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, Registry, TextEncoder};
-use rand::{distributions::Uniform, prelude::*};
+use rand::{thread_rng, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reqwest::Client;
 use std::{
@@ -53,6 +53,8 @@ use std::{
 use tokio::sync::Barrier;
 use tracing::{info, instrument};
 use url::Url;
+
+use self::report_generator::ReportGenerator;
 
 pub struct Test {
     pub helper_url: Url,
@@ -313,80 +315,47 @@ impl Test {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn generate_reports(
+    async fn run_agg_jobs<F>(
         &self,
-        test_task_config: &TestTaskConfig,
-        reports_per_batch: usize,
-        measurement: &DapMeasurement,
-        version: DapVersion,
-        now: Now,
-    ) -> anyhow::Result<Vec<messages::Report>> {
-        let report_time_dist = Uniform::from(now.0 - (60 * 60 * 36)..now.0 - (60 * 60 * 24));
-        let TestTaskConfig {
-            task_config,
-            hpke_config_list,
-            task_id,
-            ..
-        } = test_task_config;
-
-        (0..reports_per_batch)
-            .into_par_iter()
-            .map(|_| {
-                let mut rng = rand::rngs::StdRng::from_entropy();
-                task_config
-                    .vdaf
-                    .produce_report_with_extensions(
-                        hpke_config_list,
-                        report_time_dist.sample(&mut rng),
-                        task_id,
-                        measurement.clone(),
-                        vec![messages::Extension::Taskprov],
-                        version,
-                    )
-                    .with_context(|| "failed to generate report")
-            })
-            .collect::<Result<Vec<_>, _>>()
-    }
-
-    async fn run_agg_jobs(
-        &self,
-        reports: Vec<messages::Report>,
+        report_count: usize,
         test_task_config: &TestTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         reports_per_agg_job: usize,
         bearer_token: Option<&BearerToken>,
+        report_generator: F,
     ) -> anyhow::Result<(
         Vec<(DapBatchBucket, (DapAggregateShare, Vec<(ReportId, u64)>))>,
         TestDurations,
-    )> {
-        let barrier = Barrier::new(
-            reports.len() / reports_per_agg_job
-                + usize::from(reports.len() % reports_per_agg_job != 0),
-        );
-        let report_count = reports.len();
-        let (count, out_shares_for_batch, agg_job_durations) =
-            futures::stream::iter(&reports.into_iter().chunks(reports_per_agg_job))
-                .enumerate()
-                .map(|(agg_job_index, reports_for_agg_job)| {
-                    self.run_agg_job(
-                        test_task_config,
-                        agg_job_index,
-                        reports_for_agg_job.collect(),
-                        part_batch_sel,
-                        bearer_token,
-                        &barrier,
-                    )
-                })
-                .buffer_unordered((report_count / reports_per_agg_job) + 1)
-                .try_fold(
-                    (0, Vec::new(), TestDurations::default()),
-                    |(count, mut out_shares, durations), (new_shares, new_durations)| async move {
-                        out_shares.extend(new_shares);
-                        Ok((count + 1, out_shares, durations + new_durations))
-                    },
-                )
-                .await?;
+    )>
+    where
+        F: Fn(usize) -> ReportGenerator,
+    {
+        let job_count = report_count / reports_per_agg_job
+            + usize::from(report_count % reports_per_agg_job != 0);
+        let barrier = Barrier::new(job_count);
+        let (count, out_shares_for_batch, agg_job_durations) = futures::stream::iter(
+            distribute_reports_in_chunks(report_count, reports_per_agg_job),
+        )
+        .enumerate()
+        .map(|(agg_job_index, reports_for_agg_job)| {
+            self.run_agg_job(
+                test_task_config,
+                agg_job_index,
+                report_generator(reports_for_agg_job),
+                part_batch_sel,
+                bearer_token,
+                &barrier,
+            )
+        })
+        .buffer_unordered((report_count / reports_per_agg_job) + 1)
+        .try_fold(
+            (0, Vec::new(), TestDurations::default()),
+            |(count, mut out_shares, durations), (new_shares, new_durations)| async move {
+                out_shares.extend(new_shares);
+                Ok((count + 1, out_shares, durations + new_durations))
+            },
+        )
+        .await?;
         Ok((out_shares_for_batch, agg_job_durations / count))
     }
 
@@ -403,15 +372,13 @@ impl Test {
         &self,
         test_task_config: &TestTaskConfig,
         agg_job_index: usize,
-        reports_for_agg_job: Vec<messages::Report>,
+        reports_for_agg_job: ReportGenerator,
         part_batch_sel: &PartialBatchSelector,
         bearer_token: Option<&BearerToken>,
         barrier: &Barrier,
     ) -> anyhow::Result<(DapAggregateSpan<DapAggregateShare>, TestDurations)> {
-        info!(
-            report_count = reports_for_agg_job.len(),
-            "Starting aggregation job"
-        );
+        let report_count = reports_for_agg_job.len();
+        info!(report_count, "Starting aggregation job");
         let TestTaskConfig {
             task_config,
             fake_leader_hpke_receiver_config,
@@ -424,7 +391,6 @@ impl Test {
 
         // Prepare AggregationJobInitReq.
         let agg_job_id = AggregationJobId(rng.gen());
-        let report_count = reports_for_agg_job.len();
         let transition = task_config
             .produce_agg_job_init_req(
                 fake_leader_hpke_receiver_config,
@@ -437,6 +403,7 @@ impl Test {
             )
             .await
             .context("producing agg job init request")?;
+
         let (state, agg_init_req) = match transition {
             DapLeaderAggregationJobTransition::Continued(state, agg_init_req) => {
                 (state, agg_init_req)
@@ -551,26 +518,10 @@ impl Test {
         info!("task id: {}", task_id.to_hex());
 
         // Generate enough reports to complete a batch.
-        let start = Instant::now();
         let measurement = match &opt.measurement {
             Some(m) => std::borrow::Cow::Borrowed(m),
             None => std::borrow::Cow::Owned(self.gen_measurement().unwrap()),
         };
-        let reports = self.generate_reports(
-            &test_task_config,
-            opt.reports_per_batch,
-            measurement.as_ref(),
-            version,
-            now,
-        )?;
-        {
-            let duration = start.elapsed();
-            info!(
-                "generated {} reports in {duration:#?}",
-                opt.reports_per_batch
-            );
-            durations.report_generation = duration;
-        }
 
         ////
 
@@ -579,11 +530,20 @@ impl Test {
 
         let (out_shares_for_batch, agg_job_duration) = self
             .run_agg_jobs(
-                reports,
+                opt.reports_per_batch,
                 &test_task_config,
                 &part_batch_sel,
                 opt.reports_per_agg_job,
                 opt.bearer_token.as_ref(),
+                |reports_per_agg_job| {
+                    ReportGenerator::new(
+                        &test_task_config,
+                        reports_per_agg_job,
+                        measurement.as_ref(),
+                        version,
+                        now,
+                    )
+                },
             )
             .await?;
 
@@ -666,8 +626,8 @@ impl DapReportInitializer for Test {
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         tokio::task::spawn_blocking({
-            let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
+            let vdaf = task_config.vdaf;
             let agg_param = agg_param.clone();
             move || {
                 consumed_reports
@@ -676,7 +636,7 @@ impl DapReportInitializer for Test {
                         EarlyReportStateInitialized::initialize(
                             is_leader,
                             &vdaf_verify_key,
-                            &vdaf_config,
+                            &vdaf,
                             &agg_param,
                             consumed,
                         )
@@ -763,4 +723,55 @@ pub fn now() -> Now {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs())
+}
+
+/// An iterator that yields the size of chunks based on a length and a maximum chunk size.
+///
+/// # Example
+/// ```ignore
+/// assert_eq!(
+///     distribute_reports_in_chunks(200, 51).collect::<Vec<_>>(),
+///     [51, 51, 51, 47]
+/// );
+/// ```
+fn distribute_reports_in_chunks(total: usize, chunk_length: usize) -> impl Iterator<Item = usize> {
+    assert!(total >= chunk_length);
+    (0..(total / chunk_length))
+        .map(move |_| chunk_length)
+        .chain(Some(total % chunk_length).filter(|t| *t > 0))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn distribute_reports_in_chunks() {
+        for total in 0..400 {
+            for len in 1..total {
+                let expected = (0..total)
+                    .collect::<Vec<_>>()
+                    .chunks(len)
+                    .map(|c| c.len())
+                    .collect::<Vec<_>>();
+
+                let iter = super::distribute_reports_in_chunks(total, len);
+
+                let (len, _) = iter.size_hint();
+                let collected = iter.collect::<Vec<_>>();
+                assert_eq!(
+                    collected, expected,
+                    "collected values don't match expected values"
+                );
+                assert_eq!(
+                    collected.len(),
+                    len,
+                    "collected len don't match expected len"
+                );
+                assert_eq!(
+                    collected.into_iter().sum::<usize>(),
+                    expected.into_iter().sum::<usize>(),
+                    "collected sum doesn't match expected sum"
+                );
+            }
+        }
+    }
 }
