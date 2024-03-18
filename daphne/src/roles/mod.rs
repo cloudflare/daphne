@@ -154,7 +154,7 @@ mod test {
         assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
         constants::DapMediaType,
-        hpke::{HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
+        hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
             AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
             Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
@@ -511,8 +511,8 @@ mod test {
             let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
                 task_config
                     .produce_agg_job_init_req(
-                        self.leader.as_ref(),
-                        self.leader.as_ref(),
+                        &*self.leader,
+                        &*self.leader,
                         task_id,
                         &part_batch_sel,
                         &agg_param,
@@ -584,13 +584,11 @@ mod test {
                     .get_hpke_config_for(task_config.version, Some(task_id))
                     .await
                     .unwrap()
-                    .as_ref()
                     .clone(),
                 self.helper
                     .get_hpke_config_for(task_config.version, Some(task_id))
                     .await
                     .unwrap()
-                    .as_ref()
                     .clone(),
             ];
 
@@ -1645,13 +1643,11 @@ mod test {
                 .get_hpke_config_for(version, Some(&task_id))
                 .await
                 .unwrap()
-                .as_ref()
                 .clone(),
             t.helper
                 .get_hpke_config_for(version, Some(&task_id))
                 .await
                 .unwrap()
-                .as_ref()
                 .clone(),
         ];
         for _ in 0..task_config.min_batch_size {

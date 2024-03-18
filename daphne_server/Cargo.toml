@@ -25,6 +25,7 @@ futures.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+mappable-rc = "0.1.1"
 p256.workspace = true
 prio.workspace = true
 rayon.workspace = true

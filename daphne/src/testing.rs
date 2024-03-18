@@ -8,7 +8,7 @@ use crate::{
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeReceiverConfig},
+    hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
         AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
         Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
@@ -665,7 +665,7 @@ impl BearerTokenProvider for InMemoryAggregator {
 }
 
 #[async_trait]
-impl HpkeDecrypter for InMemoryAggregator {
+impl HpkeProvider for InMemoryAggregator {
     type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
     async fn get_hpke_config_for<'s>(
@@ -693,7 +693,10 @@ impl HpkeDecrypter for InMemoryAggregator {
     async fn can_hpke_decrypt(&self, _task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
         Ok(self.get_hpke_receiver_config_for(config_id).is_some())
     }
+}
 
+#[async_trait]
+impl HpkeDecrypter for InMemoryAggregator {
     async fn hpke_decrypt(
         &self,
         _task_id: &TaskId,

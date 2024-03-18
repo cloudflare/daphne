@@ -18,7 +18,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
+use std::ops::Deref;
 
 // Various algorithm constants
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
@@ -211,11 +211,10 @@ impl HpkeConfig {
     }
 }
 
-/// HPKE decrypter functionality.
 #[async_trait]
-pub trait HpkeDecrypter {
+pub trait HpkeProvider: HpkeDecrypter {
     /// Return type of `get_hpke_config_for()`, wraps a reference to an HPKE config.
-    type WrappedHpkeConfig<'a>: AsRef<HpkeConfig> + Send
+    type WrappedHpkeConfig<'a>: Deref<Target = HpkeConfig> + Send
     where
         Self: 'a;
 
@@ -228,7 +227,10 @@ pub trait HpkeDecrypter {
 
     /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
     async fn can_hpke_decrypt(&self, task_id: &TaskId, config_id: u8) -> Result<bool, DapError>;
+}
 
+#[async_trait]
+pub trait HpkeDecrypter {
     /// Decrypt the given HPKE ciphertext using the given info and AAD string.
     async fn hpke_decrypt(
         &self,
@@ -334,22 +336,10 @@ impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
     }
 }
 
+// This let's us use a single config during tests to simplify test code.
+#[cfg(any(test, feature = "test-utils"))]
 #[async_trait]
 impl HpkeDecrypter for HpkeReceiverConfig {
-    type WrappedHpkeConfig<'a> = HpkeConfig;
-
-    async fn get_hpke_config_for<'s>(
-        &'s self,
-        _version: DapVersion,
-        _task_id: Option<&TaskId>,
-    ) -> Result<Self::WrappedHpkeConfig<'s>, DapError> {
-        unreachable!("not implemented");
-    }
-
-    async fn can_hpke_decrypt(&self, _task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
-        Ok(config_id == self.config.id)
-    }
-
     async fn hpke_decrypt(
         &self,
         _task_id: &TaskId,

@@ -10,7 +10,7 @@ use crate::{
     audit_log::AuditLog,
     constants::DapMediaType,
     error::DapAbort,
-    hpke::{HpkeConfig, HpkeDecrypter},
+    hpke::{HpkeConfig, HpkeProvider},
     messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -42,7 +42,7 @@ pub enum MergeAggShareError {
 
 /// DAP Aggregator functionality.
 #[async_trait]
-pub trait DapAggregator<S: Sync>: HpkeDecrypter + DapReportInitializer + Sized {
+pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
     type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig> + Send
     where
@@ -189,7 +189,7 @@ where
 
     let payload = {
         let hpke_config_list = HpkeConfigList {
-            hpke_configs: vec![hpke_config.as_ref().clone()],
+            hpke_configs: vec![hpke_config.clone()],
         };
         hpke_config_list.get_encoded().map_err(DapError::encoding)?
     };

@@ -9,7 +9,7 @@ use daphne::{
     auth::{BearerToken, BearerTokenProvider},
     error::DapAbort,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter},
+    hpke::{HpkeConfig, HpkeDecrypter, HpkeProvider},
     messages::{BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
@@ -22,6 +22,7 @@ use daphne_service_utils::{
     durable_requests::bindings::{self, AggregateStoreMergeReq, AggregateStoreMergeResp},
 };
 use futures::{future::try_join_all, StreamExt};
+use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use crate::storage_proxy_connection::kv;
@@ -263,7 +264,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         task_id: &'req TaskId,
     ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         self.kv()
-            .get::<kv::prefix::TaskConfig>(task_id)
+            .get_cloned::<kv::prefix::TaskConfig>(task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e))
     }
@@ -402,26 +403,21 @@ impl DapReportInitializer for crate::App {
 }
 
 #[async_trait]
-impl HpkeDecrypter for crate::App {
-    type WrappedHpkeConfig<'a> = HpkeConfig
-    where
-        Self: 'a;
+impl HpkeProvider for crate::App {
+    type WrappedHpkeConfig<'s> = Marc<HpkeConfig>;
 
     async fn get_hpke_config_for<'s>(
         &'s self,
         version: DapVersion,
         _task_id: Option<&TaskId>,
-    ) -> Result<Self::WrappedHpkeConfig<'s>, DapError> {
+    ) -> Result<Self::WrappedHpkeConfig<'static>, DapError> {
         self.kv()
             .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
                 // Assume the first HPKE config in the receiver list has the highest preference.
                 //
                 // TODO draft02 cleanup: Return the entire list and not just a single HPKE config.
                 // Note that we previously returned one because this was required in draft02.
-                config_list
-                    .iter()
-                    .next()
-                    .map(|receiver| receiver.config.clone())
+                config_list.iter().next().map(|hpke| &hpke.config)
             })
             .await
             .map_err(|e| fatal_error!(err = ?e))?
@@ -438,17 +434,17 @@ impl HpkeDecrypter for crate::App {
 
         Ok(self
             .kv()
-            .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
-                config_list
-                    .iter()
-                    .find(|r| r.config.id == config_id)
-                    .map(|_| ())
+            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
+                config_list.iter().any(|r| r.config.id == config_id)
             })
             .await
             .map_err(|e| fatal_error!(err = ?e))?
-            .is_some())
+            .unwrap_or(false))
     }
+}
 
+#[async_trait]
+impl HpkeDecrypter for crate::App {
     async fn hpke_decrypt(
         &self,
         task_id: &TaskId,
@@ -463,7 +459,7 @@ impl HpkeDecrypter for crate::App {
             .ok_or(DapAbort::UnrecognizedTask)?
             .version;
         self.kv()
-            .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
+            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
                 config_list
                     .iter()
                     .find(|receiver| receiver.config.id == ciphertext.config_id)
@@ -471,6 +467,7 @@ impl HpkeDecrypter for crate::App {
             })
             .await
             .map_err(|e| fatal_error!(err = ?e))?
+            .flatten()
             .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
     }
 }
@@ -497,11 +494,10 @@ impl BearerTokenProvider for crate::App {
         }
 
         self.kv()
-            .get_mapped::<kv::prefix::LeaderBearerToken, _, _>(task_id, |t| {
-                Some(Cow::Owned(t.to_owned()))
-            })
+            .get_cloned::<kv::prefix::LeaderBearerToken>(task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e))
+            .map(|r| r.map(Cow::Owned))
     }
 
     async fn get_collector_bearer_token_for<'s>(
@@ -522,10 +518,9 @@ impl BearerTokenProvider for crate::App {
         }
 
         self.kv()
-            .get_mapped::<kv::prefix::CollectorBearerToken, _, _>(task_id, |t| {
-                Some(Cow::Owned(t.to_owned()))
-            })
+            .get_cloned::<kv::prefix::CollectorBearerToken>(task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e))
+            .map(|r| r.map(Cow::Owned))
     }
 }

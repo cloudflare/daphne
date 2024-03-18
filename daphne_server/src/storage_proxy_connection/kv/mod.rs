@@ -7,6 +7,7 @@ use std::{any::Any, fmt::Display};
 
 use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
+use mappable_rc::Marc;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::RwLock;
 
@@ -80,25 +81,54 @@ impl<'h> Kv<'h> {
         }
     }
 
-    pub async fn get<P>(&self, key: &P::Key) -> Result<Option<P::Value>, Error>
+    pub async fn get<P>(&self, key: &P::Key) -> Result<Option<Marc<P::Value>>, Error>
+    where
+        P: KvPrefix,
+    {
+        self.get_mapped::<P, _, _>(key, |t| Some(t)).await
+    }
+
+    pub async fn get_cloned<P>(&self, key: &P::Key) -> Result<Option<P::Value>, Error>
     where
         P: KvPrefix,
         P::Value: Clone,
     {
-        self.get_mapped::<P, _, _>(key, |t: &P::Value| Some(t.clone()))
-            .await
+        Ok(self.get::<P>(key).await?.map(|t| t.as_ref().clone()))
     }
 
-    pub async fn get_mapped<P, R, F>(&self, key: &P::Key, mapper: F) -> Result<Option<R>, Error>
+    pub async fn get_mapped<P, R, F>(
+        &self,
+        key: &P::Key,
+        mapper: F,
+    ) -> Result<Option<Marc<R>>, Error>
     where
         P: KvPrefix,
-        F: FnOnce(&P::Value) -> Option<R>,
+        F: for<'s> FnOnce(&'s P::Value) -> Option<&'s R>,
+    {
+        Ok(self
+            .get_impl::<P, _, _>(key, |marc| Marc::try_map(marc, mapper).ok())
+            .await?
+            .flatten())
+    }
+
+    pub async fn peek<P, R, F>(&self, key: &P::Key, peeker: F) -> Result<Option<R>, Error>
+    where
+        P: KvPrefix,
+        F: FnOnce(&P::Value) -> R,
+    {
+        self.get_impl::<P, _, _>(key, |marc| peeker(&marc)).await
+    }
+
+    async fn get_impl<P, R, F>(&self, key: &P::Key, mapper: F) -> Result<Option<R>, Error>
+    where
+        P: KvPrefix,
+        F: for<'s> FnOnce(Marc<P::Value>) -> R,
     {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "GET");
         match self.cache.read().await.get::<P>(&key) {
             cache::GetResult::NoFound => {}
-            cache::GetResult::Found(t) => return Ok(mapper(t)),
+            cache::GetResult::Found(t) => return Ok(Some(mapper(t))),
             cache::GetResult::MismatchedType => {
                 tracing::warn!(
                     "cache mismatched type, wanted {}",
@@ -119,10 +149,10 @@ impl<'h> Kv<'h> {
             Ok(None)
         } else {
             let resp = resp.error_for_status()?;
-            let t = resp.json().await?;
-            let r = mapper(&t);
+            let t = Marc::new(resp.json::<P::Value>().await?);
+            let r = mapper(t.clone());
             self.cache.write().await.put::<P>(key, t);
-            Ok(r)
+            Ok(Some(r))
         }
     }
 
@@ -142,7 +172,7 @@ impl<'h> Kv<'h> {
             .send()
             .await?
             .error_for_status()?;
-        self.cache.write().await.put::<P>(key, value);
+        self.cache.write().await.put::<P>(key, value.into());
         Ok(())
     }
 
@@ -175,7 +205,7 @@ impl<'h> Kv<'h> {
             Ok(Some(value))
         } else {
             response.error_for_status()?;
-            self.cache.write().await.put::<P>(key, value);
+            self.cache.write().await.put::<P>(key, value.into());
             Ok(None)
         }
     }
@@ -185,7 +215,7 @@ impl<'h> Kv<'h> {
         P: KvPrefix,
     {
         let key = Self::to_key::<P>(key);
-        self.cache.write().await.put::<P>(key, value);
+        self.cache.write().await.put::<P>(key, value.into());
     }
 
     fn to_key<P: KvPrefix>(key: &P::Key) -> String {
