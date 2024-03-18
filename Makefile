@@ -10,7 +10,7 @@ helper:
 	cargo run --features test-utils --example service -- -c ./daphne_server/examples/configuration-helper.toml
 
 storage_proxy:
-	docker-compose -f ./daphne_worker_test/docker-compose-storage-proxy.yaml up
+	docker-compose -f ./daphne_worker_test/docker-compose-storage-proxy.yaml up --build
 
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
