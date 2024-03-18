@@ -703,7 +703,7 @@ impl HpkeDecrypter for InMemoryAggregator {
     ) -> Result<Vec<u8>, DapError> {
         if let Some(hpke_receiver_config) = self.get_hpke_receiver_config_for(ciphertext.config_id)
         {
-            Ok(hpke_receiver_config.decrypt(info, aad, &ciphertext.enc, &ciphertext.payload)?)
+            Ok(hpke_receiver_config.decrypt(info, aad, ciphertext)?)
         } else {
             Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
         }

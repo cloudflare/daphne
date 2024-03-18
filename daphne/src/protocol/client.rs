@@ -7,8 +7,8 @@ use crate::{
     fatal_error,
     hpke::HpkeConfig,
     messages::{
-        encode_u32_bytes, Extension, HpkeCiphertext, PlaintextInputShare, Report, ReportId,
-        ReportMetadata, TaskId, Time,
+        encode_u32_bytes, Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId,
+        Time,
     },
     vdaf::{prio2::prio2_shard, prio3::prio3_shard},
     DapError, DapMeasurement, DapVersion, VdafConfig,
@@ -119,17 +119,13 @@ impl VdafConfig {
             } else {
                 CTX_ROLE_HELPER
             }; // Receiver role
-            let (enc, payload) = hpke_config.encrypt(
+            let ciphertext = hpke_config.encrypt(
                 &info,
                 &aad,
                 &encoded_input_share.map_err(DapError::encoding)?,
             )?;
 
-            encrypted_input_shares.push(HpkeCiphertext {
-                config_id: hpke_config.id,
-                enc,
-                payload,
-            });
+            encrypted_input_shares.push(ciphertext);
         }
 
         Ok(Report {
