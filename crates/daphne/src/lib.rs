@@ -69,7 +69,7 @@ use constants::DapMediaType;
 pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
-use messages::encode_base64url;
+use messages::{encode_base64url, Report};
 #[cfg(any(test, feature = "test-utils"))]
 use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
@@ -1087,6 +1087,18 @@ pub enum DapCollectionJob {
     Done(Collection),
     Pending,
     Unknown,
+}
+
+/// Leader: A report waiting to be aggregated.
+pub enum DapPendingReport {
+    /// This is the first time the report has been aggregated. The Leader still needs to transmit
+    /// the Helper's share.
+    New(Report),
+    /// The report has already been aggregated and is stored by the Leader and Helper.
+    ///
+    /// draft09 compatibility: This variant is needed to support heavy hitters and is only
+    /// constructed in the latest version.
+    Stored(ReportId),
 }
 
 /// Telemetry information for the leader's processing loop.

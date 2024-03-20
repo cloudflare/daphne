@@ -10,7 +10,7 @@ use crate::{
     messages::{
         encode_u32_bytes, encode_u32_prefixed, AggregationJobInitReq, AggregationJobResp,
         Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
-        PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
+        PlaintextInputShare, PrepareInit, ReportId, ReportMetadata, ReportShare, TaskId,
         Transition, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
@@ -21,7 +21,7 @@ use crate::{
         VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
+    DapAggregationParam, DapError, DapPendingReport, DapTaskConfig, DapVersion, VdafConfig,
 };
 use futures::{Stream, StreamExt};
 use prio::codec::{
@@ -82,10 +82,17 @@ pub trait EarlyReportState {
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateConsumed {
-    Ready {
+    New {
         metadata: ReportMetadata,
         public_share: Vec<u8>,
         input_share: Vec<u8>,
+        // Set by the Helper.
+        peer_prep_share: Option<Vec<u8>>,
+    },
+    /// draft09 compatibility: This variant is only used in the latest version. It is required to
+    /// support the heavy hitters mode of operation for DAP.
+    Stored {
+        metadata: ReportMetadata,
         // Set by the Helper.
         peer_prep_share: Option<Vec<u8>>,
     },
@@ -234,7 +241,7 @@ impl EarlyReportStateConsumed {
             }
         };
 
-        Ok(Self::Ready {
+        Ok(Self::New {
             metadata: report_share.report_metadata,
             public_share: report_share.public_share,
             peer_prep_share,
@@ -246,12 +253,14 @@ impl EarlyReportStateConsumed {
 impl EarlyReportState for EarlyReportStateConsumed {
     fn metadata(&self) -> &ReportMetadata {
         match self {
-            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
+            Self::New { metadata, .. }
+            | Self::Stored { metadata, .. }
+            | Self::Rejected { metadata, .. } => metadata,
         }
     }
 
     fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready { .. })
+        matches!(self, Self::New { .. } | Self::Stored { .. })
     }
 }
 
@@ -283,18 +292,25 @@ impl EarlyReportStateInitialized {
         agg_param: &DapAggregationParam,
         early_report_state_consumed: EarlyReportStateConsumed,
     ) -> Result<Self, DapError> {
-        // We need to use this variable for Mastic, which is currently only enabled in tests or
-        // when the feature "test-utils" is enabled.
+        // TODO heavy hitters: Remove this once we use the aggregation parameter when compiling
+        // with the default feature set.
+        #[cfg(not(any(test, feature = "test-utils")))]
         let _ = agg_param;
 
         let (metadata, public_share, input_share, peer_prep_share) =
             match early_report_state_consumed {
-                EarlyReportStateConsumed::Ready {
+                EarlyReportStateConsumed::New {
                     metadata,
                     public_share,
                     input_share,
                     peer_prep_share,
                 } => (metadata, public_share, input_share, peer_prep_share),
+                EarlyReportStateConsumed::Stored { .. } => {
+                    // TODO heavy hitters: Initialize stored reports.
+                    return Err(fatal_error!(
+                        err = "handling of stored reports is not yet implemented"
+                    ));
+                }
                 EarlyReportStateConsumed::Rejected { metadata, failure } => {
                     return Ok(Self::Rejected { metadata, failure })
                 }
@@ -388,7 +404,7 @@ impl DapTaskConfig {
         metrics: &dyn DaphneMetrics,
     ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
     where
-        S: Stream<Item = Report>,
+        S: Stream<Item = DapPendingReport>,
     {
         let (report_count_hint, _upper_bound) = reports.size_hint();
         let mut consumed_reports = Vec::with_capacity(report_count_hint);
@@ -396,7 +412,13 @@ impl DapTaskConfig {
         {
             let mut processed = HashSet::with_capacity(report_count_hint);
             let mut reports = pin!(reports);
-            while let Some(report) = reports.next().await {
+            while let Some(pending_report) = reports.next().await {
+                let DapPendingReport::New(report) = pending_report else {
+                    // TODO heavy hitters: Initialize stored reports.
+                    return Err(fatal_error!(
+                        err = "handling of stored reports is not yet implemented"
+                    ));
+                };
                 if processed.contains(&report.report_metadata.id) {
                     return Err(fatal_error!(
                         err = "tried to process report sequence with non-unique report IDs",
@@ -426,6 +448,7 @@ impl DapTaskConfig {
                 helper_shares.push(helper_share);
             }
         }
+
         let initialized_reports = initializer
             .initialize_reports(true, self, agg_param, consumed_reports)
             .await?;
@@ -503,11 +526,16 @@ impl DapTaskConfig {
         task_id: &TaskId,
         agg_job_init_req: AggregationJobInitReq,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        let num_reports = agg_job_init_req.prep_inits.len();
+        let AggregationJobInitReq {
+            agg_param,
+            part_batch_sel: _,
+            prep_inits,
+        } = agg_job_init_req;
+        let num_reports = prep_inits.len();
         let mut consumed_reports = Vec::with_capacity(num_reports);
         {
             let mut processed = HashSet::with_capacity(num_reports);
-            for prep_init in agg_job_init_req.prep_inits {
+            for prep_init in prep_inits {
                 let report_id = prep_init.report_id();
                 if processed.contains(&report_id) {
                     return Err(DapAbort::InvalidMessage {
@@ -542,17 +570,17 @@ impl DapTaskConfig {
                         report_id: _,
                         payload: _,
                     } => {
+                        // TODO heavy hitters: Initialize stored reports.
                         return Err(fatal_error!(
                             err = "handling of stored reports is not yet implemented"
-                        ))
+                        ));
                     }
                 });
             }
         }
 
-        let agg_param =
-            DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_job_init_req.agg_param)
-                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+        let agg_param = DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_param)
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
         let initialized_reports = initializer
             .initialize_reports(false, self, &agg_param, consumed_reports)
