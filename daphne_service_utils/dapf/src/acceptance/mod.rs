@@ -35,8 +35,8 @@ use daphne::{
     roles::DapReportInitializer,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
-    DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapTaskConfig,
-    DapTaskParameters, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
+    DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion,
+    EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
 use futures::{StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
@@ -391,8 +391,9 @@ impl Test {
 
         // Prepare AggregationJobInitReq.
         let agg_job_id = AggregationJobId(rng.gen());
-        let transition = task_config
-            .produce_agg_job_init_req(
+        let report_count = reports_for_agg_job.len();
+        let (agg_job_state, agg_job_init_req) = task_config
+            .produce_agg_job_req(
                 fake_leader_hpke_receiver_config,
                 self,
                 task_id,
@@ -403,16 +404,6 @@ impl Test {
             )
             .await
             .context("producing agg job init request")?;
-
-        let (state, agg_init_req) = match transition {
-            DapLeaderAggregationJobTransition::Continued(state, agg_init_req) => {
-                (state, agg_init_req)
-            }
-
-            DapLeaderAggregationJobTransition::Finished(..) => {
-                return Err(anyhow!("unexpected state transition (finished)"));
-            }
-        };
 
         // Send AggregationJobInitReq.
         let headers = construct_request_headers(
@@ -435,7 +426,7 @@ impl Test {
             self.http_client
                 .post(url)
                 .body(
-                    agg_init_req
+                    agg_job_init_req
                         .get_encoded_with_param(&task_config.version)
                         .unwrap(),
                 )
@@ -466,19 +457,19 @@ impl Test {
         }
 
         // Handle AggregationJobResp..
-        let agg_resp = AggregationJobResp::get_decoded(
+        let agg_job_resp = AggregationJobResp::get_decoded(
             &resp
                 .bytes()
                 .await
                 .context("transfering bytes from the AggregateInitReq")?,
         )
         .with_context(|| "failed to parse response to AggregateInitReq from Helper")?;
-        let transition =
-            task_config.handle_agg_job_resp(task_id, state, agg_resp, self.metrics())?;
-
-        let DapLeaderAggregationJobTransition::Finished(agg_share_span) = transition else {
-            bail!("unexpected transition");
-        };
+        let agg_share_span = task_config.consume_agg_job_resp(
+            task_id,
+            agg_job_state,
+            agg_job_resp,
+            self.metrics(),
+        )?;
 
         let aggregated_report_count = agg_share_span
             .iter()

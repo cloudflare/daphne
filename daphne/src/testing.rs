@@ -24,8 +24,7 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
-    DapHelperAggregationJobTransition, DapLeaderAggregationJobTransition, DapMeasurement,
-    DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
+    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -173,13 +172,13 @@ impl AggregationJobTest {
     /// Leader: Produce `AggregationJobInitReq`.
     ///
     /// Panics if the Leader aborts.
-    pub async fn produce_agg_job_init_req(
+    pub async fn produce_agg_job_req(
         &self,
         agg_param: &DapAggregationParam,
         reports: Vec<Report>,
-    ) -> DapLeaderAggregationJobTransition<AggregationJobInitReq> {
+    ) -> (DapAggregationJobState, AggregationJobInitReq) {
         self.task_config
-            .produce_agg_job_init_req(
+            .produce_agg_job_req(
                 &self.leader_hpke_receiver_config,
                 self,
                 &self.task_id,
@@ -195,17 +194,17 @@ impl AggregationJobTest {
     /// Helper: Handle `AggregationJobInitReq`, produce first `AggregationJobResp`.
     ///
     /// Panics if the Helper aborts.
-    pub async fn handle_agg_job_init_req(
+    pub async fn handle_agg_job_req(
         &self,
         agg_job_init_req: AggregationJobInitReq,
-    ) -> DapHelperAggregationJobTransition<AggregationJobResp> {
+    ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
-            .handle_agg_job_init_req(
+            .produce_agg_job_resp(
                 &HashMap::default(),
                 &agg_job_init_req.part_batch_sel.clone(),
                 &self
                     .task_config
-                    .helper_initialize_reports(
+                    .consume_agg_job_req(
                         &self.helper_hpke_receiver_config,
                         self,
                         &self.task_id,
@@ -217,16 +216,16 @@ impl AggregationJobTest {
             .unwrap()
     }
 
-    /// Leader: Handle first `AggregationJobResp`, produce `AggregationJobContinueReq`.
+    /// Leader: Handle `AggregationJobResp`, produce `AggregationJobContinueReq`.
     ///
     /// Panics if the Leader aborts.
-    pub fn handle_agg_job_resp(
+    pub fn consume_agg_job_resp(
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
-    ) -> DapLeaderAggregationJobTransition<()> {
+    ) -> DapAggregateSpan<DapAggregateShare> {
         self.task_config
-            .handle_agg_job_resp(
+            .consume_agg_job_resp(
                 &self.task_id,
                 leader_state,
                 agg_job_resp,
@@ -235,16 +234,16 @@ impl AggregationJobTest {
             .unwrap()
     }
 
-    /// Like [`handle_agg_job_resp`] but expect the Leader to abort.
-    pub fn handle_agg_job_resp_expect_err(
+    /// Like [`consume_agg_job_resp`] but expect the Leader to abort.
+    pub fn consume_agg_job_resp_expect_err(
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
-            .handle_agg_job_resp(&self.task_id, leader_state, agg_job_resp, metrics)
-            .expect_err("handle_agg_job_resp() succeeded; expected failure")
+            .consume_agg_job_resp(&self.task_id, leader_state, agg_job_resp, metrics)
+            .expect_err("consume_agg_job_resp() succeeded; expected failure")
     }
 
     /// Produce the Leader's encrypted aggregate share.
@@ -325,24 +324,11 @@ impl AggregationJobTest {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
-            self.produce_agg_job_init_req(&agg_param, reports).await
-        else {
-            panic!("unexpected transition");
-        };
+        let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports).await;
 
         let (leader_agg_span, helper_agg_span) = {
-            let DapHelperAggregationJobTransition::Finished(helper_agg_span, agg_job_resp) =
-                self.handle_agg_job_init_req(agg_job_init_req).await
-            else {
-                unreachable!("unexpected transition")
-            };
-
-            let DapLeaderAggregationJobTransition::Finished(leader_agg_span) =
-                self.handle_agg_job_resp(leader_state, agg_job_resp)
-            else {
-                panic!("unexpected transition");
-            };
+            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req).await;
+            let leader_agg_span = self.consume_agg_job_resp(leader_state, agg_job_resp);
             (leader_agg_span, helper_agg_span)
         };
 

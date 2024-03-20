@@ -26,8 +26,8 @@ use crate::{
         PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::DaphneRequestType,
-    DapAggregationParam, DapCollectionJob, DapError, DapLeaderAggregationJobTransition,
-    DapLeaderProcessTelemetry, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
+    DapResource, DapResponse, DapTaskConfig,
 };
 
 struct LeaderHttpRequestOptions<'p> {
@@ -333,8 +333,8 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
 
     // Prepare AggregationJobInitReq.
     let agg_job_id = AggregationJobId(thread_rng().gen());
-    let transition = task_config
-        .produce_agg_job_init_req(
+    let (agg_job_state, agg_job_init_req) = task_config
+        .produce_agg_job_req(
             aggregator,
             aggregator,
             task_id,
@@ -345,19 +345,10 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         )
         .await?;
 
-    let (state, agg_job_init_req) = match transition {
-        DapLeaderAggregationJobTransition::Continued(state, agg_job_init_req) => {
-            (state, agg_job_init_req)
-        }
-        DapLeaderAggregationJobTransition::Finished(agg_span) if agg_span.report_count() == 0 => {
-            return Ok(0)
-        }
-        DapLeaderAggregationJobTransition::Finished(..) => {
-            return Err(fatal_error!(
-                err = "unexpected state transition (uncommitted)"
-            ));
-        }
-    };
+    if agg_job_state.report_count() == 0 {
+        return Ok(0);
+    }
+
     let url_path = format!(
         "tasks/{}/aggregation_jobs/{}",
         task_id.to_base64url(),
@@ -386,11 +377,8 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Handle AggregationJobResp.
-    let DapLeaderAggregationJobTransition::Finished(agg_span) =
-        task_config.handle_agg_job_resp(task_id, state, agg_job_resp, metrics)?
-    else {
-        return Err(fatal_error!(err = "unexpected state transition"));
-    };
+    let agg_span =
+        task_config.consume_agg_job_resp(task_id, agg_job_state, agg_job_resp, metrics)?;
 
     let out_shares_count = agg_span.report_count() as u64;
     if out_shares_count == 0 {

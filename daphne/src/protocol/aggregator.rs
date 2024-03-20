@@ -21,8 +21,7 @@ use crate::{
         VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationParam, DapError, DapHelperAggregationJobTransition,
-    DapLeaderAggregationJobTransition, DapTaskConfig, DapVersion, VdafConfig,
+    DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
 };
 use futures::{Stream, StreamExt};
 use prio::codec::{
@@ -376,11 +375,10 @@ pub(crate) enum ReportProcessedStatus {
 }
 
 impl DapTaskConfig {
-    /// Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
-    /// state for the aggregation flow and the initial aggregate request to be sent to the Helper.
-    /// This method is called by the Leader.
+    /// Leader -> Helper: Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
+    /// state for the aggregation flow and the outbound `AggregationJobInitReq` message.
     #[allow(clippy::too_many_arguments)]
-    pub async fn produce_agg_job_init_req<S>(
+    pub async fn produce_agg_job_req<S>(
         &self,
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
@@ -389,7 +387,7 @@ impl DapTaskConfig {
         agg_param: &DapAggregationParam,
         reports: S,
         metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<AggregationJobInitReq>, DapError>
+    ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
     where
         S: Stream<Item = Report>,
     {
@@ -483,13 +481,7 @@ impl DapTaskConfig {
             }
         }
 
-        if prep_inits.is_empty() {
-            return Ok(DapLeaderAggregationJobTransition::Finished(
-                DapAggregateSpan::default(),
-            ));
-        }
-
-        Ok(DapLeaderAggregationJobTransition::Continued(
+        Ok((
             DapAggregationJobState {
                 seq: states,
                 part_batch_sel: part_batch_sel.clone(),
@@ -502,7 +494,9 @@ impl DapTaskConfig {
         ))
     }
 
-    pub(crate) async fn helper_initialize_reports(
+    /// Helper: Consume the `AggregationJobInitReq` sent by the Leader and return the initialized
+    /// reports.
+    pub async fn consume_agg_job_req(
         &self,
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
@@ -551,15 +545,14 @@ impl DapTaskConfig {
         Ok(initialized_reports)
     }
 
-    /// Consume an initial aggregate request from the Leader. The outputs are the Helper's state
-    /// for the aggregation flow and the aggregate response to send to the Leader. This method is
-    /// run by the Helper.
-    pub(crate) fn handle_agg_job_init_req(
+    /// Helper -> Leader: Produce the `AggregationJobResp` message to send to the Leader and
+    /// compute Helper's aggregate share span.
+    pub(crate) fn produce_agg_job_resp(
         &self,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[EarlyReportStateInitialized],
-    ) -> Result<DapHelperAggregationJobTransition<AggregationJobResp>, DapError> {
+    ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
         let num_reports = initialized_reports.len();
         let mut agg_span = DapAggregateSpan::default();
         let mut transitions = Vec::with_capacity(num_reports);
@@ -648,20 +641,18 @@ impl DapTaskConfig {
             });
         }
 
-        Ok(DapHelperAggregationJobTransition::Finished(
-            agg_span,
-            AggregationJobResp { transitions },
-        ))
+        Ok((agg_span, AggregationJobResp { transitions }))
     }
 
-    /// Handle an aggregate response from the Helper. This method is run by the Leader.
-    pub fn handle_agg_job_resp(
+    /// Leader: Consume the `AggregationJobResp` message sent by the Helper and compute the
+    /// Leader's aggregate share span.
+    pub fn consume_agg_job_resp(
         &self,
         task_id: &TaskId,
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
-    ) -> Result<DapLeaderAggregationJobTransition<()>, DapError> {
+    ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
@@ -752,7 +743,7 @@ impl DapTaskConfig {
             }
         }
 
-        Ok(DapLeaderAggregationJobTransition::Finished(agg_span))
+        Ok(agg_span)
     }
 
     /// Encrypt an aggregate share under the Collector's public key. This method is run by the

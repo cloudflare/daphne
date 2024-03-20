@@ -880,11 +880,10 @@ impl Encode for DapAggregationJobState {
     }
 }
 
-// TODO(cjpatton) Consider replacing this with an implementation of
-// `ParameterizedDecode<VdafConfig>`. This requires changing the wire format to make the sequence
-// of report states length-prefixed.
 impl DapAggregationJobState {
     /// Decode the Helper state from a byte string.
+    //
+    // TODO draft02 cleanup: Remove this.
     pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
         let mut r = std::io::Cursor::new(data);
         let part_batch_sel = PartialBatchSelector::decode(&mut r)
@@ -907,6 +906,11 @@ impl DapAggregationJobState {
             part_batch_sel,
             seq,
         })
+    }
+
+    /// Count the number of reports that can still be aggregated.
+    pub fn report_count(&self) -> usize {
+        self.seq.len()
     }
 }
 
@@ -1000,28 +1004,6 @@ impl DapAggregateShare {
         })?;
         Ok(())
     }
-}
-
-/// Leader state transition during the aggregation flow.
-//
-// TODO draft02 clean up: Hard-code `M`.
-#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
-pub enum DapLeaderAggregationJobTransition<M: Debug> {
-    /// Waiting for a response from the Helper.
-    Continued(DapAggregationJobState, M),
-
-    /// Committed to the output shares.
-    Finished(DapAggregateSpan<DapAggregateShare>),
-}
-
-/// Helper state transitions during the aggregation flow.
-#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
-pub enum DapHelperAggregationJobTransition<M: Debug> {
-    /// Waiting for a response from the Leader.
-    Continued(DapAggregationJobState, M),
-
-    /// Committed to the output shares.
-    Finished(DapAggregateSpan<DapAggregateShare>, M),
 }
 
 /// DAP sender role.
