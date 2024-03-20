@@ -1,3 +1,4 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
@@ -26,7 +27,9 @@ daphne_service_utils = { path = "../daphne_service_utils", features = ["promethe
 futures = { workspace = true, optional = true }
 hex.workspace = true
 prio.workspace = true
+prometheus.workspace = true
 rand.workspace = true
+reqwest-wasm.workspace = true
 ring.workspace = true
 serde-wasm-bindgen.workspace = true
 serde.workspace = true

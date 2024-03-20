@@ -70,7 +70,7 @@ mod prometheus {
                 super::AuthMethod::TlsClientAuth => "mutual_tls",
                 super::AuthMethod::BearerToken => "tls_client_auth",
             };
-            self.auth_method.with_label_values(&[method]);
+            self.auth_method.with_label_values(&[method]).inc();
         }
 
         fn daphne(&self) -> &dyn DaphneMetrics {
