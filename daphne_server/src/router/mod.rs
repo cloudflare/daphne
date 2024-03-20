@@ -28,6 +28,7 @@ use daphne::{
 };
 use daphne_service_utils::{
     auth::{DaphneAuth, TlsClientAuth},
+    http_headers,
     metrics::{self, DaphneServiceMetrics},
     DapRole,
 };
@@ -263,7 +264,8 @@ where
         };
 
         let sender_auth = DaphneAuth {
-            bearer_token: extract_header_as_string("DAP-Auth-Token").map(BearerToken::from),
+            bearer_token: extract_header_as_string(http_headers::DAP_AUTH_TOKEN)
+                .map(BearerToken::from),
             cf_tls_client_auth: (|| {
                 // Whatever service ends up fronting this one and terminating mTLS must pass through
                 // these headers.
@@ -298,7 +300,7 @@ where
             None
         };
 
-        let taskprov = extract_header_as_string("dap-taskprov");
+        let taskprov = extract_header_as_string(http_headers::DAP_TASKPROV);
 
         // TODO(mendess): this is very eager, we could redesign DapResponse later to allow for
         // streaming of data.

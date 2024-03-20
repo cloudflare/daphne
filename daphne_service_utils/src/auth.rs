@@ -27,7 +27,8 @@ pub struct TlsClientAuth {
 // control to that service; Daphne-Worker would just need to verify that Access granted access.
 #[derive(PartialEq)]
 pub struct DaphneAuth {
-    /// Bearer token, expected to appear in the "dap-auth-token" header.
+    /// Bearer token, expected to appear in the
+    /// [`DAP_AUTH_TOKEN`](crate::http_headers::DAP_AUTH_TOKEN) header.
     pub bearer_token: Option<BearerToken>,
 
     /// TLS client authentication. The client uses a certificate when establishing the TLS

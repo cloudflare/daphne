@@ -38,6 +38,7 @@ use daphne::{
     DapLeaderAggregationJobTransition, DapMeasurement, DapQueryConfig, DapTaskConfig,
     DapTaskParameters, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
+use daphne_service_utils::http_headers;
 use futures::{StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, Registry, TextEncoder};
@@ -668,13 +669,13 @@ where
     }
     if let Some(taskprov) = taskprov.into() {
         headers.insert(
-            reqwest::header::HeaderName::from_static("dap-taskprov"),
+            reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
             reqwest::header::HeaderValue::from_str(taskprov)?,
         );
     }
     if let Some(token) = bearer_token.into() {
         headers.insert(
-            reqwest::header::HeaderName::from_static("dap-auth-token"),
+            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
             reqwest::header::HeaderValue::from_str(token.as_ref())?,
         );
     }
