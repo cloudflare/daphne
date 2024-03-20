@@ -1,8 +1,6 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-// TODO Figure out why cargo thinks there is dead code here.
-
 use assert_matches::assert_matches;
 use daphne::{
     constants::DapMediaType,
@@ -14,6 +12,7 @@ use daphne::{
     vdaf::{Prio3Config, VdafConfig},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
 };
+use daphne_service_utils::http_headers;
 use futures::StreamExt;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
 use prio::codec::{Decode, Encode};
@@ -365,7 +364,7 @@ impl TestRunner {
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
                 reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
             );
         }
@@ -410,13 +409,13 @@ impl TestRunner {
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-auth-token"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
                 reqwest::header::HeaderValue::from_str(token).unwrap(),
             );
         }
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
                 reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
             );
         }
@@ -469,7 +468,7 @@ impl TestRunner {
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
                 reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
             );
         }
@@ -514,7 +513,7 @@ impl TestRunner {
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-auth-token"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
                 reqwest::header::HeaderValue::from_str(token).unwrap(),
             );
         }
@@ -568,12 +567,12 @@ impl TestRunner {
             .unwrap(),
         );
         headers.insert(
-            reqwest::header::HeaderName::from_static("dap-auth-token"),
+            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
             reqwest::header::HeaderValue::from_str(token).unwrap(),
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
-                reqwest::header::HeaderName::from_static("dap-taskprov"),
+                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
                 reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
             );
         }

@@ -15,6 +15,7 @@ use daphne::{
     vdaf::VdafConfig,
     DapAggregationParam, DapMeasurement, DapVersion,
 };
+use daphne_service_utils::http_headers;
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use reqwest::ClientBuilder;
@@ -431,7 +432,7 @@ async fn main() -> Result<()> {
             );
             if let Ok(token) = std::env::var("LEADER_BEARER_TOKEN") {
                 headers.insert(
-                    reqwest::header::HeaderName::from_static("dap-auth-token"),
+                    reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
                     reqwest::header::HeaderValue::from_str(&token)?,
                 );
             }

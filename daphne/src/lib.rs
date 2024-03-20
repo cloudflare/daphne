@@ -1078,7 +1078,8 @@ pub struct DapRequest<S> {
     /// Sender authorization, e.g., a bearer token.
     pub sender_auth: Option<S>,
 
-    /// taskprov: The task advertisement, sent in the "dap-taskprov" header.
+    /// taskprov: The task advertisement, sent in the
+    /// [`DAP_TASKPROV`](daphne_service_utils::http_headers::DAP_TASKPROV) header.
     pub taskprov: Option<String>,
 }
 

@@ -15,7 +15,7 @@ use daphne::{
     roles::{leader::WorkItem, DapAggregator, DapAuthorizedSender, DapLeader},
     DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse, DapTaskConfig,
 };
-use daphne_service_utils::auth::DaphneAuth;
+use daphne_service_utils::{auth::DaphneAuth, http_headers};
 use tracing::{error, info};
 use url::Url;
 
@@ -169,16 +169,20 @@ impl crate::App {
 
         if let Some(bearer_token) = req.sender_auth.and_then(|auth| auth.bearer_token) {
             headers.insert(
-                HeaderName::from_static("dap-auth-token"),
+                HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
                 HeaderValue::from_str(bearer_token.as_ref()).map_err(
-                    |e| fatal_error!(err = ?e, "failed to construct dap-auth-token header"),
+                    |e| fatal_error!(
+                        err = ?e,
+                        "failed to construct {} header",
+                        http_headers::DAP_AUTH_TOKEN
+                    ),
                 )?,
             );
         }
 
         if let Some(taskprov_advertisement) = req.taskprov.as_deref() {
             headers.insert(
-                HeaderName::from_static("dap-taskprov"),
+                HeaderName::from_static(http_headers::DAP_TASKPROV),
                 HeaderValue::from_str(taskprov_advertisement).map_err(
                     |e| fatal_error!(err = ?e, "failed to construct dap-taskprov header"),
                 )?,
