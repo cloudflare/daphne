@@ -3,6 +3,8 @@
 
 //! DAP request authorization.
 
+use std::fmt::Display;
+
 use crate::{
     constants::DapMediaType,
     fatal_error,
@@ -23,11 +25,6 @@ pub struct BearerToken {
 impl BearerToken {
     pub fn as_str(&self) -> &str {
         self.raw.as_str()
-    }
-
-    /// Return "Bearer <`bearer_token`>"
-    pub fn to_standard_header_value(&self) -> String {
-        format!("Bearer {}", self.as_str())
     }
 }
 
@@ -58,6 +55,12 @@ impl From<&str> for BearerToken {
 impl AsRef<BearerToken> for BearerToken {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+impl Display for BearerToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

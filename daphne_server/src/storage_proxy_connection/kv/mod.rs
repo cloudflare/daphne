@@ -139,10 +139,7 @@ impl<'h> Kv<'h> {
         let resp = self
             .http
             .get(self.config.url.join(&key).unwrap())
-            .header(
-                super::DAP_STORAGE_AUTH_TOKEN,
-                self.config.auth_token.to_standard_header_value(),
-            )
+            .bearer_auth(&self.config.auth_token)
             .send()
             .await?;
         if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
@@ -164,10 +161,7 @@ impl<'h> Kv<'h> {
         tracing::debug!(key, "PUT");
         self.http
             .post(self.config.url.join(&key).unwrap())
-            .header(
-                super::DAP_STORAGE_AUTH_TOKEN,
-                self.config.auth_token.to_standard_header_value(),
-            )
+            .bearer_auth(&self.config.auth_token)
             .body(serde_json::to_vec(&value).unwrap())
             .send()
             .await?
@@ -193,10 +187,7 @@ impl<'h> Kv<'h> {
         let response = self
             .http
             .put(self.config.url.join(&key).unwrap())
-            .header(
-                super::DAP_STORAGE_AUTH_TOKEN,
-                self.config.auth_token.to_standard_header_value(),
-            )
+            .bearer_auth(&self.config.auth_token)
             .body(serde_json::to_vec(&value).unwrap())
             .send()
             .await?;
