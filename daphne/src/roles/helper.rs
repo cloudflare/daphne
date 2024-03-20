@@ -12,7 +12,6 @@ use crate::{
     audit_log::AggregationJobAuditAction,
     constants::DapMediaType,
     error::DapAbort,
-    fatal_error,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
         AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportId, TaskId,
@@ -22,7 +21,7 @@ use crate::{
     protocol::aggregator::ReportProcessedStatus,
     roles::aggregator::MergeAggShareError,
     DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapAggregationParam, DapError,
-    DapHelperAggregationJobTransition, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapRequest, DapResource, DapResponse, DapTaskConfig,
 };
 
 /// DAP Helper functionality.
@@ -102,7 +101,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     let prep_init_count = agg_job_init_req.prep_inits.len();
     let part_batch_sel = agg_job_init_req.part_batch_sel.clone();
     let initialized_reports = task_config
-        .helper_initialize_reports(aggregator, aggregator, task_id, agg_job_init_req)
+        .consume_agg_job_req(aggregator, aggregator, task_id, agg_job_init_req)
         .await?;
 
     let agg_job_resp = {
@@ -112,15 +111,11 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
             task_config,
             metrics,
             |report_status| {
-                let DapHelperAggregationJobTransition::Finished(agg_span, agg_job_resp) =
-                    task_config.handle_agg_job_init_req(
-                        report_status,
-                        &part_batch_sel,
-                        &initialized_reports,
-                    )?
-                else {
-                    return Err(fatal_error!(err = "unexpected transition"));
-                };
+                let (agg_span, agg_job_resp) = task_config.produce_agg_job_resp(
+                    report_status,
+                    &part_batch_sel,
+                    &initialized_reports,
+                )?;
                 Ok((agg_span, agg_job_resp))
             },
         )

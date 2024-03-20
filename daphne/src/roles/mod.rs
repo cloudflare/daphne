@@ -166,8 +166,8 @@ mod test {
         testing::InMemoryAggregator,
         vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
-        DapError, DapGlobalConfig, DapLeaderAggregationJobTransition, DapMeasurement,
-        DapQueryConfig, DapRequest, DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
+        DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
+        DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -508,22 +508,18 @@ mod test {
 
             let agg_job_id = AggregationJobId(rng.gen());
 
-            let DapLeaderAggregationJobTransition::Continued(leader_state, agg_job_init_req) =
-                task_config
-                    .produce_agg_job_init_req(
-                        &*self.leader,
-                        &*self.leader,
-                        task_id,
-                        &part_batch_sel,
-                        &agg_param,
-                        futures::stream::iter(reports),
-                        &self.leader.metrics,
-                    )
-                    .await
-                    .unwrap()
-            else {
-                panic!("unexpected transition");
-            };
+            let (leader_state, agg_job_init_req) = task_config
+                .produce_agg_job_req(
+                    &*self.leader,
+                    &*self.leader,
+                    task_id,
+                    &part_batch_sel,
+                    &agg_param,
+                    futures::stream::iter(reports),
+                    &self.leader.metrics,
+                )
+                .await
+                .unwrap();
 
             (
                 leader_state,
@@ -696,7 +692,7 @@ mod test {
     async_test_versions! { handle_agg_job_req_invalid_batch_sel }
 
     // TODO(cjpatton) Re-enable this test. We need to refactor so that we can produce the
-    // AggregationJobInitReq without invoking `produce_agg_job_init_req()`, which filters reports
+    // AggregationJobInitReq without invoking `produce_agg_job_req()`, which filters reports
     // passed the expiration date.
     //
     //    async fn handle_agg_job_req_init_expired_task(version: DapVersion) {
