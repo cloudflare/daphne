@@ -170,13 +170,13 @@ impl crate::App {
         if let Some(bearer_token) = req.sender_auth.and_then(|auth| auth.bearer_token) {
             headers.insert(
                 HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-                HeaderValue::from_str(bearer_token.as_ref()).map_err(
-                    |e| fatal_error!(
+                HeaderValue::from_str(bearer_token.as_ref()).map_err(|e| {
+                    fatal_error!(
                         err = ?e,
                         "failed to construct {} header",
                         http_headers::DAP_AUTH_TOKEN
-                    ),
-                )?,
+                    )
+                })?,
             );
         }
 

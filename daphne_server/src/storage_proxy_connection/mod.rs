@@ -19,8 +19,6 @@ pub(crate) use kv::Kv;
 
 use crate::StorageProxyConfig;
 
-pub(crate) const DAP_STORAGE_AUTH_TOKEN: &str = "Authorization";
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error("serialization error: {0}")]
@@ -82,10 +80,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
             .http
             .post(url)
             .body(self.request.into_bytes())
-            .header(
-                DAP_STORAGE_AUTH_TOKEN,
-                self.durable.config.auth_token.to_standard_header_value(),
-            )
+            .bearer_auth(&self.durable.config.auth_token)
             .send()
             .await?;
 
