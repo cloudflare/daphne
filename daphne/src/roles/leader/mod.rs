@@ -26,8 +26,8 @@ use crate::{
         PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::DaphneRequestType,
-    DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
-    DapResource, DapResponse, DapTaskConfig,
+    DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapPendingReport,
+    DapRequest, DapResource, DapResponse, DapTaskConfig,
 };
 
 struct LeaderHttpRequestOptions<'p> {
@@ -325,7 +325,7 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,
     agg_param: &DapAggregationParam,
-    reports: Vec<Report>,
+    reports: impl IntoIterator<Item = DapPendingReport>,
 ) -> Result<u64, DapError> {
     let metrics = aggregator.metrics();
 
@@ -572,7 +572,7 @@ pub async fn process<S: Sync, A: DapLeader<S>>(
                         task_config.as_ref(),
                         &part_batch_sel,
                         &agg_param,
-                        reports,
+                        reports.into_iter().map(DapPendingReport::New),
                     )
                     .await
                 });

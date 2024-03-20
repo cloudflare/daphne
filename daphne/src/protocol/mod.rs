@@ -30,7 +30,7 @@ mod test {
         testing::AggregationJobTest,
         vdaf::{Prio3Config, VdafConfig},
         DapAggregateResult, DapAggregateShare, DapAggregationParam, DapError, DapMeasurement,
-        DapVersion, VdafAggregateShare, VdafPrepMessage, VdafPrepState,
+        DapPendingReport, DapVersion, VdafAggregateShare, VdafPrepMessage, VdafPrepState,
     };
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;
@@ -204,7 +204,10 @@ mod test {
         ]);
 
         let (agg_job_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.clone().into_iter().map(DapPendingReport::New),
+            )
             .await;
         assert_eq!(agg_job_state.report_count(), 3);
         assert_eq!(agg_job_init_req.agg_param.len(), 0);
@@ -228,7 +231,10 @@ mod test {
         reports[0].encrypted_input_shares[0].payload[0] ^= 1;
 
         let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         assert_eq!(agg_job_state.report_count(), 0);
 
@@ -247,7 +253,10 @@ mod test {
         reports[0].encrypted_input_shares[0].config_id ^= 1;
 
         let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         assert_eq!(agg_job_state.report_count(), 0);
 
@@ -266,7 +275,10 @@ mod test {
         ];
 
         let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         assert_eq!(agg_job_state.report_count(), 0);
 
@@ -285,7 +297,10 @@ mod test {
         reports[0].encrypted_input_shares[1].payload[0] ^= 1;
 
         let (_, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -306,7 +321,10 @@ mod test {
         reports[0].encrypted_input_shares[1].config_id ^= 1;
 
         let (_, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -368,7 +386,10 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -389,7 +410,10 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -410,7 +434,10 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -432,7 +459,10 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
@@ -458,7 +488,10 @@ mod test {
         ]);
 
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
 
         let (leader_agg_span, helper_agg_span) = {
@@ -504,7 +537,10 @@ mod test {
         );
 
         let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .produce_agg_job_req(
+                &DapAggregationParam::Empty,
+                reports.into_iter().map(DapPendingReport::New),
+            )
             .await;
         let prep_init_ids = agg_job_init_req
             .prep_inits
