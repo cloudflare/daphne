@@ -69,6 +69,8 @@
 //!
 //! [to_uri]: daphne_service_utils::durable_requests::bindings::DurableMethod::to_uri
 
+mod metrics;
+
 use std::{sync::OnceLock, time::Duration};
 
 use daphne::auth::BearerToken;
@@ -79,14 +81,22 @@ use tracing::warn;
 use url::Url;
 use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
 
+use self::metrics::Metrics;
+
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
+struct RequestContext {
+    req: Request,
+    env: Env,
+    metrics: Option<Metrics>,
+}
+
 /// Check if the request's authorization. If unauthorized, return the reason why.
-pub fn unauthorized_reason(req: &Request, env: &Env) -> Option<worker::Result<Response>> {
+fn unauthorized_reason(ctx: &RequestContext) -> Option<worker::Result<Response>> {
     static TRUSTED_TOKEN: OnceLock<Option<BearerToken>> = OnceLock::new();
 
     let access_denied = |reason| Response::error(format!("Unauthorized: {reason}"), 401);
-    let auth = match req.headers().get("Authorization") {
+    let auth = match ctx.req.headers().get("Authorization") {
         Ok(Some(auth)) => auth,
         Ok(None) => return Some(access_denied("missing Authorization header")),
         Err(e) => return Some(Err(e)),
@@ -95,7 +105,8 @@ pub fn unauthorized_reason(req: &Request, env: &Env) -> Option<worker::Result<Re
         return Some(access_denied("Authorization header has unexpected prefix"));
     };
     let Some(trusted_token) = TRUSTED_TOKEN.get_or_init(|| {
-        env.var("DAPHNE_SERVER_AUTH_TOKEN")
+        ctx.env
+            .var("DAPHNE_SERVER_AUTH_TOKEN")
             .ok()
             .map(|t| t.to_string())
             .map(BearerToken::from)
@@ -120,40 +131,59 @@ pub async fn handle_request(
     env: Env,
     _ctx: worker::Context,
 ) -> worker::Result<Response> {
-    if let Some(error_response) = unauthorized_reason(&req, &env) {
-        return error_response;
-    }
+    let mut ctx = RequestContext {
+        metrics: Metrics::new(req.url()?.host_str().unwrap_or("unspecified-host"), &env),
+        req,
+        env,
+    };
 
-    let path = req.path();
-    if let Some(uri) = path
-        .strip_prefix(KV_PATH_PREFIX)
-        .and_then(|s| s.strip_prefix('/'))
-    {
-        handle_kv_request(req, env, uri).await
-    } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
-        handle_do_request(req, env, uri).await
-    } else {
-        #[cfg(feature = "test-utils")]
-        if let Some("") = path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE) {
-            return storage_purge(env).await;
-        } else if let Some("") =
-            path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
-        {
-            return Response::ok("");
+    // make an async block in order to avoid early returning and skipping the push_metrics
+    // statement
+    let response = async {
+        if let Some(error_response) = unauthorized_reason(&ctx) {
+            return error_response;
         }
 
-        tracing::error!("path {path:?} was invalid");
-        Response::error("invalid base path", 400)
+        let path = ctx.req.path();
+        if let Some(uri) = path
+            .strip_prefix(KV_PATH_PREFIX)
+            .and_then(|s| s.strip_prefix('/'))
+        {
+            handle_kv_request(&mut ctx, uri).await
+        } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
+            handle_do_request(&mut ctx, uri).await
+        } else {
+            #[cfg(feature = "test-utils")]
+            if let Some("") =
+                path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE)
+            {
+                return storage_purge(&ctx).await;
+            } else if let Some("") =
+                path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
+            {
+                return Response::ok("");
+            }
+
+            tracing::error!("path {path:?} was invalid");
+            Response::error("invalid base path", 400)
+        }
     }
+    .await;
+
+    if let Some(metrics) = ctx.metrics {
+        metrics.push_metrics().await;
+    }
+
+    response
 }
 
 #[cfg(feature = "test-utils")]
 /// Clear all storage. Only available to tests
-async fn storage_purge(env: Env) -> worker::Result<Response> {
+async fn storage_purge(ctx: &RequestContext) -> worker::Result<Response> {
     use daphne_service_utils::durable_requests::bindings::{DurableMethod, GarbageCollector};
 
     let kv_delete = async {
-        let kv = env.kv(KV_BINDING_DAP_CONFIG)?;
+        let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
         for key in kv.list().execute().await?.keys {
             kv.delete(&key.name).await?;
             tracing::trace!("deleted KV item {}", key.name);
@@ -167,7 +197,8 @@ async fn storage_purge(env: Env) -> worker::Result<Response> {
             RequestInit::new().with_method(worker::Method::Post),
         )?;
 
-        env.durable_object(GarbageCollector::BINDING)?
+        ctx.env
+            .durable_object(GarbageCollector::BINDING)?
             .id_from_name(GarbageCollector::NAME_STR)?
             .get_stub()?
             .fetch_with_request(req)
@@ -179,10 +210,10 @@ async fn storage_purge(env: Env) -> worker::Result<Response> {
 }
 
 /// Handle a kv request.
-async fn handle_kv_request(mut req: Request, env: Env, key: &str) -> worker::Result<Response> {
-    match req.method() {
+async fn handle_kv_request(ctx: &mut RequestContext, key: &str) -> worker::Result<Response> {
+    match ctx.req.method() {
         worker::Method::Get => {
-            let bytes = env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
+            let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
 
             match bytes {
                 Some(bytes) => Response::from_bytes(bytes),
@@ -190,15 +221,16 @@ async fn handle_kv_request(mut req: Request, env: Env, key: &str) -> worker::Res
             }
         }
         worker::Method::Post => {
-            env.kv(KV_BINDING_DAP_CONFIG)?
-                .put_bytes(key, &req.bytes().await?)?
+            ctx.env
+                .kv(KV_BINDING_DAP_CONFIG)?
+                .put_bytes(key, &ctx.req.bytes().await?)?
                 .execute()
                 .await?;
 
             Response::empty()
         }
         worker::Method::Put => {
-            let kv = env.kv(KV_BINDING_DAP_CONFIG)?;
+            let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
             if kv
                 .list()
                 .prefix(key.into())
@@ -210,13 +242,15 @@ async fn handle_kv_request(mut req: Request, env: Env, key: &str) -> worker::Res
             {
                 Response::error(String::new(), 409 /* Conflict */)
             } else {
-                kv.put_bytes(key, &req.bytes().await?)?.execute().await?;
+                kv.put_bytes(key, &ctx.req.bytes().await?)?
+                    .execute()
+                    .await?;
 
                 Response::empty()
             }
         }
         worker::Method::Delete => {
-            env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
+            ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
 
             Response::empty()
         }
@@ -225,7 +259,7 @@ async fn handle_kv_request(mut req: Request, env: Env, key: &str) -> worker::Res
 }
 
 /// Handle a durable object request
-async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Result<Response> {
+async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Result<Response> {
     const RETRY_DELAYS: &[Duration] = &[
         Duration::from_millis(100),
         Duration::from_millis(500),
@@ -233,7 +267,7 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
         Duration::from_millis(3_000),
     ];
 
-    let buf = req.bytes().await.map_err(|e| {
+    let buf = ctx.req.bytes().await.map_err(|e| {
         tracing::error!(error = ?e, "failed to get bytes");
         e
     })?;
@@ -241,7 +275,7 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
     let parsed_req = DurableRequest::try_from(&buf)
         .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
-    let binding = env.durable_object(&parsed_req.binding)?;
+    let binding = ctx.env.durable_object(&parsed_req.binding)?;
     let obj = match &parsed_req.id {
         ObjectIdFrom::Name(name) => binding.id_from_name(name)?,
         ObjectIdFrom::Hex(hex) => binding.id_from_string(hex)?,
@@ -249,7 +283,7 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
 
     let mut do_req = RequestInit::new();
     do_req.with_method(worker::Method::Post);
-    do_req.with_headers(req.headers().clone());
+    do_req.with_headers(ctx.req.headers().clone());
     if let body @ [_a, ..] = parsed_req.body() {
         let buffer =
             Uint8Array::new_with_length(body.len().try_into().map_err(|_| {
@@ -269,9 +303,22 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
         1
     };
     let mut attempt = 1;
+    let obj_name = match &parsed_req.id {
+        ObjectIdFrom::Name(name) => Some(name.as_str()),
+        ObjectIdFrom::Hex(_) => None,
+    };
     loop {
         match stub.fetch_with_request(do_req.clone()?).await {
-            Ok(ok) => return Ok(ok),
+            Ok(ok) => {
+                if let Some(metrics) = &ctx.metrics {
+                    metrics.durable_request_retry_count_inc(
+                        (attempt - 1).try_into().unwrap(),
+                        obj_name,
+                        uri,
+                    );
+                }
+                return Ok(ok);
+            }
             Err(error) => {
                 if attempt < attempts {
                     warn!(
@@ -284,6 +331,9 @@ async fn handle_do_request(mut req: Request, env: Env, uri: &str) -> worker::Res
                     Delay::from(RETRY_DELAYS[attempt - 1]).await;
                     attempt += 1;
                 } else {
+                    if let Some(metrics) = &ctx.metrics {
+                        metrics.durable_request_retry_count_inc(-1, obj_name, uri);
+                    }
                     return Err(error);
                 }
             }

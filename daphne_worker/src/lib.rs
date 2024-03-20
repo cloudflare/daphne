@@ -11,11 +11,6 @@ mod durable;
 pub mod storage_proxy;
 mod tracing_utils;
 
-#[cfg(test)]
-mod silence_unused_crates_warning {
-    use reqwest as _;
-}
-
 use tracing::error;
 use worker::{Date, Env, Error};
 
