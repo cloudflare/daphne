@@ -150,6 +150,7 @@ impl VdafConfig {
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
+                threshold: _,
             } => Ok(mastic_shard(*input_size, *weight_config, measurement)?),
         }
     }

@@ -164,7 +164,7 @@ mod test {
     };
 
     async fn roundtrip(version: DapVersion) {
-        let mut t = AggregationJobTest::new(
+        let t = AggregationJobTest::new(
             &VdafConfig::Prio2 { dimension: 5 },
             HpkeKemId::X25519HkdfSha256,
             version,

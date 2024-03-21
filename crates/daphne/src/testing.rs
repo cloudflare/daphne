@@ -12,20 +12,20 @@ use crate::{
     messages::{
         self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
         Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
-        ReportId, TaskId, Time, TransitionFailure,
+        ReportId, ReportMetadata, TaskId, Time, TransitionFailure,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    protocol::aggregator::{EarlyReportStateFetched, EarlyReportStateInitialized},
     roles::{
         aggregator::MergeAggShareError,
         helper,
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
-        DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer,
+        DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportProcessor,
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
     DapMeasurement, DapPendingReport, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
-    DapVersion, VdafConfig,
+    DapVersion, EarlyReportStateConsumed, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -61,30 +61,42 @@ pub struct AggregationJobTest {
     #[allow(dead_code)]
     pub(crate) leader_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphnePromMetrics,
+    stored_reports: Option<Arc<Mutex<HashMap<ReportId, StoredReport>>>>,
 }
 
 fn initialize_reports(
     is_leader: bool,
     task_config: &DapTaskConfig,
     agg_param: &DapAggregationParam,
-    consumed_reports: Vec<EarlyReportStateConsumed>,
+    reports: Vec<EarlyReportStateFetched>,
 ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-    consumed_reports
+    reports
         .into_iter()
-        .map(|consumed| {
-            EarlyReportStateInitialized::initialize(
+        .map(|report| {
+            report.into_initialized(
                 is_leader,
                 &task_config.vdaf_verify_key,
                 &task_config.vdaf,
                 agg_param,
-                consumed,
             )
         })
         .collect()
 }
 
+#[derive(Clone)]
+enum StoredReport {
+    Ready {
+        metadata: ReportMetadata,
+        public_share: Vec<u8>,
+        input_share: Vec<u8>,
+    },
+    Rejected {
+        failure: TransitionFailure,
+    },
+}
+
 #[async_trait]
-impl DapReportInitializer for AggregationJobTest {
+impl DapReportProcessor for AggregationJobTest {
     fn valid_report_time_range(&self) -> Range<Time> {
         self.valid_report_range.clone()
     }
@@ -94,9 +106,126 @@ impl DapReportInitializer for AggregationJobTest {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(is_leader, task_config, agg_param, reports)
+    }
+
+    async fn fetch_stored_reports(
+        &self,
+        _task_id: &TaskId,
+        reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateFetched>, DapError> {
+        let mut stored_reports = self.stored_reports.as_ref().map(|x| x.lock().unwrap());
+
+        Ok(reports
+            .into_iter()
+            .map(|report| match report {
+                EarlyReportStateConsumed::New {
+                    metadata,
+                    public_share,
+                    input_share,
+                    peer_prep_share,
+                } => {
+                    // Store the report so that it can be retrieved later. This operation only
+                    // applies to VDAFs that are compatible with multiple collections.
+                    if let VdafConfig::Mastic { .. } = self.task_config.vdaf {
+                        if stored_reports
+                            .as_ref()
+                            .expect("need to call with_report_storage()")
+                            .get(&metadata.id)
+                            .is_some()
+                        {
+                            // Reject if this operation would overwrite an existing report.
+                            //
+                            // TODO spec: Specify an error variant for this case (report already
+                            // exists).
+                            return EarlyReportStateFetched::Rejected {
+                                id: metadata.id,
+                                failure: TransitionFailure::ReportDropped,
+                            };
+                        }
+
+                        stored_reports
+                            .as_mut()
+                            .expect("need to call with_report_storage()")
+                            .insert(
+                                metadata.id,
+                                StoredReport::Ready {
+                                    metadata: metadata.clone(),
+                                    public_share: public_share.clone(),
+                                    input_share: input_share.clone(),
+                                },
+                            );
+                    }
+
+                    EarlyReportStateFetched::Ready {
+                        metadata,
+                        public_share,
+                        input_share,
+                        peer_prep_share,
+                    }
+                }
+
+                EarlyReportStateConsumed::Stored {
+                    id,
+                    peer_prep_share,
+                } => {
+                    match stored_reports
+                        .as_ref()
+                        .expect("need to call with_report_storage()")
+                        .get(&id)
+                        .cloned()
+                    {
+                        Some(StoredReport::Ready {
+                            metadata,
+                            public_share,
+                            input_share,
+                        }) => EarlyReportStateFetched::Ready {
+                            metadata,
+                            public_share,
+                            input_share,
+                            peer_prep_share,
+                        },
+                        Some(StoredReport::Rejected { failure }) => {
+                            EarlyReportStateFetched::Rejected { id, failure }
+                        }
+                        None => EarlyReportStateFetched::Rejected {
+                            id,
+                            // TODO spec: Specify an error variant for this case (report does not
+                            // exist).
+                            failure: TransitionFailure::ReportDropped,
+                        },
+                    }
+                }
+
+                EarlyReportStateConsumed::Rejected { id, failure } => {
+                    EarlyReportStateFetched::Rejected { id, failure }
+                }
+            })
+            .collect())
+    }
+
+    async fn mark_stored_rejected<R: Send + Iterator<Item = (ReportId, TransitionFailure)>>(
+        &self,
+        _task_id: &TaskId,
+        reports: R,
+    ) -> Result<(), DapError> {
+        if let VdafConfig::Mastic { .. } = &self.task_config.vdaf {
+            let mut stored_reports = self
+                .stored_reports
+                .as_ref()
+                .ok_or(fatal_error!(
+                    err = "need to call with_report_storage() first"
+                ))?
+                .lock()
+                .map_err(|e| fatal_error!(err = ?e))?;
+
+            for (report_id, failure) in reports {
+                stored_reports.insert(report_id, StoredReport::Rejected { failure });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -151,6 +280,23 @@ impl AggregationJobTest {
             },
             leader_registry,
             leader_metrics,
+            stored_reports: None,
+        }
+    }
+
+    pub(crate) fn with_report_storage(&self) -> Self {
+        Self {
+            now: self.now,
+            valid_report_range: self.valid_report_range.clone(),
+            task_id: self.task_id,
+            leader_hpke_receiver_config: self.leader_hpke_receiver_config.clone(),
+            helper_hpke_receiver_config: self.helper_hpke_receiver_config.clone(),
+            client_hpke_config_list: self.client_hpke_config_list.clone(),
+            collector_hpke_receiver_config: self.collector_hpke_receiver_config.clone(),
+            task_config: self.task_config.clone(),
+            leader_registry: self.leader_registry.clone(),
+            leader_metrics: self.leader_metrics.clone(),
+            stored_reports: Some(Default::default()),
         }
     }
 
@@ -208,6 +354,8 @@ impl AggregationJobTest {
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
             .produce_agg_job_resp(
+                self,
+                &self.task_id,
                 &HashMap::default(),
                 &agg_job_init_req.part_batch_sel.clone(),
                 &self
@@ -221,36 +369,40 @@ impl AggregationJobTest {
                     .await
                     .unwrap(),
             )
+            .await
             .unwrap()
     }
 
     /// Leader: Handle `AggregationJobResp`, produce `AggregationJobContinueReq`.
     ///
     /// Panics if the Leader aborts.
-    pub fn consume_agg_job_resp(
+    pub async fn consume_agg_job_resp(
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
     ) -> DapAggregateSpan<DapAggregateShare> {
         self.task_config
             .consume_agg_job_resp(
+                self,
                 &self.task_id,
                 leader_state,
                 agg_job_resp,
                 &self.leader_metrics,
             )
+            .await
             .unwrap()
     }
 
     /// Like [`consume_agg_job_resp`] but expect the Leader to abort.
-    pub fn consume_agg_job_resp_expect_err(
+    pub async fn consume_agg_job_resp_expect_err(
         &self,
         leader_state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
-            .consume_agg_job_resp(&self.task_id, leader_state, agg_job_resp, metrics)
+            .consume_agg_job_resp(self, &self.task_id, leader_state, agg_job_resp, metrics)
+            .await
             .expect_err("consume_agg_job_resp() succeeded; expected failure")
     }
 
@@ -317,7 +469,7 @@ impl AggregationJobTest {
 
     /// Generate a set of reports, aggregate them, and unshard the result.
     pub async fn roundtrip(
-        &mut self,
+        &self,
         agg_param: DapAggregationParam,
         measurements: Vec<DapMeasurement>,
     ) -> DapAggregateResult {
@@ -328,22 +480,30 @@ impl AggregationJobTest {
             },
         };
 
+        let report_count = measurements.len();
+
         // Clients: Shard
         let reports = self
             .produce_reports(measurements)
             .into_iter()
             .map(DapPendingReport::New);
 
+        let leader = self.with_report_storage();
+        let helper = self.with_report_storage();
+
         // Aggregators: Preparation
-        let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports).await;
+        let (leader_state, agg_job_init_req) =
+            leader.produce_agg_job_req(&agg_param, reports).await;
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req).await;
-            let leader_agg_span = self.consume_agg_job_resp(leader_state, agg_job_resp);
+            let (helper_agg_span, agg_job_resp) = helper.handle_agg_job_req(agg_job_init_req).await;
+            let leader_agg_span = leader
+                .consume_agg_job_resp(leader_state, agg_job_resp)
+                .await;
             (leader_agg_span, helper_agg_span)
         };
-
-        let report_count = u64::try_from(leader_agg_span.report_count()).unwrap();
+        assert_eq!(report_count, leader_agg_span.report_count());
+        assert_eq!(report_count, helper_agg_span.report_count());
 
         // Leader: Aggregation
         let leader_agg_share = leader_agg_span.collapsed();
@@ -360,7 +520,7 @@ impl AggregationJobTest {
         // Collector: Unshard
         self.consume_encrypted_agg_shares(
             &batch_selector,
-            report_count,
+            report_count.try_into().unwrap(),
             &agg_param,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
@@ -794,7 +954,7 @@ impl DapAuthorizedSender<BearerToken> for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapReportInitializer for InMemoryAggregator {
+impl DapReportProcessor for InMemoryAggregator {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
         0..u64::max_value()
@@ -805,9 +965,9 @@ impl DapReportInitializer for InMemoryAggregator {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(is_leader, task_config, agg_param, reports)
     }
 }
 

@@ -4,7 +4,7 @@
 //! Acceptance tests for live Daphne deployments. These tests assume the following
 //! environment variables are defined:
 //!
-//! * `$VDAF_VERIFY_INIT`: The hex encoded VDAF verification key initializer, as specified in the
+//! * `$VDAF_VERIFY_INIT`: The hex encoded VDAF verification key processor, as specified in the
 //!   Task prov extension.
 //!
 //! * either:
@@ -32,11 +32,11 @@ use daphne::{
         BatchSelector, PartialBatchSelector, ReportId, TaskId,
     },
     metrics::DaphneMetrics,
-    roles::DapReportInitializer,
+    roles::DapReportProcessor,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
     DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion,
-    EarlyReportStateConsumed, EarlyReportStateInitialized,
+    EarlyReportStateFetched, EarlyReportStateInitialized,
 };
 use daphne_service_utils::http_headers;
 use futures::{StreamExt, TryStreamExt};
@@ -508,12 +508,9 @@ impl Test {
                 .context("transfering bytes from the AggregateInitReq")?,
         )
         .with_context(|| "failed to parse response to AggregateInitReq from Helper")?;
-        let agg_share_span = task_config.consume_agg_job_resp(
-            task_id,
-            agg_job_state,
-            agg_job_resp,
-            self.metrics(),
-        )?;
+        let agg_share_span = task_config
+            .consume_agg_job_resp(self, task_id, agg_job_state, agg_job_resp, self.metrics())
+            .await?;
 
         let aggregated_report_count = agg_share_span
             .iter()
@@ -675,7 +672,7 @@ impl Test {
 }
 
 #[async_trait]
-impl DapReportInitializer for Test {
+impl DapReportProcessor for Test {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
         0..u64::max_value()
@@ -686,23 +683,17 @@ impl DapReportInitializer for Test {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         tokio::task::spawn_blocking({
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
             let vdaf = task_config.vdaf;
             let agg_param = agg_param.clone();
             move || {
-                consumed_reports
+                reports
                     .into_par_iter()
-                    .map(|consumed| {
-                        EarlyReportStateInitialized::initialize(
-                            is_leader,
-                            &vdaf_verify_key,
-                            &vdaf,
-                            &agg_param,
-                            consumed,
-                        )
+                    .map(|report| {
+                        report.into_initialized(is_leader, &vdaf_verify_key, &vdaf, &agg_param)
                     })
                     .collect::<Result<Vec<_>, _>>()
             }

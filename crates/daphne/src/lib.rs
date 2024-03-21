@@ -88,7 +88,8 @@ use url::Url;
 use vdaf::mastic::MasticWeight;
 
 pub use protocol::aggregator::{
-    EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
+    EarlyReportState, EarlyReportStateConsumed, EarlyReportStateFetched,
+    EarlyReportStateInitialized,
 };
 
 /// DAP version used for a task.
@@ -1090,6 +1091,7 @@ pub enum DapCollectionJob {
 }
 
 /// Leader: A report waiting to be aggregated.
+#[derive(Clone)]
 pub enum DapPendingReport {
     /// This is the first time the report has been aggregated. The Leader still needs to transmit
     /// the Helper's share.
@@ -1099,6 +1101,15 @@ pub enum DapPendingReport {
     /// draft09 compatibility: This variant is needed to support heavy hitters and is only
     /// constructed in the latest version.
     Stored(ReportId),
+}
+
+impl DapPendingReport {
+    pub(crate) fn report_id(&self) -> ReportId {
+        match self {
+            Self::New(report) => report.report_metadata.id,
+            Self::Stored(report_id) => *report_id,
+        }
+    }
 }
 
 /// Telemetry information for the leader's processing loop.

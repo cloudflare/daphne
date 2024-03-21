@@ -11,17 +11,16 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     hpke::{HpkeConfig, HpkeProvider},
-    messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
+    messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time, TransitionFailure},
     metrics::{DaphneMetrics, DaphneRequestType},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    protocol::aggregator::{EarlyReportStateFetched, EarlyReportStateInitialized},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapResponse, DapTaskConfig,
+    DapRequest, DapResponse, DapTaskConfig, EarlyReportStateConsumed,
 };
 
-/// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
-/// job.
+/// Report processor. Used by an aggregator [`DapAggregator`] when initializing an aggregation job.
 #[async_trait]
-pub trait DapReportInitializer {
+pub trait DapReportProcessor: Sync {
     /// Return the time range in which a report must appear in order to be considered valid.
     fn valid_report_time_range(&self) -> Range<Time>;
 
@@ -32,8 +31,71 @@ pub trait DapReportInitializer {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;
+
+    /// Fetch reports from storage and store new reports if applicable.
+    ///
+    /// # Default behavior
+    ///
+    /// The default implementation of this method does not have storage. Thus any report indicated
+    /// to be stored is rejected. This is good enough for aggregation tasks that do not require
+    /// aggregating reports multiple times. Others, like the heavy hitters mode of Mastic, will
+    /// need to override this method.
+    async fn fetch_stored_reports(
+        &self,
+        _task_id: &TaskId,
+        reports: Vec<EarlyReportStateConsumed>,
+    ) -> Result<Vec<EarlyReportStateFetched>, DapError> {
+        Ok(reports
+            .into_iter()
+            .map(|report| match report {
+                EarlyReportStateConsumed::New {
+                    metadata,
+                    public_share,
+                    input_share,
+                    peer_prep_share,
+                } => EarlyReportStateFetched::Ready {
+                    metadata,
+                    public_share,
+                    input_share,
+                    peer_prep_share,
+                },
+
+                // There are no reports in storage, so we have to reject.
+                EarlyReportStateConsumed::Stored {
+                    id,
+                    peer_prep_share: _,
+                } => EarlyReportStateFetched::Rejected {
+                    id,
+                    // TODO spec: Specify an error variant for this.
+                    failure: TransitionFailure::ReportDropped,
+                },
+
+                EarlyReportStateConsumed::Rejected { id, failure } => {
+                    EarlyReportStateFetched::Rejected { id, failure }
+                }
+            })
+            .collect())
+    }
+
+    /// Mark reports in storage as rejected.
+    ///
+    /// # Notes
+    ///
+    /// It must be safe to call this method multiple times on the same input.
+    ///
+    /// # Default behavior
+    ///
+    /// The default implementation of this method does not have storage. As such, it is a no-op.
+    async fn mark_stored_rejected<R: Send + Iterator<Item = (ReportId, TransitionFailure)>>(
+        &self,
+        _task_id: &TaskId,
+        _reports: R,
+    ) -> Result<(), DapError> {
+        // There are no reports in storage, so this is a no-op.
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -45,7 +107,7 @@ pub enum MergeAggShareError {
 
 /// DAP Aggregator functionality.
 #[async_trait]
-pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
+pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportProcessor + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
     type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig> + Send
     where

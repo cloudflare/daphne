@@ -12,9 +12,9 @@ use daphne::{
     hpke::{HpkeConfig, HpkeDecrypter, HpkeProvider},
     messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
     metrics::DaphneMetrics,
-    roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
+    roles::{aggregator::MergeAggShareError, DapAggregator, DapReportProcessor},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
-    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
+    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateFetched,
     EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
@@ -346,7 +346,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
 }
 
 #[async_trait]
-impl DapReportInitializer for crate::App {
+impl DapReportProcessor for crate::App {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -364,22 +364,21 @@ impl DapReportInitializer for crate::App {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         tokio::task::spawn_blocking({
             let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
             let agg_param = agg_param.clone();
             move || {
-                consumed_reports
+                reports
                     .into_par_iter()
-                    .map(|consumed_report| {
-                        EarlyReportStateInitialized::initialize(
+                    .map(|report| {
+                        report.into_initialized(
                             is_leader,
                             &vdaf_verify_key,
                             &vdaf_config,
                             &agg_param,
-                            consumed_report,
                         )
                     })
                     .collect::<Result<Vec<EarlyReportStateInitialized>, _>>()

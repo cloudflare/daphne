@@ -243,15 +243,20 @@ mod test {
 
     use super::*;
     use crate::{
-        async_test_version, hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig,
-        DapAggregateResult, DapMeasurement, DapVersion,
+        async_test_versions,
+        hpke::HpkeKemId,
+        messages::{BatchId, BatchSelector},
+        testing::AggregationJobTest,
+        vdaf::VdafConfig,
+        DapAggregateResult, DapMeasurement, DapPendingReport, DapVersion,
     };
 
     async fn roundtrip_count(version: DapVersion) {
-        let mut t = AggregationJobTest::new(
+        let t = AggregationJobTest::new(
             &VdafConfig::Mastic {
                 input_size: 4,
                 weight_config: MasticWeightConfig::Count,
+                threshold: None,
             },
             HpkeKemId::X25519HkdfSha256,
             version,
@@ -293,6 +298,158 @@ mod test {
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1, 2]));
     }
 
-    async_test_version! { roundtrip_count, Draft09 }
-    async_test_version! { roundtrip_count, Latest }
+    async_test_versions! { roundtrip_count }
+
+    // TODO heavy hitters: Align this test with the spec. This is in line with Proposal #1.
+    #[tokio::test]
+    async fn heavy_hitters_count() {
+        let input_size = 1;
+        let level_count = input_size * 8;
+        let threshold = 1;
+        let t = AggregationJobTest::new(
+            &VdafConfig::Mastic {
+                input_size,
+                weight_config: MasticWeightConfig::Count,
+                threshold: Some(threshold),
+            },
+            HpkeKemId::X25519HkdfSha256,
+            DapVersion::Latest,
+        );
+        let leader = t.with_report_storage();
+        let helper = t.with_report_storage();
+
+        let dummy_batch_sel = BatchSelector::FixedSizeByBatchId {
+            batch_id: BatchId([0; 32]),
+        };
+
+        // Clients: Shard
+        let reports = {
+            let measurements = vec![
+                DapMeasurement::Mastic {
+                    input: [0b0000_0000].to_vec(),
+                    weight: MasticWeight::Bool(false),
+                },
+                DapMeasurement::Mastic {
+                    input: [0b1000_0000].to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: [0b1001_0010].to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: [0b1001_0000].to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: [0b1001_0000].to_vec(),
+                    weight: MasticWeight::Bool(false),
+                },
+            ];
+            t.produce_reports(measurements)
+        };
+
+        let report_count = reports.len().try_into().unwrap();
+
+        let pending_reports_stored = reports
+            .iter()
+            .map(|report| DapPendingReport::Stored(report.report_metadata.id))
+            .collect::<Vec<_>>();
+        let mut pending_reports = reports
+            .into_iter()
+            .map(DapPendingReport::New)
+            .collect::<Vec<_>>();
+
+        let mut prefixes = vec![
+            IdpfInput::from_bools(&[false]),
+            IdpfInput::from_bools(&[true]),
+        ];
+
+        for level in 0..level_count {
+            let agg_param = DapAggregationParam::Mastic(
+                Poplar1AggregationParam::try_from_prefixes(prefixes.clone()).unwrap(),
+            );
+
+            // Aggregators
+            let (leader_encrypted_agg_share, helper_encrypted_agg_share) = {
+                let (leader_state, agg_job_init_req) = leader
+                    .produce_agg_job_req(&agg_param, pending_reports)
+                    .await;
+
+                let (leader_agg_span, helper_agg_span) = {
+                    let (helper_agg_span, agg_job_resp) =
+                        helper.handle_agg_job_req(agg_job_init_req).await;
+                    let leader_agg_span = leader
+                        .consume_agg_job_resp(leader_state, agg_job_resp)
+                        .await;
+                    (leader_agg_span, helper_agg_span)
+                };
+                assert_eq!(
+                    usize::try_from(report_count).unwrap(),
+                    leader_agg_span.report_count(),
+                    "level {level}"
+                );
+                assert_eq!(
+                    usize::try_from(report_count).unwrap(),
+                    helper_agg_span.report_count(),
+                    "level {level}"
+                );
+
+                // Leader: Aggregation
+                let leader_agg_share = leader_agg_span.collapsed();
+                let leader_encrypted_agg_share = t.produce_leader_encrypted_agg_share(
+                    &dummy_batch_sel,
+                    &agg_param,
+                    &leader_agg_share,
+                );
+
+                // Helper: Aggregation
+                let helper_encrypted_agg_share = t.produce_helper_encrypted_agg_share(
+                    &dummy_batch_sel,
+                    &agg_param,
+                    &helper_agg_span.collapsed(),
+                );
+
+                (leader_encrypted_agg_share, helper_encrypted_agg_share)
+            };
+
+            // Collector: Unshard
+            let DapAggregateResult::U64Vec(prefix_counts) = t
+                .consume_encrypted_agg_shares(
+                    &dummy_batch_sel,
+                    report_count,
+                    &agg_param,
+                    vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
+                )
+                .await
+            else {
+                unreachable!("unexpected aggregate result type");
+            };
+
+            assert_eq!(prefix_counts.len(), prefixes.len());
+
+            let mut next_prefixes = Vec::new();
+            if level < level_count - 1 {
+                for (prefix_count, prefix) in prefix_counts.iter().zip(prefixes.iter()) {
+                    if *prefix_count >= threshold {
+                        next_prefixes.push(prefix.clone_with_suffix(&[false]));
+                        next_prefixes.push(prefix.clone_with_suffix(&[true]));
+                    }
+                }
+            } else {
+                for (prefix_count, prefix) in prefix_counts.iter().zip(prefixes.iter()) {
+                    if *prefix_count >= threshold {
+                        next_prefixes.push(prefix.clone());
+                    }
+                }
+            }
+            prefixes = next_prefixes;
+            pending_reports = pending_reports_stored.clone();
+        }
+
+        assert_eq!(3, prefixes.len(), "{prefixes:?}");
+        assert_eq!(prefixes[0].to_bytes(), [0b1000_0000]);
+        assert_eq!(prefixes[1].to_bytes(), [0b1001_0000]);
+        assert_eq!(prefixes[2].to_bytes(), [0b1001_0010]);
+    }
 }

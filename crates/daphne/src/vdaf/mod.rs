@@ -59,6 +59,12 @@ pub enum VdafConfig {
 
         /// The type of each weight.
         weight_config: MasticWeightConfig,
+
+        /// The heavy hitters threshold. If not set, then heavy hitters mode is disabled.
+        ///
+        /// draft09 compatibility: This variant is only used in the latest version of DAP. It is
+        /// used to support heavy hitters mode.
+        threshold: Option<u64>,
     },
 }
 
@@ -79,6 +85,16 @@ impl std::fmt::Display for VdafConfig {
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
+                threshold: Some(threshold),
+            } => write!(
+                f,
+                "Mastic-Heavy-Hitters({input_size}, {weight_config}, {threshold})"
+            ),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Mastic {
+                input_size,
+                weight_config,
+                threshold: None,
             } => write!(f, "Mastic({input_size}, {weight_config})"),
         }
     }

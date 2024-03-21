@@ -14,7 +14,7 @@ use crate::{
 };
 use tracing::warn;
 
-pub use aggregator::{DapAggregator, DapReportInitializer};
+pub use aggregator::{DapAggregator, DapReportProcessor};
 pub use helper::DapHelper;
 pub use leader::{DapAuthorizedSender, DapLeader};
 
@@ -284,6 +284,7 @@ mod test {
             let mastic = VdafConfig::Mastic {
                 input_size: 1,
                 weight_config: MasticWeightConfig::Count,
+                threshold: None,
             };
             tasks.insert(
                 heavy_hitters_task_id,
