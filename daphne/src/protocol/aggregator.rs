@@ -329,6 +329,7 @@ impl EarlyReportStateInitialized {
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
+                threshold: _,
             } => mastic_prep_init(
                 *input_size,
                 *weight_config,
@@ -405,6 +406,7 @@ impl DapTaskConfig {
     where
         S: Stream<Item = DapPendingReport>,
     {
+        // XXX Check that each variant is the same
         let (report_count_hint, _upper_bound) = reports.size_hint();
         let mut consumed_reports = Vec::with_capacity(report_count_hint);
         let mut helper_shares = Vec::with_capacity(report_count_hint);
@@ -412,38 +414,39 @@ impl DapTaskConfig {
             let mut processed = HashSet::with_capacity(report_count_hint);
             let mut reports = pin!(reports);
             while let Some(pending_report) = reports.next().await {
-                let DapPendingReport::New(report) = pending_report else {
-                    // TODO heavy hitters: Initialize stored reports.
-                    return Err(fatal_error!(
-                        err = "handling of stored reports is not yet implemented"
-                    ));
-                };
-                if processed.contains(&report.report_metadata.id) {
+                let report_id = pending_report.report_id();
+                if processed.contains(report_id) {
                     return Err(fatal_error!(
                         err = "tried to process report sequence with non-unique report IDs",
-                        non_unique_id = %report.report_metadata.id,
+                        non_unique_id = %report_id,
                     ));
                 }
-                processed.insert(report.report_metadata.id);
+                processed.insert(*report_id);
 
-                let [leader_share, helper_share] = report.encrypted_input_shares;
+                consumed_reports.push(match pending_report {
+                    DapPendingReport::New(report) => {
+                        let [leader_share, helper_share] = report.encrypted_input_shares;
+                        helper_shares.push(helper_share);
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        decrypter,
-                        true,
-                        task_id,
-                        self,
-                        ReportShare {
-                            report_metadata: report.report_metadata,
-                            public_share: report.public_share,
-                            encrypted_input_share: leader_share,
-                        },
-                        None,
-                    )
-                    .await?,
-                );
-                helper_shares.push(helper_share);
+                        EarlyReportStateConsumed::consume(
+                            decrypter,
+                            true,
+                            task_id,
+                            self,
+                            ReportShare {
+                                report_metadata: report.report_metadata,
+                                public_share: report.public_share,
+                                encrypted_input_share: leader_share,
+                            },
+                            None,
+                        )
+                        .await?
+                    }
+                    DapPendingReport::Stored(report_metadata) => EarlyReportStateConsumed::Stored {
+                        metadata: report_metadata,
+                        peer_prep_share: None,
+                    },
+                });
             }
         }
 
@@ -529,6 +532,7 @@ impl DapTaskConfig {
             part_batch_sel: _,
             prep_inits,
         } = agg_job_init_req;
+        // XXX Check that each variant is the same
         let num_reports = prep_inits.len();
         let mut consumed_reports = Vec::with_capacity(num_reports);
         {
@@ -564,13 +568,21 @@ impl DapTaskConfig {
                     }
                     #[cfg(any(test, feature = "test-utils"))]
                     PrepareInit::Stored {
-                        report_metadata: _,
-                        payload: _,
+                        report_metadata,
+                        payload,
                     } => {
-                        // TODO heavy hitters: Initialize stored reports.
-                        return Err(fatal_error!(
-                            err = "handling of stored reports is not yet implemented"
-                        ));
+                        // Decode the ping-pong "initialize" message framing.
+                        // (draft-irtf-cfrg-vdaf-08, Section 5.8).
+                        match decode_ping_pong_framed(&payload, PingPongMessageType::Initialize) {
+                            Ok(peer_prep_share) => EarlyReportStateConsumed::Stored {
+                                metadata: report_metadata,
+                                peer_prep_share: Some(peer_prep_share.to_vec()),
+                            },
+                            Err(_) => EarlyReportStateConsumed::Rejected {
+                                metadata: report_metadata,
+                                failure: TransitionFailure::VdafPrepError,
+                            },
+                        }
                     }
                 });
             }
@@ -628,6 +640,7 @@ impl DapTaskConfig {
                             VdafConfig::Mastic {
                                 input_size: _,
                                 weight_config,
+                                threshold: _,
                             } => mastic_prep_finish_from_shares(
                                 *weight_config,
                                 helper_prep_state.clone(),

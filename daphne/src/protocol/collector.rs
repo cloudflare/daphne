@@ -92,6 +92,7 @@ impl VdafConfig {
             Self::Mastic {
                 input_size: _,
                 weight_config,
+                threshold: _,
             } => Ok(mastic_unshard(*weight_config, agg_param, agg_shares)?),
         }
     }

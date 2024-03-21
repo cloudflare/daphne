@@ -313,6 +313,7 @@ mod test {
             let mastic = VdafConfig::Mastic {
                 input_size: 1,
                 weight_config: MasticWeightConfig::Count,
+                threshold: None,
             };
             tasks.insert(
                 heavy_hitters_task_id,
