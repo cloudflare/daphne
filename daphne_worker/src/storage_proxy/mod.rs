@@ -171,6 +171,10 @@ pub async fn handle_request(
     .await;
 
     if let Some(metrics) = ctx.metrics {
+        match &response {
+            Ok(r) => metrics.count_http_status_code(r.status_code()),
+            Err(_) => metrics.count_http_status_code(500),
+        }
         metrics.push_metrics().await;
     }
 
