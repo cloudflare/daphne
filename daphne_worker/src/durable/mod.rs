@@ -2,43 +2,23 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub(crate) mod aggregate_store;
-pub(crate) mod garbage_collector;
 pub(crate) mod helper_state_store;
+pub(crate) mod test_state_cleaner;
 
-use crate::{
-    int_err, now,
-    tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
-};
-use daphne::messages::TaskId;
+use crate::tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields};
 use daphne_service_utils::{
     config::DaphneWorkerDeployment,
-    durable_requests::bindings::{self, DurableMethod, GarbageCollector},
+    durable_requests::bindings::{self, DurableMethod, TestStateCleaner},
 };
-use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::sync::OnceLock;
-use std::{cmp::min, ops::ControlFlow, time::Duration};
+use std::{ops::ControlFlow, sync::OnceLock, time::Duration};
 use tracing::info_span;
 use worker::{
-    js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request, RequestInit,
-    Response, Result, ScheduledTime, State, Stub,
+    js_sys::Uint8Array, Delay, Env, Error, Headers, Method, Request, RequestInit, Response, Result,
+    ScheduledTime, State, Stub,
 };
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
-
-// The maximum number of keys to get at once in a list command.
-//
-// The DO API does not say that there is any limit on the number of keys it is willing to return
-// other than overall DO/worker memory, which it warns you not to exceed. Imposing some sort of
-// limit is a good idea, lest we get DoS'd by a task configuration with a large value.
-//
-// Currently the value is set to 128, as the miniflare environment will fail with more than this.
-// This appears to be a miniflare bug and not part of the API.
-//
-// We have not been able to replicate failures with wrangler2 in local or experimental-local mode.
-//
-// TODO(bhalley) does this need to be configurable?
-const MAX_KEYS: usize = 128;
 
 const RETRY_DELAYS: &[Duration] = &[
     Duration::from_millis(100),
@@ -209,21 +189,20 @@ impl<'srv> DurableConnector<'srv> {
     }
 }
 
-trait DapDurableObject {
+/// A durable object that is capable of garbage collecting itself.
+trait GcDurableObject {
     type DurableMethod: DurableMethod;
 
-    fn new(state: State, env: Env) -> Self;
+    /// Instantiate the durable object from it's state and environment.
+    fn with_state_and_env(state: State, env: Env) -> Self;
 
     /// Handle a durable object request.
     async fn handle(&mut self, req: Request) -> Result<Response>;
 
     /// When this durable object should self cleanup.
     ///
-    /// The default implementation of this function returns None, signaling that this object should
-    /// not be automatically cleaned up.
-    fn should_cleanup_at(&self) -> Option<ScheduledTime> {
-        None
-    }
+    /// Returning None signals that this DO should not be automatically cleaned up.
+    fn should_cleanup_at(&self) -> Option<ScheduledTime>;
 }
 
 fn deployment(env: &Env) -> DaphneWorkerDeployment {
@@ -267,7 +246,7 @@ macro_rules! mk_durable_object {
         impl DurableObject for $name {
             fn new(state: ::worker::State, env: ::worker::Env) -> Self {
                 $crate::tracing_utils::initialize_tracing(&env);
-                <Self as $crate::durable::DapDurableObject>::new(state, env)
+                <Self as $crate::durable::GcDurableObject>::with_state_and_env(state, env)
             }
 
             async fn fetch(
@@ -276,8 +255,9 @@ macro_rules! mk_durable_object {
             ) -> ::worker::Result<::worker::Response> {
                 use $crate::durable::{
                     deployment,
-                    setup_and_handle_garbage_collector_requests,
-                    create_span_from_request
+                    setup_and_handle_test_cleaner_requests,
+                    create_span_from_request,
+                    GcDurableObject,
                 };
                 use ::tracing::Instrument;
                 use ::std::ops::ControlFlow;
@@ -285,13 +265,14 @@ macro_rules! mk_durable_object {
 
                 if matches!(deployment(&self.env), Dev) {
                     // Try to handle a delete all request.
-                    req = match setup_and_handle_garbage_collector_requests::<Self>(
+                    req = match setup_and_handle_test_cleaner_requests::<Self>(
                         &self.state,
                         &self.env,
                         req
                     ).await? {
                         ControlFlow::Continue(req) => req,
-                        // This req was a GC request and as such we must return from this function.
+                        // This req was a DeleteAll request and as such we must return from this
+                        // function.
                         ControlFlow::Break(()) => return ::worker::Response::from_json(&()),
                     };
                 }
@@ -303,7 +284,7 @@ macro_rules! mk_durable_object {
                 };
 
                 let span = create_span_from_request(&req);
-                <$name as DapDurableObject>::handle(self, req).instrument(span).await
+                <$name as GcDurableObject>::handle(self, req).instrument(span).await
             }
 
             async fn alarm(&mut self) -> Result<Response> {
@@ -343,47 +324,43 @@ macro_rules! mk_durable_object {
     };
 }
 
-/// Register a do to be deleted by the [`GarbageCollector`](garbage_collector::GarbageCollector).
+/// Register a DO to be deleted by the [`TestStateCleaner`](test_state_cleaner::TestStateCleaner).
 ///
-/// If, however, the request is a [`GarbageCollector::DeleteAll`] request we also handle that
+/// If, however, the request is a [`TestStateCleaner::DeleteAll`] request we also handle that
 /// request. This consumes the request and returns `Continue::Break`, signaling that the durable
 /// object should itself return from fetch.
 ///
-/// If the request *wasn't* a [`GarbageCollector::DeleteAll`] request, the `Request` is
+/// If the request *wasn't* a [`TestStateCleaner::DeleteAll`] request, the `Request` is
 /// returned through the `ControlFlow::Continue` variant.
 ///
 /// # Note
 /// This function is doing two things at once, which makes it confusing, but both things revolve
 /// around keeping some state (`gc_delete_all_is_setup`) in sync and such it's less error prone for
 /// callers if it's all done in one place.
-async fn setup_and_handle_garbage_collector_requests<T: DapDurableObject>(
+async fn setup_and_handle_test_cleaner_requests<T: GcDurableObject>(
     state: &State,
     env: &Env,
     req: Request,
 ) -> Result<ControlFlow<(), Request>> {
     // We first check if this was a delete all request. If it was then it means that the setup in
     // the else branch was already done before.
-    if let Some(GarbageCollector::DeleteAll) = GarbageCollector::try_from_uri(&req.path()) {
+    if let Some(TestStateCleaner::DeleteAll) = TestStateCleaner::try_from_uri(&req.path()) {
         state.storage().delete_all().await?;
-        state
-            .storage()
-            .put("gc_delete_all_is_setup", &false)
-            .await?;
+        state.storage().put("delete_all_is_setup", &false).await?;
         Ok(ControlFlow::Break(()))
     } else {
         // if this wasn't a delete all request then we must ensure that we have registered
-        // ourselves with the `GarbageCollector` to delete us.
-        let gc_delete_all_is_setup =
-            state_set_if_not_exists(state, "gc_delete_all_is_setup", &true)
-                .await?
-                .unwrap_or(false);
-        if !gc_delete_all_is_setup {
+        // ourselves with the `TestStateCleaner` to delete us.
+        let delete_all_is_setup = state_set_if_not_exists(state, "delete_all_is_setup", &true)
+            .await?
+            .unwrap_or(false);
+        if !delete_all_is_setup {
             crate::durable::DurableConnector::new(env)
                 .post(
-                    bindings::GarbageCollector::BINDING,
-                    bindings::GarbageCollector::Put.to_uri(),
-                    bindings::GarbageCollector::name(()).unwrap_from_name(),
-                    &crate::durable::DurableReference {
+                    bindings::TestStateCleaner::BINDING,
+                    bindings::TestStateCleaner::Put.to_uri(),
+                    bindings::TestStateCleaner::name(()).unwrap_from_name(),
+                    &test_state_cleaner::DurableReference {
                         binding: T::DurableMethod::BINDING.to_string(),
                         id_hex: state.id().to_string(),
                         task_id: None,
@@ -437,118 +414,6 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 
     state.storage().put(key, val).await?;
     Ok(None)
-}
-
-/// Reference to a DO instance, used by the garbage collector.
-#[derive(Deserialize, Serialize)]
-pub(crate) struct DurableReference {
-    /// The DO binding, e.g., "DAP_REPORT_STORE".
-    pub(crate) binding: String,
-
-    /// Unique ID assigned to the DO instance by the Workers runtime.
-    pub(crate) id_hex: String,
-
-    /// If applicable, the DAP task ID to which the DO instance is associated.
-    pub(crate) task_id: Option<TaskId>,
-}
-
-/// An element of a queue stored in a DO instance.
-#[derive(Deserialize, Serialize)]
-pub(crate) struct DurableOrdered<T> {
-    item: T,
-    prefix: String,
-    ordinal: String,
-}
-
-impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
-    /// Return all elements in the queue.
-    ///
-    /// WARNING: If the queue is too long, then this action is likely to cause the Workers runtime
-    /// to start rate limiting the Worker. This should only be used when the size of the queue is
-    /// strictly controlled.
-    async fn get_all(state: &State, prefix: &str) -> Result<Vec<Self>> {
-        get_front(state, prefix, None).await
-    }
-
-    /// Create a new element for a roughly ordered queue. (Use `put()` to store it.)
-    ///
-    /// Items in this queue are handled roughly in order of creation (oldest elements first).
-    /// Specifically, the ordinal is the UNIX time (in seconds) at which this method was called.
-    /// Ties are broken by a random nonce tacked on to the key. The format of the ordinal is:
-    ///
-    /// ```text
-    ///     time/<time>/nonce/<nonce>
-    /// ```
-    ///
-    /// where <time> is the timestamp and <nonce> is a random nonce.
-    pub(crate) fn new_roughly_ordered(item: T, prefix: &str) -> Self {
-        let mut rng = thread_rng();
-        let time = now();
-        let nonce = rng.gen::<[u8; 16]>();
-
-        // Pad the timestamp with 0s to the length of the longest 64-bit integer encoded in
-        // decimal. This ensures that queue elements stay ordered.
-        let ordinal = format!("time/{:020}/nonce/{}", time, hex::encode(nonce));
-
-        Self {
-            item,
-            prefix: prefix.to_string(),
-            ordinal,
-        }
-    }
-
-    /// Store the item in the provided DO state.
-    pub(crate) async fn put(&self, state: &State) -> Result<()> {
-        state.storage().put(&self.key(), &self.item).await
-    }
-
-    /// Compute the key used to store store the item. The key format is:
-    ///
-    /// ```text
-    ///     <prefix>/item/<ordinal>
-    /// ```
-    ///
-    /// where `<prefix>` is the indicated namespace and `<ordinal>` is the item's ordinal.
-    pub(crate) fn key(&self) -> String {
-        format!("{}/item/{}", self.prefix, self.ordinal)
-    }
-}
-
-impl<T> AsRef<T> for DurableOrdered<T> {
-    fn as_ref(&self) -> &T {
-        &self.item
-    }
-}
-
-async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
-    state: &State,
-    prefix: &str,
-    limit: Option<usize>,
-) -> Result<Vec<DurableOrdered<T>>> {
-    let key_prefix = format!("{prefix}/item/");
-    let mut opt = ListOptions::new().prefix(&key_prefix);
-    if let Some(limit) = limit {
-        // Note we impose an upper limit on the user's specified limit.
-        opt = opt.limit(min(limit, MAX_KEYS));
-    }
-    let iter = state.storage().list_with_options(opt).await?.entries();
-    let mut js_item = iter.next()?;
-    let mut res = Vec::new();
-    while !js_item.done() {
-        let (key, item): (String, T) =
-            serde_wasm_bindgen::from_value(js_item.value()).map_err(int_err)?;
-        if key[..key_prefix.len()] != key_prefix {
-            return Err(int_err("queue element key is improperly formatted"));
-        }
-        let ordinal = &key[key_prefix.len()..];
-        res.push(DurableOrdered {
-            item,
-            prefix: prefix.to_string(),
-            ordinal: ordinal.to_string(),
-        });
-        js_item = iter.next()?;
-    }
-    Ok(res)
 }
 
 fn span_to_headers() -> Headers {

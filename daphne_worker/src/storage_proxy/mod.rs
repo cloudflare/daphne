@@ -184,7 +184,7 @@ pub async fn handle_request(
 #[cfg(feature = "test-utils")]
 /// Clear all storage. Only available to tests
 async fn storage_purge(ctx: &RequestContext) -> worker::Result<Response> {
-    use daphne_service_utils::durable_requests::bindings::{DurableMethod, GarbageCollector};
+    use daphne_service_utils::durable_requests::bindings::{DurableMethod, TestStateCleaner};
 
     let kv_delete = async {
         let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
@@ -197,13 +197,13 @@ async fn storage_purge(ctx: &RequestContext) -> worker::Result<Response> {
 
     let do_delete = async {
         let req = Request::new_with_init(
-            &format!("https://fake-host{}", GarbageCollector::DeleteAll.to_uri(),),
+            &format!("https://fake-host{}", TestStateCleaner::DeleteAll.to_uri(),),
             RequestInit::new().with_method(worker::Method::Post),
         )?;
 
         ctx.env
-            .durable_object(GarbageCollector::BINDING)?
-            .id_from_name(GarbageCollector::NAME_STR)?
+            .durable_object(TestStateCleaner::BINDING)?
+            .id_from_name(TestStateCleaner::NAME_STR)?
             .get_stub()?
             .fetch_with_request(req)
             .await

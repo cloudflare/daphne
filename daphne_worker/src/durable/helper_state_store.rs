@@ -20,7 +20,7 @@ use worker::{
     Result, ScheduledTime, State,
 };
 
-use super::{req_parse, DapDurableObject};
+use super::{req_parse, GcDurableObject};
 
 crate::mk_durable_object! {
     struct HelperStateStore {
@@ -29,10 +29,10 @@ crate::mk_durable_object! {
     }
 }
 
-impl DapDurableObject for HelperStateStore {
+impl GcDurableObject for HelperStateStore {
     type DurableMethod = bindings::HelperState;
 
-    fn new(state: State, env: Env) -> Self {
+    fn with_state_and_env(state: State, env: Env) -> Self {
         Self { state, env }
     }
 
@@ -77,12 +77,12 @@ impl DapDurableObject for HelperStateStore {
             Duration::from_secs(
                 self.env
                     .var(VAR_NAME)
-                    .unwrap_or_else(|e| panic!("{VAR_NAME} not defined: {e}"))
-                    .to_string()
-                    .parse()
-                    .unwrap_or_else(|e| {
-                        panic!("{VAR_NAME} could not be parsed as a number of seconds: {e}")
-                    }),
+                    .map(|v| {
+                        v.to_string().parse().unwrap_or_else(|e| {
+                            panic!("{VAR_NAME} could not be parsed as a number of seconds: {e}")
+                        })
+                    })
+                    .unwrap_or(60 * 60 * 24 * 7), // one week
             )
         });
 
