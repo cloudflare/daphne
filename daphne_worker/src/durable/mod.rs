@@ -8,7 +8,6 @@ pub(crate) mod helper_state_store;
 use crate::{
     int_err, now,
     tracing_utils::{shorten_paths, DaphneSubscriber, JsonFields},
-    DapWorkerMode,
 };
 use daphne::messages::TaskId;
 use daphne_service_utils::{
@@ -17,11 +16,12 @@ use daphne_service_utils::{
 };
 use rand::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{cmp::min, time::Duration};
-use tracing::{info_span, trace, warn};
+use std::sync::OnceLock;
+use std::{cmp::min, ops::ControlFlow, time::Duration};
+use tracing::info_span;
 use worker::{
-    async_trait, js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request,
-    RequestInit, Result, ScheduledTime, State, Stub,
+    js_sys::Uint8Array, Delay, Env, Error, Headers, ListOptions, Method, Request, RequestInit,
+    Response, Result, ScheduledTime, State, Stub,
 };
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
@@ -197,7 +197,7 @@ impl<'srv> DurableConnector<'srv> {
                 Ok(mut resp) => return Ok(handler(resp.json().await?, attempt > 1)),
                 Err(err) => {
                     if attempt < attempts {
-                        warn!("DO {durable_binding}: post {durable_path}: attempt #{attempt} failed: {err}");
+                        tracing::warn!("DO {durable_binding}: post {durable_path}: attempt #{attempt} failed: {err}");
                         Delay::from(RETRY_DELAYS[attempt - 1]).await;
                         attempt += 1;
                     } else {
@@ -212,94 +212,186 @@ impl<'srv> DurableConnector<'srv> {
 trait DapDurableObject {
     type DurableMethod: DurableMethod;
 
-    fn state(&self) -> &State;
+    fn new(state: State, env: Env) -> Self;
 
-    fn deployment(&self) -> DaphneWorkerDeployment;
-}
+    /// Handle a durable object request.
+    async fn handle(&mut self, req: Request) -> Result<Response>;
 
-#[async_trait::async_trait(?Send)]
-trait Alarmed: DapDurableObject {
-    /// A mutable property used to track whether this DO has been alarmed.
-    fn alarmed(&mut self) -> &mut bool;
-
-    /// Ensure the alarm call is setup for this DO.
-    async fn ensure_alarmed<L: Into<ScheduledTime>>(&mut self, lifetime: L) -> Result<()> {
-        if !*self.alarmed() {
-            let result = self.state().storage().get_alarm().await;
-            match result {
-                Ok(None) => {
-                    self.state().storage().set_alarm(lifetime).await?;
-                }
-                Ok(Some(_)) => { /* alarm already setup */ }
-                Err(e) => {
-                    if matches!(self.deployment(), DaphneWorkerDeployment::Dev) {
-                        warn!("ignoring get_alarm() failure in a dev environment until --experimental-local implements it: {e}");
-                    } else {
-                        // We only return an error if not in the "dev" deployment as
-                        // the experimental-local dev environment doesn't have
-                        // working get_alarm() and set_alarm() yet, so we want to
-                        // ignore errors in that case.
-                        return Err(e);
-                    }
-                }
-            }
-            *self.alarmed() = true;
-        }
-        Ok(())
+    /// When this durable object should self cleanup.
+    ///
+    /// The default implementation of this function returns None, signaling that this object should
+    /// not be automatically cleaned up.
+    fn should_cleanup_at(&self) -> Option<ScheduledTime> {
+        None
     }
 }
 
-#[async_trait::async_trait(?Send)]
-trait GarbageCollectable: DapDurableObject {
-    /// A mutable property used to track whether this DO has been touched.
-    fn touched(&mut self) -> &mut bool;
+fn deployment(env: &Env) -> DaphneWorkerDeployment {
+    static DEPLOYMENT: OnceLock<DaphneWorkerDeployment> = OnceLock::new();
 
-    fn env(&self) -> &Env;
-
-    /// Run garbage collection requests.
-    ///
-    /// If a garbage collection request is handled no further processing needs to be done, as such,
-    /// this function will consume the request, otherwise it will return the passed in request for
-    /// further handling.
-    async fn schedule_for_garbage_collection(
-        &mut self,
-        req: Request,
-    ) -> Result<std::ops::ControlFlow<(), Request>> {
-        match GarbageCollector::try_from_uri(&req.path()) {
-            Some(GarbageCollector::DeleteAll) => {
-                self.state().storage().delete_all().await?;
-                *self.touched() = false;
-                return Ok(std::ops::ControlFlow::Break(()));
+    *DEPLOYMENT.get_or_init(|| {
+        let deployment = match env.var("DAP_DEPLOYMENT").map(|x| x.to_string()).as_deref() {
+            Ok("dev") => DaphneWorkerDeployment::Dev,
+            Ok("prod") | Err(_) => DaphneWorkerDeployment::Prod,
+            Ok(s) => {
+                tracing::error!("Invalid value for DAP_DEPLOYMENT ({s}), defaulting to prod");
+                DaphneWorkerDeployment::Prod
             }
-            _ if !*self.touched() => {
-                // The GarbageCollector should only be used when running tests. In production, the DO->DO
-                // communication overhead adds unacceptable latency, and there's no need to do the
-                // bulk deletes of state that test suites require.
-                if matches!(self.deployment(), DaphneWorkerDeployment::Dev) {
-                    let touched = state_set_if_not_exists(self.state(), "touched", &true)
-                        .await?
-                        .unwrap_or(false);
-                    if !touched {
-                        let durable = crate::durable::DurableConnector::new(self.env());
-                        durable
-                            .post(
-                                bindings::GarbageCollector::BINDING,
-                                bindings::GarbageCollector::Put.to_uri(),
-                                bindings::GarbageCollector::name(()).unwrap_from_name(),
-                                &crate::durable::DurableReference {
-                                    binding: Self::DurableMethod::BINDING.to_string(),
-                                    id_hex: self.state().id().to_string(),
-                                    task_id: None,
-                                },
-                            )
-                            .await?;
-                    }
-                }
-                *self.touched() = true;
-            }
-            _ => {}
+        };
+        if !matches!(deployment, DaphneWorkerDeployment::Prod) {
+            tracing::trace!("DAP deployment override applied: {deployment:?}");
         }
-        Ok(std::ops::ControlFlow::Continue(req))
+        deployment
+    })
+}
+
+/// Generate a durable object based on a `DapDurableObject`.
+///
+/// This object must hold the `State` and `Env`. Thus the macro forces it.
+#[macro_export]
+macro_rules! mk_durable_object {
+    (struct $name:ident {
+        state: State,
+        env: Env,
+        $($field:ident : $type:ty),*
+        $(,)?
+    }) => {
+        #[worker::durable_object]
+        struct $name {
+            state: ::worker::State,
+            env: ::worker::Env,
+            $($field: $type),*
+        }
+
+        #[worker::durable_object]
+        impl DurableObject for $name {
+            fn new(state: ::worker::State, env: ::worker::Env) -> Self {
+                $crate::tracing_utils::initialize_tracing(&env);
+                <Self as $crate::durable::DapDurableObject>::new(state, env)
+            }
+
+            async fn fetch(
+                &mut self,
+                #[allow(unused_mut)] mut req: ::worker::Request
+            ) -> ::worker::Result<::worker::Response> {
+                use $crate::durable::{
+                    deployment,
+                    setup_and_handle_garbage_collector_requests,
+                    create_span_from_request
+                };
+                use ::tracing::Instrument;
+                use ::std::ops::ControlFlow;
+                use ::daphne_service_utils::config::DaphneWorkerDeployment::Dev;
+
+                if matches!(deployment(&self.env), Dev) {
+                    // Try to handle a delete all request.
+                    req = match setup_and_handle_garbage_collector_requests::<Self>(
+                        &self.state,
+                        &self.env,
+                        req
+                    ).await? {
+                        ControlFlow::Continue(req) => req,
+                        // This req was a GC request and as such we must return from this function.
+                        ControlFlow::Break(()) => return ::worker::Response::from_json(&()),
+                    };
+                }
+
+                // Ensure this DO instance is garbage collected eventually.
+                if let Some(lifetime) = self.should_cleanup_at() {
+                    self.state.storage().set_alarm(lifetime).await?;
+                    ::tracing::trace!(instance = self.state.id().to_string(), "alarm set");
+                };
+
+                let span = create_span_from_request(&req);
+                <$name as DapDurableObject>::handle(self, req).instrument(span).await
+            }
+
+            async fn alarm(&mut self) -> Result<Response> {
+                self.state.storage().delete_all().await?;
+                ::tracing::trace!(
+                    instance = self.state.id().to_string(),
+                    "{}: alarm triggered, deleting...",
+                    ::std::stringify!($name),
+                );
+                ::worker::Response::from_json(&())
+            }
+        }
+
+        #[allow(dead_code)]
+        impl $name {
+            async fn get<T>(&self, key: &str) -> ::worker::Result<Option<T>>
+                where
+                    T: ::serde::de::DeserializeOwned,
+            {
+                $crate::durable::state_get(&self.state, key).await
+            }
+
+            async fn get_or_default<T>(&self, key: &str) -> ::worker::Result<T>
+                where
+                    T: ::serde::de::DeserializeOwned + std::default::Default,
+            {
+                $crate::durable::state_get_or_default(&self.state, key).await
+            }
+
+            async fn set_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
+                where
+                    T: ::serde::de::DeserializeOwned + ::serde::Serialize,
+            {
+                $crate::durable::state_set_if_not_exists(&self.state, key, val).await
+            }
+        }
+    };
+}
+
+/// Register a do to be deleted by the [`GarbageCollector`](garbage_collector::GarbageCollector).
+///
+/// If, however, the request is a [`GarbageCollector::DeleteAll`] request we also handle that
+/// request. This consumes the request and returns `Continue::Break`, signaling that the durable
+/// object should itself return from fetch.
+///
+/// If the request *wasn't* a [`GarbageCollector::DeleteAll`] request, the `Request` is
+/// returned through the `ControlFlow::Continue` variant.
+///
+/// # Note
+/// This function is doing two things at once, which makes it confusing, but both things revolve
+/// around keeping some state (`gc_delete_all_is_setup`) in sync and such it's less error prone for
+/// callers if it's all done in one place.
+async fn setup_and_handle_garbage_collector_requests<T: DapDurableObject>(
+    state: &State,
+    env: &Env,
+    req: Request,
+) -> Result<ControlFlow<(), Request>> {
+    // We first check if this was a delete all request. If it was then it means that the setup in
+    // the else branch was already done before.
+    if let Some(GarbageCollector::DeleteAll) = GarbageCollector::try_from_uri(&req.path()) {
+        state.storage().delete_all().await?;
+        state
+            .storage()
+            .put("gc_delete_all_is_setup", &false)
+            .await?;
+        Ok(ControlFlow::Break(()))
+    } else {
+        // if this wasn't a delete all request then we must ensure that we have registered
+        // ourselves with the `GarbageCollector` to delete us.
+        let gc_delete_all_is_setup =
+            state_set_if_not_exists(state, "gc_delete_all_is_setup", &true)
+                .await?
+                .unwrap_or(false);
+        if !gc_delete_all_is_setup {
+            crate::durable::DurableConnector::new(env)
+                .post(
+                    bindings::GarbageCollector::BINDING,
+                    bindings::GarbageCollector::Put.to_uri(),
+                    bindings::GarbageCollector::name(()).unwrap_from_name(),
+                    &crate::durable::DurableReference {
+                        binding: T::DurableMethod::BINDING.to_string(),
+                        id_hex: state.id().to_string(),
+                        task_id: None,
+                    },
+                )
+                .await?;
+        }
+        Ok(ControlFlow::Continue(req))
     }
 }
 
@@ -425,70 +517,6 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
 impl<T> AsRef<T> for DurableOrdered<T> {
     fn as_ref(&self) -> &T {
         &self.item
-    }
-}
-
-pub(crate) struct DaphneWorkerDurableConfig {
-    /// Deployment type. This controls certain behavior overrides relevant to specific deployments.
-    pub deployment: DaphneWorkerDeployment,
-
-    /// Helper: Time to wait before deleting an instance of HelperStateStore. This field is not
-    /// configured by the Leader.
-    pub helper_state_store_garbage_collect_after_secs: Option<Duration>,
-}
-
-impl DaphneWorkerDurableConfig {
-    pub(crate) fn from_worker_env(env: &Env) -> Result<Self> {
-        let is_do_proxy = crate::get_worker_mode(env) == DapWorkerMode::StorageProxy;
-
-        let is_leader = match env.var("DAP_AGGREGATOR_ROLE").map(|s| s.to_string()) {
-            Ok(r) if r == "leader" => Some(true),
-            Ok(r) if r == "helper" => Some(false),
-            Err(_) if is_do_proxy => None,
-            other => {
-                let other = other?;
-                return Err(worker::Error::RustError(format!(
-                    "Invalid value for DAP_AGGREGATOR_ROLE: '{other}'",
-                )));
-            }
-        };
-
-        let deployment = if let Ok(deployment) = env.var("DAP_DEPLOYMENT") {
-            match deployment.to_string().as_str() {
-                "prod" => DaphneWorkerDeployment::Prod,
-                "dev" => DaphneWorkerDeployment::Dev,
-                s => {
-                    return Err(worker::Error::RustError(format!(
-                        "Invalid value for DAP_DEPLOYMENT: {s}",
-                    )))
-                }
-            }
-        } else {
-            DaphneWorkerDeployment::default()
-        };
-        if !matches!(deployment, DaphneWorkerDeployment::Prod) {
-            trace!("DAP deployment override applied: {deployment:?}");
-        }
-
-        let helper_state_store_garbage_collect_after_secs = if let Some(false) | None = is_leader {
-            Some(Duration::from_secs(
-                env.var("DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS")?
-                    .to_string()
-                    .parse()
-                    .map_err(|err| {
-                        worker::Error::RustError(format!(
-                            "Failed to parse DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS: {err}"
-                        ))
-                    })?,
-            ))
-        } else {
-            None
-        };
-
-        Ok(Self {
-            deployment,
-            helper_state_store_garbage_collect_after_secs,
-        })
     }
 }
 

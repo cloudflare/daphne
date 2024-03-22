@@ -1,22 +1,36 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, io::Cursor, mem::size_of, ops::ControlFlow};
+//! Durable Object (DO) for storing aggregate shares for a bucket of reports.
+//!
+//! This object defines the following API endpoints:
+//!
+//! - `DURABLE_AGGREGATE_STORE_GET`: Return the current value of the aggregate share.
+//! - `DURABLE_AGGREGATE_STORE_MERGE`: Update the aggregate share.
+//! - `DURABLE_AGGREGATE_STORE_MARK_COLLECTED`: Mark the bucket as having been collected.
+//! - `DURABLE_AGGREGATE_STORE_CHECK_COLLECTED`: Return a boolean indicating if the bucket has been
+//!   collected.
+//!
+//! The schema for the data stored by this DO is as follows:
+//!
+//! ```text
+//! [Aggregate share]
+//!     meta                -> DapAggregateShareMetadata
+//!     chunk_v2_{000..004} -> slice of VdafAggregateShare
+//! [Collected flag]
+//!     collected -> bool
+//! ```
 
-use crate::{
-    durable::{create_span_from_request, state_get_or_default},
-    initialize_tracing, int_err,
-};
+use std::{collections::HashSet, io::Cursor, mem::size_of, sync::OnceLock, time::Duration};
+
+use crate::int_err;
 use daphne::{
     messages::{ReportId, Time},
     vdaf::VdafAggregateShare,
     DapAggregateShare,
 };
-use daphne_service_utils::{
-    config::DaphneWorkerDeployment,
-    durable_requests::bindings::{
-        self, AggregateStoreMergeReq, AggregateStoreMergeResp, DurableMethod,
-    },
+use daphne_service_utils::durable_requests::bindings::{
+    self, AggregateStoreMergeReq, AggregateStoreMergeResp, DurableMethod,
 };
 use prio::{
     codec::{Decode, Encode},
@@ -24,42 +38,12 @@ use prio::{
     vdaf::AggregateShare,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tracing::Instrument;
 use worker::{
-    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures,
-    worker_sys, Env, Error, Request, Response, Result, State,
+    async_trait, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures, worker_sys,
+    Env, Error, Request, Response, Result, ScheduledTime, State,
 };
 
-use super::{req_parse, DapDurableObject, DaphneWorkerDurableConfig, GarbageCollectable};
-
-/// Durable Object (DO) for storing aggregate shares for a bucket of reports.
-///
-/// This object defines the following API endpoints:
-///
-/// - `DURABLE_AGGREGATE_STORE_GET`: Return the current value of the aggregate share.
-/// - `DURABLE_AGGREGATE_STORE_MERGE`: Update the aggregate share.
-/// - `DURABLE_AGGREGATE_STORE_MARK_COLLECTED`: Mark the bucket as having been collected.
-/// - `DURABLE_AGGREGATE_STORE_CHECK_COLLECTED`: Return a boolean indicating if the bucket has been
-///   collected.
-///
-/// The schema for the data stored by this DO is as follows:
-///
-/// ```text
-/// [Aggregate share]
-///     meta                -> DapAggregateShareMetadata
-///     chunk_v2_{000..004} -> slice of VdafAggregateShare
-/// [Collected flag]
-///     collected -> bool
-/// ```
-#[durable_object]
-pub struct AggregateStore {
-    #[allow(dead_code)]
-    state: State,
-    env: Env,
-    config: DaphneWorkerDurableConfig,
-    touched: bool,
-    collected: Option<bool>,
-}
+use super::{req_parse, DapDurableObject};
 
 /// Minimum number of chunks needed to store 1Mb of aggregate share data.
 const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 8;
@@ -281,24 +265,11 @@ fn shard_bytes_to_object(
     Ok(())
 }
 
-#[durable_object]
-impl DurableObject for AggregateStore {
-    fn new(state: State, env: Env) -> Self {
-        initialize_tracing(&env);
-        let config =
-            DaphneWorkerDurableConfig::from_worker_env(&env).expect("failed to load configuration");
-        Self {
-            state,
-            env,
-            config,
-            touched: false,
-            collected: None,
-        }
-    }
-
-    async fn fetch(&mut self, req: Request) -> Result<Response> {
-        let span = create_span_from_request(&req);
-        self.handle(req).instrument(span).await
+crate::mk_durable_object! {
+    struct AggregateStore {
+        state: State,
+        env: Env,
+        collected: Option<bool>,
     }
 }
 
@@ -307,19 +278,25 @@ impl AggregateStore {
         Ok(if let Some(collected) = self.collected {
             collected
         } else {
-            let collected = state_get_or_default(&self.state, COLLECTED_KEY).await?;
+            let collected = self.get_or_default(COLLECTED_KEY).await?;
             self.collected = Some(collected);
             collected
         })
     }
+}
 
-    async fn handle(&mut self, req: Request) -> Result<Response> {
-        let mut req = match self.schedule_for_garbage_collection(req).await? {
-            ControlFlow::Continue(req) => req,
-            // This req was a GC request and as such we must return from this function.
-            ControlFlow::Break(()) => return Response::from_json(&()),
-        };
+impl DapDurableObject for AggregateStore {
+    type DurableMethod = bindings::AggregateStore;
 
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            state,
+            env,
+            collected: None,
+        }
+    }
+
+    async fn handle(&mut self, mut req: Request) -> Result<Response> {
         match bindings::AggregateStore::try_from_uri(&req.path()) {
             Some(bindings::AggregateStore::GetMerged) => {
                 Response::from_json(&self.load_aggregated_report_ids().await?)
@@ -429,31 +406,24 @@ impl AggregateStore {
             ))),
         }
     }
-}
 
-impl DapDurableObject for AggregateStore {
-    type DurableMethod = bindings::AggregateStore;
+    fn should_cleanup_at(&self) -> Option<ScheduledTime> {
+        const VAR_NAME: &str = "DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS";
+        static SELF_DELETE_AFTER: OnceLock<Duration> = OnceLock::new();
 
-    #[inline(always)]
-    fn state(&self) -> &State {
-        &self.state
-    }
+        let duration = SELF_DELETE_AFTER.get_or_init(|| {
+            Duration::from_secs(
+                self.env
+                    .var(VAR_NAME)
+                    .map(|v| {
+                        v.to_string().parse().unwrap_or_else(|e| {
+                            panic!("{VAR_NAME} could not be parsed as a number of seconds: {e}")
+                        })
+                    })
+                    .unwrap_or(60 * 60 * 24 * 7), // one week
+            )
+        });
 
-    #[inline(always)]
-    fn deployment(&self) -> DaphneWorkerDeployment {
-        self.config.deployment
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl GarbageCollectable for AggregateStore {
-    #[inline(always)]
-    fn touched(&mut self) -> &mut bool {
-        &mut self.touched
-    }
-
-    #[inline(always)]
-    fn env(&self) -> &Env {
-        &self.env
+        Some(ScheduledTime::from(*duration))
     }
 }

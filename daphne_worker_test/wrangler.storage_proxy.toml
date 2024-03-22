@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 name = "daphne_storage_proxy"
 main = "build/worker/shim.mjs"
 compatibility_date = "2023-12-21"
@@ -18,7 +21,8 @@ fallthrough = false
 DAPHNE_SERVER_AUTH_TOKEN = "this-is-the-storage-proxy-auth-token" # SECRET
 DAP_WORKER_MODE = "storage-proxy"
 DAP_DEPLOYMENT = "dev"
-DAP_HELPER_STATE_STORE_GARBAGE_COLLECT_AFTER_SECS = "10"
+DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"
+DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
 
 [durable_objects]
 bindings = [
