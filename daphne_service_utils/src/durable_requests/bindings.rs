@@ -126,9 +126,9 @@ pub enum AggregateStoreMergeResp {
 }
 
 define_do_binding! {
-    const BINDING = "DAP_GARBAGE_COLLECTOR";
-    enum GarbageCollector {
-        Put = "/internal/do/garbage_collector/put",
+    const BINDING = "DAP_TEST_STATE_CLEANER";
+    enum TestStateCleaner {
+        Put = "/internal/do/test_state_cleaner/put",
         DeleteAll = "/internal/do/delete_all",
     }
 
@@ -137,8 +137,8 @@ define_do_binding! {
     }
 }
 
-impl GarbageCollector {
-    pub const NAME_STR: &'static str = "garbage_collector";
+impl TestStateCleaner {
+    pub const NAME_STR: &'static str = "test_do_cleaner";
 }
 
 define_do_binding! {

@@ -27,7 +27,7 @@ DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
 [durable_objects]
 bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
-    { name = "DAP_GARBAGE_COLLECTOR", class_name = "GarbageCollector" },
+    { name = "DAP_TEST_STATE_CLEANER", class_name = "TestStateCleaner" },
     { name = "DAP_HELPER_STATE_STORE", class_name = "HelperStateStore" },
 ]
 
@@ -57,4 +57,10 @@ new_classes = [
     "AggregateStore",
     "GarbageCollector",
     "HelperStateStore",
+]
+
+[[migrations]]
+tag = "v2"
+renamed_classes = [
+    { from = "GarbageCollector", to = "TestStateCleaner" },
 ]

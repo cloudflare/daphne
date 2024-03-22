@@ -16,7 +16,9 @@
 //! ```text
 //! [Aggregate share]
 //!     meta                -> DapAggregateShareMetadata
-//!     chunk_v2_{000..004} -> slice of VdafAggregateShare
+//!     chunk_v2_{000..008} -> slice of VdafAggregateShare
+//! [Seen Report Ids]
+//!     aggregated_report_ids_{000..002} -> slice of ReportId
 //! [Collected flag]
 //!     collected -> bool
 //! ```
@@ -43,7 +45,7 @@ use worker::{
     Env, Error, Request, Response, Result, ScheduledTime, State,
 };
 
-use super::{req_parse, DapDurableObject};
+use super::{req_parse, GcDurableObject};
 
 /// Minimum number of chunks needed to store 1Mb of aggregate share data.
 const MAX_AGG_SHARE_CHUNK_KEY_COUNT: usize = 8;
@@ -285,10 +287,10 @@ impl AggregateStore {
     }
 }
 
-impl DapDurableObject for AggregateStore {
+impl GcDurableObject for AggregateStore {
     type DurableMethod = bindings::AggregateStore;
 
-    fn new(state: State, env: Env) -> Self {
+    fn with_state_and_env(state: State, env: Env) -> Self {
         Self {
             state,
             env,
