@@ -54,9 +54,9 @@ impl GarbageCollector {
                 let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
                 queued.put(&self.state).await?;
                 trace!(
-                    "scheduled {} instance {} for deletion",
-                    queued.as_ref().binding,
-                    queued.as_ref().id_hex
+                    binding = queued.as_ref().binding,
+                    instance = queued.as_ref().id_hex,
+                    "registered DO instance for deletion",
                 );
                 Response::from_json(&())
             }
@@ -85,9 +85,9 @@ impl GarbageCollector {
                         )
                         .await?;
                     trace!(
-                        "deleted {} instance {}",
-                        durable_ref.binding,
-                        durable_ref.id_hex
+                        binding = durable_ref.binding,
+                        instance = durable_ref.id_hex,
+                        "deleted instance",
                     );
                 }
 
