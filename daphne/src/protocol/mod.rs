@@ -210,10 +210,7 @@ mod test {
         assert_eq!(agg_job_init_req.agg_param.len(), 0);
         assert_eq!(agg_job_init_req.prep_inits.len(), 3);
         for (prep_init, report) in agg_job_init_req.prep_inits.iter().zip(reports.iter()) {
-            assert_eq!(
-                prep_init.report_share.report_metadata.id,
-                report.report_metadata.id
-            );
+            assert_eq!(prep_init.report_id(), &report.report_metadata.id);
         }
 
         let (agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
@@ -333,7 +330,7 @@ mod test {
             agg_param: Vec::new(),
             part_batch_sel: PartialBatchSelector::TimeInterval,
             prep_inits: vec![
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: report0.report_metadata,
                         public_share: report0.public_share,
@@ -341,7 +338,7 @@ mod test {
                     },
                     payload: b"malformed payload".to_vec(),
                 },
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: report1.report_metadata,
                         public_share: report1.public_share,
@@ -512,7 +509,7 @@ mod test {
         let prep_init_ids = agg_job_init_req
             .prep_inits
             .iter()
-            .map(|r| r.report_share.report_metadata.id)
+            .map(|prep_init| *prep_init.report_id())
             .collect::<Vec<_>>();
         let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 

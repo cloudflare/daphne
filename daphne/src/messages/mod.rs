@@ -238,23 +238,16 @@ pub struct ReportMetadata {
     pub time: Time,
 }
 
-impl ParameterizedEncode<DapVersion> for ReportMetadata {
-    fn encode_with_param(
-        &self,
-        _version: &DapVersion,
-        bytes: &mut Vec<u8>,
-    ) -> Result<(), CodecError> {
+impl Encode for ReportMetadata {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         self.id.encode(bytes)?;
         self.time.encode(bytes)?;
         Ok(())
     }
 }
 
-impl ParameterizedDecode<DapVersion> for ReportMetadata {
-    fn decode_with_param(
-        _version: &DapVersion,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
+impl Decode for ReportMetadata {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         let metadata = Self {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
@@ -313,26 +306,19 @@ pub struct ReportShare {
     pub encrypted_input_share: HpkeCiphertext,
 }
 
-impl ParameterizedEncode<DapVersion> for ReportShare {
-    fn encode_with_param(
-        &self,
-        version: &DapVersion,
-        bytes: &mut Vec<u8>,
-    ) -> Result<(), CodecError> {
-        self.report_metadata.encode_with_param(version, bytes)?;
+impl Encode for ReportShare {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.report_metadata.encode(bytes)?;
         encode_u32_bytes(bytes, &self.public_share)?;
         self.encrypted_input_share.encode(bytes)?;
         Ok(())
     }
 }
 
-impl ParameterizedDecode<DapVersion> for ReportShare {
-    fn decode_with_param(
-        version: &DapVersion,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
+impl Decode for ReportShare {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         Ok(Self {
-            report_metadata: ReportMetadata::decode_with_param(version, bytes)?,
+            report_metadata: ReportMetadata::decode(bytes)?,
             public_share: decode_u32_bytes(bytes)?,
             encrypted_input_share: HpkeCiphertext::decode(bytes)?,
         })
@@ -450,38 +436,86 @@ impl Default for BatchSelector {
     }
 }
 
-/// The `PrepareInit` message consisting of the report share and the Leader's initial prep share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct PrepareInit {
-    pub report_share: ReportShare,
-    pub payload: Vec<u8>,
+pub enum PrepareInit {
+    New {
+        report_share: ReportShare,
+        payload: Vec<u8>,
+    },
+    /// draft09 compatibility: This variant is only constructed in the latest version, in heavy
+    /// hitters mode.
+    #[cfg(any(test, feature = "test-utils"))]
+    Stored {
+        report_metadata: ReportMetadata,
+        payload: Vec<u8>,
+    },
 }
 
-impl ParameterizedEncode<DapVersion> for PrepareInit {
-    fn encode_with_param(
-        &self,
-        version: &DapVersion,
-        bytes: &mut Vec<u8>,
-    ) -> Result<(), CodecError> {
-        self.report_share.encode_with_param(version, bytes)?;
-        encode_u32_bytes(bytes, &self.payload)?;
+impl PrepareInit {
+    pub(crate) fn report_id(&self) -> &ReportId {
+        match self {
+            Self::New { report_share, .. } => &report_share.report_metadata.id,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Stored {
+                report_metadata, ..
+            } => &report_metadata.id,
+        }
+    }
+}
+
+impl ParameterizedEncode<bool> for PrepareInit {
+    fn encode_with_param(&self, stored: &bool, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        match self {
+            Self::New {
+                report_share,
+                payload,
+            } if !*stored => {
+                report_share.encode(bytes)?;
+                encode_u32_bytes(bytes, payload)?;
+            }
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Stored {
+                report_metadata,
+                payload,
+            } if *stored => {
+                report_metadata.encode(bytes)?;
+                encode_u32_bytes(bytes, payload)?;
+            }
+            _ => {
+                return Err(CodecError::Other(
+                    "unexpected encoding parameter for PrepareInit variant".into(),
+                ))
+            }
+        };
         Ok(())
     }
 }
 
-impl ParameterizedDecode<DapVersion> for PrepareInit {
-    fn decode_with_param(
-        version: &DapVersion,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let report_share = ReportShare::decode_with_param(version, bytes)?;
-        let payload = decode_u32_bytes(bytes)?;
+impl ParameterizedDecode<bool> for PrepareInit {
+    fn decode_with_param(stored: &bool, bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        if !*stored {
+            Ok(Self::New {
+                report_share: ReportShare::decode(bytes)?,
+                payload: decode_u32_bytes(bytes)?,
+            })
+        } else {
+            #[cfg(any(test, feature = "test-utils"))]
+            {
+                Ok(Self::Stored {
+                    report_metadata: ReportMetadata::decode(bytes)?,
+                    payload: decode_u32_bytes(bytes)?,
+                })
+            }
 
-        Ok(Self {
-            report_share,
-            payload,
-        })
+            // TODO heavy hitters: Remove this exception.
+            #[cfg(not(any(test, feature = "test-utils")))]
+            {
+                Err(CodecError::Other(
+                    "Decoding of AggregationJobInitReqFromStored is not implemented".into(),
+                ))
+            }
+        }
     }
 }
 
@@ -493,29 +527,41 @@ pub struct AggregationJobInitReq {
     pub prep_inits: Vec<PrepareInit>,
 }
 
-impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
+impl ParameterizedEncode<(DapVersion, bool)> for AggregationJobInitReq {
     fn encode_with_param(
         &self,
-        version: &DapVersion,
+        (version, stored): &(DapVersion, bool),
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u32_bytes(bytes, &self.agg_param)?;
-        self.part_batch_sel.encode(bytes)?;
-        encode_u32_items(bytes, version, &self.prep_inits)?;
-        Ok(())
+        if let (DapVersion::Draft09, true) = (version, stored) {
+            Err(CodecError::Other(
+                format!("AggregationJobInitReqFromStored is not specified in {version:?}").into(),
+            ))
+        } else {
+            encode_u32_bytes(bytes, &self.agg_param)?;
+            self.part_batch_sel.encode(bytes)?;
+            encode_u32_items(bytes, stored, &self.prep_inits)?;
+            Ok(())
+        }
     }
 }
 
-impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
+impl ParameterizedDecode<(DapVersion, bool)> for AggregationJobInitReq {
     fn decode_with_param(
-        version: &DapVersion,
+        (version, stored): &(DapVersion, bool),
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        Ok(Self {
-            agg_param: decode_u32_bytes(bytes)?,
-            part_batch_sel: PartialBatchSelector::decode(bytes)?,
-            prep_inits: decode_u32_items(version, bytes)?,
-        })
+        if let (DapVersion::Draft09, true) = (version, stored) {
+            Err(CodecError::Other(
+                format!("AggregationJobInitReqFromStored is not specified in {version:?}").into(),
+            ))
+        } else {
+            Ok(Self {
+                agg_param: decode_u32_bytes(bytes)?,
+                part_batch_sel: PartialBatchSelector::decode(bytes)?,
+                prep_inits: decode_u32_items(stored, bytes)?,
+            })
+        }
     }
 }
 
@@ -1277,7 +1323,7 @@ mod test {
                 batch_id: BatchId([0; 32]),
             },
             prep_inits: vec![
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
@@ -1292,7 +1338,7 @@ mod test {
                     },
                     payload: b"prep share".to_vec(),
                 },
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
@@ -1309,9 +1355,13 @@ mod test {
                 },
             ],
         };
-        println!("want {:?}", want.get_encoded_with_param(&version).unwrap());
+        println!(
+            "want {:?}",
+            want.get_encoded_with_param(&(version, false)).unwrap()
+        );
 
-        let got = AggregationJobInitReq::get_decoded_with_param(&version, TEST_DATA).unwrap();
+        let got =
+            AggregationJobInitReq::get_decoded_with_param(&(version, false), TEST_DATA).unwrap();
         assert_eq!(got, want);
     }
 
@@ -1324,7 +1374,7 @@ mod test {
                 batch_id: BatchId([0; 32]),
             },
             prep_inits: vec![
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
@@ -1339,7 +1389,7 @@ mod test {
                     },
                     payload: b"prep share".to_vec(),
                 },
-                PrepareInit {
+                PrepareInit::New {
                     report_share: ReportShare {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
@@ -1358,14 +1408,50 @@ mod test {
         };
 
         let got = AggregationJobInitReq::get_decoded_with_param(
-            &version,
-            &want.get_encoded_with_param(&version).unwrap(),
+            &(version, false),
+            &want.get_encoded_with_param(&(version, false)).unwrap(),
         )
         .unwrap();
         assert_eq!(got, want);
     }
 
     test_versions! { roundtrip_agg_job_init_req }
+
+    #[test]
+    fn roundtrip_agg_job_init_req_from_stored() {
+        let want = AggregationJobInitReq {
+            agg_param: b"this is an aggregation parameter".to_vec(),
+            part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+                batch_id: BatchId([0; 32]),
+            },
+            prep_inits: vec![
+                PrepareInit::Stored {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([99; 16]),
+                        time: 13_371_337,
+                    },
+                    payload: b"prep share".to_vec(),
+                },
+                PrepareInit::Stored {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([17; 16]),
+                        time: 1337,
+                    },
+                    payload: b"prep share".to_vec(),
+                },
+            ],
+        };
+
+        let got = AggregationJobInitReq::get_decoded_with_param(
+            &(DapVersion::Latest, true),
+            &want
+                .get_encoded_with_param(&(DapVersion::Latest, true))
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn read_agg_job_resp() {

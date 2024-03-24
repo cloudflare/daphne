@@ -428,7 +428,7 @@ impl Test {
                 .post(url)
                 .body(
                     agg_job_init_req
-                        .get_encoded_with_param(&task_config.version)
+                        .get_encoded_with_param(&(task_config.version, false))
                         .unwrap(),
                 )
                 .headers(headers),

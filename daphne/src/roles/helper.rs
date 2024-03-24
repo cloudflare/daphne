@@ -56,7 +56,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     let task_id = req.task_id()?;
     let metrics = aggregator.metrics();
     let agg_job_init_req =
-        AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
+        AggregationJobInitReq::get_decoded_with_param(&(req.version, false), &req.payload)
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
