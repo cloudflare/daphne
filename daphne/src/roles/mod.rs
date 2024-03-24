@@ -166,8 +166,8 @@ mod test {
         testing::InMemoryAggregator,
         vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
-        DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
-        DapTaskConfig, DapTaskParameters, DapVersion,
+        DapError, DapGlobalConfig, DapMeasurement, DapPendingReport, DapQueryConfig, DapRequest,
+        DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
@@ -495,7 +495,7 @@ mod test {
             &self,
             task_id: &TaskId,
             agg_param: DapAggregationParam,
-            reports: Vec<Report>,
+            reports: Vec<DapPendingReport>,
         ) -> (DapAggregationJobState, DapRequest<BearerToken>) {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
@@ -733,7 +733,7 @@ mod test {
             .gen_test_agg_job_init_req(
                 &t.time_interval_task_id,
                 DapAggregationParam::Empty,
-                vec![report],
+                vec![DapPendingReport::New(report)],
             )
             .await;
         req.sender_auth = None;
@@ -931,7 +931,11 @@ mod test {
         let mut report = t.gen_test_report(task_id).await;
         report.encrypted_input_shares[1].payload[0] ^= 0xff; // Cause decryption to fail
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
+            .gen_test_agg_job_init_req(
+                task_id,
+                DapAggregationParam::Empty,
+                vec![DapPendingReport::New(report)],
+            )
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
@@ -959,7 +963,11 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let (_, req) = t
-            .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
+            .gen_test_agg_job_init_req(
+                task_id,
+                DapAggregationParam::Empty,
+                vec![DapPendingReport::New(report)],
+            )
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.

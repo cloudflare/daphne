@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use daphne::{messages, DapMeasurement, DapTaskConfig, DapVersion};
+use daphne::{messages, DapMeasurement, DapPendingReport, DapTaskConfig, DapVersion};
 use deepsize::DeepSizeOf;
 use futures::Stream;
 use pin_project::pin_project;
@@ -29,11 +29,11 @@ use super::{Now, TestTaskConfig};
 pub struct ReportGenerator {
     len: usize,
     #[pin]
-    ch: mpsc::Receiver<messages::Report>,
+    ch: mpsc::Receiver<DapPendingReport>,
 }
 
 impl Stream for ReportGenerator {
-    type Item = messages::Report;
+    type Item = DapPendingReport;
 
     fn poll_next(
         self: Pin<&mut Self>,
@@ -115,7 +115,7 @@ impl ReportGenerator {
                         // --
 
                         sender
-                            .blocking_send(report)
+                            .blocking_send(DapPendingReport::New(report))
                             .context("sending generated report")?;
                         anyhow::Ok(())
                     },

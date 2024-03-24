@@ -24,7 +24,8 @@ use crate::{
     },
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
-    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
+    DapMeasurement, DapPendingReport, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig,
+    DapVersion, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -175,7 +176,7 @@ impl AggregationJobTest {
     pub async fn produce_agg_job_req(
         &self,
         agg_param: &DapAggregationParam,
-        reports: Vec<Report>,
+        reports: impl IntoIterator<Item = DapPendingReport>,
     ) -> (DapAggregationJobState, AggregationJobInitReq) {
         self.task_config
             .produce_agg_job_req(
@@ -184,7 +185,7 @@ impl AggregationJobTest {
                 &self.task_id,
                 &PartialBatchSelector::TimeInterval,
                 agg_param,
-                futures::stream::iter(reports),
+                futures::stream::iter(reports.into_iter()),
                 &self.leader_metrics,
             )
             .await
@@ -321,7 +322,10 @@ impl AggregationJobTest {
         };
 
         // Clients: Shard
-        let reports = self.produce_reports(measurements);
+        let reports = self
+            .produce_reports(measurements)
+            .into_iter()
+            .map(DapPendingReport::New);
 
         // Aggregators: Preparation
         let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports).await;
