@@ -229,15 +229,36 @@ impl EarlyReportStateConsumed {
         })
     }
 
-    /// Convert this `EarlyReportStateConsumed` into a rejected [`EarlyReportStateInitialized`] using
+    /// Convert this `EarlyReportStateConsumed` into a rejected [`EarlyReportStateFetched`] using
     /// `failure` as the reason. If this is already a rejected report, the passed in `failure`
     /// value overwrites the previous one.
-    pub fn into_initialized_rejected_due_to(
+    pub fn into_fetched_rejected_due_to(
         self,
         failure: TransitionFailure,
-    ) -> EarlyReportStateInitialized {
+    ) -> EarlyReportStateFetched {
         let metadata = self.metadata().clone();
-        EarlyReportStateInitialized::Rejected { metadata, failure }
+        EarlyReportStateFetched::Rejected { metadata, failure }
+    }
+
+    /// XXX
+    pub fn into_fetched(self) -> Option<EarlyReportStateFetched> {
+        match self {
+            Self::New {
+                metadata,
+                public_share,
+                input_share,
+                peer_prep_share,
+            } => Some(EarlyReportStateFetched::Ready {
+                metadata,
+                public_share,
+                input_share,
+                peer_prep_share,
+            }),
+            Self::Stored { .. } => None,
+            Self::Rejected { metadata, failure } => {
+                Some(EarlyReportStateFetched::Rejected { metadata, failure })
+            }
+        }
     }
 }
 
@@ -255,17 +276,16 @@ impl EarlyReportState for EarlyReportStateConsumed {
     }
 }
 
-/// Report state during aggregation initialization after the VDAF preparation step.
+/// XXX
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum EarlyReportStateInitialized {
+pub enum EarlyReportStateFetched {
     Ready {
         metadata: ReportMetadata,
         public_share: Vec<u8>,
+        input_share: Vec<u8>,
         // Set by the Helper.
         peer_prep_share: Option<Vec<u8>>,
-        prep_share: VdafPrepMessage,
-        prep_state: VdafPrepState,
     },
     Rejected {
         metadata: ReportMetadata,
@@ -273,39 +293,44 @@ pub enum EarlyReportStateInitialized {
     },
 }
 
-impl EarlyReportStateInitialized {
+impl EarlyReportState for EarlyReportStateFetched {
+    fn metadata(&self) -> &ReportMetadata {
+        match self {
+            Self::Ready { metadata, .. } | Self::Rejected { metadata, .. } => metadata,
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready { .. })
+    }
+}
+
+impl EarlyReportStateFetched {
     /// Initialize VDAF preparation for a report. This method is meant to be called by
     /// [`DapReportInitializer`].
-    pub fn initialize(
+    pub fn into_initialized(
+        self,
         is_leader: bool,
         vdaf_verify_key: &VdafVerifyKey,
         vdaf_config: &VdafConfig,
         agg_param: &DapAggregationParam,
-        early_report_state_consumed: EarlyReportStateConsumed,
-    ) -> Result<Self, DapError> {
+    ) -> Result<EarlyReportStateInitialized, DapError> {
         // TODO heavy hitters: Remove this once we use the aggregation parameter when compiling
         // with the default feature set.
         #[cfg(not(any(test, feature = "test-utils")))]
         let _ = agg_param;
 
-        let (metadata, public_share, input_share, peer_prep_share) =
-            match early_report_state_consumed {
-                EarlyReportStateConsumed::New {
-                    metadata,
-                    public_share,
-                    input_share,
-                    peer_prep_share,
-                } => (metadata, public_share, input_share, peer_prep_share),
-                EarlyReportStateConsumed::Stored { .. } => {
-                    // TODO heavy hitters: Initialize stored reports.
-                    return Err(fatal_error!(
-                        err = "handling of stored reports is not yet implemented"
-                    ));
-                }
-                EarlyReportStateConsumed::Rejected { metadata, failure } => {
-                    return Ok(Self::Rejected { metadata, failure })
-                }
-            };
+        let (metadata, public_share, input_share, peer_prep_share) = match self {
+            Self::Ready {
+                metadata,
+                public_share,
+                input_share,
+                peer_prep_share,
+            } => (metadata, public_share, input_share, peer_prep_share),
+            Self::Rejected { metadata, failure } => {
+                return Ok(EarlyReportStateInitialized::Rejected { metadata, failure })
+            }
+        };
 
         let agg_id = usize::from(!is_leader);
         let res = match vdaf_config {
@@ -341,31 +366,38 @@ impl EarlyReportStateInitialized {
         };
 
         let early_report_state_initialized = match res {
-            Ok((prep_state, prep_share)) => Self::Ready {
+            Ok((prep_state, prep_share)) => EarlyReportStateInitialized::Ready {
                 metadata,
                 public_share,
                 peer_prep_share,
                 prep_share,
                 prep_state,
             },
-            Err(..) => Self::Rejected {
+            Err(..) => EarlyReportStateInitialized::Rejected {
                 metadata,
                 failure: TransitionFailure::VdafPrepError,
             },
         };
         Ok(early_report_state_initialized)
     }
+}
 
-    /// Turn this report into a rejected report using `failure` as the reason for it's rejection.
-    pub fn reject_due_to(&mut self, failure: TransitionFailure) {
-        // this never aborts because the closure never panics
-        replace_with_or_abort(self, |self_| {
-            let metadata = match self_ {
-                Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
-            };
-            Self::Rejected { metadata, failure }
-        });
-    }
+/// Report state during aggregation initialization after the VDAF preparation step.
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum EarlyReportStateInitialized {
+    Ready {
+        metadata: ReportMetadata,
+        public_share: Vec<u8>,
+        // Set by the Helper.
+        peer_prep_share: Option<Vec<u8>>,
+        prep_share: VdafPrepMessage,
+        prep_state: VdafPrepState,
+    },
+    Rejected {
+        metadata: ReportMetadata,
+        failure: TransitionFailure,
+    },
 }
 
 impl EarlyReportState for EarlyReportStateInitialized {
@@ -377,6 +409,19 @@ impl EarlyReportState for EarlyReportStateInitialized {
 
     fn is_ready(&self) -> bool {
         matches!(self, Self::Ready { .. })
+    }
+}
+
+impl EarlyReportStateInitialized {
+    /// Turn this report into a rejected report using `failure` as the reason for it's rejection.
+    pub fn reject_due_to(&mut self, failure: TransitionFailure) {
+        // this never aborts because the closure never panics
+        replace_with_or_abort(self, |self_| {
+            let metadata = match self_ {
+                Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
+            };
+            Self::Rejected { metadata, failure }
+        });
     }
 }
 

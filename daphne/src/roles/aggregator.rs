@@ -13,7 +13,9 @@ use crate::{
     hpke::{HpkeConfig, HpkeProvider},
     messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
     metrics::{DaphneMetrics, DaphneRequestType},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    protocol::aggregator::{
+        EarlyReportStateConsumed, EarlyReportStateFetched, EarlyReportStateInitialized,
+    },
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequest, DapResponse, DapTaskConfig,
 };
@@ -29,7 +31,7 @@ pub trait DapReportInitializer {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;
 }
 

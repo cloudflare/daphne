@@ -15,7 +15,9 @@ use crate::{
         ReportId, TaskId, Time, TransitionFailure,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
+    protocol::aggregator::{
+        EarlyReportStateConsumed, EarlyReportStateFetched, EarlyReportStateInitialized,
+    },
     roles::{
         aggregator::MergeAggShareError,
         helper,
@@ -66,17 +68,16 @@ fn initialize_reports(
     is_leader: bool,
     task_config: &DapTaskConfig,
     agg_param: &DapAggregationParam,
-    consumed_reports: Vec<EarlyReportStateConsumed>,
+    reports: Vec<EarlyReportStateFetched>,
 ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-    consumed_reports
+    reports
         .into_iter()
-        .map(|consumed| {
-            EarlyReportStateInitialized::initialize(
+        .map(|report| {
+            report.into_initialized(
                 is_leader,
                 &task_config.vdaf_verify_key,
                 &task_config.vdaf,
                 agg_param,
-                consumed,
             )
         })
         .collect()
@@ -89,9 +90,9 @@ impl DapReportInitializer for AggregationJobTest {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(is_leader, task_config, agg_param, reports)
     }
 }
 
@@ -793,9 +794,9 @@ impl DapReportInitializer for InMemoryAggregator {
         is_leader: bool,
         task_config: &DapTaskConfig,
         agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
+        reports: Vec<EarlyReportStateFetched>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(is_leader, task_config, agg_param, reports)
     }
 }
 
