@@ -672,7 +672,7 @@ impl Decode for AggregationJobResp {
 }
 
 /// A batch interval.
-#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct Interval {
     pub start: Time,
@@ -704,7 +704,7 @@ impl Decode for Interval {
 }
 
 /// A query issued by the Collector in a collect request.
-#[derive(Clone, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum Query {

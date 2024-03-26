@@ -84,7 +84,7 @@ async fn check_batch<S: Sync>(
     };
 
     // Check that the batch does not overlap with any previously collected batch.
-    if let Some(batch_sel) = query.clone().into_batch_sel() {
+    if let Some(batch_sel) = query.into_batch_sel() {
         if agg.is_batch_overlapping(task_id, &batch_sel).await? {
             return Err(DapAbort::batch_overlap(task_id, query).into());
         }
