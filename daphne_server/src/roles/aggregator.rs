@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, time::SystemTime};
+use std::{borrow::Cow, future::ready, time::SystemTime};
 
 use axum::async_trait;
 use daphne::{
@@ -21,7 +21,7 @@ use daphne_service_utils::{
     auth::DaphneAuth,
     durable_requests::bindings::{self, AggregateStoreMergeReq, AggregateStoreMergeResp},
 };
-use futures::{future::try_join_all, StreamExt};
+use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
@@ -290,29 +290,21 @@ impl DapAggregator<DaphneAuth> for crate::App {
         // checking the AggregateStore and seeing whether it requests for aggregate
         // shares that have already been marked collected.
         let durable = self.durable();
-        let mut requests = Vec::new();
-        for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
-            requests.push(
-                durable
-                    .request(
-                        bindings::AggregateStore::CheckCollected,
-                        (task_config.as_ref().version, &task_id.to_hex(), &bucket),
-                    )
-                    .send(),
-            );
-        }
-
-        let responses: Vec<bool> = try_join_all(requests)
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        for collected in responses {
-            if collected {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        Ok(
+            futures::stream::iter(task_config.batch_span_for_sel(batch_sel)?)
+                .map(|bucket| {
+                    durable
+                        .request(
+                            bindings::AggregateStore::CheckCollected,
+                            (task_config.as_ref().version, &task_id.to_hex(), &bucket),
+                        )
+                        .send()
+                })
+                .buffer_unordered(usize::MAX)
+                .try_any(ready)
+                .await
+                .map_err(|e| fatal_error!(err = ?e))?,
+        )
     }
 
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
