@@ -307,17 +307,13 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
         1
     };
     let mut attempt = 1;
-    let obj_name = match &parsed_req.id {
-        ObjectIdFrom::Name(name) => Some(name.as_str()),
-        ObjectIdFrom::Hex(_) => None,
-    };
     loop {
         match stub.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
                 if let Some(metrics) = &ctx.metrics {
                     metrics.durable_request_retry_count_inc(
                         (attempt - 1).try_into().unwrap(),
-                        obj_name,
+                        &parsed_req.binding,
                         uri,
                     );
                 }
@@ -336,7 +332,7 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
                     attempt += 1;
                 } else {
                     if let Some(metrics) = &ctx.metrics {
-                        metrics.durable_request_retry_count_inc(-1, obj_name, uri);
+                        metrics.durable_request_retry_count_inc(-1, &parsed_req.binding, uri);
                     }
                     return Err(error);
                 }
