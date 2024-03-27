@@ -59,7 +59,7 @@ impl Config {
 pub struct Metrics {
     config: &'static Config,
 
-    _registry: Registry,
+    registry: Registry,
 
     /// Number of retries done in durable object requests before returning (whether by success
     /// or failure).
@@ -96,7 +96,7 @@ impl Metrics {
 
         Some(Self {
             config,
-            _registry: registry,
+            registry,
             durable_request_retry_count,
             http_status_code_counter,
         })
@@ -126,7 +126,7 @@ impl Metrics {
     pub async fn push_metrics(self) {
         let encoded_metrics = {
             let encoder = TextEncoder::new();
-            let metrics = prometheus::gather();
+            let metrics = self.registry.gather();
             let mut encoded_metrics = Vec::new();
             if let Err(e) = encoder.encode(&metrics, &mut encoded_metrics) {
                 tracing::error!(error = ?e, "failed to encode metrics");
