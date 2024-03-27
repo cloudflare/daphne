@@ -1,11 +1,11 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::cmp::min;
+use std::{cmp::min, ops::ControlFlow};
 
 use crate::{
-    durable::{create_span_from_request, req_parse, DurableConnector},
-    initialize_tracing, int_err, now,
+    durable::{create_span_from_request, req_parse},
+    initialize_tracing, int_err,
 };
 use daphne::messages::TaskId;
 use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
@@ -13,9 +13,11 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace, Instrument};
 use worker::{
-    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env,
-    ListOptions, Request, Response, Result, State,
+    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Date, Env,
+    ListOptions, Method, Request, Response, Result, State, Stub,
 };
+
+use super::GcDurableObject;
 
 /// Durable Object (DO) for keeping track of all persistent DO storage.
 #[durable_object]
@@ -156,7 +158,8 @@ impl<T: for<'a> Deserialize<'a> + Serialize> DurableOrdered<T> {
     /// where <time> is the timestamp and <nonce> is a random nonce.
     pub(crate) fn new_roughly_ordered(item: T, prefix: &str) -> Self {
         let mut rng = thread_rng();
-        let time = now();
+        let time = Date::now().as_millis() / 1000;
+
         let nonce = rng.gen::<[u8; 16]>();
 
         // Pad the timestamp with 0s to the length of the longest 64-bit integer encoded in
@@ -235,4 +238,152 @@ pub(crate) struct DurableReference {
 
     /// If applicable, the DAP task ID to which the DO instance is associated.
     pub(crate) task_id: Option<TaskId>,
+}
+
+/// Register a DO to be deleted by the [`TestStateCleaner`](test_state_cleaner::TestStateCleaner).
+///
+/// If, however, the request is a [`TestStateCleaner::DeleteAll`] request we also handle that
+/// request. This consumes the request and returns `Continue::Break`, signaling that the durable
+/// object should itself return from fetch.
+///
+/// If the request *wasn't* a [`TestStateCleaner::DeleteAll`] request, the `Request` is
+/// returned through the `ControlFlow::Continue` variant.
+///
+/// # Note
+/// This function is doing two things at once, which makes it confusing, but both things revolve
+/// around keeping some state (`gc_delete_all_is_setup`) in sync and such it's less error prone for
+/// callers if it's all done in one place.
+pub(super) async fn setup_and_handle_test_cleaner_requests<T: GcDurableObject>(
+    state: &State,
+    env: &Env,
+    req: Request,
+) -> Result<ControlFlow<(), Request>> {
+    // We first check if this was a delete all request. If it was then it means that the setup in
+    // the else branch was already done before.
+    if let Some(bindings::TestStateCleaner::DeleteAll) =
+        bindings::TestStateCleaner::try_from_uri(&req.path())
+    {
+        state.storage().delete_all().await?;
+        state.storage().put("delete_all_is_setup", &false).await?;
+        Ok(ControlFlow::Break(()))
+    } else {
+        // if this wasn't a delete all request then we must ensure that we have registered
+        // ourselves with the `TestStateCleaner` to delete us.
+        let delete_all_is_setup =
+            super::state_set_if_not_exists(state, "delete_all_is_setup", &true)
+                .await?
+                .unwrap_or(false);
+        if !delete_all_is_setup {
+            DurableConnector::new(env)
+                .post(
+                    bindings::TestStateCleaner::BINDING,
+                    bindings::TestStateCleaner::Put.to_uri(),
+                    bindings::TestStateCleaner::name(()).unwrap_from_name(),
+                    &DurableReference {
+                        binding: T::DurableMethod::BINDING.to_string(),
+                        id_hex: state.id().to_string(),
+                        task_id: None,
+                    },
+                )
+                .await?;
+        }
+        Ok(ControlFlow::Continue(req))
+    }
+}
+
+/// Used to send HTTP requests to a durable object (DO) instance.
+pub(crate) struct DurableConnector<'srv> {
+    env: &'srv Env,
+}
+
+impl<'srv> DurableConnector<'srv> {
+    pub(crate) fn new(env: &'srv Env) -> Self {
+        DurableConnector { env }
+    }
+
+    /// Send a POST request with the given path to the DO instance with the given binding and name.
+    /// The body of the request is a JSON object. The response is expected to be a JSON object.
+    pub(crate) async fn post<I: Serialize, O: for<'b> Deserialize<'b>>(
+        &self,
+        durable_binding: &str,
+        durable_path: &'static str,
+        durable_name: String,
+        data: I,
+    ) -> Result<O> {
+        let stub = self
+            .env
+            .durable_object(durable_binding)?
+            .id_from_name(&durable_name)?
+            .get_stub()?;
+        self.durable_request(stub, durable_path, Method::Post, Some(data))
+            .await
+            .map_err(|error| {
+                worker::Error::RustError(format!(
+                    "DO {durable_binding}: post {durable_path}: {error}"
+                ))
+            })
+    }
+
+    /// Send a POST request with the given path to the DO instance with the given binding and hex
+    /// identifier. The body of the request is a JSON object. The response is expected to be a JSON
+    /// object.
+    pub(crate) async fn post_by_id_hex<I: Serialize, O: for<'b> Deserialize<'b>>(
+        &self,
+        durable_binding: &str,
+        durable_path: &'static str,
+        durable_id_hex: String,
+        data: I,
+    ) -> Result<O> {
+        let namespace = self.env.durable_object(durable_binding)?;
+        let stub = namespace.id_from_string(&durable_id_hex)?.get_stub()?;
+        self.durable_request(stub, durable_path, Method::Post, Some(data))
+            .await
+            .map_err(|error| {
+                worker::Error::RustError(format!(
+                    "DO {durable_binding}: post {durable_path}: {error}"
+                ))
+            })
+    }
+
+    async fn durable_request<I, O>(
+        &self,
+        durable_stub: Stub,
+        durable_path: &'static str,
+        method: Method,
+        data: Option<I>,
+    ) -> Result<O>
+    where
+        I: Serialize,
+        O: for<'a> Deserialize<'a>,
+    {
+        let req = match (&method, &data) {
+            (Method::Post, Some(data)) => {
+                let data = bincode::serialize(&data).map_err(|e| {
+                    worker::Error::RustError(format!("failed to serialize data: {e:?}"))
+                })?;
+                let buffer =
+                    worker::js_sys::Uint8Array::new_with_length(data.len().try_into().map_err(
+                        |_| worker::Error::RustError(format!("buffer is too long {}", data.len())),
+                    )?);
+                buffer.copy_from(&data);
+                Request::new_with_init(
+                    &format!("https://fake-host{durable_path}"),
+                    worker::RequestInit::new()
+                        .with_method(Method::Post)
+                        .with_body(Some(buffer.into())),
+                )?
+            }
+            (Method::Get, None) => Request::new_with_init(
+                &format!("https://fake-host{durable_path}"),
+                worker::RequestInit::new().with_method(Method::Get),
+            )?,
+            _ => {
+                return Err(worker::Error::RustError(format!(
+                    "durable_request: Unrecognized method: {method:?}",
+                )));
+            }
+        };
+
+        durable_stub.fetch_with_request(req).await?.json().await
+    }
 }

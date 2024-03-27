@@ -12,7 +12,7 @@ pub mod storage_proxy;
 mod tracing_utils;
 
 use tracing::error;
-use worker::{Date, Env, Error};
+use worker::{Env, Error};
 
 pub use crate::tracing_utils::initialize_tracing;
 pub use daphne::DapRequest;
@@ -20,10 +20,6 @@ pub use daphne::DapRequest;
 pub(crate) fn int_err<S: ToString>(s: S) -> Error {
     error!("internal error: {}", s.to_string());
     Error::RustError("internalError".to_string())
-}
-
-pub(crate) fn now() -> u64 {
-    Date::now().as_millis() / 1000
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]

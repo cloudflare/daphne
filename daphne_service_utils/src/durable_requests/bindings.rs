@@ -126,22 +126,6 @@ pub enum AggregateStoreMergeResp {
 }
 
 define_do_binding! {
-    const BINDING = "DAP_TEST_STATE_CLEANER";
-    enum TestStateCleaner {
-        Put = "/internal/do/test_state_cleaner/put",
-        DeleteAll = "/internal/do/delete_all",
-    }
-
-    fn name((): ()) -> ObjectIdFrom {
-        ObjectIdFrom::Name(Self::NAME_STR.into())
-    }
-}
-
-impl TestStateCleaner {
-    pub const NAME_STR: &'static str = "test_do_cleaner";
-}
-
-define_do_binding! {
     const BINDING = "DAP_HELPER_STATE_STORE";
     enum HelperState {
         PutIfNotExists = "/internal/do/helper_state/put_if_not_exists",
@@ -157,6 +141,24 @@ define_do_binding! {
         ))
     }
 
+}
+
+#[cfg(feature = "test-utils")]
+define_do_binding! {
+    const BINDING = "DAP_TEST_STATE_CLEANER";
+    enum TestStateCleaner {
+        Put = "/internal/do/test_state_cleaner/put",
+        DeleteAll = "/internal/do/delete_all",
+    }
+
+    fn name((): ()) -> ObjectIdFrom {
+        ObjectIdFrom::Name(Self::NAME_STR.into())
+    }
+}
+
+#[cfg(feature = "test-utils")]
+impl TestStateCleaner {
+    pub const NAME_STR: &'static str = "test_do_cleaner";
 }
 
 #[cfg(test)]
