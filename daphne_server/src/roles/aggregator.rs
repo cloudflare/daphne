@@ -1,7 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, future::ready, time::SystemTime};
+use std::{
+    borrow::Cow,
+    future::ready,
+    time::{Instant, SystemTime},
+};
 
 use axum::async_trait;
 use daphne::{
@@ -25,7 +29,7 @@ use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-use crate::storage_proxy_connection::kv;
+use crate::{router::DaphneService, storage_proxy_connection::kv};
 
 #[async_trait]
 impl DapAggregator<DaphneAuth> for crate::App {
@@ -40,6 +44,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
         futures::stream::iter(agg_share_span)
             .map(|(bucket, (agg_share, report_metadatas))| async {
+                let now = Instant::now();
+                let report_count = report_metadatas.len();
+                let agg_share_len = agg_share.data.as_ref().map(|d| d.len());
                 let result = durable
                     .request(
                         bindings::AggregateStore::Merge,
@@ -52,6 +59,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
                     .send::<AggregateStoreMergeResp>()
                     .await
                     .map_err(|e| fatal_error!(err = ?e));
+                let merge_duration = now.elapsed();
+                self.server_metrics()
+                    .observe_aggregate_store_merge_time(merge_duration);
                 let result = match result {
                     Ok(AggregateStoreMergeResp::Ok) => Ok(()),
                     Ok(AggregateStoreMergeResp::AlreadyCollected) => {
@@ -60,7 +70,16 @@ impl DapAggregator<DaphneAuth> for crate::App {
                     Ok(AggregateStoreMergeResp::ReplaysDetected(replays)) => {
                         Err(MergeAggShareError::ReplaysDetected(replays))
                     }
-                    Err(e) => Err(MergeAggShareError::Other(e)),
+                    Err(e) => {
+                        tracing::error!(
+                            error = ?e,
+                            ?merge_duration,
+                            report_count,
+                            agg_share_len,
+                            "merge request failed"
+                        );
+                        Err(MergeAggShareError::Other(e))
+                    }
                 };
                 (bucket, (result, report_metadatas))
             })

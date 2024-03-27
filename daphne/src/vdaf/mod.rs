@@ -332,6 +332,20 @@ pub enum VdafAggregateShare {
     FieldPrio2(prio::vdaf::AggregateShare<FieldPrio2>),
 }
 
+impl VdafAggregateShare {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Field64(fields) => fields.as_ref().len(),
+            Self::Field128(fields) => fields.as_ref().len(),
+            Self::FieldPrio2(fields) => fields.as_ref().len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 impl deepsize::DeepSizeOf for VdafAggregateShare {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
