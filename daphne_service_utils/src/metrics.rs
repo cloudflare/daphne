@@ -3,6 +3,8 @@
 
 //! Daphne-Worker metrics.
 
+use std::time::Duration;
+
 use daphne::metrics::DaphneMetrics;
 
 pub trait DaphneServiceMetrics: DaphneMetrics {
@@ -10,6 +12,7 @@ pub trait DaphneServiceMetrics: DaphneMetrics {
     fn count_http_status_code(&self, status_code: u16);
     fn daphne(&self) -> &dyn DaphneMetrics;
     fn auth_method_inc(&self, method: AuthMethod);
+    fn observe_aggregate_store_merge_time(&self, d: Duration);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,13 +23,18 @@ pub enum AuthMethod {
 
 #[cfg(any(feature = "prometheus", feature = "test-utils", test))]
 mod prometheus {
+    use std::time::Duration;
+
     use super::DaphneServiceMetrics;
     use daphne::{
         fatal_error,
         metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
         DapError,
     };
-    use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
+    use prometheus::{
+        register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
+        IntCounterVec, Registry,
+    };
 
     impl DaphneMetrics for DaphnePromServiceMetrics {
         fn report_inc_by(&self, status: &str, val: u64) {
@@ -76,6 +84,11 @@ mod prometheus {
         fn daphne(&self) -> &dyn DaphneMetrics {
             self
         }
+
+        fn observe_aggregate_store_merge_time(&self, d: Duration) {
+            self.aggregate_store_merge_time_histogram
+                .observe(d.as_millis() as f64);
+        }
     }
 
     #[derive(Clone)]
@@ -91,6 +104,9 @@ mod prometheus {
 
         /// Counts the used authentication methods
         auth_method: IntCounterVec,
+
+        /// Histogram of the times merge requests to aggregate store take.
+        aggregate_store_merge_time_histogram: Histogram,
     }
 
     impl DaphnePromServiceMetrics {
@@ -119,6 +135,14 @@ mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to register dap_abort"))?;
 
+            let aggregate_store_merge_time_histogram = register_histogram_with_registry!(
+                "aggregate_store_merge_time_histogram",
+                "Time it takes to resolve an aggregate store merge request",
+                vec![1., 10., 100., 1_000., 10_000., 20_000., 30_000., 40_000.],
+                registry
+            )
+            .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_batch_size"))?;
+
             let daphne = DaphnePromMetrics::register(registry)?;
 
             Ok(Self {
@@ -126,6 +150,7 @@ mod prometheus {
                 http_status_code_counter,
                 dap_abort_counter,
                 auth_method,
+                aggregate_store_merge_time_histogram,
             })
         }
     }
