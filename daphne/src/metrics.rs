@@ -3,13 +3,41 @@
 
 //! Daphne metrics.
 
+use core::fmt;
+use std::borrow::Cow;
+
+use crate::messages::TransitionFailure;
+
 pub trait DaphneMetrics: Send + Sync {
     fn inbound_req_inc(&self, request_type: DaphneRequestType);
-    fn report_inc_by(&self, status: &str, val: u64);
+    fn report_inc_by(&self, status: ReportStatus, val: u64);
     fn agg_job_observe_batch_size(&self, val: usize);
     fn agg_job_started_inc(&self);
     fn agg_job_completed_inc(&self);
     fn agg_job_put_span_retry_inc(&self);
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ReportStatus {
+    Rejected(TransitionFailure),
+    Aggregated,
+    Collected,
+}
+
+impl fmt::Display for ReportStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&Self::to_string(*self))
+    }
+}
+
+impl ReportStatus {
+    pub fn to_string(self) -> Cow<'static, str> {
+        match self {
+            Self::Aggregated => "aggregated".into(),
+            Self::Collected => "collected".into(),
+            Self::Rejected(failure) => format!("rejected_{failure}").into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -26,7 +54,7 @@ pub enum DaphneRequestType {
 
 #[cfg(any(feature = "prometheus", feature = "test-utils", test))]
 pub mod prometheus {
-    use super::{DaphneMetrics, DaphneRequestType};
+    use super::{DaphneMetrics, DaphneRequestType, ReportStatus};
     use crate::{fatal_error, DapError};
     use ::prometheus::{
         exponential_buckets, register_histogram_with_registry,
@@ -128,8 +156,10 @@ pub mod prometheus {
                 .inc();
         }
 
-        fn report_inc_by(&self, status: &str, val: u64) {
-            self.report_counter.with_label_values(&[status]).inc_by(val);
+        fn report_inc_by(&self, status: ReportStatus, val: u64) {
+            self.report_counter
+                .with_label_values(&[&status.to_string()])
+                .inc_by(val);
         }
 
         fn agg_job_observe_batch_size(&self, val: usize) {

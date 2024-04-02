@@ -17,7 +17,7 @@ use crate::{
         AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportId, TaskId,
         TransitionFailure, TransitionVar,
     },
-    metrics::{DaphneMetrics, DaphneRequestType},
+    metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::ReportProcessedStatus,
     roles::aggregator::MergeAggShareError,
     DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapAggregationParam, DapError,
@@ -259,7 +259,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
         encrypted_agg_share,
     };
 
-    metrics.report_inc_by("collected", agg_share_req.report_count);
+    metrics.report_inc_by(ReportStatus::Collected, agg_share_req.report_count);
     metrics.inbound_req_inc(DaphneRequestType::Collect);
     Ok(DapResponse {
         version: req.version,
@@ -380,11 +380,12 @@ async fn finish_agg_job_and_aggregate<S: Sync>(
                 .count()
                 .try_into()
                 .expect("usize to fit in u64");
-            metrics.report_inc_by("aggregated", out_shares_count);
+            metrics.report_inc_by(ReportStatus::Aggregated, out_shares_count);
 
             for transition in &agg_job_resp.transitions {
                 if let TransitionVar::Failed(failure) = &transition.var {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    tracing::warn!(%failure, "rejecting report");
+                    metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
                 }
             }
 

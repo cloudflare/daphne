@@ -23,13 +23,13 @@ mod prometheus {
     use super::DaphneServiceMetrics;
     use daphne::{
         fatal_error,
-        metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
+        metrics::{prometheus::DaphnePromMetrics, DaphneMetrics, ReportStatus},
         DapError,
     };
     use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
     impl DaphneMetrics for DaphnePromServiceMetrics {
-        fn report_inc_by(&self, status: &str, val: u64) {
+        fn report_inc_by(&self, status: ReportStatus, val: u64) {
             self.daphne.report_inc_by(status, val);
         }
 
