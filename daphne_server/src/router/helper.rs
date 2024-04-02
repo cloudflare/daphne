@@ -3,7 +3,11 @@
 
 use std::sync::Arc;
 
-use axum::{body::HttpBody, extract::State, routing::post};
+use axum::{
+    body::HttpBody,
+    extract::State,
+    routing::{post, put},
+};
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
@@ -24,11 +28,9 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route("/:version/aggregate", post(agg_job))
-        .route("/:version/aggregate_share", post(agg_share))
         .route(
             "/:version/tasks/:task_id/aggregation_jobs/:agg_job_id",
-            post(agg_job).put(agg_job),
+            put(agg_job),
         )
         .route("/:version/tasks/:task_id/aggregate_shares", post(agg_share))
 }

@@ -8,7 +8,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{get, put},
 };
 use daphne::{
     constants::DapMediaType,
@@ -29,8 +29,6 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route("/:version/tasks/:task_id/reports", post(upload))
-        .route("/:version/collect", post(get_collect_uri))
         .route(
             "/:version/collect/task/:task_id/req/:collect_job_id",
             get(collect),
@@ -38,7 +36,7 @@ where
         .route("/:version/tasks/:task_id/reports", put(upload))
         .route(
             "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
-            put(get_collect_uri).post(collect),
+            put(get_collect_uri),
         )
 }
 
