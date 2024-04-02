@@ -25,7 +25,7 @@ use crate::{
         BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
         PartialBatchSelector, Query, Report, TaskId,
     },
-    metrics::DaphneRequestType,
+    metrics::{DaphneRequestType, ReportStatus},
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
     DapResource, DapResponse, DapTaskConfig,
 };
@@ -418,7 +418,7 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
         );
     }
 
-    metrics.report_inc_by("aggregated", out_shares_count);
+    metrics.report_inc_by(ReportStatus::Aggregated, out_shares_count);
     Ok(out_shares_count)
 }
 
@@ -521,7 +521,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
         .mark_collected(task_id, &agg_share_req.batch_sel)
         .await?;
 
-    metrics.report_inc_by("collected", agg_share_req.report_count);
+    metrics.report_inc_by(ReportStatus::Collected, agg_share_req.report_count);
     Ok(agg_share_req.report_count)
 }
 

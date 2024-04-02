@@ -13,7 +13,7 @@ use crate::{
         PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
         Transition, TransitionFailure, TransitionVar,
     },
-    metrics::DaphneMetrics,
+    metrics::{DaphneMetrics, ReportStatus},
     roles::DapReportInitializer,
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
@@ -475,7 +475,8 @@ impl DapTaskConfig {
 
                 EarlyReportStateInitialized::Rejected { failure, .. } => {
                     // Skip report that can't be processed any further.
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    tracing::warn!(%failure, "rejecting report");
+                    metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                     continue;
                 }
             }
@@ -699,7 +700,8 @@ impl DapTaskConfig {
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    tracing::warn!(%failure, "rejecting report");
+                    metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
                     continue;
                 }
 
@@ -736,7 +738,8 @@ impl DapTaskConfig {
 
                 Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
                     let failure = TransitionFailure::VdafPrepError;
-                    metrics.report_inc_by(&format!("rejected_{failure}"), 1);
+                    tracing::warn!(%failure, "rejecting report");
+                    metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                 }
 
                 Err(VdafError::Dap(e)) => return Err(e),
