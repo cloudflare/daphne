@@ -355,7 +355,7 @@ async fn leader_upload_taskprov() {
             version,
         )
         .unwrap();
-    t.leader_post_expect_ok(
+    t.leader_put_expect_ok(
         client,
         &format!("tasks/{}/reports", task_id.to_base64url()),
         DapMediaType::Report,
@@ -377,7 +377,7 @@ async fn leader_upload_taskprov() {
             version,
         )
         .unwrap();
-    t.leader_post_expect_abort(
+    t.leader_put_expect_abort(
         client,
         None,
         // Generate a random ID.
@@ -386,7 +386,6 @@ async fn leader_upload_taskprov() {
             TaskId(thread_rng().gen()).to_base64url()
         ),
         DapMediaType::Report,
-        Some(&taskprov_advertisement),
         report.get_encoded_with_param(&version).unwrap(),
         400,
         "unrecognizedTask",

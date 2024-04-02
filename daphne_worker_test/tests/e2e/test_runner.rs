@@ -392,7 +392,7 @@ impl TestRunner {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub async fn leader_post_expect_abort(
         &self,
         client: &reqwest::Client,
