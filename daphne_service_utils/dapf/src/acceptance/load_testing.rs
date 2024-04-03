@@ -318,10 +318,7 @@ pub async fn execute_multiple_combinations(helper_url: Url) {
     let mut t = Test::from_env(helper_url, VdafConfig::Prio2 { dimension: 44 }, None)
         .expect("env to be present");
 
-    let config = t
-        .get_hpke_config(&t.helper_url, None)
-        .await
-        .expect("test failed");
+    let config = t.get_hpke_config(&t.helper_url).await.expect("test failed");
     let mut test_config = TestOptions {
         bearer_token: t.leader_bearer_token.clone(),
         helper_hpke_config: Some(config),
