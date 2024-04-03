@@ -353,6 +353,7 @@ impl TestRunner {
         get_raw_hpke_config(client, self.task_id.as_ref(), &self.helper_url, "helper").await
     }
 
+    #[allow(dead_code)]
     pub async fn leader_post_expect_ok(
         &self,
         client: &reqwest::Client,
@@ -386,7 +387,9 @@ impl TestRunner {
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::OK,
-            "unexpected response status: {:?}",
+            "unexpected response status. Expected {} got {}: Body is {:?}",
+            resp.status(),
+            reqwest::StatusCode::OK,
             resp.text().await?,
         );
         Ok(())
@@ -437,7 +440,9 @@ impl TestRunner {
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
-            "unexpected response status: {:?}",
+            "unexpected response status. Expected {} got {}: Body is {:?}",
+            expected_status,
+            resp.status(),
             resp.text().await?,
         );
 
@@ -492,7 +497,9 @@ impl TestRunner {
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::OK,
-            "unexpected response status: {:?}",
+            "unexpected response status. Expected {} got {}: Body is {:?}",
+            resp.status(),
+            reqwest::StatusCode::OK,
             resp.text().await?,
         );
         Ok(())
@@ -536,7 +543,9 @@ impl TestRunner {
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
-            "unexpected response status: {:?}",
+            "unexpected response status. Expected {} got {}: Body is {:?}",
+            expected_status,
+            resp.status(),
             resp.text().await?,
         );
 
@@ -628,7 +637,9 @@ impl TestRunner {
             .context("request failed")?;
         anyhow::ensure!(
             resp.status() == 200,
-            "unexpected response status: {:?}",
+            "unexpected response status. Expected {} got {}: Body is {:?}",
+            resp.status(),
+            reqwest::StatusCode::OK,
             resp.text().await?,
         );
         Ok(resp.json().await?)
@@ -741,7 +752,7 @@ impl TestRunner {
         client: &reqwest::Client,
         url: &Url,
     ) -> anyhow::Result<reqwest::Response> {
-        let builder = client.post(url.as_str());
+        let builder = client.put(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
