@@ -806,6 +806,7 @@ dependencies = [
 name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "cap",
  "cfg-if",

@@ -1,6 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use anyhow::Context;
 use assert_matches::assert_matches;
 use daphne::{
     constants::DapMediaType,
@@ -206,7 +207,7 @@ impl TestRunner {
         // Configure the endpoints.
         //
         // First, delete the data from the previous test.
-        t.internal_delete_all(&t.batch_interval()).await;
+        t.internal_delete_all(&t.batch_interval()).await.unwrap();
 
         // Configure the Leader with the task.
         let leader_add_task_cmd = json!({
@@ -228,7 +229,8 @@ impl TestRunner {
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestCommandResult = t
             .leader_post_internal(&add_task_path, &leader_add_task_cmd)
-            .await;
+            .await
+            .unwrap();
         assert_eq!(
             res.status, "success",
             "response status: {}, error: {:?}",
@@ -253,7 +255,8 @@ impl TestRunner {
         });
         let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)
-            .await;
+            .await
+            .unwrap();
         assert_eq!(
             res.status, "success",
             "response status: {}, error: {:?}",
@@ -269,7 +272,8 @@ impl TestRunner {
                 &format!("{version}/internal/test/add_hpke_config"),
                 &gen_config(),
             )
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             res.status, "success",
@@ -282,7 +286,8 @@ impl TestRunner {
                 &format!("{version}/internal/test/add_hpke_config"),
                 &gen_config(),
             )
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             res.status, "success",
@@ -317,30 +322,34 @@ impl TestRunner {
         &self,
         _version: DapVersion,
         client: &reqwest::Client,
-    ) -> [HpkeConfig; 2] {
-        let raw_leader_hpke_config = self.leader_get_raw_hpke_config(client).await;
-        let raw_helper_hpke_config = self.helper_get_raw_hpke_config(client).await;
+    ) -> anyhow::Result<[HpkeConfig; 2]> {
+        let raw_leader_hpke_config = self.leader_get_raw_hpke_config(client).await?;
+        let raw_helper_hpke_config = self.helper_get_raw_hpke_config(client).await?;
 
-        let mut leader_hpke_config_list =
-            HpkeConfigList::get_decoded(&raw_leader_hpke_config).unwrap();
-        let mut helper_hpke_config_list =
-            HpkeConfigList::get_decoded(&raw_helper_hpke_config).unwrap();
+        let mut leader_hpke_config_list = HpkeConfigList::get_decoded(&raw_leader_hpke_config)?;
+        let mut helper_hpke_config_list = HpkeConfigList::get_decoded(&raw_helper_hpke_config)?;
         if leader_hpke_config_list.hpke_configs.len() != 1
             || helper_hpke_config_list.hpke_configs.len() != 1
         {
             panic!("only a length 1 HpkeConfList is currently supported by the test suite")
         }
-        [
+        Ok([
             leader_hpke_config_list.hpke_configs.pop().unwrap(),
             helper_hpke_config_list.hpke_configs.pop().unwrap(),
-        ]
+        ])
     }
 
-    pub async fn leader_get_raw_hpke_config(&self, client: &reqwest::Client) -> Vec<u8> {
+    pub async fn leader_get_raw_hpke_config(
+        &self,
+        client: &reqwest::Client,
+    ) -> anyhow::Result<Vec<u8>> {
         get_raw_hpke_config(client, self.task_id.as_ref(), &self.leader_url, "leader").await
     }
 
-    pub async fn helper_get_raw_hpke_config(&self, client: &reqwest::Client) -> Vec<u8> {
+    pub async fn helper_get_raw_hpke_config(
+        &self,
+        client: &reqwest::Client,
+    ) -> anyhow::Result<Vec<u8>> {
         get_raw_hpke_config(client, self.task_id.as_ref(), &self.helper_url, "helper").await
     }
 
@@ -351,21 +360,20 @@ impl TestRunner {
         media_type: DapMediaType,
         taskprov: Option<&str>,
         data: Vec<u8>,
-    ) {
-        let url = self.leader_url.join(path).unwrap();
+    ) -> anyhow::Result<()> {
+        let url = self.leader_url.join(path)?;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             media_type
                 .as_str_for_version(self.version)
-                .unwrap()
-                .parse()
-                .unwrap(),
+                .context("no string for version")?
+                .parse()?,
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
             );
         }
         let resp = client
@@ -374,14 +382,14 @@ impl TestRunner {
             .headers(headers)
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
 
-        assert_eq!(
-            reqwest::StatusCode::from_u16(200).unwrap(),
-            resp.status(),
+        anyhow::ensure!(
+            resp.status() == reqwest::StatusCode::OK,
             "unexpected response status: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -395,28 +403,27 @@ impl TestRunner {
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
-    ) {
-        let url = self.leader_url.join(path).unwrap();
+    ) -> anyhow::Result<()> {
+        let url = self.leader_url.join(path)?;
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             media_type
                 .as_str_for_version(self.version)
-                .unwrap()
-                .parse()
-                .unwrap(),
+                .context("no string for version")?
+                .parse()?,
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-                reqwest::header::HeaderValue::from_str(token).unwrap(),
+                reqwest::header::HeaderValue::from_str(token)?,
             );
         }
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
             );
         }
 
@@ -426,26 +433,29 @@ impl TestRunner {
             .headers(headers)
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
 
-        assert_eq!(
-            reqwest::StatusCode::from_u16(expected_status).unwrap(),
-            resp.status(),
+        anyhow::ensure!(
+            resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
             "unexpected response status: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
 
-        assert_eq!(
-            resp.headers().get("Content-Type").unwrap(),
-            "application/problem+json"
+        anyhow::ensure!(
+            resp.headers()
+                .get("Content-Type")
+                .context("no Content-Type header")?
+                == "application/problem+json"
         );
 
-        let problem_details: serde_json::Value = resp.json().await.unwrap();
-        let got = problem_details.as_object().unwrap().get("type").unwrap();
-        assert_eq!(
-            got,
-            &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}")
-        );
+        let problem_details: serde_json::Value = resp.json().await?;
+        let got = problem_details
+            .as_object()
+            .context("problem details is not an object")?
+            .get("type")
+            .context("problem details doesn't have a `type` field")?;
+        anyhow::ensure!(got == &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}"));
+        Ok(())
     }
 
     pub async fn leader_put_expect_ok(
@@ -455,21 +465,20 @@ impl TestRunner {
         media_type: DapMediaType,
         taskprov: Option<&str>,
         data: Vec<u8>,
-    ) {
-        let url = self.leader_url.join(path).unwrap();
+    ) -> anyhow::Result<()> {
+        let url = self.leader_url.join(path)?;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             media_type
                 .as_str_for_version(self.version)
-                .unwrap()
-                .parse()
-                .unwrap(),
+                .context("no string for version")?
+                .parse()?,
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
             );
         }
 
@@ -479,14 +488,14 @@ impl TestRunner {
             .headers(headers)
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
 
-        assert_eq!(
-            reqwest::StatusCode::from_u16(200).unwrap(),
-            resp.status(),
+        anyhow::ensure!(
+            resp.status() == reqwest::StatusCode::OK,
             "unexpected response status: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -499,22 +508,21 @@ impl TestRunner {
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
-    ) {
-        let url = self.leader_url.join(path).unwrap();
+    ) -> anyhow::Result<()> {
+        let url = self.leader_url.join(path)?;
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             media_type
                 .as_str_for_version(self.version)
-                .unwrap()
-                .parse()
-                .unwrap(),
+                .context("no string for version")?
+                .parse()?,
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-                reqwest::header::HeaderValue::from_str(token).unwrap(),
+                reqwest::header::HeaderValue::from_str(token)?,
             );
         }
 
@@ -524,26 +532,29 @@ impl TestRunner {
             .headers(headers)
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
 
-        assert_eq!(
-            reqwest::StatusCode::from_u16(expected_status).unwrap(),
-            resp.status(),
+        anyhow::ensure!(
+            resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
             "unexpected response status: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
 
-        assert_eq!(
-            resp.headers().get("Content-Type").unwrap(),
-            "application/problem+json"
+        anyhow::ensure!(
+            resp.headers()
+                .get("Content-Type")
+                .context("no Content-Type header")?
+                == "application/problem+json"
         );
 
-        let problem_details: serde_json::Value = resp.json().await.unwrap();
-        let got = problem_details.as_object().unwrap().get("type").unwrap();
-        assert_eq!(
-            got,
-            &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}")
-        );
+        let problem_details: serde_json::Value = resp.json().await?;
+        let got = problem_details
+            .as_object()
+            .context("problem details is not an object")?
+            .get("type")
+            .context("problem details doesn't have a `type` field")?;
+        anyhow::ensure!(got == &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}"));
+        Ok(())
     }
 
     pub async fn leader_post_collect_using_token(
@@ -553,27 +564,26 @@ impl TestRunner {
         taskprov: Option<&str>,
         task_id: Option<&TaskId>,
         data: Vec<u8>,
-    ) -> Url {
+    ) -> anyhow::Result<Url> {
         let path = Self::collect_path_for_task(task_id.unwrap_or(&self.task_id));
-        let url = self.leader_url.join(&path).unwrap();
+        let url = self.leader_url.join(&path)?;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_str(
                 DapMediaType::CollectReq
                     .as_str_for_version(self.version)
-                    .unwrap(),
-            )
-            .unwrap(),
+                    .context("no string for version")?,
+            )?,
         );
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-            reqwest::header::HeaderValue::from_str(token).unwrap(),
+            reqwest::header::HeaderValue::from_str(token)?,
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement).unwrap(),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
             );
         }
 
@@ -583,24 +593,30 @@ impl TestRunner {
             .headers(headers)
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
 
         let expected_status = 201;
-        assert_eq!(
-            resp.status(),
-            expected_status,
+        anyhow::ensure!(
+            resp.status() == expected_status,
             "request failed: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
-        url
+        Ok(url)
     }
 
-    pub async fn leader_post_collect(&self, client: &reqwest::Client, data: Vec<u8>) -> Url {
+    pub async fn leader_post_collect(
+        &self,
+        client: &reqwest::Client,
+        data: Vec<u8>,
+    ) -> anyhow::Result<Url> {
         self.leader_post_collect_using_token(client, &self.collector_bearer_token, None, None, data)
             .await
     }
 
-    pub async fn internal_process(&self, client: &reqwest::Client) -> DapLeaderProcessTelemetry {
+    pub async fn internal_process(
+        &self,
+        client: &reqwest::Client,
+    ) -> anyhow::Result<DapLeaderProcessTelemetry> {
         // Replace path "/v09" with "/internal/process".
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
@@ -609,14 +625,13 @@ impl TestRunner {
             .post(url.as_str())
             .send()
             .await
-            .expect("request failed");
-        assert_eq!(
-            200,
-            resp.status(),
+            .context("request failed")?;
+        anyhow::ensure!(
+            resp.status() == 200,
             "unexpected response status: {:?}",
-            resp.text().await.unwrap()
+            resp.text().await?,
         );
-        resp.json().await.unwrap()
+        Ok(resp.json().await?)
     }
 
     async fn post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
@@ -624,7 +639,7 @@ impl TestRunner {
         is_leader: bool,
         path: &str,
         data: &I,
-    ) -> O {
+    ) -> anyhow::Result<O> {
         let client = self.http_client();
         let mut url = if is_leader {
             self.leader_url.clone()
@@ -637,13 +652,12 @@ impl TestRunner {
             .json(data)
             .send()
             .await
-            .expect("request failed");
-        assert_eq!(
-            resp.status(),
-            200,
+            .context("request failed")?;
+        anyhow::ensure!(
+            resp.status() == 200,
             "request to {url} failed: response: {resp:?}"
         );
-        let t = resp.text().await.expect("failed to extract text");
+        let t = resp.text().await.context("failed to extract text")?;
         // This is needed so we can have tests that call this expecting nothing and have it work
         // for empty bodies.
         if t.is_empty() && any::TypeId::of::<O>() == any::TypeId::of::<()>() {
@@ -652,15 +666,12 @@ impl TestRunner {
                 std::mem::transmute_copy(&())
             }
         } else {
-            serde_json::from_str(&t)
-                .map_err(|e| {
-                    println!(
-                        "failed to Deserialize {t:?} into {}",
-                        std::any::type_name::<O>()
-                    );
-                    e
-                })
-                .expect("failed to parse result")
+            serde_json::from_str(&t).with_context(|| {
+                format!(
+                    "failed to Deserialize {t:?} into {}",
+                    std::any::type_name::<O>()
+                )
+            })
         }
     }
 
@@ -668,7 +679,7 @@ impl TestRunner {
         &self,
         path: &str,
         data: &I,
-    ) -> O {
+    ) -> anyhow::Result<O> {
         self.post_internal(true /* is_leader */, path, data).await
     }
 
@@ -676,17 +687,18 @@ impl TestRunner {
         &self,
         path: &str,
         data: &I,
-    ) -> O {
+    ) -> anyhow::Result<O> {
         self.post_internal(false /* is_leader */, path, data).await
     }
 
-    pub async fn internal_delete_all(&self, batch_interval: &Interval) {
+    pub async fn internal_delete_all(&self, batch_interval: &Interval) -> anyhow::Result<()> {
         let client = self.http_client();
-        post_internal_delete_all(client, &self.leader_url, batch_interval).await;
-        post_internal_delete_all(client, &self.helper_url, batch_interval).await;
+        post_internal_delete_all(client, &self.leader_url, batch_interval).await?;
+        post_internal_delete_all(client, &self.helper_url, batch_interval).await?;
+        Ok(())
     }
 
-    pub async fn internal_current_batch(&self, task_id: &TaskId) -> BatchId {
+    pub async fn internal_current_batch(&self, task_id: &TaskId) -> anyhow::Result<BatchId> {
         let client = self.http_client();
         let mut url = self.leader_url.clone();
         url.set_path(&format!(
@@ -697,13 +709,13 @@ impl TestRunner {
             .get(url.clone())
             .send()
             .await
-            .expect("request failed");
+            .context("request failed")?;
         if resp.status() == 200 {
-            let batch_id_base64url = resp.text().await.unwrap();
+            let batch_id_base64url = resp.text().await?;
             BatchId::try_from_base64url(batch_id_base64url)
-                .expect("Failed to parse URL-safe base64 batch ID")
+                .context("Failed to parse URL-safe base64 batch ID")
         } else {
-            panic!("request to {url} failed: response: {resp:?}");
+            anyhow::bail!("request to {url} failed: response: {resp:?}");
         }
     }
 
@@ -728,7 +740,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         url: &Url,
-    ) -> reqwest::Response {
+    ) -> anyhow::Result<reqwest::Response> {
         let builder = client.post(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -736,11 +748,10 @@ impl TestRunner {
             reqwest::header::HeaderValue::from_str(
                 DapMediaType::CollectReq
                     .as_str_for_version(self.version)
-                    .unwrap(),
-            )
-            .unwrap(),
+                    .context("no string for version")?,
+            )?,
         );
-        builder.headers(headers).send().await.unwrap()
+        Ok(builder.headers(headers).send().await?)
     }
 }
 
@@ -749,11 +760,11 @@ async fn get_raw_hpke_config(
     task_id: &[u8],
     base_url: &Url,
     svc: &str,
-) -> Vec<u8> {
+) -> anyhow::Result<Vec<u8>> {
     let time_to_wait = std::time::Duration::from_secs(15);
     let max_time_to_wait = std::time::Duration::from_secs(60 * 3);
     let mut elapsed_time = std::time::Duration::default();
-    let url = base_url.join("hpke_config").unwrap();
+    let url = base_url.join("hpke_config")?;
     let query = [("task_id", encode_base64url(task_id))];
     while elapsed_time < max_time_to_wait {
         let req = client.get(url.as_str()).query(&query);
@@ -761,13 +772,13 @@ async fn get_raw_hpke_config(
             Ok(resp) => {
                 if resp.status() == 200 {
                     println!("{svc} is up.");
-                    return resp.bytes().await.unwrap().to_vec();
+                    return Ok(resp.bytes().await?.to_vec());
                 }
-                panic!(
+                anyhow::bail!(
                     "request to {} failed: status = {}, body = {}",
                     url,
                     resp.status(),
-                    resp.text().await.unwrap()
+                    resp.text().await?,
                 );
             }
             Err(e) => {
@@ -780,26 +791,26 @@ async fn get_raw_hpke_config(
         };
     }
     println!("error: timeout after {elapsed_time:?} waiting for {svc}");
-    panic!("{svc} at {url} is down.")
+    anyhow::bail!("{svc} at {url} is down.")
 }
 
 async fn post_internal_delete_all(
     client: &reqwest::Client,
     base_url: &Url,
     batch_interval: &Interval,
-) {
+) -> anyhow::Result<()> {
     // Replace path "/v09" with "/internal/delete_all".
     let mut url = base_url.clone();
     url.set_path("internal/delete_all");
 
     let req = client
         .post(url.as_str())
-        .body(serde_json::to_string(batch_interval).unwrap());
-    let resp = req.send().await.expect("request failed");
-    assert_eq!(
-        200,
-        resp.status(),
+        .body(serde_json::to_string(batch_interval)?);
+    let resp = req.send().await.context("request failed")?;
+    anyhow::ensure!(
+        resp.status() == 200,
         "request to {url} failed: response {:?}",
-        resp.text().await.unwrap()
+        resp.text().await?,
     );
+    Ok(())
 }
