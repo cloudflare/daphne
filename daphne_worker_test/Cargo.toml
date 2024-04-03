@@ -38,6 +38,7 @@ worker.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+anyhow.workspace = true
 daphne_service_utils = { path = "../daphne_service_utils" }
 futures.workspace = true
 hex.workspace = true
