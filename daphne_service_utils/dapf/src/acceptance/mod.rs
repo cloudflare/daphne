@@ -48,7 +48,7 @@ use reqwest::Client;
 use std::{
     convert::TryFrom,
     env,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::Barrier;
@@ -225,14 +225,10 @@ impl Test {
         gen_measurement_for(&self.vdaf_config)
     }
 
-    pub async fn get_hpke_config(
-        &self,
-        aggregator: &Url,
-        hpke_signing_certificate_path: Option<&Path>,
-    ) -> anyhow::Result<HpkeConfig> {
+    pub async fn get_hpke_config(&self, aggregator: &Url) -> anyhow::Result<HpkeConfig> {
         Ok(self
             .http_client
-            .get_hpke_config(aggregator, hpke_signing_certificate_path)
+            .get_hpke_config(aggregator, self.hpke_signing_certificate_path.as_deref())
             .await?
             .hpke_configs
             .swap_remove(0))
