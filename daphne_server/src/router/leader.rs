@@ -8,7 +8,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::{post, put},
 };
 use daphne::{
     constants::DapMediaType,
@@ -31,7 +31,7 @@ where
     router
         .route(
             "/:version/collect/task/:task_id/req/:collect_job_id",
-            get(collect),
+            post(collect),
         )
         .route("/:version/tasks/:task_id/reports", put(upload))
         .route(
@@ -75,7 +75,9 @@ where
     A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
 {
     match (leader::handle_coll_job_req(&*app, &req).await, req.version) {
-        (Ok(_), DapVersion::Draft09 | DapVersion::Latest) => StatusCode::CREATED.into_response(),
+        (Ok(collect_uri), DapVersion::Draft09 | DapVersion::Latest) => {
+            (StatusCode::CREATED, axum::Json(collect_uri)).into_response()
+        }
         (Err(e), _) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }
