@@ -7,12 +7,14 @@ use serde::{Deserialize, Serialize};
 
 pub mod auth;
 pub mod config;
+#[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
 pub mod metrics;
 pub mod test_route_types;
 
 // the generated code expects this module to be defined at the root of the library.
+#[cfg(feature = "durable_requests")]
 mod durable_request_capnp {
     #![allow(dead_code)]
     #![allow(clippy::pedantic)]

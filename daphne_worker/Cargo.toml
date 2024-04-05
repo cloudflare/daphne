@@ -23,7 +23,6 @@ crate-type = ["cdylib", "rlib"]
 bincode.workspace = true
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
 daphne = { path = "../daphne", features = ["prometheus"] }
-daphne_service_utils = { path = "../daphne_service_utils", features = ["prometheus"] }
 futures = { workspace = true, optional = true }
 hex.workspace = true
 prio.workspace = true
@@ -39,6 +38,10 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "json"]}
 tracing.workspace = true
 url.workspace = true
 worker.workspace = true
+
+[dependencies.daphne_service_utils]
+path = "../daphne_service_utils"
+features = ["prometheus", "durable_requests"]
 
 [dev-dependencies]
 daphne = { path = "../daphne", features = ["test-utils"] }
