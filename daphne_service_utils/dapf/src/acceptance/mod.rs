@@ -112,20 +112,19 @@ impl Test {
     pub fn new(
         http_client: reqwest::Client,
         helper_url: Url,
-        leader_bearer_token: Option<String>,
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
-        hpke_signing_certificate_path: Option<PathBuf>,
     ) -> Result<Self> {
-        let leader_bearer_token = leader_bearer_token.map(BearerToken::from);
-
-        let vdaf_verify_init =
-            <[u8; 32]>::try_from(hex::decode(vdaf_verify_init)?).map_err(|v| {
-                anyhow!(
-                    "incorrect length of vdaf verify init: got {}; want 32",
-                    v.len()
-                )
-            })?;
+        let vdaf_verify_init = <[u8; 32]>::try_from(
+            hex::decode(vdaf_verify_init)
+                .context("vdaf_verify_init is not encoded in valid hex")?,
+        )
+        .map_err(|v| {
+            anyhow!(
+                "incorrect length of vdaf verify init: got {}; want 32",
+                v.len()
+            )
+        })?;
 
         // Register Prometheus metrics.
         let prometheus_registry = prometheus::Registry::new();
@@ -134,13 +133,13 @@ impl Test {
 
         Ok(Self {
             helper_url,
-            bearer_token: leader_bearer_token,
+            bearer_token: None,
             vdaf_verify_init,
             http_client,
             prometheus_registry,
             daphne_metrics,
             vdaf_config,
-            hpke_signing_certificate_path,
+            hpke_signing_certificate_path: None,
         })
     }
 
@@ -194,14 +193,28 @@ impl Test {
             .build()
             .with_context(|| "failed to build HTTP client")?;
 
-        Test::new(
-            http_client,
-            helper_url,
-            leader_bearer_token,
-            &vdaf_verify_init,
-            vdaf_config,
-            hpke_signing_certificate_path,
-        )
+        let mut test = Test::new(http_client, helper_url, &vdaf_verify_init, vdaf_config)?;
+        if let Some(token) = leader_bearer_token {
+            test = test.with_bearer_token(token);
+        }
+        if let Some(path) = hpke_signing_certificate_path {
+            test = test.with_hpke_signing_certificate_path(path);
+        }
+        Ok(test)
+    }
+
+    pub fn with_bearer_token(self, bearer_token: String) -> Self {
+        Self {
+            bearer_token: Some(BearerToken::from(bearer_token)),
+            ..self
+        }
+    }
+
+    pub fn with_hpke_signing_certificate_path<P: Into<PathBuf>>(self, path: P) -> Self {
+        Self {
+            hpke_signing_certificate_path: Some(path.into()),
+            ..self
+        }
     }
 
     pub fn metrics(&self) -> &dyn DaphneMetrics {
