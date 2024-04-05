@@ -17,7 +17,7 @@ readme = "../README.md"
 
 [dependencies]
 async-trait.workspace = true
-capnp.workspace = true
+capnp = { workspace = true, optional = true }
 daphne = { path = "../daphne", default-features = false }
 futures.workspace = true
 itertools.workspace = true
@@ -37,12 +37,12 @@ prometheus.workspace = true
 rand.workspace = true
 
 [build-dependencies]
-capnpc = "0.18.1"
+capnpc = { version = "0.18.1", optional = true }
 
 [features]
 test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
 prometheus = ["dep:prometheus", "daphne/prometheus"]
-test_acceptance = ["dep:prometheus"]
+durable_requests = ["dep:capnp", "dep:capnpc"]
 
 [lints]
 workspace = true

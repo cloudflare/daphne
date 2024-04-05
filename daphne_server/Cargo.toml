@@ -20,7 +20,7 @@ readme = "../README.md"
 axum.workspace = true
 bincode.workspace = true
 daphne = { path = "../daphne" }
-daphne_service_utils = { path = "../daphne_service_utils" }
+daphne_service_utils = { path = "../daphne_service_utils", features = ["durable_requests"] }
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
