@@ -736,9 +736,9 @@ impl DapTaskConfig {
                     )?;
                 }
 
-                Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
+                Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
                     let failure = TransitionFailure::VdafPrepError;
-                    tracing::warn!(%failure, "rejecting report");
+                    tracing::warn!(error = ?e, %failure, "rejecting report");
                     metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                 }
 
