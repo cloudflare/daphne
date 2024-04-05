@@ -42,7 +42,7 @@ use daphne_service_utils::http_headers;
 use futures::{StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, Registry, TextEncoder};
-use rand::{thread_rng, Rng};
+use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reqwest::Client;
 use std::{
@@ -384,7 +384,7 @@ impl Test {
             ..
         } = test_task_config;
         let mut durations = TestDurations::default();
-        let mut rng = thread_rng();
+        let mut rng = rngs::OsRng;
 
         // Prepare AggregationJobInitReq.
         let agg_job_id = AggregationJobId(rng.gen());
@@ -490,7 +490,7 @@ impl Test {
         opt: &TestOptions,
         version: DapVersion,
     ) -> Result<TestDurations> {
-        let mut rng = thread_rng();
+        let mut rng = rngs::OsRng;
         let now = now();
 
         let (test_task_config, mut durations) = self
@@ -731,6 +731,8 @@ fn distribute_reports_in_chunks(total: usize, chunk_length: usize) -> impl Itera
 
 #[cfg(test)]
 mod tests {
+    use crate::acceptance::Test;
+
     #[test]
     fn distribute_reports_in_chunks() {
         for total in 0..400 {
@@ -761,5 +763,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_helper_is_send() {
+        #![allow(unused_variables, unreachable_code, clippy::diverging_sub_expression)]
+        fn is_send<T: Send>(_t: T) {}
+        let _never_run = || {
+            let t: Test = todo!();
+            is_send(t.test_helper(todo!(), todo!()));
+            is_send(t.run_agg_job(todo!(), todo!(), todo!(), todo!(), todo!(), todo!()));
+            is_send(t.run_agg_jobs(todo!(), todo!(), todo!(), todo!(), todo!(), |_| todo!()));
+            is_send(t.get_hpke_config(todo!()));
+            is_send(t.generate_task_config(todo!(), todo!(), todo!(), todo!()));
+        };
     }
 }
