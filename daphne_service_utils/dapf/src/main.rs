@@ -620,24 +620,20 @@ async fn main() -> Result<()> {
             reports_per_batch,
             reports_per_agg_job,
         } => {
+            tracing::info!("using vdaf: {:?}", vdaf_config);
+
             let t = dapf::acceptance::Test::from_env(
                 helper_url,
                 vdaf_config.into_vdaf(),
                 hpke_signing_certificate_path,
             )?;
 
-            tracing::info!("using vdaf: {:?}", t.vdaf_config);
-
             let res = t
-                .test_helper(
-                    &TestOptions {
-                        bearer_token: t.leader_bearer_token.clone(),
-                        reports_per_agg_job,
-                        reports_per_batch,
-                        ..Default::default()
-                    },
-                    deduce_dap_version_from_url(&t.helper_url)?,
-                )
+                .test_helper(&TestOptions {
+                    reports_per_agg_job,
+                    reports_per_batch,
+                    ..Default::default()
+                })
                 .await
                 .map(|_| ());
             println!("\n\nMETRICS:\n{}\n\n", t.encode_metrics());

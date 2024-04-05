@@ -15,7 +15,6 @@ use chrono::{DateTime, Utc};
 use daphne::{
     messages::{BatchId, PartialBatchSelector},
     vdaf::VdafConfig,
-    DapVersion,
 };
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
@@ -279,12 +278,12 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
     }
 }
 
-async fn execute(t: &Test, test_config: &TestOptions, version: DapVersion) -> TestResults {
+async fn execute(t: &Test, test_config: &TestOptions) -> TestResults {
     let tests = futures::stream::iter(0..TestResults::RUNS)
         .map(|i| async move {
             let r = tokio::time::timeout(
                 Duration::from_secs(60) * 30, // 30 min
-                t.test_helper(test_config, version),
+                t.test_helper(test_config),
             )
             .await;
             match r {
@@ -320,7 +319,6 @@ pub async fn execute_multiple_combinations(helper_url: Url) {
 
     let config = t.get_hpke_config(&t.helper_url).await.expect("test failed");
     let mut test_config = TestOptions {
-        bearer_token: t.leader_bearer_token.clone(),
         helper_hpke_config: Some(config),
         ..Default::default()
     };
@@ -346,7 +344,7 @@ pub async fn execute_multiple_combinations(helper_url: Url) {
             println!("\t- reports_per_agg_job: {reports_per_agg_job}");
             println!("\t- vdaf_config:         {vdaf_config:?}");
 
-            let results = execute(&t, &test_config, DapVersion::Latest).await;
+            let results = execute(&t, &test_config).await;
 
             println!("durations:\n{results:#?}");
 
@@ -400,7 +398,6 @@ pub async fn execute_single_combination_from_env(
                 &test_task_config,
                 &part_batch_sel,
                 reports_per_agg_job,
-                t.leader_bearer_token.as_ref(),
                 |reports_per_job| {
                     ReportGenerator::new(
                         &test_task_config,

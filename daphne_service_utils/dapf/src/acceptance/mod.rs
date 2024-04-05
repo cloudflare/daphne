@@ -19,7 +19,7 @@
 pub mod load_testing;
 pub mod report_generator;
 
-use crate::{test_durations::TestDurations, HttpClientExt};
+use crate::{deduce_dap_version_from_url, test_durations::TestDurations, HttpClientExt};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use daphne::{
@@ -59,21 +59,18 @@ use self::report_generator::ReportGenerator;
 
 pub struct Test {
     pub helper_url: Url,
-    pub leader_bearer_token: Option<BearerToken>,
+    bearer_token: Option<BearerToken>,
     vdaf_verify_init: [u8; 32],
     http_client: Client,
     prometheus_registry: Registry,
     daphne_metrics: DaphnePromMetrics,
-    pub vdaf_config: VdafConfig,
+    vdaf_config: VdafConfig,
     /// The path to the hpke signing certificate, which can be used to verify the hpke config
     /// signature.
-    pub hpke_signing_certificate_path: Option<PathBuf>,
+    hpke_signing_certificate_path: Option<PathBuf>,
 }
 
 pub struct TestOptions {
-    /// Bearer token to offer the Helper. If not provided, then only mutual TLS is used.
-    pub bearer_token: Option<BearerToken>,
-
     /// The number of reports to aggregate.
     pub reports_per_batch: usize,
 
@@ -95,7 +92,6 @@ pub struct TestOptions {
 impl Default for TestOptions {
     fn default() -> Self {
         Self {
-            bearer_token: None,
             reports_per_batch: 50,
             reports_per_agg_job: 17,
             measurement: None,
@@ -138,7 +134,7 @@ impl Test {
 
         Ok(Self {
             helper_url,
-            leader_bearer_token,
+            bearer_token: leader_bearer_token,
             vdaf_verify_init,
             http_client,
             prometheus_registry,
@@ -318,7 +314,6 @@ impl Test {
         test_task_config: &TestTaskConfig,
         part_batch_sel: &PartialBatchSelector,
         reports_per_agg_job: usize,
-        bearer_token: Option<&BearerToken>,
         report_generator: F,
     ) -> anyhow::Result<(
         Vec<(DapBatchBucket, (DapAggregateShare, Vec<(ReportId, u64)>))>,
@@ -340,7 +335,6 @@ impl Test {
                 agg_job_index,
                 report_generator(reports_for_agg_job),
                 part_batch_sel,
-                bearer_token,
                 &barrier,
             )
         })
@@ -362,7 +356,6 @@ impl Test {
         // agg_job_index is kept
         reports_for_agg_job,
         part_batch_sel,
-        bearer_token,
         barrier,
     ))]
     pub async fn run_agg_job(
@@ -371,7 +364,6 @@ impl Test {
         agg_job_index: usize,
         reports_for_agg_job: ReportGenerator,
         part_batch_sel: &PartialBatchSelector,
-        bearer_token: Option<&BearerToken>,
         barrier: &Barrier,
     ) -> anyhow::Result<(DapAggregateSpan<DapAggregateShare>, TestDurations)> {
         let report_count = reports_for_agg_job.len();
@@ -384,10 +376,9 @@ impl Test {
             ..
         } = test_task_config;
         let mut durations = TestDurations::default();
-        let mut rng = rngs::OsRng;
 
         // Prepare AggregationJobInitReq.
-        let agg_job_id = AggregationJobId(rng.gen());
+        let agg_job_id = AggregationJobId(rngs::OsRng.gen());
         let report_count = reports_for_agg_job.len();
         let (agg_job_state, agg_job_init_req) = task_config
             .produce_agg_job_req(
@@ -406,7 +397,7 @@ impl Test {
         let headers = construct_request_headers(
             DapMediaType::AggregationJobInitReq.as_str_for_version(task_config.version),
             taskprov_advertisement.as_deref(),
-            bearer_token,
+            &self.bearer_token,
         )
         .context("constructing request headers for AggregationJobInitReq")?;
         let url = self.helper_url.join(&format!(
@@ -485,12 +476,8 @@ impl Test {
     // TODO(cpatton) See if we can de-duplicate this code and the `DapLeader::run_agg_job()`
     // method, since they overlap significantly. We could use `MockAggregator`, but it doesn't
     // support HTTP right now. (HTTP is mocked by the testing framework.)
-    pub async fn test_helper(
-        &self,
-        opt: &TestOptions,
-        version: DapVersion,
-    ) -> Result<TestDurations> {
-        let mut rng = rngs::OsRng;
+    pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
+        let version = deduce_dap_version_from_url(&self.helper_url)?;
         let now = now();
 
         let (test_task_config, mut durations) = self
@@ -513,7 +500,7 @@ impl Test {
 
         ////
 
-        let batch_id = BatchId(rng.gen());
+        let batch_id = BatchId(rngs::OsRng.gen());
         let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
 
         let (out_shares_for_batch, agg_job_duration) = self
@@ -522,7 +509,6 @@ impl Test {
                 &test_task_config,
                 &part_batch_sel,
                 opt.reports_per_agg_job,
-                opt.bearer_token.as_ref(),
                 |reports_per_agg_job| {
                     ReportGenerator::new(
                         &test_task_config,
@@ -558,7 +544,7 @@ impl Test {
         let headers = construct_request_headers(
             DapMediaType::AggregateShareReq.as_str_for_version(version),
             taskprov_advertisement.as_deref(),
-            opt.bearer_token.as_ref(),
+            &self.bearer_token,
         )?;
         let url = self.helper_url.join(&format!(
             "tasks/{}/aggregate_shares",
@@ -771,9 +757,9 @@ mod tests {
         fn is_send<T: Send>(_t: T) {}
         let _never_run = || {
             let t: Test = todo!();
-            is_send(t.test_helper(todo!(), todo!()));
-            is_send(t.run_agg_job(todo!(), todo!(), todo!(), todo!(), todo!(), todo!()));
-            is_send(t.run_agg_jobs(todo!(), todo!(), todo!(), todo!(), todo!(), |_| todo!()));
+            is_send(t.test_helper(todo!()));
+            is_send(t.run_agg_job(todo!(), todo!(), todo!(), todo!(), todo!()));
+            is_send(t.run_agg_jobs(todo!(), todo!(), todo!(), todo!(), |_| todo!()));
             is_send(t.get_hpke_config(todo!()));
             is_send(t.generate_task_config(todo!(), todo!(), todo!(), todo!()));
         };
