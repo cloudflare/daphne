@@ -10,7 +10,7 @@ use crate::{
         encode_u32_bytes, Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId,
         Time,
     },
-    vdaf::{prio2::prio2_shard, prio3::prio3_shard},
+    vdaf::{prio2::prio2_shard, prio3::prio3_shard, VdafError},
     DapError, DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::{Encode, ParameterizedEncode};
@@ -49,7 +49,9 @@ impl VdafConfig {
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
         let report_id = ReportId(rng.gen());
-        let (public_share, input_shares) = self.produce_input_shares(measurement, &report_id.0)?;
+        let (public_share, input_shares) = self
+            .produce_input_shares(measurement, &report_id.0)
+            .map_err(DapError::from_vdaf)?;
         Self::produce_report_with_extensions_for_shares(
             public_share,
             input_shares,
@@ -140,7 +142,7 @@ impl VdafConfig {
         &self,
         measurement: DapMeasurement,
         nonce: &[u8; 16],
-    ) -> Result<(Vec<u8>, Vec<Vec<u8>>), DapError> {
+    ) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
         match self {
             Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
             Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),

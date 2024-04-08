@@ -62,10 +62,11 @@ impl FatalDapError {
     }
 }
 
-impl From<VdafError> for DapError {
-    fn from(e: VdafError) -> Self {
+impl DapError {
+    pub(crate) fn from_vdaf(e: VdafError) -> Self {
         match e {
             VdafError::Codec(..) | VdafError::Vdaf(..) => {
+                tracing::warn!(error = ?e, "rejecting report");
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
             VdafError::Dap(e) => e,
