@@ -82,17 +82,14 @@ impl VdafConfig {
 
         let num_measurements = usize::try_from(report_count).unwrap();
         match self {
-            Self::Prio3(prio3_config) => {
-                Ok(prio3_unshard(prio3_config, num_measurements, agg_shares)?)
-            }
-            Self::Prio2 { dimension } => {
-                Ok(prio2_unshard(*dimension, num_measurements, agg_shares)?)
-            }
+            Self::Prio3(prio3_config) => prio3_unshard(prio3_config, num_measurements, agg_shares),
+            Self::Prio2 { dimension } => prio2_unshard(*dimension, num_measurements, agg_shares),
             #[cfg(any(test, feature = "test-utils"))]
             Self::Mastic {
                 input_size: _,
                 weight_config,
-            } => Ok(mastic_unshard(*weight_config, agg_param, agg_shares)?),
+            } => mastic_unshard(*weight_config, agg_param, agg_shares),
         }
+        .map_err(DapError::from_vdaf)
     }
 }

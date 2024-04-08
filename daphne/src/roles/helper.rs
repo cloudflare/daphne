@@ -376,7 +376,6 @@ async fn finish_agg_job_and_aggregate<S: Sync>(
 
             for transition in &agg_job_resp.transitions {
                 if let TransitionVar::Failed(failure) = &transition.var {
-                    tracing::warn!(%failure, "rejecting report");
                     metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
                 }
             }

@@ -225,11 +225,12 @@ impl EarlyReportStateConsumed {
             .transpose()
         {
             Ok(peer_prep_share) => peer_prep_share.map(|bytes| bytes.to_vec()),
-            Err(_) => {
+            Err(e) => {
+                tracing::warn!(error = ?e, "rejecting report");
                 return Ok(Self::Rejected {
                     metadata: report_share.report_metadata,
                     failure: TransitionFailure::VdafPrepError,
-                })
+                });
             }
         };
 
@@ -339,10 +340,13 @@ impl EarlyReportStateInitialized {
                 prep_share,
                 prep_state,
             },
-            Err(..) => Self::Rejected {
-                metadata,
-                failure: TransitionFailure::VdafPrepError,
-            },
+            Err(e) => {
+                tracing::warn!(error = ?e, "rejecting report");
+                Self::Rejected {
+                    metadata,
+                    failure: TransitionFailure::VdafPrepError,
+                }
+            }
         };
         Ok(early_report_state_initialized)
     }
@@ -471,7 +475,6 @@ impl DapTaskConfig {
 
                 EarlyReportStateInitialized::Rejected { failure, .. } => {
                     // Skip report that can't be processed any further.
-                    tracing::warn!(%failure, "rejecting report");
                     metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                     continue;
                 }
@@ -612,9 +615,9 @@ impl DapTaskConfig {
                                 TransitionVar::Continued(outbound)
                             }
 
-                            Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
-                                let failure = TransitionFailure::VdafPrepError;
-                                TransitionVar::Failed(failure)
+                            Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
+                                tracing::warn!(error = ?e, "rejecting report");
+                                TransitionVar::Failed(TransitionFailure::VdafPrepError)
                             }
 
                             Err(VdafError::Dap(e)) => return Err(e),
@@ -697,7 +700,6 @@ impl DapTaskConfig {
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(failure) => {
-                    tracing::warn!(%failure, "rejecting report");
                     metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
                     continue;
                 }
@@ -733,10 +735,10 @@ impl DapTaskConfig {
                     )?;
                 }
 
-                Err(VdafError::Codec(..) | VdafError::Vdaf(..)) => {
-                    let failure = TransitionFailure::VdafPrepError;
-                    tracing::warn!(%failure, "rejecting report");
-                    metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
+                Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
+                    tracing::warn!(error = ?e, "rejecting report");
+                    metrics
+                        .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
                 }
 
                 Err(VdafError::Dap(e)) => return Err(e),
