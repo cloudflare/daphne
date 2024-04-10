@@ -158,11 +158,10 @@ mod test {
         messages::{
             AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
             Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportId,
-            ReportMetadata, TaskId, Time, TransitionFailure, TransitionVar,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
+            TransitionFailure, TransitionVar,
         },
         roles::leader::WorkItem,
-        test_versions,
         testing::InMemoryAggregator,
         vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
@@ -179,34 +178,6 @@ mod test {
     use rand::{thread_rng, Rng};
     use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
     use url::Url;
-
-    /// Check for transition failures due to:
-    ///
-    /// * the report having already been processed
-    /// * the report having already been collected
-    /// * the report not being within time bounds
-    ///
-    /// Returns `Some(TransitionFailure)` if there is a problem,
-    /// or `None` if no transition failure occurred.
-    pub fn early_metadata_check(
-        metadata: &ReportMetadata,
-        processed: bool,
-        collected: bool,
-        min_time: u64,
-        max_time: u64,
-    ) -> Option<TransitionFailure> {
-        if processed {
-            Some(TransitionFailure::ReportReplayed)
-        } else if collected {
-            Some(TransitionFailure::BatchCollected)
-        } else if metadata.time < min_time {
-            Some(TransitionFailure::ReportDropped)
-        } else if metadata.time > max_time {
-            Some(TransitionFailure::ReportTooEarly)
-        } else {
-            None
-        }
-    }
 
     pub(super) struct TestData {
         pub now: Time,
@@ -1724,76 +1695,6 @@ mod test {
 
     async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Draft09 }
     async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Latest }
-
-    fn early_metadata_checks(version: DapVersion) {
-        let t = Test::new(version);
-        let mut rng = thread_rng();
-        let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
-            time: t.now,
-        };
-        // We declare these so the first call to early_metadata_check() is more readable.
-        let processed = false;
-        let collected = false;
-        // A current not processed, not collected report is OK!
-        assert_matches!(
-            early_metadata_check(&metadata, processed, collected, t.now - 100, t.now + 100),
-            None
-        );
-        // A current processed, not collected report is TransitionFailure::ReportReplayed.
-        assert_matches!(
-            early_metadata_check(&metadata, true, false, t.now - 100, t.now + 100),
-            Some(TransitionFailure::ReportReplayed)
-        );
-        // A current not processed but collected report is TransitionFailure::BatchCollected.
-        assert_matches!(
-            early_metadata_check(&metadata, false, true, t.now - 100, t.now + 100),
-            Some(TransitionFailure::BatchCollected)
-        );
-        // A current processed and collected report is TransitionFailure::ReportReplayed.
-        assert_matches!(
-            early_metadata_check(&metadata, true, true, t.now - 100, t.now + 100),
-            Some(TransitionFailure::ReportReplayed)
-        );
-        // A not collected and not processed report at the future boundary is OK.
-        let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
-            time: t.now + 100,
-        };
-        assert_matches!(
-            early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
-            None
-        );
-        // A not collected and not processed report too far in the future is TransitionFailure::ReportTooEarly.
-        let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
-            time: t.now + 101,
-        };
-        assert_matches!(
-            early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
-            Some(TransitionFailure::ReportTooEarly)
-        );
-        // A not collected and not processed report at the past boundary is OK.
-        let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
-            time: t.now - 100,
-        };
-        assert_matches!(
-            early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
-            None
-        );
-        // A not collected and not processed report too far in the past is TransitionFailure::ReportDropped.
-        let metadata = ReportMetadata {
-            id: ReportId(rng.gen()),
-            time: t.now - 101,
-        };
-        assert_matches!(
-            early_metadata_check(&metadata, false, false, t.now - 100, t.now + 100),
-            Some(TransitionFailure::ReportDropped)
-        );
-    }
-
-    test_versions! { early_metadata_checks }
 
     // Test multiple tasks in flight at once.
     async fn multi_task(version: DapVersion) {

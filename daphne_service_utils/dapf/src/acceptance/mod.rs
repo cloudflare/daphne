@@ -28,7 +28,7 @@ use daphne::{
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
+        self, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
         BatchSelector, PartialBatchSelector, ReportId, TaskId,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
@@ -48,6 +48,7 @@ use reqwest::Client;
 use std::{
     convert::TryFrom,
     env,
+    ops::Range,
     path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
@@ -605,6 +606,11 @@ impl Test {
 
 #[async_trait]
 impl DapReportInitializer for Test {
+    fn valid_report_time_range(&self) -> Range<messages::Time> {
+        // Accept reports with any timestmap.
+        0..u64::max_value()
+    }
+
     async fn initialize_reports(
         &self,
         is_leader: bool,

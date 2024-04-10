@@ -10,7 +10,7 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
-        AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
+        self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
         Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
         ReportId, TaskId, Time, TransitionFailure,
     },
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
-    ops::DerefMut,
+    ops::{DerefMut, Range},
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
@@ -54,6 +54,7 @@ pub struct AggregationJobTest {
 
     // the current time
     pub(crate) now: Time,
+    pub(crate) valid_report_range: Range<Time>,
 
     // operational parameters
     #[allow(dead_code)]
@@ -83,6 +84,10 @@ fn initialize_reports(
 
 #[async_trait]
 impl DapReportInitializer for AggregationJobTest {
+    fn valid_report_time_range(&self) -> Range<Time> {
+        self.valid_report_range.clone()
+    }
+
     async fn initialize_reports(
         &self,
         is_leader: bool,
@@ -123,6 +128,8 @@ impl AggregationJobTest {
 
         Self {
             now,
+            // Accept reports within two minutes of the current time.
+            valid_report_range: now - 60..now + 60,
             task_id,
             leader_hpke_receiver_config,
             helper_hpke_receiver_config,
@@ -784,6 +791,11 @@ impl DapAuthorizedSender<BearerToken> for InMemoryAggregator {
 
 #[async_trait]
 impl DapReportInitializer for InMemoryAggregator {
+    fn valid_report_time_range(&self) -> Range<messages::Time> {
+        // Accept reports with any timestmap.
+        0..u64::max_value()
+    }
+
     async fn initialize_reports(
         &self,
         is_leader: bool,
