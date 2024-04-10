@@ -99,6 +99,7 @@ pub enum EarlyReportStateConsumed {
 impl EarlyReportStateConsumed {
     pub(crate) async fn consume(
         decrypter: &impl HpkeDecrypter,
+        initializer: &impl DapReportInitializer,
         is_leader: bool,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
@@ -109,6 +110,25 @@ impl EarlyReportStateConsumed {
             return Ok(Self::Rejected {
                 metadata: report_share.report_metadata,
                 failure: TransitionFailure::TaskExpired,
+            });
+        }
+
+        let valid_report_range = initializer.valid_report_time_range();
+        if report_share.report_metadata.time < valid_report_range.start {
+            // If the report time is before the first valid timestamp, we drop it
+            // because it's too late.
+            return Ok(EarlyReportStateConsumed::Rejected {
+                metadata: report_share.report_metadata,
+                failure: TransitionFailure::ReportDropped,
+            });
+        }
+
+        if valid_report_range.end < report_share.report_metadata.time {
+            // If the report time is too far in the future of the maximum allowed
+            // time skew so we reject it.
+            return Ok(EarlyReportStateConsumed::Rejected {
+                metadata: report_share.report_metadata,
+                failure: TransitionFailure::ReportTooEarly,
             });
         }
 
@@ -411,6 +431,7 @@ impl DapTaskConfig {
                 consumed_reports.push(
                     EarlyReportStateConsumed::consume(
                         decrypter,
+                        initializer,
                         true,
                         task_id,
                         self,
@@ -524,6 +545,7 @@ impl DapTaskConfig {
                 consumed_reports.push(
                     EarlyReportStateConsumed::consume(
                         decrypter,
+                        initializer,
                         false,
                         task_id,
                         self,

@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use async_trait::async_trait;
 use prio::codec::Encode;
@@ -22,6 +22,9 @@ use crate::{
 /// job.
 #[async_trait]
 pub trait DapReportInitializer {
+    /// Return the time range in which a report must appear in order to be considered valid.
+    fn valid_report_time_range(&self) -> Range<Time>;
+
     /// Initialize a sequence of reports that are in the "consumed" state by initializing VDAF
     /// preparation.
     async fn initialize_reports(

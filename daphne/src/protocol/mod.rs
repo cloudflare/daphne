@@ -26,6 +26,7 @@ mod test {
         protocol::aggregator::{
             EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
         },
+        roles::DapReportInitializer,
         test_versions,
         testing::AggregationJobTest,
         vdaf::{Prio3Config, VdafConfig},
@@ -64,6 +65,7 @@ mod test {
 
         let early_report_state_consumed = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
+            &t,
             true, // is_leader
             &t.task_id,
             &t.task_config,
@@ -94,6 +96,7 @@ mod test {
 
         let early_report_state_consumed = EarlyReportStateConsumed::consume(
             &t.helper_hpke_receiver_config,
+            &t,
             false, // is_helper
             &t.task_id,
             &t.task_config,
@@ -242,6 +245,58 @@ mod test {
 
     async_test_versions! { produce_agg_job_req_skip_hpke_decrypt_err }
 
+    async fn produce_agg_job_req_skip_time_too_stale(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.valid_report_time_range().start - 1,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                t.task_config.version,
+            )
+            .unwrap()];
+
+        let (agg_job_state, _agg_job_init_req) = t
+            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .await;
+        assert_eq!(agg_job_state.report_count(), 0);
+
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_report_dropped"}"#: 1,
+        });
+    }
+
+    async_test_versions! { produce_agg_job_req_skip_time_too_stale }
+
+    async fn produce_agg_job_req_skip_time_too_early(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.valid_report_time_range().end + 1,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                t.task_config.version,
+            )
+            .unwrap()];
+
+        let (agg_job_state, _agg_job_init_req) = t
+            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .await;
+        assert_eq!(agg_job_state.report_count(), 0);
+
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_report_too_early"}"#: 1,
+        });
+    }
+
+    async_test_versions! { produce_agg_job_req_skip_time_too_early }
+
     async fn produce_agg_job_req_skip_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
@@ -300,6 +355,78 @@ mod test {
     }
 
     async_test_versions! { handle_agg_job_req_hpke_decrypt_err }
+
+    async fn handle_agg_job_req_skip_time_too_stale(version: DapVersion) {
+        let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.valid_report_time_range().start - 1,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                t.task_config.version,
+            )
+            .unwrap()];
+
+        let agg_job_init_req = {
+            // Temporarily overwrite the valid report time range so that the Leader accepts the
+            // out-of-range report and produces the request.
+            let tmp = t.valid_report_range.clone();
+            t.valid_report_range = 0..u64::max_value();
+            let (_, agg_job_init_req) = t
+                .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
+                .await;
+            t.valid_report_range = tmp;
+            agg_job_init_req
+        };
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+
+        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_matches!(
+            agg_job_resp.transitions[0].var,
+            TransitionVar::Failed(TransitionFailure::ReportDropped)
+        );
+    }
+
+    async_test_versions! { handle_agg_job_req_skip_time_too_stale }
+
+    async fn handle_agg_job_req_skip_time_too_early(version: DapVersion) {
+        let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.valid_report_time_range().end + 1,
+                &t.task_id,
+                DapMeasurement::U64(1),
+                t.task_config.version,
+            )
+            .unwrap()];
+
+        let agg_job_init_req = {
+            // Temporarily overwrite the valid report time range so that the Leader accepts the
+            // out-of-range report and produces the request.
+            let tmp = t.valid_report_range.clone();
+            t.valid_report_range = 0..u64::max_value();
+            let (_, agg_job_init_req) = t
+                .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
+                .await;
+            t.valid_report_range = tmp;
+            agg_job_init_req
+        };
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+
+        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_matches!(
+            agg_job_resp.transitions[0].var,
+            TransitionVar::Failed(TransitionFailure::ReportTooEarly)
+        );
+    }
+
+    async_test_versions! { handle_agg_job_req_skip_time_too_early }
 
     async fn handle_agg_job_req_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -599,6 +726,7 @@ mod test {
         let report_metadata = report.report_metadata.clone();
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
+            &t,
             true,
             &t.task_id,
             &t.task_config,
@@ -648,6 +776,7 @@ mod test {
         let [leader_share, _] = report.encrypted_input_shares;
         let consumed_report = EarlyReportStateConsumed::consume(
             &t.leader_hpke_receiver_config,
+            &t,
             true,
             &t.task_id,
             &t.task_config,

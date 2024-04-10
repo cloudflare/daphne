@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, future::ready, time::SystemTime};
+use std::{borrow::Cow, future::ready, ops::Range, time::SystemTime};
 
 use axum::async_trait;
 use daphne::{
@@ -10,12 +10,12 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeProvider},
-    messages::{BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
+    messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
-    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportState,
-    EarlyReportStateConsumed, EarlyReportStateInitialized,
+    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
+    EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
@@ -347,6 +347,18 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
 #[async_trait]
 impl DapReportInitializer for crate::App {
+    fn valid_report_time_range(&self) -> Range<messages::Time> {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("now should always be after unix epoch")
+            .as_secs();
+
+        let start = now.saturating_sub(self.service_config.report_storage_epoch_duration);
+        let end = now.saturating_add(self.service_config.report_storage_max_future_time_skew);
+
+        start..end
+    }
+
     async fn initialize_reports(
         &self,
         is_leader: bool,
@@ -354,8 +366,6 @@ impl DapReportInitializer for crate::App {
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        let valid_report_range = self.valid_report_time_range();
-
         tokio::task::spawn_blocking({
             let vdaf_config = task_config.vdaf;
             let vdaf_verify_key = task_config.vdaf_verify_key.clone();
@@ -364,27 +374,13 @@ impl DapReportInitializer for crate::App {
                 consumed_reports
                     .into_par_iter()
                     .map(|consumed_report| {
-                        let metadata = consumed_report.metadata();
-                        let initialized = if metadata.time < valid_report_range.start {
-                            // If the report time is before the first valid timestamp, we drop it
-                            // because it's too late.
-                            consumed_report
-                                .into_initialized_rejected_due_to(TransitionFailure::ReportDropped)
-                        } else if valid_report_range.end < metadata.time {
-                            // If the report time is too far in the future of the maximum allowed
-                            // time skew so we reject it.
-                            consumed_report
-                                .into_initialized_rejected_due_to(TransitionFailure::ReportTooEarly)
-                        } else {
-                            EarlyReportStateInitialized::initialize(
-                                is_leader,
-                                &vdaf_verify_key,
-                                &vdaf_config,
-                                &agg_param,
-                                consumed_report,
-                            )?
-                        };
-                        Ok(initialized)
+                        EarlyReportStateInitialized::initialize(
+                            is_leader,
+                            &vdaf_verify_key,
+                            &vdaf_config,
+                            &agg_param,
+                            consumed_report,
+                        )
                     })
                     .collect::<Result<Vec<EarlyReportStateInitialized>, _>>()
             }
