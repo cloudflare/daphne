@@ -670,42 +670,6 @@ impl DapTaskConfig {
         }
     }
 
-    /// Return the batch span of a set of reports.
-    pub fn batch_span_for_meta<'sel, 'rep>(
-        &self,
-        part_batch_sel: &'sel PartialBatchSelector,
-        consumed_reports: impl Iterator<Item = &'rep EarlyReportStateConsumed>,
-    ) -> Result<DapAggregateSpan<()>, DapError> {
-        if !self.query.is_valid_part_batch_sel(part_batch_sel) {
-            return Err(fatal_error!(
-                err = "partial batch selector not compatible with task",
-            ));
-        }
-        Ok(consumed_reports
-            .filter(|consumed_report| consumed_report.is_ready())
-            .map(|consumed_report| {
-                let bucket = self.bucket_for(part_batch_sel, consumed_report);
-                let metadata = consumed_report.metadata();
-                (bucket, (metadata.id, metadata.time))
-            })
-            .collect())
-    }
-
-    pub fn bucket_for<E: EarlyReportState>(
-        &self,
-        part_batch_sel: &PartialBatchSelector,
-        report: &E,
-    ) -> DapBatchBucket {
-        match part_batch_sel {
-            PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
-                batch_window: self.quantized_time_lower_bound(report.metadata().time),
-            },
-            PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
-                batch_id: *batch_id,
-            },
-        }
-    }
-
     /// Check if the batch size is too small. Returns an error if the report count is too large.
     pub(crate) fn is_report_count_compatible(
         &self,
