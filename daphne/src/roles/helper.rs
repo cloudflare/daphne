@@ -14,14 +14,14 @@ use crate::{
     error::DapAbort,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportId, TaskId,
-        TransitionFailure, TransitionVar,
+        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure,
+        TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::ReportProcessedStatus,
     roles::aggregator::MergeAggShareError,
-    DapAggregateShare, DapAggregateSpan, DapAggregationJobState, DapAggregationParam, DapError,
-    DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapAggregationJobState, DapAggregationParam, DapError, DapRequest, DapResource, DapResponse,
+    DapTaskConfig, EarlyReportStateInitialized,
 };
 
 /// DAP Helper functionality.
@@ -109,15 +109,9 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
             aggregator,
             task_id,
             task_config,
+            &part_batch_sel,
+            &initialized_reports,
             metrics,
-            |report_status| {
-                let (agg_span, agg_job_resp) = task_config.produce_agg_job_resp(
-                    report_status,
-                    &part_batch_sel,
-                    &initialized_reports,
-                )?;
-                Ok((agg_span, agg_job_resp))
-            },
         )
         .await?;
 
@@ -294,19 +288,13 @@ fn check_part_batch(
     Ok(())
 }
 
-// TODO draft02 cleanup: Hard-code this now that we don't have to deal with two variants of
-// `finish_agg_job`.
 async fn finish_agg_job_and_aggregate<S: Sync>(
     helper: &impl DapHelper<S>,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
+    part_batch_sel: &PartialBatchSelector,
+    initialized_reports: &[EarlyReportStateInitialized],
     metrics: &dyn DaphneMetrics,
-    finish_agg_job: impl Fn(
-        &HashMap<ReportId, ReportProcessedStatus>,
-    ) -> Result<
-        (DapAggregateSpan<DapAggregateShare>, AggregationJobResp),
-        DapError,
-    >,
 ) -> Result<AggregationJobResp, DapError> {
     // This loop is intended to run at most once on the "happy path". The intent is as follows:
     //
@@ -321,7 +309,11 @@ async fn finish_agg_job_and_aggregate<S: Sync>(
     const RETRY_COUNT: u32 = 3;
     let mut report_status = HashMap::new();
     for _ in 0..RETRY_COUNT {
-        let (agg_span, agg_job_resp) = finish_agg_job(&report_status)?;
+        let (agg_span, agg_job_resp) = task_config.produce_agg_job_resp(
+            &report_status,
+            part_batch_sel,
+            initialized_reports,
+        )?;
 
         let put_shares_result = helper
             .try_put_agg_share_span(task_id, task_config, agg_span)
