@@ -30,7 +30,6 @@ hpke-rs-rust-crypto.workspace = true
 prio = { workspace = true, features = ["experimental"] }
 prometheus = { workspace = true, optional = true }
 rand.workspace = true
-replace_with.workspace = true
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true

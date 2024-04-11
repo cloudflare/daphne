@@ -27,7 +27,6 @@ use futures::{Stream, StreamExt};
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
-use replace_with::replace_with_or_abort;
 use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
@@ -346,17 +345,6 @@ impl EarlyReportStateInitialized {
             },
         };
         Ok(early_report_state_initialized)
-    }
-
-    /// Turn this report into a rejected report using `failure` as the reason for it's rejection.
-    pub fn reject_due_to(&mut self, failure: TransitionFailure) {
-        // this never aborts because the closure never panics
-        replace_with_or_abort(self, |self_| {
-            let metadata = match self_ {
-                Self::Rejected { metadata, .. } | Self::Ready { metadata, .. } => metadata,
-            };
-            Self::Rejected { metadata, failure }
-        });
     }
 }
 
