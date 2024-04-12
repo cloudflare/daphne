@@ -119,6 +119,8 @@ impl CliVdafConfig {
 struct Cli {
     #[clap(subcommand)]
     action: Action,
+    #[arg(env, long)]
+    sentry_dsn: Option<sentry::types::Dsn>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -291,6 +293,16 @@ impl ValueEnum for KemAlg {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut cli = Cli::parse();
+    let _sentry = cli.sentry_dsn.take().map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                ..Default::default()
+            },
+        ))
+    });
     tracing_subscriber::fmt()
         .compact()
         .with_writer(std::io::stderr)
@@ -304,8 +316,6 @@ async fn main() -> Result<()> {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
-
-    let cli = Cli::parse();
 
     // HTTP client should not handle redirects automatically.
     let http_client = ClientBuilder::new()
