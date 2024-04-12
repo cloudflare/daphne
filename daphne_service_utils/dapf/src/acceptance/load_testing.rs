@@ -152,9 +152,6 @@ impl TestResults {
     fn agg_init(&self) -> (Duration, Duration, Duration) {
         self.measurements_of(|d| d.aggregate_init_req)
     }
-    fn agg_cont(&self) -> (Duration, Duration, Duration) {
-        self.measurements_of(|d| d.aggregate_cont_req)
-    }
     fn agg_share(&self) -> (Duration, Duration, Duration) {
         self.measurements_of(|d| d.aggregate_share_req)
     }
@@ -253,11 +250,10 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
     println!(";success;runs;min;avg;max;min;avg;max;min;avg;max;reports/sec");
     for (param, results) in measurments {
         println!(
-            "{param};{};{};{};{};{};{}",
+            "{param};{};{};{};{};{}",
             results.success_rate,
             results.tests.len(),
             tabularize_durations(results.agg_init()),
-            tabularize_durations(results.agg_cont()),
             tabularize_durations(results.agg_share()),
             {
                 let (sum, c) = results
