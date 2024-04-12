@@ -71,7 +71,6 @@ regex = "1.10.3"
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls-native-roots"] }
 reqwest-wasm = "0.11.16"
 ring = "0.17.8"
-sentry = "0.32.1"
 serde = { version = "1.0.197", features = ["derive"] }
 serde-wasm-bindgen = "0.5.0"
 serde_json = "1.0.114"
@@ -86,6 +85,18 @@ url = { version = "2.5.0", features = ["serde"] }
 webpki = "0.22.4"
 worker = "0.0.18"
 x509-parser = "0.15.1"
+
+[workspace.dependencies.sentry]
+version = "0.32.1"
+default-features = false
+features = [
+    "backtrace",
+    "contexts",
+    "debug-images",
+    "panic",
+    "reqwest",
+    "rustls",
+]
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "warn"
