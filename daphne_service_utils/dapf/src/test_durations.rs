@@ -10,7 +10,6 @@ use std::{
 pub struct TestDurations {
     pub hpke_config_fetch: Duration,
     pub aggregate_init_req: Duration,
-    pub aggregate_cont_req: Duration,
     pub aggregate_share_req: Duration,
 }
 
@@ -20,7 +19,6 @@ impl Add<&Self> for TestDurations {
         Self {
             hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
             aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
-            aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
             aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
         }
     }
@@ -32,7 +30,6 @@ impl Add for TestDurations {
         Self {
             hpke_config_fetch: self.hpke_config_fetch + rhs.hpke_config_fetch,
             aggregate_init_req: self.aggregate_init_req + rhs.aggregate_init_req,
-            aggregate_cont_req: self.aggregate_cont_req + rhs.aggregate_cont_req,
             aggregate_share_req: self.aggregate_share_req + rhs.aggregate_share_req,
         }
     }
@@ -45,7 +42,6 @@ impl Div<u32> for TestDurations {
         Self {
             hpke_config_fetch: self.hpke_config_fetch / rhs,
             aggregate_init_req: self.aggregate_init_req / rhs,
-            aggregate_cont_req: self.aggregate_cont_req / rhs,
             aggregate_share_req: self.aggregate_share_req / rhs,
         }
     }
@@ -59,9 +55,6 @@ impl AsRef<Self> for TestDurations {
 
 impl TestDurations {
     pub fn total_service_time(&self) -> Duration {
-        self.hpke_config_fetch
-            + self.aggregate_init_req
-            + self.aggregate_cont_req
-            + self.aggregate_share_req
+        self.hpke_config_fetch + self.aggregate_init_req + self.aggregate_share_req
     }
 }
