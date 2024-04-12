@@ -636,7 +636,7 @@ async fn main() -> Result<()> {
                 })
                 .await
                 .map(|_| ());
-            println!("\n\nMETRICS:\n{}\n\n", t.encode_metrics());
+            println!("{}", t.encode_metrics());
             res
         }
         Action::LoadTest {

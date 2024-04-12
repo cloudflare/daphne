@@ -31,7 +31,7 @@ use daphne::{
         AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
         BatchSelector, PartialBatchSelector, ReportId, TaskId,
     },
-    metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
+    metrics::DaphneMetrics,
     roles::DapReportInitializer,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
@@ -41,7 +41,7 @@ use daphne::{
 use daphne_service_utils::http_headers;
 use futures::{StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
-use prometheus::{Encoder, Registry, TextEncoder};
+use prometheus::{Encoder, HistogramVec, IntCounterVec, TextEncoder};
 use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reqwest::Client;
@@ -57,13 +57,33 @@ use url::Url;
 
 use self::report_generator::ReportGenerator;
 
+struct TestMetrics {
+    aggregated: IntCounterVec,
+    test_durations: HistogramVec,
+    report_counter: IntCounterVec,
+}
+
+// we only implement the metrics we actually want from acceptante tests
+impl DaphneMetrics for TestMetrics {
+    fn report_inc_by(&self, status: daphne::metrics::ReportStatus, val: u64) {
+        self.report_counter
+            .with_label_values(&[&status.to_string()])
+            .inc_by(val);
+    }
+    fn inbound_req_inc(&self, _: daphne::metrics::DaphneRequestType) {}
+    fn agg_job_observe_batch_size(&self, _: usize) {}
+    fn agg_job_started_inc(&self) {}
+    fn agg_job_completed_inc(&self) {}
+    fn agg_job_put_span_retry_inc(&self) {}
+}
+
 pub struct Test {
     pub helper_url: Url,
     bearer_token: Option<BearerToken>,
+    using_mtls: bool,
     vdaf_verify_init: [u8; 32],
     http_client: Client,
-    prometheus_registry: Registry,
-    daphne_metrics: DaphnePromMetrics,
+    metrics: TestMetrics,
     vdaf_config: VdafConfig,
     /// The path to the hpke signing certificate, which can be used to verify the hpke config
     /// signature.
@@ -111,6 +131,7 @@ struct TestTaskConfig {
 impl Test {
     pub fn new(
         http_client: reqwest::Client,
+        using_mtls: bool,
         helper_url: Url,
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
@@ -127,17 +148,33 @@ impl Test {
         })?;
 
         // Register Prometheus metrics.
-        let prometheus_registry = prometheus::Registry::new();
-        let daphne_metrics = DaphnePromMetrics::register(&prometheus_registry)
-            .with_context(|| "failed to register Prometheus metrics")?;
+
+        let metrics = TestMetrics {
+            aggregated: prometheus::register_int_counter_vec!(
+                "aggregated",
+                "Counts the number of times tests ran",
+                &["using_mtls", "using_bearer_token", "success"],
+            )?,
+            test_durations: prometheus::register_histogram_vec!(
+                "test_durations",
+                "The time tests take in milliseconds",
+                &["section"],
+                prometheus::linear_buckets(500., 500., 12).unwrap(),
+            )?,
+            report_counter: prometheus::register_int_counter_vec!(
+                "report_counter",
+                "Total number reports rejected, aggregated, and collected.",
+                &["status"],
+            )?,
+        };
 
         Ok(Self {
+            using_mtls,
             helper_url,
             bearer_token: None,
             vdaf_verify_init,
             http_client,
-            prometheus_registry,
-            daphne_metrics,
+            metrics,
             vdaf_config,
             hpke_signing_certificate_path: None,
         })
@@ -185,6 +222,7 @@ impl Test {
             // We might as well use rustls because we already need the feature for
             // `Identity::from_pem()`.
             .use_rustls_tls();
+        let using_mtls = leader_tls_identity.is_some();
         if let Some(identity) = leader_tls_identity {
             // Configure TLS certificate, if available.
             http_client_builder = http_client_builder.identity(identity);
@@ -193,7 +231,13 @@ impl Test {
             .build()
             .with_context(|| "failed to build HTTP client")?;
 
-        let mut test = Test::new(http_client, helper_url, &vdaf_verify_init, vdaf_config)?;
+        let mut test = Test::new(
+            http_client,
+            using_mtls,
+            helper_url,
+            &vdaf_verify_init,
+            vdaf_config,
+        )?;
         if let Some(token) = leader_bearer_token {
             test = test.with_bearer_token(token);
         }
@@ -218,15 +262,13 @@ impl Test {
     }
 
     pub fn metrics(&self) -> &dyn DaphneMetrics {
-        &self.daphne_metrics
+        &self.metrics
     }
 
     pub fn encode_metrics(&self) -> String {
         let mut buf = Vec::new();
         let encoder = TextEncoder::new();
-        encoder
-            .encode(&self.prometheus_registry.gather(), &mut buf)
-            .unwrap();
+        encoder.encode(&prometheus::gather(), &mut buf).unwrap();
         String::from_utf8(buf).unwrap()
     }
 
@@ -484,12 +526,44 @@ impl Test {
         Ok((agg_share_span, durations))
     }
 
+    pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
+        let res = self.test_helper_impl(opt).await;
+        let success = res.is_ok();
+        let c = |b: bool| ["F", "T"][b as usize];
+        self.metrics
+            .aggregated
+            .with_label_values(&[
+                c(self.using_mtls),
+                c(self.bearer_token.is_some()),
+                c(success),
+            ])
+            .inc();
+        if let Ok(TestDurations {
+            hpke_config_fetch,
+            aggregate_init_req,
+            aggregate_share_req,
+        }) = &res
+        {
+            for (name, value) in [
+                ("hpke_config_fetch", hpke_config_fetch),
+                ("aggregate_init_req", aggregate_init_req),
+                ("aggregate_share_req", aggregate_share_req),
+            ] {
+                self.metrics
+                    .test_durations
+                    .with_label_values(&[name])
+                    .observe(value.as_millis() as f64);
+            }
+        }
+        res
+    }
+
     /// Mock the Leader aggregating and collecting a batch.
     //
     // TODO(cpatton) See if we can de-duplicate this code and the `DapLeader::run_agg_job()`
     // method, since they overlap significantly. We could use `MockAggregator`, but it doesn't
     // support HTTP right now. (HTTP is mocked by the testing framework.)
-    pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
+    async fn test_helper_impl(&self, opt: &TestOptions) -> Result<TestDurations> {
         let version = deduce_dap_version_from_url(&self.helper_url)?;
         let now = now();
 
