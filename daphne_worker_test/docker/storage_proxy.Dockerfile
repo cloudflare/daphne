@@ -21,6 +21,7 @@ COPY daphne ./daphne
 RUN cargo new --lib daphne_server
 WORKDIR /tmp/dap_test/daphne_worker_test
 COPY daphne_worker_test/wrangler.storage_proxy.toml ./wrangler.toml
+RUN worker-build --dev
 RUN wrangler publish --dry-run
 
 FROM alpine:3.16 AS test

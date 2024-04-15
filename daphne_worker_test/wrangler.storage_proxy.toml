@@ -5,11 +5,12 @@ name = "daphne_storage_proxy"
 main = "build/worker/shim.mjs"
 compatibility_date = "2023-12-21"
 
-# This Worker requires `worker-build` in order to package Rust for WASM. In
-# most cases it is preferable to install it ahead of time so that `wrangler
-# dev` starts faster.
-[build]
-command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build --dev"
+# Don't ask to send metrics to Cloudflare. The worker may be run from a container.
+send_metrics = false
+
+# Before starting the worker, run `worker-build`.
+#[build]
+#command = "cargo install --git https://github.com/cloudflare/workers-rs && worker-build --dev"
 
 [[rules]]
 globs = ["**/*.wasm"]
