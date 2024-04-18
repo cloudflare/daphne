@@ -160,7 +160,7 @@ impl Test {
                 "test_durations",
                 "The time tests take in milliseconds",
                 &["section"],
-                prometheus::linear_buckets(500., 500., 12).unwrap(),
+                prometheus::exponential_buckets(100., 2., 12).unwrap(),
             )?,
             report_counter: prometheus::register_int_counter_vec!(
                 "report_counter",
@@ -468,7 +468,7 @@ impl Test {
         let start = Instant::now();
         let resp = send(
             self.http_client
-                .post(url)
+                .put(url)
                 .body(
                     agg_job_init_req
                         .get_encoded_with_param(&task_config.version)
@@ -628,6 +628,7 @@ impl Test {
         };
 
         // Send AggregateShareReq.
+        info!("Starting AggregationJobInitReq");
         let start = Instant::now();
         let headers = construct_request_headers(
             DapMediaType::AggregateShareReq.as_str_for_version(version),
@@ -668,11 +669,6 @@ impl Test {
             return Err(anyhow!(
                 "unexpected response while running an AggregateInitReq: {resp:?}"
             ));
-        }
-        {
-            let duration = start.elapsed();
-            info!("Finished AggregateInitReq in {duration:#?}");
-            durations.aggregate_init_req = duration;
         }
         Ok(durations)
     }
