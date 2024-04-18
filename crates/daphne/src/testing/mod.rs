@@ -1201,3 +1201,18 @@ macro_rules! assert_metrics_include {
         }
     }}
 }
+
+impl VdafConfig {
+    pub fn gen_measurement(&self) -> Result<DapMeasurement, DapError> {
+        match self {
+            Self::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
+            Self::Prio3(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                length,
+                ..
+            }) => Ok(DapMeasurement::U64Vec(vec![0; *length])),
+            _ => Err(fatal_error!(
+                err = format!("gen_measurement_for currently does not support {self:?}")
+            )),
+        }
+    }
+}
