@@ -51,7 +51,7 @@ tokio.workspace = true
 
 [features]
 test-utils = ["dep:deepsize", "dep:prometheus", "dep:pin-project"]
-report-generator = ["test-utils", "dep:tokio", "dep:rayon"]
+report-generator = ["test-utils", "dep:tokio", "dep:rayon", "tokio/sync"]
 default = []
 prometheus = ["dep:prometheus"]
 

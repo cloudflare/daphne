@@ -272,7 +272,9 @@ impl Test {
     }
 
     pub fn gen_measurement(&self) -> Result<DapMeasurement> {
-        gen_measurement_for(&self.vdaf_config)
+        self.vdaf_config
+            .gen_measurement()
+            .context("failed to generate a measurement")
     }
 
     pub async fn get_hpke_config(&self, aggregator: &Url) -> anyhow::Result<HpkeConfig> {
@@ -764,19 +766,6 @@ async fn send(req: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response
         }
     }
     unreachable!()
-}
-
-pub fn gen_measurement_for(vdaf_config: &VdafConfig) -> Result<DapMeasurement> {
-    match vdaf_config {
-        VdafConfig::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
-        VdafConfig::Prio3(daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-            length,
-            ..
-        }) => Ok(DapMeasurement::U64Vec(vec![0; *length])),
-        _ => Err(anyhow!(
-            "VDAF config {vdaf_config:?} not currently supported"
-        )),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
