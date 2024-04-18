@@ -3,6 +3,9 @@
 
 //! Mock backend functionality to test DAP protocol.
 
+#[cfg(feature = "report-generator")]
+pub mod report_generator;
+
 use crate::{
     audit_log::{AggregationJobAuditAction, AuditLog},
     auth::{BearerToken, BearerTokenProvider},
@@ -496,6 +499,10 @@ impl InMemoryAggregateStore {
 
         agg_store
     }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 /// An implementation of a DAP Aggregator without long-term storage. This is intended to be used
@@ -625,6 +632,12 @@ impl InMemoryAggregator {
             .await
             .expect("encountered unexpected error")
             .expect("missing task config")
+    }
+
+    pub fn clear_storage(&self) {
+        self.leader_state_store.lock().unwrap().delete_all();
+        self.helper_state_store.lock().unwrap().clear();
+        self.agg_store.lock().unwrap().clear();
     }
 }
 
