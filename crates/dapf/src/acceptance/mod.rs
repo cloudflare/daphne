@@ -17,7 +17,6 @@
 //!
 
 pub mod load_testing;
-pub mod report_generator;
 
 use crate::{deduce_dap_version_from_url, test_durations::TestDurations, HttpClientExt};
 use anyhow::{anyhow, bail, Context, Result};
@@ -33,6 +32,7 @@ use daphne::{
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
+    testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
     DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion,
@@ -55,8 +55,6 @@ use std::{
 use tokio::sync::Barrier;
 use tracing::{info, instrument};
 use url::Url;
-
-use self::report_generator::ReportGenerator;
 
 struct TestMetrics {
     aggregated: IntCounterVec,
@@ -599,11 +597,13 @@ impl Test {
                 opt.reports_per_agg_job,
                 |reports_per_agg_job| {
                     ReportGenerator::new(
-                        &test_task_config,
+                        &test_task_config.task_config.vdaf,
+                        &test_task_config.hpke_config_list,
+                        test_task_config.task_id,
                         reports_per_agg_job,
                         measurement.as_ref(),
                         version,
-                        now,
+                        now.0,
                     )
                 },
             )

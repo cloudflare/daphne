@@ -11,8 +11,13 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Context as _;
-use daphne::{messages, DapMeasurement, DapTaskConfig, DapVersion};
+use crate::{
+    fatal_error,
+    hpke::HpkeConfig,
+    messages::{self, TaskId, Time},
+    vdaf::VdafConfig,
+    DapError, DapMeasurement, DapVersion,
+};
 use deepsize::DeepSizeOf;
 use futures::Stream;
 use pin_project::pin_project;
@@ -22,8 +27,6 @@ use rand::{
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::mpsc;
-
-use super::{Now, TestTaskConfig};
 
 #[pin_project]
 pub struct ReportGenerator {
@@ -45,7 +48,7 @@ impl Stream for ReportGenerator {
                 *this.len = this.len.saturating_sub(1);
                 std::task::Poll::Ready(report)
             }
-            poll => poll,
+            poll @ std::task::Poll::Pending => poll,
         }
     }
 
@@ -55,24 +58,19 @@ impl Stream for ReportGenerator {
 }
 
 impl ReportGenerator {
-    pub(super) fn new(
-        test_task_config: &TestTaskConfig,
+    pub fn new(
+        vdaf: &VdafConfig,
+        hpke_config_list: &[HpkeConfig; 2],
+        task_id: TaskId,
         reports_per_batch: usize,
         measurement: &DapMeasurement,
         version: DapVersion,
-        now: Now,
+        now: Time,
     ) -> Self {
         let (tx, rx) = mpsc::channel(4);
         rayon::spawn({
-            let TestTaskConfig {
-                task_config: DapTaskConfig { vdaf, .. },
-                hpke_config_list,
-                task_id,
-                ..
-            } = test_task_config;
             let hpke_config_list = hpke_config_list.clone();
             let measurement = measurement.clone();
-            let task_id = *task_id;
             let vdaf = *vdaf;
             move || {
                 // perf measurements
@@ -80,8 +78,7 @@ impl ReportGenerator {
                 static LAST_INSTANT: Mutex<Option<Instant>> = Mutex::new(None);
                 // --
 
-                let report_time_dist =
-                    Uniform::from(now.0 - (60 * 60 * 36)..now.0 - (60 * 60 * 24));
+                let report_time_dist = Uniform::from(now - (60 * 60 * 36)..now - (60 * 60 * 24));
                 let error = (0..reports_per_batch).into_par_iter().try_for_each_with(
                     tx,
                     move |sender, _| {
@@ -98,8 +95,7 @@ impl ReportGenerator {
                                 measurement.clone(),
                                 vec![messages::Extension::Taskprov],
                                 version,
-                            )
-                            .context("generating report")?;
+                            )?;
 
                         // perf measurements
                         let count = GENERATED_REPORT_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
@@ -116,8 +112,8 @@ impl ReportGenerator {
 
                         sender
                             .blocking_send(report)
-                            .context("sending generated report")?;
-                        anyhow::Ok(())
+                            .map_err(|_| fatal_error!(err = "failed to send report, channel closed"))?;
+                        Ok::<_, DapError>(())
                     },
                 );
                 if let Err(error) = error {

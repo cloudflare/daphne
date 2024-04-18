@@ -8,12 +8,13 @@ use std::{
 };
 
 use crate::{
-    acceptance::{now, report_generator::ReportGenerator, Test, TestOptions},
+    acceptance::{now, Test, TestOptions},
     test_durations::TestDurations,
 };
 use chrono::{DateTime, Utc};
 use daphne::{
     messages::{BatchId, PartialBatchSelector},
+    testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
 };
 use futures::StreamExt;
@@ -396,11 +397,13 @@ pub async fn execute_single_combination_from_env(
                 reports_per_agg_job,
                 |reports_per_job| {
                     ReportGenerator::new(
-                        &test_task_config,
+                        &test_task_config.task_config.vdaf,
+                        &test_task_config.hpke_config_list,
+                        test_task_config.task_id,
                         reports_per_job,
                         &measurment,
                         VERSION,
-                        system_now,
+                        system_now.0,
                     )
                 },
             )
