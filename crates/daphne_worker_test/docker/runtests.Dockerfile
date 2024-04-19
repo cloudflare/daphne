@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 FROM rust:1.76-bookworm
 
 WORKDIR /tmp/dap_test
@@ -11,11 +14,10 @@ RUN apt-get update && \
 RUN rustup component add clippy-preview
 
 COPY Cargo.toml Cargo.lock ./
-COPY daphne_worker_test ./daphne_worker_test
-COPY daphne_worker ./daphne_worker
-COPY daphne_service_utils ./daphne_service_utils
-COPY daphne ./daphne
-RUN cargo new --lib daphne_server
+COPY crates/daphne_worker_test ./crates/daphne_worker_test
+COPY crates/daphne_worker ./crates/daphne_worker
+COPY crates/daphne_service_utils ./crates/daphne_service_utils
+COPY crates/daphne ./crates/daphne
 
 ENV PATH="${PATH}:/root/.cargo/bin"
 ENV RUST_BACKTRACE=1

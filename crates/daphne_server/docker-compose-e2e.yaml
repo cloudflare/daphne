@@ -30,8 +30,8 @@ services:
     ports:
       - "8787"
     build:
-      context: ..
-      dockerfile: daphne_server/docker/example-service.Dockerfile
+      context: ../..
+      dockerfile: crates/daphne_server/docker/example-service.Dockerfile
       target: leader
     depends_on:
       - leader_storage
@@ -43,8 +43,8 @@ services:
     ports:
       - "8788"
     build:
-      context: ..
-      dockerfile: daphne_server/docker/example-service.Dockerfile
+      context: ../..
+      dockerfile: crates/daphne_server/docker/example-service.Dockerfile
       target: helper
     depends_on:
       - helper_storage
@@ -55,8 +55,8 @@ services:
     networks:
       - dap_network
     build:
-      context: ..
-      dockerfile: daphne_worker_test/docker/runtests.Dockerfile
+      context: ../..
+      dockerfile: crates/daphne_worker_test/docker/runtests.Dockerfile
     depends_on:
       - leader
       - helper

@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 @0xd076f8051f8de41a;
 
 enum Method {
