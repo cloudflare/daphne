@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 FROM rust:1.76-bookworm AS builder
 
 RUN apt update && \
@@ -7,17 +10,15 @@ RUN apt update && \
 WORKDIR /dap
 
 COPY Cargo.toml Cargo.lock .
-COPY daphne daphne
-COPY daphne_service_utils daphne_service_utils
-COPY daphne_server daphne_server
-RUN cargo new --lib daphne_worker
-RUN cargo new --lib daphne_worker_test
+COPY crates/daphne crates/daphne
+COPY crates/daphne_service_utils crates/daphne_service_utils
+COPY crates/daphne_server crates/daphne_server
 
 RUN cargo build -p daphne_server --example service --features test-utils
 
 FROM debian:bookworm AS helper
 
-COPY ./daphne_server/examples/configuration-helper.toml configuration.toml
+COPY ./crates/daphne_server/examples/configuration-helper.toml configuration.toml
 RUN sed -i 's/localhost/helper_storage/g' configuration.toml
 COPY --from=builder /dap/target/debug/examples/service .
 
@@ -25,7 +26,7 @@ ENTRYPOINT ["./service"]
 
 FROM debian:bookworm AS leader
 
-COPY ./daphne_server/examples/configuration-leader.toml configuration.toml
+COPY ./crates/daphne_server/examples/configuration-leader.toml configuration.toml
 RUN sed -i 's/localhost/leader_storage/g' configuration.toml
 COPY --from=builder /dap/target/debug/examples/service .
 

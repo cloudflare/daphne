@@ -6,25 +6,7 @@
 # See: https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html#details
 resolver = "2"
 
-members = [
-    # Core Daphne crate
-    "daphne",
-
-    # Daphne storage with Worker backend
-    "daphne_worker",
-
-    # End-to-end tests
-    "daphne_worker_test",
-
-    # Daphne native implementation
-    "daphne_server",
-
-    # Service utilities shared by the server and worker
-    "daphne_service_utils",
-
-    # CLI for interacting with DAP deployments
-    "daphne_service_utils/dapf",
-]
+members = ["crates/*"]
 
 [profile.release]
 opt-level = "s"

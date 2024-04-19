@@ -1,3 +1,6 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Prepare dependencies common to both services.
 #
 # NOTE: We must use debian (bookworm). We cannot use alpine because building
@@ -16,23 +19,20 @@ RUN cargo install --git https://github.com/cloudflare/workers-rs
 FROM build-deps-common AS builder-service
 WORKDIR /build
 COPY Cargo.toml Cargo.lock /build/
-COPY daphne /build/daphne
-COPY daphne_server /build/daphne_server
-COPY daphne_service_utils /build/daphne_service_utils
-RUN cargo new --lib daphne_worker  # mock workspace dependency
-RUN cargo new --lib daphne_worker_test  # mock workspace dependency
+COPY crates/daphne /build/crates/daphne
+COPY crates/daphne_server /build/crates/daphne_server
+COPY crates/daphne_service_utils /build/crates/daphne_service_utils
 RUN cargo build --example service --features test-utils --release
 
 # Build the storage proxy.
 FROM build-deps-storage-proxy AS builder-storage-proxy
 WORKDIR /build
 COPY Cargo.toml Cargo.lock /build/
-COPY daphne /build/daphne
-RUN cargo new --lib daphne_server  # mock workspace dependency
-COPY daphne_service_utils /build/daphne_service_utils
-COPY daphne_worker /build/daphne_worker
-COPY daphne_worker_test /build/daphne_worker_test
-WORKDIR /build/daphne_worker_test
+COPY crates/daphne /build/crates/daphne
+COPY crates/daphne_service_utils /build/crates/daphne_service_utils
+COPY crates/daphne_worker /build/crates/daphne_worker
+COPY crates/daphne_worker_test /build/crates/daphne_worker_test
+WORKDIR /build/crates/daphne_worker_test
 RUN worker-build --dev
 
 # Prepare the environment in which the service and storage proxy will run.
@@ -40,9 +40,9 @@ FROM node:bookworm AS final
 RUN apt update && apt install -y colorized-logs
 RUN npm install -g wrangler@3.50.0 && npm cache clean --force
 COPY --from=builder-service /build/target/release/examples/service /
-COPY --from=builder-storage-proxy /build/daphne_worker_test/build /build
-COPY daphne_worker_test/wrangler.storage_proxy.toml /
-COPY daphne_server/examples/configuration-helper.toml /
+COPY --from=builder-storage-proxy /build/crates/daphne_worker_test/build /build
+COPY crates/daphne_worker_test/wrangler.storage_proxy.toml /
+COPY crates/daphne_server/examples/configuration-helper.toml /
 COPY interop/run_interop_helper.sh /
 WORKDIR /
 RUN wrangler deploy --dry-run -c wrangler.storage_proxy.toml
