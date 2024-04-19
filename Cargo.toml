@@ -5,8 +5,20 @@
 # This is needed to avoid pulling in tokio features in wasm targets, due to new features in version 0.0.18 of the `worker` crate
 # See: https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html#details
 resolver = "2"
-
 members = ["crates/*"]
+
+[workspace.package]
+version = "0.3.0"
+authors = [
+  "Christopher Patton <cpatton@cloudflare.com>",
+  "Armando Faz Hernandez <armfazh@cloudflare.com>",
+  "Pedro Mendes <pmendes@cloudflare.com>",
+]
+edition = "2021"
+license = "BSD-3-Clause"
+readme = "README.md"
+homepage = "https://github.com/cloudflare/daphne"
+repository = "https://github.com/cloudflare/daphne"
 
 [profile.release]
 opt-level = "s"
