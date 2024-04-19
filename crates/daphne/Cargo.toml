@@ -59,5 +59,9 @@ prometheus = ["dep:prometheus"]
 name = "vdaf"
 harness = false
 
+[[bench]]
+name = "aggregation"
+harness = false
+
 [lints]
 workspace = true
