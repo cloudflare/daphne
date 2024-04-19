@@ -58,6 +58,7 @@ impl Stream for ReportGenerator {
 }
 
 impl ReportGenerator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vdaf: &VdafConfig,
         hpke_config_list: &[HpkeConfig; 2],
@@ -66,6 +67,7 @@ impl ReportGenerator {
         measurement: &DapMeasurement,
         version: DapVersion,
         now: Time,
+        extensions: Vec<messages::Extension>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(4);
         rayon::spawn({
@@ -93,7 +95,7 @@ impl ReportGenerator {
                                 report_time_dist.sample(&mut thread_rng()),
                                 &task_id,
                                 measurement.clone(),
-                                vec![messages::Extension::Taskprov],
+                                extensions.clone(),
                                 version,
                             )?;
 

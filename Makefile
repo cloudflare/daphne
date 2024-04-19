@@ -15,7 +15,7 @@ storage_proxy:
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
 	export E2E_TEST_HPKE_SIGNING_CERTIFICATE="$$(cat /tmp/certificate)"; \
-	docker-compose -f ./crates/daphne-server/docker-compose-e2e.yaml up --build --abort-on-container-exit --exit-code-from test
+	docker compose -f ./crates/daphne-server/docker-compose-e2e.yaml up --build --abort-on-container-exit --exit-code-from test
 
 build_interop:
 	docker build . -f ./interop/Dockerfile.interop_helper --tag daphne-interop

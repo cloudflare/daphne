@@ -172,7 +172,7 @@ mod test {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
 
         // The helper's HPKE config indicates a KEM type no supported by the client.
-        let unsupported_hpke_config_list = vec![
+        let unsupported_hpke_config_list = [
             t.client_hpke_config_list[0].clone(),
             HpkeConfig {
                 id: thread_rng().gen(),

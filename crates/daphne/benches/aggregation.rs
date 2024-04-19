@@ -115,7 +115,7 @@ fn make_aggregator(
             min_batch_interval_start: u64::MAX,
             max_batch_interval_end: u64::MAX,
             supported_hpke_kems: vec![HpkeKemId::P256HkdfSha256],
-            allow_taskprov: true,
+            allow_taskprov: false,
         },
         token.clone(),
         collector_hpke,
@@ -131,15 +131,50 @@ async fn make_request(
     task_config: &DapTaskConfig,
     bearer_token: BearerToken,
 ) -> DapRequest<BearerToken> {
+    let fake_leader_hpke = HpkeReceiverConfig::gen(2, HpkeKemId::P256HkdfSha256).unwrap();
+    let leader = InMemoryAggregator::new_leader(
+        [],
+        [fake_leader_hpke],
+        aggregator.global_config.clone(),
+        aggregator.leader_token.clone(),
+        aggregator.collector_token.clone(),
+        aggregator.collector_hpke_config.clone(),
+        &prometheus::Registry::new(),
+        VERIFY_KEY,
+        "taskprov_leader_token".into(),
+        None,
+        None,
+    );
     let batch_id = BatchId(thread_rng().gen());
 
-    let fake_leader_hpke = HpkeReceiverConfig::gen(2, HpkeKemId::P256HkdfSha256).unwrap();
-
     let hpke_config_list = [
-        fake_leader_hpke.config,
+        leader.hpke_receiver_config_list[0].config.clone(),
         aggregator.hpke_receiver_config_list[0].config.clone(),
     ];
 
+    let payload = task_config
+        .produce_agg_job_req(
+            &leader,
+            &leader,
+            &task_id,
+            &daphne::messages::PartialBatchSelector::FixedSizeByBatchId { batch_id },
+            &daphne::DapAggregationParam::Empty,
+            ReportGenerator::new(
+                &task_config.vdaf,
+                &hpke_config_list,
+                task_id,
+                task_config.min_batch_size.try_into().unwrap(),
+                &task_config.vdaf.gen_measurement().unwrap(),
+                VERSION,
+                task_config.expiration - 10,
+                vec![],
+            ),
+            aggregator.metrics(),
+        )
+        .await
+        .unwrap()
+        .1;
+    assert_ne!(payload.prep_inits.len(), 0);
     DapRequest {
         version: daphne::DapVersion::Draft09,
         media_type: Some(daphne::constants::DapMediaType::AggregationJobInitReq),
@@ -147,29 +182,7 @@ async fn make_request(
         resource: daphne::DapResource::AggregationJob(daphne::messages::AggregationJobId(
             thread_rng().gen(),
         )),
-        payload: task_config
-            .produce_agg_job_req(
-                aggregator,
-                aggregator,
-                &task_id,
-                &daphne::messages::PartialBatchSelector::FixedSizeByBatchId { batch_id },
-                &daphne::DapAggregationParam::Empty,
-                ReportGenerator::new(
-                    &task_config.vdaf,
-                    &hpke_config_list,
-                    task_id,
-                    task_config.min_batch_size.try_into().unwrap(),
-                    &task_config.vdaf.gen_measurement().unwrap(),
-                    VERSION,
-                    task_config.expiration - 10,
-                ),
-                aggregator.metrics(),
-            )
-            .await
-            .unwrap()
-            .1
-            .get_encoded_with_param(&VERSION)
-            .unwrap(),
+        payload: payload.get_encoded_with_param(&VERSION).unwrap(),
         sender_auth: Some(bearer_token),
         taskprov: None,
     }

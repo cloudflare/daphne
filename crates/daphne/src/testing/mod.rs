@@ -25,6 +25,7 @@ use crate::{
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
         DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer,
     },
+    vdaf::VdafVerifyKey,
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
     DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
@@ -52,7 +53,7 @@ pub struct AggregationJobTest {
     pub(crate) task_config: DapTaskConfig,
     pub(crate) leader_hpke_receiver_config: HpkeReceiverConfig,
     pub(crate) helper_hpke_receiver_config: HpkeReceiverConfig,
-    pub(crate) client_hpke_config_list: Vec<HpkeConfig>,
+    pub(crate) client_hpke_config_list: [HpkeConfig; 2],
     pub(crate) collector_hpke_receiver_config: HpkeReceiverConfig,
 
     // the current time
@@ -65,9 +66,40 @@ pub struct AggregationJobTest {
     pub(crate) leader_metrics: DaphnePromMetrics,
 }
 
-fn initialize_reports(
+#[cfg(test)]
+async fn initialize_reports(
     is_leader: bool,
-    task_config: &DapTaskConfig,
+    vdaf_verify_key: VdafVerifyKey,
+    vdaf: VdafConfig,
+    agg_param: &DapAggregationParam,
+    consumed_reports: Vec<EarlyReportStateConsumed>,
+) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
+    let agg_param = agg_param.clone();
+    tokio::task::spawn_blocking(move || {
+        consumed_reports
+            .into_par_iter()
+            .map(|consumed| {
+                EarlyReportStateInitialized::initialize(
+                    is_leader,
+                    &vdaf_verify_key,
+                    &vdaf,
+                    &agg_param,
+                    consumed,
+                )
+            })
+            .collect()
+    })
+    .await
+    .unwrap()
+}
+
+#[cfg(not(test))]
+#[allow(clippy::unused_async)]
+async fn initialize_reports(
+    is_leader: bool,
+    vdaf_verify_key: VdafVerifyKey,
+    vdaf: VdafConfig,
     agg_param: &DapAggregationParam,
     consumed_reports: Vec<EarlyReportStateConsumed>,
 ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
@@ -76,8 +108,8 @@ fn initialize_reports(
         .map(|consumed| {
             EarlyReportStateInitialized::initialize(
                 is_leader,
-                &task_config.vdaf_verify_key,
-                &task_config.vdaf,
+                &vdaf_verify_key,
+                &vdaf,
                 agg_param,
                 consumed,
             )
@@ -98,7 +130,14 @@ impl DapReportInitializer for AggregationJobTest {
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(
+            is_leader,
+            task_config.vdaf_verify_key.clone(),
+            task_config.vdaf,
+            agg_param,
+            consumed_reports,
+        )
+        .await
     }
 }
 
@@ -136,7 +175,7 @@ impl AggregationJobTest {
             task_id,
             leader_hpke_receiver_config,
             helper_hpke_receiver_config,
-            client_hpke_config_list: vec![leader_hpke_config, helper_hpke_config],
+            client_hpke_config_list: [leader_hpke_config, helper_hpke_config],
             collector_hpke_receiver_config,
             task_config: DapTaskConfig {
                 version,
@@ -753,7 +792,14 @@ impl DapReportInitializer for InMemoryAggregator {
         agg_param: &DapAggregationParam,
         consumed_reports: Vec<EarlyReportStateConsumed>,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(is_leader, task_config, agg_param, consumed_reports)
+        initialize_reports(
+            is_leader,
+            task_config.vdaf_verify_key.clone(),
+            task_config.vdaf,
+            agg_param,
+            consumed_reports,
+        )
+        .await
     }
 }
 

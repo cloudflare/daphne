@@ -13,7 +13,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use daphne::{
-    messages::{BatchId, PartialBatchSelector},
+    messages::{self, BatchId, PartialBatchSelector},
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
 };
@@ -404,6 +404,7 @@ pub async fn execute_single_combination_from_env(
                         &measurment,
                         VERSION,
                         system_now.0,
+                        vec![messages::Extension::Taskprov],
                     )
                 },
             )
