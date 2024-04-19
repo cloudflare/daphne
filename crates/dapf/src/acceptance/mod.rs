@@ -606,6 +606,7 @@ impl Test {
                         measurement.as_ref(),
                         version,
                         now.0,
+                        vec![messages::Extension::Taskprov],
                     )
                 },
             )

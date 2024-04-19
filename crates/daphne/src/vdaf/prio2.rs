@@ -23,7 +23,7 @@ pub(crate) fn prio2_shard(
     dimension: usize,
     measurement: DapMeasurement,
     nonce: &[u8; 16],
-) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
+) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
     let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
     let (public_share, input_shares) = match measurement {
         DapMeasurement::U32Vec(ref data) => vdaf.shard(data, nonce)?,
@@ -39,7 +39,13 @@ pub(crate) fn prio2_shard(
         input_shares
             .iter()
             .map(|input_share| input_share.get_encoded())
-            .collect::<Result<Vec<_>, _>>()?,
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|e: Vec<_>| {
+                VdafError::Dap(fatal_error!(
+                    err = format!("expected 2 input shares got {}", e.len())
+                ))
+            })?,
     ))
 }
 

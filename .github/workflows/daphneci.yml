@@ -35,7 +35,7 @@ jobs:
       - name: Linting
         run: cargo hack clippy --each-feature -- -D warnings
       - name: Testing
-        run: cargo test --all-targets
+        run: cargo test
       - name: Doc Testing
         run: cargo test --doc
 

@@ -11,8 +11,6 @@ RUN apt-get update && \
         pkg-config \
         capnproto
 
-RUN rustup component add clippy-preview
-
 COPY Cargo.toml Cargo.lock ./
 COPY crates/daphne-worker-test ./crates/daphne-worker-test
 COPY crates/daphne-worker ./crates/daphne-worker

@@ -4,7 +4,6 @@
 #[cfg(any(test, feature = "test-utils"))]
 use crate::vdaf::mastic::mastic_shard;
 use crate::{
-    fatal_error,
     hpke::HpkeConfig,
     messages::{
         encode_u32_bytes, Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId,
@@ -40,7 +39,7 @@ impl VdafConfig {
     /// * `version` is the `DapVersion` to use.
     pub fn produce_report_with_extensions(
         &self,
-        hpke_config_list: &[HpkeConfig],
+        hpke_config_list: &[HpkeConfig; 2],
         time: Time,
         task_id: &TaskId,
         measurement: DapMeasurement,
@@ -68,21 +67,14 @@ impl VdafConfig {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn produce_report_with_extensions_for_shares(
         public_share: Vec<u8>,
-        input_shares: Vec<Vec<u8>>,
-        hpke_configs: &[HpkeConfig],
+        input_shares: [Vec<u8>; 2],
+        hpke_configs: &[HpkeConfig; 2],
         time: Time,
         task_id: &TaskId,
         report_id: &ReportId,
         extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
-        if input_shares.len() != 2 {
-            return Err(fatal_error!(err = "unexpected number of input shares"));
-        }
-        if hpke_configs.len() != 2 {
-            return Err(fatal_error!(err = "unexpected number of HPKE configs"));
-        }
-
         let mut plaintext_input_share = PlaintextInputShare {
             extensions,
             payload: Vec::default(),
@@ -142,7 +134,7 @@ impl VdafConfig {
         &self,
         measurement: DapMeasurement,
         nonce: &[u8; 16],
-    ) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
+    ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
         match self {
             Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
             Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
@@ -173,7 +165,7 @@ impl VdafConfig {
     /// * `version` is the `DapVersion` to use.
     pub fn produce_report(
         &self,
-        hpke_config_list: &[HpkeConfig],
+        hpke_config_list: &[HpkeConfig; 2],
         time: Time,
         task_id: &TaskId,
         measurement: DapMeasurement,

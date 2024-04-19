@@ -7,6 +7,8 @@
 //!
 //! [draft-mouris-cfrg-mastic]: https://datatracker.ietf.org/doc/draft-mouris-cfrg-mastic/
 
+use std::array;
+
 use crate::{fatal_error, DapAggregateResult, DapAggregationParam, DapMeasurement};
 
 use super::{
@@ -58,7 +60,7 @@ pub(crate) fn mastic_shard(
     input_size: usize,
     weight_config: MasticWeightConfig,
     measurement: DapMeasurement,
-) -> Result<(Vec<u8>, Vec<Vec<u8>>), VdafError> {
+) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
     match (weight_config, measurement) {
         (
             MasticWeightConfig::Count,
@@ -69,7 +71,7 @@ pub(crate) fn mastic_shard(
         ) if input.len() == input_size => {
             // Simulate Mastic, insecurely. Set the public share to the input and each input share
             // to the weight.
-            Ok((input, vec![vec![u8::from(counter)]; 2]))
+            Ok((input, array::from_fn(|_| vec![u8::from(counter)])))
         }
         _ => Err(VdafError::Dap(fatal_error!(
             err = "mastic: unexpected measurement type"
