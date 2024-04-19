@@ -3,14 +3,13 @@
 
 [package]
 name = "dapf"
-version = "0.3.0"
-authors = [
-  "Christopher Patton <cpatton@cloudflare.com>",
-  "Armando Faz Hernandez <armfazh@cloudflare.com>",
-  "Pedro Mendes <pmendes@cloudflare.com>",
-]
-edition = "2021"
-license = "BSD-3-Clause"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
