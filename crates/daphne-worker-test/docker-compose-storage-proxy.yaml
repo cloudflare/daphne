@@ -8,7 +8,7 @@ services:
       - 4000:4000
     build:
       context: ../..
-      dockerfile: crates/daphne_worker_test/docker/storage_proxy.Dockerfile
+      dockerfile: crates/daphne-worker-test/docker/storage-proxy.Dockerfile
     command:
       - "--port=4000"
       - "--global-random"
@@ -17,7 +17,7 @@ services:
       - 4001:4001
     build:
       context: ../..
-      dockerfile: crates/daphne_worker_test/docker/storage_proxy.Dockerfile
+      dockerfile: crates/daphne-worker-test/docker/storage-proxy.Dockerfile
     command:
       - "--port=4001"
       - "--global-random"

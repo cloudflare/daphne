@@ -93,7 +93,7 @@ impl ObjectIdFrom {
     /// Assert that the object is being referenced by name.
     ///
     /// # Note
-    /// This is here for convenience of the `daphne_worker` and can be removed in the future.
+    /// This is here for convenience of the `daphne-worker` and can be removed in the future.
     pub fn unwrap_from_name(self) -> String {
         let Self::Name(name) = self else {
             panic!("unwraped a {self:?} when a Name was expected");
@@ -104,7 +104,7 @@ impl ObjectIdFrom {
     /// Assert that the object is being referenced by id.
     ///
     /// # Note
-    /// This is here for convenience of the `daphne_worker` and can be removed in the future.
+    /// This is here for convenience of the `daphne-worker` and can be removed in the future.
     pub fn unwrap_from_hex(self) -> String {
         let Self::Hex(name) = self else {
             panic!("unwraped a {self:?} when a Hex was expected");

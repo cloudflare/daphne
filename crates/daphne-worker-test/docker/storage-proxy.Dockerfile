@@ -17,19 +17,19 @@ RUN cargo install --git https://github.com/cloudflare/workers-rs
 RUN rustup target add wasm32-unknown-unknown
 
 COPY Cargo.toml Cargo.lock ./
-COPY crates/daphne_worker_test ./crates/daphne_worker_test
-COPY crates/daphne_worker ./crates/daphne_worker
-COPY crates/daphne_service_utils ./crates/daphne_service_utils
+COPY crates/daphne-worker-test ./crates/daphne-worker-test
+COPY crates/daphne-worker ./crates/daphne-worker
+COPY crates/daphne-service-utils ./crates/daphne-service-utils
 COPY crates/daphne ./crates/daphne
-WORKDIR /tmp/dap_test/crates/daphne_worker_test
-COPY crates/daphne_worker_test/wrangler.storage_proxy.toml ./wrangler.toml
+WORKDIR /tmp/dap_test/crates/daphne-worker-test
+COPY crates/daphne-worker-test/wrangler.storage-proxy.toml ./wrangler.toml
 RUN worker-build --dev
 RUN wrangler publish --dry-run
 
 FROM alpine:3.16 AS test
 RUN apk add --update npm bash
 RUN npm install -g miniflare@2.14.0
-COPY --from=builder /tmp/dap_test/crates/daphne_worker_test/wrangler.toml /wrangler.toml
-COPY --from=builder /tmp/dap_test/crates/daphne_worker_test/build/worker/* /build/worker/
+COPY --from=builder /tmp/dap_test/crates/daphne-worker-test/wrangler.toml /wrangler.toml
+COPY --from=builder /tmp/dap_test/crates/daphne-worker-test/build/worker/* /build/worker/
 # `-B ""` to skip build command.
 ENTRYPOINT ["miniflare", "--modules", "--modules-rule=CompiledWasm=**/*.wasm", "/build/worker/shim.mjs", "-B", ""]

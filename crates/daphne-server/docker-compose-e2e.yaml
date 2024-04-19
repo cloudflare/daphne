@@ -14,7 +14,7 @@ services:
     ports:
       - "4000"
     extends:
-      file: ../daphne_worker_test/docker-compose-storage-proxy.yaml
+      file: ../daphne-worker-test/docker-compose-storage-proxy.yaml
       service: leader_storage
   helper_storage:
     networks:
@@ -22,7 +22,7 @@ services:
     ports:
       - "4001"
     extends:
-      file: ../daphne_worker_test/docker-compose-storage-proxy.yaml
+      file: ../daphne-worker-test/docker-compose-storage-proxy.yaml
       service: helper_storage
   leader:
     networks:
@@ -31,7 +31,7 @@ services:
       - "8787"
     build:
       context: ../..
-      dockerfile: crates/daphne_server/docker/example-service.Dockerfile
+      dockerfile: crates/daphne-server/docker/example-service.Dockerfile
       target: leader
     depends_on:
       - leader_storage
@@ -44,7 +44,7 @@ services:
       - "8788"
     build:
       context: ../..
-      dockerfile: crates/daphne_server/docker/example-service.Dockerfile
+      dockerfile: crates/daphne-server/docker/example-service.Dockerfile
       target: helper
     depends_on:
       - helper_storage
@@ -56,7 +56,7 @@ services:
       - dap_network
     build:
       context: ../..
-      dockerfile: crates/daphne_worker_test/docker/runtests.Dockerfile
+      dockerfile: crates/daphne-worker-test/docker/runtests.Dockerfile
     depends_on:
       - leader
       - helper

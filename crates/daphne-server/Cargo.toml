@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
-name = "daphne_server"
+name = "daphne-server"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -16,7 +16,7 @@ description = "Workers backend for Daphne"
 axum.workspace = true
 bincode.workspace = true
 daphne = { path = "../daphne" }
-daphne_service_utils = { path = "../daphne_service_utils", features = ["durable_requests"] }
+daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -38,7 +38,7 @@ url.workspace = true
 clap.workspace = true
 config.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
-daphne_service_utils = { path = "../daphne_service_utils", features = ["prometheus"] }
+daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus"] }
 paste.workspace = true
 prometheus.workspace = true
 rand.workspace = true
@@ -48,7 +48,7 @@ webpki.workspace = true
 x509-parser.workspace = true
 
 [features]
-test-utils = ["daphne/test-utils", "daphne_service_utils/test-utils"]
+test-utils = ["daphne/test-utils", "daphne-service-utils/test-utils"]
 
 [lints]
 workspace = true

@@ -14,9 +14,9 @@ RUN apt-get update && \
 RUN rustup component add clippy-preview
 
 COPY Cargo.toml Cargo.lock ./
-COPY crates/daphne_worker_test ./crates/daphne_worker_test
-COPY crates/daphne_worker ./crates/daphne_worker
-COPY crates/daphne_service_utils ./crates/daphne_service_utils
+COPY crates/daphne-worker-test ./crates/daphne-worker-test
+COPY crates/daphne-worker ./crates/daphne-worker
+COPY crates/daphne-service-utils ./crates/daphne-service-utils
 COPY crates/daphne ./crates/daphne
 
 ENV PATH="${PATH}:/root/.cargo/bin"

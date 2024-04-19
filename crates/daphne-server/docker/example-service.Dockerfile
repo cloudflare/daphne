@@ -11,14 +11,14 @@ WORKDIR /dap
 
 COPY Cargo.toml Cargo.lock .
 COPY crates/daphne crates/daphne
-COPY crates/daphne_service_utils crates/daphne_service_utils
-COPY crates/daphne_server crates/daphne_server
+COPY crates/daphne-service-utils crates/daphne-service-utils
+COPY crates/daphne-server crates/daphne-server
 
-RUN cargo build -p daphne_server --example service --features test-utils
+RUN cargo build -p daphne-server --example service --features test-utils
 
 FROM debian:bookworm AS helper
 
-COPY ./crates/daphne_server/examples/configuration-helper.toml configuration.toml
+COPY ./crates/daphne-server/examples/configuration-helper.toml configuration.toml
 RUN sed -i 's/localhost/helper_storage/g' configuration.toml
 COPY --from=builder /dap/target/debug/examples/service .
 
@@ -26,7 +26,7 @@ ENTRYPOINT ["./service"]
 
 FROM debian:bookworm AS leader
 
-COPY ./crates/daphne_server/examples/configuration-leader.toml configuration.toml
+COPY ./crates/daphne-server/examples/configuration-leader.toml configuration.toml
 RUN sed -i 's/localhost/leader_storage/g' configuration.toml
 COPY --from=builder /dap/target/debug/examples/service .
 

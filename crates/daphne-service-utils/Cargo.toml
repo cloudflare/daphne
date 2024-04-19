@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
-name = "daphne_service_utils"
+name = "daphne-service-utils"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

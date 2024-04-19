@@ -110,7 +110,7 @@ impl TestRunner {
             method: Default::default(),
         };
 
-        // This block needs to be kept in-sync with daphne_worker_test/wrangler.toml.
+        // This block needs to be kept in-sync with daphne-worker-test/wrangler.toml.
         let global_config = DapGlobalConfig {
             max_batch_duration: 360_000,
             min_batch_interval_start: 259_200,
