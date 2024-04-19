@@ -26,19 +26,19 @@ The [repository](https://github.com/cloudflare/daphne) contains three crates:
   for the functionalities that a concrete instantantiation of the protocol is
   required to implement. We call these functionalities "roles".
 
-* `daphne_worker` (aka "Daphne-Worker") -- Implements a backend for the
+* `daphne-worker` (aka "Daphne-Worker") -- Implements a backend for the
   Aggregator roles based on [Cloudflare
   Workers](https://workers.cloudflare.com/). This crate also implements the
   various HTTP endpoints defined in the DAP spec.
 
-* `daphne_worker_test` -- Defines a deployment of Daphne-Worker for testing
+* `daphne-worker-test` -- Defines a deployment of Daphne-Worker for testing
   changes locally. It also implements integration tests for Daphne and
   Daphne-Worker.
 
 ## Testing
 
-The `daphne` crate relies on unit tests. The `daphne_worker` crate relies mostly
-on integration tests implemented in `daphne_worker_test`. See the README in that
+The `daphne` crate relies on unit tests. The `daphne-worker` crate relies mostly
+on integration tests implemented in `daphne-worker-test`. See the README in that
 directory for instructions on running Daphne-Worker locally.
 
 Integration tests can be run via docker-compose.

@@ -16,7 +16,7 @@
 //!
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
-//! protocol is required to implement. For example, the `daphne_worker` crate implements a backend
+//! protocol is required to implement. For example, the `daphne-worker` crate implements a backend
 //! for the DAP Leader and Helper. See the [`crate::roles`](roles) module for details.
 //!
 //! Daphne is not yet feature complete. Known issues include:

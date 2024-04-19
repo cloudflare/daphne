@@ -27,7 +27,7 @@ cfg-if.workspace = true
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne = { path = "../daphne", features = ["test-utils"] }
-daphne_worker = { path = "../daphne_worker", features = ["test-utils"] }
+daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
 # We don't actually call into getrandom directly, but prio does, so we pretend
 # we depend on it just so we can activate the js feature. Idealy this would be
 # a prio feature.
@@ -38,7 +38,7 @@ worker.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 anyhow.workspace = true
-daphne_service_utils = { path = "../daphne_service_utils" }
+daphne-service-utils = { path = "../daphne-service-utils" }
 futures.workspace = true
 hex.workspace = true
 hpke-rs.workspace = true

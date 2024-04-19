@@ -17,7 +17,7 @@ async-trait.workspace = true
 chrono.workspace = true
 clap = { workspace = true, features = ["env"] }
 daphne = { path = "../daphne", features = ["test-utils", "prometheus"] }
-daphne_service_utils = { path = "../daphne_service_utils" }
+daphne-service-utils = { path = "../daphne-service-utils" }
 deepsize.workspace = true
 futures.workspace = true
 hex.workspace = true

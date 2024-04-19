@@ -462,7 +462,7 @@ impl AuditLog for MockAuditLog {
 
 /// Aggregate share and associated book-keeping data for a bucket of reports.
 //
-// TODO heavy hitters: Move this code into a space where `daphne_server` can use it. We need the
+// TODO heavy hitters: Move this code into a space where `daphne-server` can use it. We need the
 // same logic there.
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct AggregateStore {

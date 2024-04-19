@@ -20,8 +20,8 @@ FROM build-deps-common AS builder-service
 WORKDIR /build
 COPY Cargo.toml Cargo.lock /build/
 COPY crates/daphne /build/crates/daphne
-COPY crates/daphne_server /build/crates/daphne_server
-COPY crates/daphne_service_utils /build/crates/daphne_service_utils
+COPY crates/daphne-server /build/crates/daphne-server
+COPY crates/daphne-service-utils /build/crates/daphne-service-utils
 RUN cargo build --example service --features test-utils --release
 
 # Build the storage proxy.
@@ -29,10 +29,10 @@ FROM build-deps-storage-proxy AS builder-storage-proxy
 WORKDIR /build
 COPY Cargo.toml Cargo.lock /build/
 COPY crates/daphne /build/crates/daphne
-COPY crates/daphne_service_utils /build/crates/daphne_service_utils
-COPY crates/daphne_worker /build/crates/daphne_worker
-COPY crates/daphne_worker_test /build/crates/daphne_worker_test
-WORKDIR /build/crates/daphne_worker_test
+COPY crates/daphne-service-utils /build/crates/daphne-service-utils
+COPY crates/daphne-worker /build/crates/daphne-worker
+COPY crates/daphne-worker-test /build/crates/daphne-worker-test
+WORKDIR /build/crates/daphne-worker-test
 RUN worker-build --dev
 
 # Prepare the environment in which the service and storage proxy will run.
@@ -40,12 +40,12 @@ FROM node:bookworm AS final
 RUN apt update && apt install -y colorized-logs
 RUN npm install -g wrangler@3.50.0 && npm cache clean --force
 COPY --from=builder-service /build/target/release/examples/service /
-COPY --from=builder-storage-proxy /build/crates/daphne_worker_test/build /build
-COPY crates/daphne_worker_test/wrangler.storage_proxy.toml /
-COPY crates/daphne_server/examples/configuration-helper.toml /
+COPY --from=builder-storage-proxy /build/crates/daphne-worker-test/build /build
+COPY crates/daphne-worker-test/wrangler.storage-proxy.toml /
+COPY crates/daphne-server/examples/configuration-helper.toml /
 COPY interop/run_interop_helper.sh /
 WORKDIR /
-RUN wrangler deploy --dry-run -c wrangler.storage_proxy.toml
+RUN wrangler deploy --dry-run -c wrangler.storage-proxy.toml
 
 # Expose the port for the service. The test runner does not need direct access
 # to the storage proxy.

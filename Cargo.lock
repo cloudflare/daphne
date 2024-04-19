@@ -751,7 +751,7 @@ dependencies = [
  "chrono",
  "clap",
  "daphne",
- "daphne_service_utils",
+ "daphne-service-utils",
  "deepsize",
  "futures",
  "hex",
@@ -803,37 +803,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "daphne-worker-test"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "assert_matches",
- "cap",
- "cfg-if",
- "console_error_panic_hook",
- "daphne",
- "daphne_service_utils",
- "daphne_worker",
- "futures",
- "getrandom",
- "hex",
- "hpke-rs",
- "paste",
- "prio",
- "rand",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
- "webpki",
- "worker",
- "x509-parser",
-]
-
-[[package]]
-name = "daphne_server"
+name = "daphne-server"
 version = "0.3.0"
 dependencies = [
  "axum",
@@ -841,7 +811,7 @@ dependencies = [
  "clap",
  "config",
  "daphne",
- "daphne_service_utils",
+ "daphne-service-utils",
  "futures",
  "hex",
  "http",
@@ -868,7 +838,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "daphne_service_utils"
+name = "daphne-service-utils"
 version = "0.3.0"
 dependencies = [
  "async-trait",
@@ -890,13 +860,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "daphne_worker"
+name = "daphne-worker"
 version = "0.3.0"
 dependencies = [
  "bincode",
  "chrono",
  "daphne",
- "daphne_service_utils",
+ "daphne-service-utils",
  "futures",
  "hex",
  "paste",
@@ -914,6 +884,36 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "worker",
+]
+
+[[package]]
+name = "daphne-worker-test"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "cap",
+ "cfg-if",
+ "console_error_panic_hook",
+ "daphne",
+ "daphne-service-utils",
+ "daphne-worker",
+ "futures",
+ "getrandom",
+ "hex",
+ "hpke-rs",
+ "paste",
+ "prio",
+ "rand",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+ "webpki",
+ "worker",
+ "x509-parser",
 ]
 
 [[package]]

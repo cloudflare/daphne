@@ -125,7 +125,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum TestAction {
-    /// Add an hpke config to a test-utils enabled `daphne_server`.
+    /// Add an hpke config to a test-utils enabled `daphne-server`.
     AddHpkeConfig {
         aggregator_url: Url,
         #[arg(short, long, default_value = "x25519_hkdf_sha256")]

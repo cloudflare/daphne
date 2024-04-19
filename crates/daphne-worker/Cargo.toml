@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
-name = "daphne_worker"
+name = "daphne-worker"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -35,8 +35,8 @@ tracing.workspace = true
 url.workspace = true
 worker.workspace = true
 
-[dependencies.daphne_service_utils]
-path = "../daphne_service_utils"
+[dependencies.daphne-service-utils]
+path = "../daphne-service-utils"
 features = ["prometheus", "durable_requests"]
 
 [dev-dependencies]
@@ -45,7 +45,7 @@ paste.workspace = true
 reqwest.workspace = true # used in doc tests
 
 [features]
-test-utils = ["daphne_service_utils/test-utils", "dep:futures"]
+test-utils = ["daphne-service-utils/test-utils", "dep:futures"]
 
 [lints]
 workspace = true
