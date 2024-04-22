@@ -245,9 +245,9 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
         }
     }
     println!("====== SUCCESS RATE ======");
-    println!(";;;;;agg_init;;;agg_cont;;;agg_share");
+    println!(";;;;;agg_init;;;agg_share");
     print!("{}", MeasurementParameters::headers());
-    println!(";success;runs;min;avg;max;min;avg;max;min;avg;max;reports/sec");
+    println!(";success;runs;min;avg;max;min;avg;max;reports/sec");
     for (param, results) in measurments {
         println!(
             "{param};{};{};{};{};{}",
