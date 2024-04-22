@@ -280,10 +280,6 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
         .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
     let binding = ctx.env.durable_object(&parsed_req.binding)?;
-    let obj = match &parsed_req.id {
-        ObjectIdFrom::Name(name) => binding.id_from_name(name)?,
-        ObjectIdFrom::Hex(hex) => binding.id_from_string(hex)?,
-    };
 
     let mut do_req = RequestInit::new();
     do_req.with_method(worker::Method::Post);
@@ -299,8 +295,10 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
     let url = Url::parse("https://fake-host/").unwrap().join(uri).unwrap();
     let do_req = Request::new_with_init(url.as_str(), &do_req)?;
 
-    let stub = obj.get_stub()?;
-
+    let obj = match &parsed_req.id {
+        ObjectIdFrom::Name(name) => binding.id_from_name(name)?,
+        ObjectIdFrom::Hex(hex) => binding.id_from_string(hex)?,
+    };
     let attempts = if parsed_req.retry {
         RETRY_DELAYS.len() + 1
     } else {
@@ -308,7 +306,7 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
     };
     let mut attempt = 1;
     loop {
-        match stub.fetch_with_request(do_req.clone()?).await {
+        match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
                 if let Some(metrics) = &ctx.metrics {
                     metrics.durable_request_retry_count_inc(
