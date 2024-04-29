@@ -10,3 +10,4 @@ dist
 .secrets
 .vscode
 .rusty-hook.toml
+package-lock.json

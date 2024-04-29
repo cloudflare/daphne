@@ -28,6 +28,9 @@ DAP_DEPLOYMENT = "dev"
 DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"
 DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
 
+[dev]
+ip = "0.0.0.0"
+
 [durable_objects]
 bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },

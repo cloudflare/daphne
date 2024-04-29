@@ -66,7 +66,7 @@ jobs:
       - name: Run integration tests
         uses: isbang/compose-action@v1.4.1
         with:
-          compose-file: "./daphne_server/docker-compose-e2e.yaml"
+          compose-file: "./crates/daphne-server/docker-compose-e2e.yaml"
           up-flags: "--build --abort-on-container-exit --exit-code-from test"
         env:
           HPKE_SIGNING_KEY: ${{ steps.hpke_signing_key.outputs.hpke_signing_key }}
