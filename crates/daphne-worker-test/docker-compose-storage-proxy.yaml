@@ -11,7 +11,6 @@ services:
       dockerfile: crates/daphne-worker-test/docker/storage-proxy.Dockerfile
     command:
       - "--port=4000"
-      - "--global-random"
   helper_storage:
     ports:
       - 4001:4001
@@ -20,4 +19,3 @@ services:
       dockerfile: crates/daphne-worker-test/docker/storage-proxy.Dockerfile
     command:
       - "--port=4001"
-      - "--global-random"
