@@ -559,10 +559,10 @@ impl DapTaskConfig {
         let mut transitions = Vec::with_capacity(num_reports);
 
         for initialized_report in initialized_reports {
-            let var = match report_status.get(&initialized_report.metadata().id) {
+            let status = report_status.get(&initialized_report.metadata().id);
+            let var = match status {
                 Some(ReportProcessedStatus::Rejected(failure)) => TransitionVar::Failed(*failure),
-                Some(ReportProcessedStatus::Aggregated) => TransitionVar::Finished,
-                None => match initialized_report {
+                Some(ReportProcessedStatus::Aggregated) | None => match initialized_report {
                     EarlyReportStateInitialized::Ready {
                         metadata,
                         public_share: _,
@@ -598,13 +598,17 @@ impl DapTaskConfig {
 
                         match res {
                             Ok((data, prep_msg)) => {
-                                agg_span.add_out_share(
-                                    self,
-                                    part_batch_sel,
-                                    metadata.id,
-                                    metadata.time,
-                                    data,
-                                )?;
+                                // If we have not processed this report yet, then add the output
+                                // share to the aggregate span.
+                                if status.is_none() {
+                                    agg_span.add_out_share(
+                                        self,
+                                        part_batch_sel,
+                                        metadata.id,
+                                        metadata.time,
+                                        data,
+                                    )?;
+                                }
 
                                 let mut outbound = Vec::with_capacity(1 + prep_msg.len());
                                 // Add ping-pong "finish" message framing (draft-irtf-cfrg-vdaf-08,
@@ -702,14 +706,6 @@ impl DapTaskConfig {
                 TransitionVar::Failed(failure) => {
                     metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
                     continue;
-                }
-
-                TransitionVar::Finished => {
-                    return Err(DapAbort::InvalidMessage {
-                        detail: "helper sent unexpected `Finished` message".to_string(),
-                        task_id: Some(*task_id),
-                    }
-                    .into())
                 }
             };
 

@@ -566,8 +566,9 @@ mod test {
             .await;
         let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
-        // Helper sent a transition with an unrecognized report ID.
-        agg_job_resp.transitions[0].var = TransitionVar::Finished;
+        // Helper sent a transition with an unrecognized report ID. Simulate this by flipping the
+        // first bit of the report ID.
+        agg_job_resp.transitions[0].report_id.0[0] ^= 1;
 
         assert_matches!(
             t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),

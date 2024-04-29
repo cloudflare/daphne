@@ -550,7 +550,6 @@ impl Decode for Transition {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum TransitionVar {
     Continued(Vec<u8>),
-    Finished,
     Failed(TransitionFailure),
 }
 
@@ -560,9 +559,6 @@ impl Encode for TransitionVar {
             TransitionVar::Continued(vdaf_message) => {
                 0_u8.encode(bytes)?;
                 encode_u32_bytes(bytes, vdaf_message)?;
-            }
-            TransitionVar::Finished => {
-                1_u8.encode(bytes)?;
             }
             TransitionVar::Failed(err) => {
                 2_u8.encode(bytes)?;
@@ -577,7 +573,6 @@ impl Decode for TransitionVar {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
             0 => Ok(Self::Continued(decode_u32_bytes(bytes)?)),
-            1 => Ok(Self::Finished),
             2 => Ok(Self::Failed(TransitionFailure::decode(bytes)?)),
             _ => Err(CodecError::UnexpectedValue),
         }
