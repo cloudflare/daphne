@@ -8,33 +8,33 @@
 //!
 //! # KV
 //!
-//! The prefix of all KV request URIs is [`KV_PATH_BASE`].
+//! The prefix of all KV request URIs is [`KV_PATH_PREFIX`].
 //!
 //! ## Getting a key
 //!
-//! Make a `GET` request with uri `{KV_PATH_BASE}/path/to/key`.
+//! Make a `GET` request with uri `{KV_PATH_PREFIX}/path/to/key`.
 //!
 //! ## Putting a key
 //!
-//! Make a `POST` request with uri `{KV_PATH_BASE}/path/to/key`. The body of the request will be
+//! Make a `POST` request with uri `{KV_PATH_PREFIX}/path/to/key`. The body of the request will be
 //! stored in kv as is, without any processing.
 //!
 //! ## Putting a key if it doesn't exist
 //!
-//! Make a `PUT` request with uri `{KV_PATH_BASE}/path/to/key`. The body of the request will be
+//! Make a `PUT` request with uri `{KV_PATH_PREFIX}/path/to/key`. The body of the request will be
 //! stored in kv as is, without any processing, if this key is not already present in KV.
 //!
 //! ## Deleting a key
 //!
-//! Make a `DELETE` request with uri `{KV_PATH_BASE}/path/to/key`.
+//! Make a `DELETE` request with uri `{KV_PATH_PREFIX}/path/to/key`.
 //!
 //!
 //! # Durable Objects
 //!
-//! The prefix of all durable object request URIs is [`DO_PATH_BASE`].
+//! The prefix of all durable object request URIs is [`DO_PATH_PREFIX`].
 //!
 //! To interact with a durable object, create an instance of [`DurableRequest`], which will be the
-//! body of a `POST` request to `{DO_PATH_BASE}/{DURABLE_OBJECT_METHOD}` where
+//! body of a `POST` request to `{DO_PATH_PREFIX}/{DURABLE_OBJECT_METHOD}` where
 //! `DURABLE_OBJECT_METHOD` is defined by the [`DurableMethod::to_uri`][to_uri] trait method of the
 //! binding used to create the [`DurableRequest`].
 //!

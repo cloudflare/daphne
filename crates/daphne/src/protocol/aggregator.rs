@@ -766,7 +766,7 @@ impl DapTaskConfig {
         )
     }
 
-    /// Like [`produce_leader_encrypted_agg_share`](VdafConfig::produce_leader_encrypted_agg_share) but run by the Helper in response to an
+    /// Like [`produce_leader_encrypted_agg_share`](Self::produce_leader_encrypted_agg_share) but run by the Helper in response to an
     /// aggregate-share request.
     pub fn produce_helper_encrypted_agg_share(
         &self,

@@ -230,7 +230,7 @@ async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
 /// Reference to a DO instance.
 #[derive(Deserialize, Serialize)]
 pub(crate) struct DurableReference {
-    /// The DO binding, e.g., "DAP_REPORT_STORE".
+    /// The DO binding, e.g., `DAP_REPORT_STORE`.
     pub(crate) binding: String,
 
     /// Unique ID assigned to the DO instance by the Workers runtime.

@@ -132,7 +132,7 @@ impl InMemoryLeaderState {
             .map_err(|e| fatal_error!(err = ?e))?;
 
         // Store the collection job in the pending state.
-        if per_task.coll_jobs.get(coll_job_id).is_some() {
+        if per_task.coll_jobs.contains_key(coll_job_id) {
             return Err(DapError::Abort(DapAbort::BadRequest(format!(
                 "tried to overwrite collection job {}",
                 coll_job_id.to_base64url()

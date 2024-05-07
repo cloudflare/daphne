@@ -24,21 +24,23 @@ pub enum DapAbort {
     #[error("bad request")]
     BadRequest(String),
 
-    /// Invalid batch. Sent in response to a CollectReq or AggregateShareReq.
+    /// Invalid batch. Sent in response to a [`CollectionReq`](crate::messages::CollectionReq) or
+    /// [`AggregateShareReq`](crate::messages::AggregateShareReq).
     #[error("batchInvalid")]
     BatchInvalid { detail: String, task_id: TaskId },
 
-    /// Batch mismatch. Sent in response to an AggregateShareReq.
+    /// Batch mismatch. Sent in response to an
+    /// [`AggregateShareReq`](crate::messages::AggregateShareReq).
     #[error("batchMismatch")]
     BatchMismatch { detail: String, task_id: TaskId },
 
-    /// Batch overlap. Sent in response to an CollectReq for which the Leader detects the same
+    /// Batch overlap. Sent in response to an [`CollectionReq`](crate::messages::CollectionReq) for which the Leader detects the same
     /// Collector requesting an aggregate share which it has collected in the past.
     #[error("batchOverlap")]
     BatchOverlap { detail: String, task_id: TaskId },
 
-    /// Invalid batch size (either too small or too large). Sent in response to a CollectReq or
-    /// AggregateShareReq.
+    /// Invalid batch size (either too small or too large). Sent in response to a `CollectReq` or
+    /// `AggregateShareReq`.
     #[error("invalidBatchSize")]
     InvalidBatchSize { detail: String, task_id: TaskId },
 
@@ -50,7 +52,8 @@ pub enum DapAbort {
     #[error("missingTaskID")]
     MissingTaskId,
 
-    /// Query mismatch. Sent in response to a CollectReq or AggregateShareReq.
+    /// Query mismatch. Sent in response to a [`CollectionReq`](crate::messages::CollectionReq) or
+    /// [`AggregateShareReq`](crate::messages::AggregateShareReq).
     #[error("queryMismatch")]
     QueryMismatch { detail: String, task_id: TaskId },
 
@@ -78,7 +81,7 @@ pub enum DapAbort {
     #[error("unauthorizedRequest")]
     UnauthorizedRequest { detail: String, task_id: TaskId },
 
-    /// Unrecognized aggregation job. Sent in response to an AggregateContinueReq for which the
+    /// Unrecognized aggregation job. Sent in response to an `AggregateContinueReq` for which the
     /// Helper does not recognize the indicated aggregation job.
     #[error("unrecognizedAggregationJob")]
     UnrecognizedAggregationJob {

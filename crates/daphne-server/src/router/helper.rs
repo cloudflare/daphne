@@ -18,9 +18,7 @@ use http::StatusCode;
 
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
 
-pub(super) fn add_helper_routes<A: DapHelper<DaphneAuth>, B>(
-    router: super::Router<A, B>,
-) -> super::Router<A, B>
+pub(super) fn add_helper_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
     A: DapHelper<DaphneAuth> + DaphneService + Send + Sync + 'static,
     B: Send + HttpBody + 'static,
