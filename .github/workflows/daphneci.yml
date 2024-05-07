@@ -1,3 +1,5 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
 ---
 name: DaphneCI
 
@@ -28,12 +30,15 @@ jobs:
         uses: Swatinem/rust-cache@v1
       - name: Format
         run: cargo fmt --all --check
+      - name: Documentation
+        run: RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features --workspace
       - name: Linting
         run: cargo hack clippy --each-feature -- -D warnings
       - name: Testing
         run: cargo test --all-targets
       - name: Doc Testing
         run: cargo test --doc
+
   e2e:
     runs-on: ubuntu-latest
     steps:

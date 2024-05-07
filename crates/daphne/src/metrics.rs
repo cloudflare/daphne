@@ -74,7 +74,7 @@ pub mod prometheus {
         /// Helper: Total number of aggregation jobs started and completed.
         aggregation_job_counter: IntCounterVec,
 
-        /// Helper: Number of records in an incoming AggregationJobInitReq.
+        /// Helper: Number of records in an incoming [`AggregationJobInitReq`].
         aggregation_job_batch_size_histogram: Histogram,
 
         /// Helper: Number of times replays caused the aggregation to be retried.

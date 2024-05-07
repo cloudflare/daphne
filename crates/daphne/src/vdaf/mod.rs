@@ -154,7 +154,7 @@ pub enum VdafVerifyKey {
     /// Prio3 with the standard XOF.
     L16(#[serde(with = "hex")] [u8; 16]),
 
-    /// Prio2 and Prio3 with XofHmacSha256Aes128.
+    /// Prio2 and Prio3 with `XofHmacSha256Aes128`.
     L32(#[serde(with = "hex")] [u8; 32]),
 }
 

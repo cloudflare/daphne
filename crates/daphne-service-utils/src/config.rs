@@ -38,7 +38,7 @@ pub type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;
 pub struct DaphneServiceConfig {
     pub env: String,
 
-    /// Indicates if DaphneWorker is used as the Leader.
+    /// Indicates the role the service should play.
     pub role: DapRole,
 
     /// Global DAP configuration.

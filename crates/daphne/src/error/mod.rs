@@ -16,8 +16,8 @@ use self::aborts::ProblemDetails;
 pub enum DapError {
     /// Fatal error. If this triggers an abort, then treat this as an internal error.
     ///
-    /// To create an instance of this variant the [`fatal_error`] must be used. This ensures that
-    /// all fatal errors are logged with tracing when created.
+    /// To create an instance of this variant the [`fatal_error`](crate::fatal_error) macro must be
+    /// used. This ensures that all fatal errors are logged with tracing when created.
     #[error("fatal error: {0}")]
     Fatal(#[from] FatalDapError),
 

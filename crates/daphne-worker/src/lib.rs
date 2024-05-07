@@ -2,10 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Workers backend for `daphne-server`.
-//!
-//! The code is intended to be packaged with
-//! [workers-rs](https://github.com/cloudflare/workers-rs). See [`DaphneWorkerRouter`] for usage
-//! instructions.
 
 mod durable;
 pub mod storage_proxy;

@@ -104,6 +104,7 @@ impl<'h> Kv<'h> {
     where
         P: KvPrefix,
         F: for<'s> FnOnce(&'s P::Value) -> Option<&'s R>,
+        R: 'static,
     {
         Ok(self
             .get_impl::<P, _, _>(key, |marc| Marc::try_map(marc, mapper).ok())

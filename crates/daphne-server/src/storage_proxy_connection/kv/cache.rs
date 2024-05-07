@@ -10,7 +10,7 @@ use super::KvPrefix;
 #[derive(Default, Debug)]
 pub struct Cache {
     /// This map follows the same structure of KV queries.
-    /// The first key (&'static str) is a KvPrefix::PREFIX
+    /// The first key (&'static str) is a [`KvPrefix::PREFIX`]
     /// The second key (String) is the key that is associated with this value
     kv: HashMap<&'static str, HashMap<String, Marc<dyn Any + Send + Sync + 'static>>>,
 }

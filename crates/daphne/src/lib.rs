@@ -17,7 +17,7 @@
 //! Daphne does not provide the complete, end-to-end functionality of any party in the protocol.
 //! Instead, it defines traits for the functionalities that a concrete instantiation of the
 //! protocol is required to implement. For example, the `daphne-worker` crate implements a backend
-//! for the DAP Leader and Helper. See the [`crate::roles`](roles) module for details.
+//! for the DAP Leader and Helper. See the [`roles`] module for details.
 //!
 //! Daphne is not yet feature complete. Known issues include:
 //!
@@ -32,7 +32,7 @@
 //! Details" document are omitted.
 //!
 //! * Daphne does not implement a complete DAP Client or Collector. However, methods are provided
-//! on [`VdafConfig`](crate::VdafConfig) for producing reports and consuming aggregate results.
+//! on [`VdafConfig`] for producing reports and consuming aggregate results.
 //!
 //! * Daphne does not yet support deletion of collection jobs:
 //!
@@ -133,7 +133,7 @@ impl std::fmt::Display for DapVersion {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapGlobalConfig {
-    /// Maximum interval duration permitted in CollectReq.
+    /// Maximum interval duration permitted in [`CollectionReq`](messages::CollectionReq).
     /// Prevents Collectors from requesting wide range or reports.
     pub max_batch_duration: Duration,
 
@@ -1022,8 +1022,7 @@ pub struct DapRequest<S> {
     /// Sender authorization, e.g., a bearer token.
     pub sender_auth: Option<S>,
 
-    /// taskprov: The task advertisement, sent in the
-    /// [`DAP_TASKPROV`](daphne_service_utils::http_headers::DAP_TASKPROV) header.
+    /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
     pub taskprov: Option<String>,
 }
 

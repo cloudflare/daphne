@@ -107,7 +107,7 @@ pub struct DaphneWorkerAuthMethod {
 pub struct TlsCertInfo {
     /// Certificate issuer. Checked against the value of the "certIssuerDNRFC2253" field from the
     /// "tlsClientAuth" object passed by the Workers runtime to the request handler.
-    /// https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties
+    /// <https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties>
     pub issuer: String,
 
     /// Certificate subject. Checked against the value of the "certSubjectDNRFC2253" field from the

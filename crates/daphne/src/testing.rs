@@ -241,7 +241,7 @@ impl AggregationJobTest {
             .unwrap()
     }
 
-    /// Like [`consume_agg_job_resp`] but expect the Leader to abort.
+    /// Like [`Self::consume_agg_job_resp`] but expect the Leader to abort.
     pub fn consume_agg_job_resp_expect_err(
         &self,
         leader_state: DapAggregationJobState,

@@ -104,7 +104,7 @@ impl Metrics {
 
     pub fn durable_request_retry_count_inc(&self, number_of_retries: i8, object: &str, path: &str) {
         self.durable_request_retry_count
-            .with_label_values(&[&number_of_retries.to_string().as_str(), object, path])
+            .with_label_values(&[&number_of_retries.to_string(), object, path])
             .inc();
     }
 
