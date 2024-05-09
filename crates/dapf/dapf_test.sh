@@ -9,7 +9,8 @@
 set -e
 
 # Task configuration
-TASK_ID="8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8=" # URL-safe, base64
+#TASK_ID="8oW-PK-Uj8_Da30yGBwU25XFXwT1Wi2y7kOcWHkmTh8=" # URL-safe, base64
+TASK_ID="wO0FAqcJnVGAhw0qZglTpYOVMm5EPj1EKcZNPrisOrI" # URL-safe, base64
 LEADER_BASE_URL="http://127.0.0.1:8787"
 HELPER_BASE_URL="http://127.0.0.1:8788"
 MIN_BATCH_DURATION=3600 # seconds
@@ -68,11 +69,11 @@ for i in {1..10}; do
     echo "Uploading report $i..."
     echo "{\"u64\":$MEASUREMENT}" | \
         dapf \
-            --task-id "$TASK_ID" \
             upload \
+		        --task-id "$TASK_ID" \
                 --leader-url "$LEADER_BASE_URL/v02/" \
                 --helper-url "$HELPER_BASE_URL/v02/" \
-                --vdaf "$VDAF_CONFIG"
+                --vdaf-config "$VDAF_CONFIG"
 done
 
 echo "Sending collect request..."
