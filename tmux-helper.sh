@@ -1,3 +1,21 @@
+#! /bin/bash
+
+# if no tmux stop
+if ! which tmux > /dev/null; then
+    echo "missing tmux, please install before continuing"
+    exit 8840
+fi
+
+
+# key setup
+make /tmp/private-key /tmp/certificate
+export DAP_SERVICE__SIGNING_KEY="$(cat /tmp/private-key)"; \
+
+echo 'signing key:'
+echo $DAP_SERVICE__SIGNING_KEY
+echo
+
+
 # configuration
 read -r -d '' TMUX_CONFIG << EOC
 set-window-option -g mouse on; 
