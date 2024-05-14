@@ -535,6 +535,46 @@ mod test {
 
     async_test_versions! { agg_job_resp_abort_report_id_repeated }
 
+    #[tokio::test]
+    async fn how_big_is_agg_job() {
+        use prio::codec::ParameterizedEncode;
+        let agg_job_size = 100;
+        let t = AggregationJobTest::new(
+            &VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                bits: 1,
+                length: 100_000,
+                chunk_length: 320,
+                num_proofs: 3,
+            }),
+            HpkeKemId::X25519HkdfSha256,
+            DapVersion::Draft09,
+        );
+
+        let reports =
+            t.produce_reports(vec![DapMeasurement::U64Vec(vec![1; 100_000]); agg_job_size]);
+        let (_leader_state, agg_job_req) = t
+            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
+            .await;
+        println!(
+            "{}",
+            agg_job_req
+                .get_encoded_with_param(&DapVersion::Draft09)
+                .unwrap()
+                .len()
+        );
+
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_req).await;
+        println!(
+            "{}",
+            agg_job_resp
+                .get_encoded_with_param(&DapVersion::Draft09)
+                .unwrap()
+                .len()
+        );
+
+        todo!("fail!")
+    }
+
     async fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
         let mut rng = thread_rng();
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
