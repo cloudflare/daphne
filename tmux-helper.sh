@@ -1,5 +1,12 @@
 #! /bin/bash
 
+# check not running already
+if [ $(ps aux | grep "/bin/bash $0" | grep -v grep | wc -l) -gt 2 ]; then
+    echo "$0 already running, exiting."
+    exit 8810
+fi
+
+
 # if no tmux stop
 if ! which tmux > /dev/null; then
     echo "missing tmux, please install before continuing"
