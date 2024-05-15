@@ -187,7 +187,7 @@ mod test {
         pub time_interval_task_id: TaskId,
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
-        pub heavy_hitters_task_id: TaskId,
+        pub mastic_task_id: TaskId,
         helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
         pub leader_token: BearerToken,
@@ -228,7 +228,7 @@ mod test {
             let time_interval_task_id = TaskId(rng.gen());
             let fixed_size_task_id = TaskId(rng.gen());
             let expired_task_id = TaskId(rng.gen());
-            let heavy_hitters_task_id = TaskId(rng.gen());
+            let mastic_task_id = TaskId(rng.gen());
             let mut tasks = HashMap::new();
             tasks.insert(
                 time_interval_task_id,
@@ -286,7 +286,7 @@ mod test {
                 weight_config: MasticWeightConfig::Count,
             };
             tasks.insert(
-                heavy_hitters_task_id,
+                mastic_task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
@@ -336,7 +336,7 @@ mod test {
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
-                heavy_hitters_task_id,
+                mastic_task_id,
                 helper_registry,
                 tasks,
                 leader_token,
@@ -388,7 +388,7 @@ mod test {
                 time_interval_task_id: self.time_interval_task_id,
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
-                heavy_hitters_task_id: self.heavy_hitters_task_id,
+                mastic_task_id: self.mastic_task_id,
                 helper_registry: self.helper_registry,
                 leader_registry: self.leader_registry,
             }
@@ -404,7 +404,7 @@ mod test {
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
-        heavy_hitters_task_id: TaskId,
+        mastic_task_id: TaskId,
         pub helper_registry: prometheus::Registry,
         pub leader_registry: prometheus::Registry,
     }
@@ -961,8 +961,7 @@ mod test {
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
             agg_store
-                .for_bucket(task_id, &bucket, &DapAggregationParam::Empty)
-                .unwrap()
+                .for_bucket(task_id, &bucket)
                 .reports
                 .insert(report.report_metadata.id);
         }
@@ -1000,10 +999,7 @@ mod test {
                 batch_window: task_config.quantized_time_lower_bound(t.now),
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
-            agg_store
-                .for_bucket(task_id, &bucket, &DapAggregationParam::Empty)
-                .unwrap()
-                .collected = true;
+            agg_store.for_bucket(task_id, &bucket).collected = true;
         }
 
         let query = task_config.query_for_current_batch_window(t.now);
@@ -1755,14 +1751,10 @@ mod test {
 
     async_test_versions! { multi_task }
 
-    // TODO(cjpatton) Test collecting the batch multiple times per the "heavy hitters" mode of
-    // operation for Mastic.
-    //
-    // TODO(cjpatton) Create a test for "attribute based metrics" for draft09.
     #[tokio::test]
-    async fn heavy_hitters() {
+    async fn mastic() {
         let t = Test::new(DapVersion::Latest);
-        let task_id = &t.heavy_hitters_task_id;
+        let task_id = &t.mastic_task_id;
         let task_config = t
             .leader
             .unchecked_get_task_config(&t.fixed_size_task_id)
