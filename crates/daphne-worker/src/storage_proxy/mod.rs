@@ -88,7 +88,7 @@ const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 struct RequestContext {
     req: Request,
     env: Env,
-    metrics: Option<Metrics>,
+    metrics: Metrics,
 }
 
 /// Check if the request's authorization. If unauthorized, return the reason why.
@@ -126,13 +126,9 @@ fn unauthorized_reason(ctx: &RequestContext) -> Option<worker::Result<Response>>
 
 /// Handle a proxy request. This is the entry point of the Worker.
 #[allow(clippy::no_effect_underscore_binding)]
-pub async fn handle_request(
-    req: Request,
-    env: Env,
-    _ctx: worker::Context,
-) -> worker::Result<Response> {
+pub async fn handle_request(req: Request, env: Env) -> worker::Result<(Response, Metrics)> {
     let mut ctx = RequestContext {
-        metrics: Metrics::new(req.url()?.host_str().unwrap_or("unspecified-host"), &env),
+        metrics: Metrics::new(req.url()?.host_str().unwrap_or("unspecified-host")),
         req,
         env,
     };
@@ -170,15 +166,12 @@ pub async fn handle_request(
     }
     .await;
 
-    if let Some(metrics) = ctx.metrics {
-        match &response {
-            Ok(r) => metrics.count_http_status_code(r.status_code()),
-            Err(_) => metrics.count_http_status_code(500),
-        }
-        metrics.push_metrics().await;
+    match &response {
+        Ok(r) => ctx.metrics.count_http_status_code(r.status_code()),
+        Err(_) => ctx.metrics.count_http_status_code(500),
     }
 
-    response
+    response.map(|r| (r, ctx.metrics))
 }
 
 #[cfg(feature = "test-utils")]
@@ -308,13 +301,11 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
     loop {
         match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
-                if let Some(metrics) = &ctx.metrics {
-                    metrics.durable_request_retry_count_inc(
-                        (attempt - 1).try_into().unwrap(),
-                        &parsed_req.binding,
-                        uri,
-                    );
-                }
+                ctx.metrics.durable_request_retry_count_inc(
+                    (attempt - 1).try_into().unwrap(),
+                    &parsed_req.binding,
+                    uri,
+                );
                 return Ok(ok);
             }
             Err(error) => {
@@ -329,9 +320,8 @@ async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Resul
                     Delay::from(RETRY_DELAYS[attempt - 1]).await;
                     attempt += 1;
                 } else {
-                    if let Some(metrics) = &ctx.metrics {
-                        metrics.durable_request_retry_count_inc(-1, &parsed_req.binding, uri);
-                    }
+                    ctx.metrics
+                        .durable_request_retry_count_inc(-1, &parsed_req.binding, uri);
                     return Err(error);
                 }
             }
