@@ -6,6 +6,29 @@ if [ $(ps aux | grep "/bin/bash $0" | grep -v grep | wc -l) -gt 2 ]; then
     exit 8810
 fi
 
+# if no rustc stop
+if ! which rustc > /dev/null; then
+    echo "missing rustc, please install before continuing"
+    exit 8815
+fi
+
+# if no make stop
+if ! which make > /dev/null; then
+    echo "missing make, please install before continuing"
+    exit 8820
+fi
+
+# if no clang stop
+if ! which clang > /dev/null; then
+    echo "missing clang, please install before continuing"
+    exit 8830
+fi
+
+# if no capnp stop
+if ! which capnp > /dev/null; then
+    echo "missing capnp, please install before continuing"
+    exit 8830
+fi
 
 # if no tmux stop
 if ! which tmux > /dev/null; then
