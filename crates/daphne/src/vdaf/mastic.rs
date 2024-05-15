@@ -1,10 +1,9 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Dummy Mastic [[draft-mouris-cfrg-mastic]], a 2-party, 1-round VDAF for (weighted) heavy hitters
-//! and attribute-based metrics. This module implements an insecure, "dummy" version of Mastic
-//! intended for testing and prototyping heavy hitters in daphne. Eventually it will be replaced by
-//! a production-quality implementation.
+//! Dummy Mastic [[draft-mouris-cfrg-mastic]], a 2-party, 1-round VDAF. This module implements an
+//! insecure, "dummy" version of Mastic intended for testing and prototyping. Eventually it will be
+//! replaced by a production-quality implementation.
 //!
 //! [draft-mouris-cfrg-mastic]: https://datatracker.ietf.org/doc/draft-mouris-cfrg-mastic/
 

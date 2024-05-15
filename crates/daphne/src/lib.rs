@@ -755,18 +755,6 @@ pub enum DapAggregationParam {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl DapAggregationParam {
-    /// Return the aggregation level for the aggregation parameter. Replay protection is enforced
-    /// with respect to this value.
-    pub(crate) fn level(&self) -> usize {
-        match self {
-            Self::Empty => 0,
-            Self::Mastic(agg_param) => agg_param.level(),
-        }
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
 impl deepsize::DeepSizeOf for DapAggregationParam {
     fn deep_size_of(&self) -> usize {
         0
