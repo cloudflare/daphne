@@ -13,8 +13,8 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace, Instrument};
 use worker::{
-    async_trait, durable_object, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Date, Env,
-    ListOptions, Method, Request, Response, Result, State, Stub,
+    async_trait, durable_object, wasm_bindgen, wasm_bindgen_futures, Date, Env, ListOptions,
+    Method, Request, Response, Result, State, Stub,
 };
 
 use super::GcDurableObject;

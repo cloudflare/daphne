@@ -41,8 +41,8 @@ use prio::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use worker::{
-    async_trait, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures, worker_sys,
-    Env, Error, Request, Response, Result, ScheduledTime, State,
+    async_trait, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures, Env, Error,
+    Request, Response, Result, ScheduledTime, State,
 };
 
 use super::{req_parse, GcDurableObject};
@@ -366,7 +366,8 @@ impl GcDurableObject for AggregateStore {
                 js_sys::Reflect::set(
                     &chunks_map,
                     &JsValue::from_str(METADATA_KEY),
-                    &serde_wasm_bindgen::to_value(&meta)?,
+                    &serde_wasm_bindgen::to_value(&meta)
+                        .expect("serialization should always succeed"),
                 )?;
 
                 self.state.storage().put_multiple_raw(chunks_map).await?;
