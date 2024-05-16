@@ -77,7 +77,7 @@ tracing-core = "0.1.32"
 tracing-subscriber = "0.3.18"
 url = { version = "2.5.0", features = ["serde"] }
 webpki = "0.22.4"
-worker = "0.0.18"
+worker = "0.2.0"
 x509-parser = "0.15.1"
 
 [workspace.dependencies.sentry]

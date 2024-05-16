@@ -16,8 +16,8 @@ use std::{sync::OnceLock, time::Duration};
 use crate::int_err;
 use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use worker::{
-    async_trait, js_sys, wasm_bindgen, wasm_bindgen_futures, worker_sys, Env, Request, Response,
-    Result, ScheduledTime, State,
+    async_trait, wasm_bindgen, wasm_bindgen_futures, Env, Request, Response, Result, ScheduledTime,
+    State,
 };
 
 use super::{req_parse, GcDurableObject};
