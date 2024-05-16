@@ -81,7 +81,7 @@ use tracing::warn;
 use url::Url;
 use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
 
-use self::metrics::Metrics;
+pub use self::metrics::Metrics;
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
