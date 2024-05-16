@@ -241,17 +241,6 @@ impl DapTaskConfig {
         vdaf_verify_key_init: &[u8; 32],
         collector_hpke_config: &HpkeConfig,
     ) -> Result<DapTaskConfig, DapAbort> {
-        // We don't implement any DP strategy at the moment.
-        if task_config.vdaf_config.dp_config != messages::taskprov::DpConfig::None {
-            return Err(DapAbort::InvalidTask {
-                detail: format!(
-                    "unsupported DpConfig variant {:?}",
-                    task_config.vdaf_config.dp_config
-                ),
-                task_id: *task_id,
-            });
-        }
-
         // Only one query per batch is currently supported.
         if task_config.query_config.max_batch_query_count != 1 {
             return Err(DapAbort::InvalidTask {
@@ -378,6 +367,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
 
 #[cfg(test)]
 mod test {
+    use assert_matches::assert_matches;
     use prio::codec::ParameterizedEncode;
 
     use super::{compute_task_id, compute_vdaf_verify_key, resolve_advertised_task_config};
@@ -512,19 +502,65 @@ mod test {
             .unwrap()
             .config;
 
-        match (
-            version,
-            resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id),
-        ) {
-            (
-                DapVersion::Draft09 | DapVersion::Latest,
-                Err(DapAbort::InvalidTask { detail, .. }),
-            ) => {
-                assert_eq!(detail, "unimplemented VDAF type (1337)");
-            }
-            (_, r) => panic!("unexpected result: {r:?} ({version})"),
-        }
+        assert_matches!(
+            resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id).unwrap_err(),
+            DapAbort::InvalidTask{ detail, .. } if detail == "unimplemented VDAF type (1337)"
+        );
     }
 
     test_versions! { resolve_advertised_task_config_expect_abort_unrecognized_vdaf }
+
+    fn resolve_advertised_task_config_ignore_unimplemented_dp_ocnfig(version: DapVersion) {
+        // Create a request for a taskprov task with an unrecognized DP mechanism.
+        let (req, task_id) = {
+            let taskprov_task_config_bytes = messages::taskprov::TaskConfig {
+                task_info: "cool task".as_bytes().to_vec(),
+                leader_url: messages::taskprov::UrlBytes {
+                    bytes: b"https://leader.com/".to_vec(),
+                },
+                helper_url: messages::taskprov::UrlBytes {
+                    bytes: b"http://helper.org:8788/".to_vec(),
+                },
+                query_config: messages::taskprov::QueryConfig {
+                    time_precision: 3600,
+                    max_batch_query_count: 1,
+                    min_batch_size: 1,
+                    var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                },
+                task_expiration: 0,
+                vdaf_config: messages::taskprov::VdafConfig {
+                    dp_config: messages::taskprov::DpConfig::NotImplemented {
+                        typ: 99,
+                        param: b"Just, do it!".to_vec(),
+                    },
+                    var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 1337 },
+                },
+            }
+            .get_encoded_with_param(&version)
+            .unwrap();
+            let task_id = compute_task_id(&taskprov_task_config_bytes);
+            let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
+
+            let req = DapRequest::<()> {
+                version,
+                media_type: None, // ignored by test
+                task_id: Some(task_id),
+                resource: DapResource::Undefined, // ignored by test
+                payload: Vec::default(),          // ignored by test
+                sender_auth: None,                // ignored by test
+                taskprov: Some(taskprov_task_config_base64url),
+            };
+
+            (req, task_id)
+        };
+
+        let collector_hpke_config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256)
+            .unwrap()
+            .config;
+
+        let _ = resolve_advertised_task_config(&req, &[0; 32], &collector_hpke_config, &task_id)
+            .unwrap();
+    }
+
+    test_versions! { resolve_advertised_task_config_ignore_unimplemented_dp_ocnfig }
 }
