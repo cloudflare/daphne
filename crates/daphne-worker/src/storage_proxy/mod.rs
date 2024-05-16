@@ -85,9 +85,9 @@ pub use self::metrics::Metrics;
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
-struct RequestContext {
+struct RequestContext<'e> {
     req: Request,
-    env: Env,
+    env: &'e Env,
     metrics: Metrics,
 }
 
@@ -126,7 +126,7 @@ fn unauthorized_reason(ctx: &RequestContext) -> Option<worker::Result<Response>>
 
 /// Handle a proxy request. This is the entry point of the Worker.
 #[allow(clippy::no_effect_underscore_binding)]
-pub async fn handle_request(req: Request, env: Env) -> worker::Result<(Response, Metrics)> {
+pub async fn handle_request(req: Request, env: &Env) -> worker::Result<(Response, Metrics)> {
     let mut ctx = RequestContext {
         metrics: Metrics::new(req.url()?.host_str().unwrap_or("unspecified-host")),
         req,
@@ -176,7 +176,7 @@ pub async fn handle_request(req: Request, env: Env) -> worker::Result<(Response,
 
 #[cfg(feature = "test-utils")]
 /// Clear all storage. Only available to tests
-async fn storage_purge(ctx: &RequestContext) -> worker::Result<Response> {
+async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
     use daphne_service_utils::durable_requests::bindings::{DurableMethod, TestStateCleaner};
 
     let kv_delete = async {
@@ -207,7 +207,7 @@ async fn storage_purge(ctx: &RequestContext) -> worker::Result<Response> {
 }
 
 /// Handle a kv request.
-async fn handle_kv_request(ctx: &mut RequestContext, key: &str) -> worker::Result<Response> {
+async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::Result<Response> {
     match ctx.req.method() {
         worker::Method::Get => {
             let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
@@ -256,7 +256,7 @@ async fn handle_kv_request(ctx: &mut RequestContext, key: &str) -> worker::Resul
 }
 
 /// Handle a durable object request
-async fn handle_do_request(ctx: &mut RequestContext, uri: &str) -> worker::Result<Response> {
+async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::Result<Response> {
     const RETRY_DELAYS: &[Duration] = &[
         Duration::from_millis(100),
         Duration::from_millis(500),
