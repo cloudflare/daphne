@@ -114,12 +114,15 @@ macro_rules! mk_durable_object {
 
             #[doc(hidden)]
             pub async fn alarm(&mut self) -> Result<Response> {
-                self.state.storage().delete_all().await?;
                 ::tracing::trace!(
                     instance = self.state.id().to_string(),
                     "{}: alarm triggered, deleting...",
                     ::std::stringify!($name),
                 );
+                if let Err(e) = self.state.storage().delete_all().await {
+                    ::tracing::warn!(error = ?e, "failed to garbage collect");
+                    return Err(e)
+                }
                 ::worker::Response::from_json(&())
             }
         }
