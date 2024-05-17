@@ -981,7 +981,7 @@ impl DapAggregationJobState {
 }
 
 /// An aggregate share computed by combining a set of output shares.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapAggregateShare {
     /// Number of reports in the batch.

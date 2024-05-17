@@ -93,6 +93,12 @@ macro_rules! id_struct {
             }
         }
 
+        impl AsRef<[u8; $len]> for $sname {
+            fn as_ref(&self) -> &[u8; $len] {
+                &self.0
+            }
+        }
+
         impl fmt::Display for $sname {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}", self.to_hex())

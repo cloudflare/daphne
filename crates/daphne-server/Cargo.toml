@@ -14,7 +14,6 @@ description = "Workers backend for Daphne"
 
 [dependencies]
 axum.workspace = true
-bincode.workspace = true
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 futures.workspace = true

@@ -13,41 +13,19 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure,
-        TransitionVar,
+        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobInitReq,
+        AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::ReportProcessedStatus,
     roles::aggregator::MergeAggShareError,
-    DapAggregationJobState, DapAggregationParam, DapError, DapRequest, DapResource, DapResponse,
-    DapTaskConfig, EarlyReportStateInitialized,
+    DapAggregationParam, DapError, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    EarlyReportStateInitialized,
 };
 
 /// DAP Helper functionality.
-//
-// TODO draft02 cleanup: Remove methods for mutating aggregation job state. This is not needed
-// until we add support for multi-round VDAFs. Note that we will likely still need this trait for
-// features coming in the next draft.
 #[async_trait]
-pub trait DapHelper<S: Sync>: DapAggregator<S> {
-    /// Store the Helper's aggregation-flow state unless it already exists. Returns a boolean
-    /// indicating if the operation succeeded.
-    async fn put_helper_state_if_not_exists(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-        helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError>;
-
-    /// Fetch the Helper's aggregation-flow state. `None` is returned if the Helper has no state
-    /// associated with the given task and aggregation job.
-    async fn get_helper_state(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-    ) -> Result<Option<DapAggregationJobState>, DapError>;
-}
+pub trait DapHelper<S: Sync>: DapAggregator<S> {}
 
 pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,

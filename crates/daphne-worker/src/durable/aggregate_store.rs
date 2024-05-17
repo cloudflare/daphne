@@ -306,7 +306,7 @@ fn shard_bytes_to_object(
 
 super::mk_durable_object! {
     /// Where the aggregate share is stored. For the binding name see its
-    /// [`BINDING`](bindings::HelperState::BINDING)
+    /// [`BINDING`](bindings::AggregateStore::BINDING)
     struct AggregateStore {
         state: State,
         env: Env,

@@ -3,10 +3,7 @@
 
 use std::{cmp::min, ops::ControlFlow};
 
-use crate::{
-    durable::{create_span_from_request, req_parse},
-    initialize_tracing, int_err,
-};
+use crate::{durable::create_span_from_request, initialize_tracing, int_err};
 use daphne::messages::TaskId;
 use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use rand::{thread_rng, Rng};
@@ -46,9 +43,10 @@ impl TestStateCleaner {
         match bindings::TestStateCleaner::try_from_uri(&req.path()) {
             // Schedule a durable object (DO) instance for deletion.
             Some(bindings::TestStateCleaner::Put) => {
-                let durable_ref: DurableReference = req_parse(&mut req).await?;
+                let durable_ref: DurableReference =
+                    serde_json::from_slice(&req.bytes().await?).unwrap();
                 match durable_ref.binding.as_ref() {
-                    bindings::AggregateStore::BINDING | bindings::HelperState::BINDING => (),
+                    bindings::AggregateStore::BINDING => (),
                     s => {
                         let message = format!("GarbageCollector: unrecognized binding: {s}");
                         error!("{}", message);
@@ -358,7 +356,7 @@ impl<'srv> DurableConnector<'srv> {
     {
         let req = match (&method, &data) {
             (Method::Post, Some(data)) => {
-                let data = bincode::serialize(&data).map_err(|e| {
+                let data = serde_json::to_vec(&data).map_err(|e| {
                     worker::Error::RustError(format!("failed to serialize data: {e:?}"))
                 })?;
                 let buffer =

@@ -6,15 +6,15 @@
 //!
 //! It also defines types that are used as the body of requests sent to these objects.
 
-use std::collections::HashSet;
-
-use daphne::{
-    messages::{AggregationJobId, ReportId, TaskId},
-    DapAggregateShare, DapBatchBucket, DapVersion,
-};
-use serde::{Deserialize, Serialize};
+mod aggregate_store;
+#[cfg(feature = "test-utils")]
+mod test_state_cleaner;
 
 use super::ObjectIdFrom;
+
+pub use aggregate_store::{AggregateStore, AggregateStoreMergeReq, AggregateStoreMergeResp};
+#[cfg(feature = "test-utils")]
+pub use test_state_cleaner::TestStateCleaner;
 
 /// A durable object method.
 pub trait DurableMethod {
@@ -33,6 +33,48 @@ pub trait DurableMethod {
 
     /// Generate the durable object name
     fn name(params: Self::NameParameters<'_>) -> ObjectIdFrom;
+}
+
+pub trait DurableRequestPayload {
+    fn decode_from_reader(
+        reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
+    ) -> capnp::Result<Self>
+    where
+        Self: Sized;
+
+    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator>;
+}
+
+pub trait DurableRequestPayloadExt {
+    fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
+    where
+        Self: Sized;
+    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>>;
+}
+
+impl<T> DurableRequestPayloadExt for T
+where
+    T: DurableRequestPayload,
+{
+    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        let message = self.encode_to_builder();
+        capnp::serialize_packed::write_message(&mut buf, &message)?;
+        Ok(buf)
+    }
+
+    fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut cursor = std::io::Cursor::new(bytes);
+        let reader = capnp::serialize_packed::read_message(
+            &mut cursor,
+            capnp::message::ReaderOptions::new(),
+        )?;
+
+        T::decode_from_reader(reader)
+    }
 }
 
 macro_rules! define_do_binding {
@@ -61,7 +103,7 @@ macro_rules! define_do_binding {
             $($op),*
         }
 
-        impl DurableMethod for $name {
+        impl $crate::durable_requests::bindings::DurableMethod for $name {
             const BINDING: &'static str = $binding;
 
             type NameParameters<'n> = $params_ty;
@@ -79,87 +121,14 @@ macro_rules! define_do_binding {
                 }
             }
 
-            fn name($params: Self::NameParameters<'_>) -> ObjectIdFrom {
+            fn name($params: Self::NameParameters<'_>) -> $crate::durable_requests::bindings::ObjectIdFrom {
                 $name_impl
             }
         }
     };
 }
 
-define_do_binding! {
-    const BINDING = "DAP_AGGREGATE_STORE";
-    enum AggregateStore {
-        GetMerged = "/internal/do/aggregate_store/get_merged",
-        Get = "/internal/do/aggregate_store/get",
-        Merge = "/internal/do/aggregate_store/merge",
-        MarkCollected = "/internal/do/aggregate_store/mark_collected",
-        CheckCollected = "/internal/do/aggregate_store/check_collected",
-    }
-
-    fn name((version, task_id_hex, bucket): (DapVersion, &'n str, &'n DapBatchBucket)) -> ObjectIdFrom {
-        fn durable_name_bucket(bucket: &DapBatchBucket) -> String {
-            format!("{bucket}")
-        }
-        ObjectIdFrom::Name(format!(
-            "{}/{}",
-            durable_name_task(version, task_id_hex),
-            durable_name_bucket(bucket),
-        ))
-    }
-}
-
-fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
-    format!("{}/task/{}", version.as_ref(), task_id_hex)
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AggregateStoreMergeReq {
-    pub contained_reports: Vec<ReportId>,
-    pub agg_share_delta: DapAggregateShare,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AggregateStoreMergeResp {
-    Ok,
-    ReplaysDetected(HashSet<ReportId>),
-    AlreadyCollected,
-}
-
-define_do_binding! {
-    const BINDING = "DAP_HELPER_STATE_STORE";
-    enum HelperState {
-        PutIfNotExists = "/internal/do/helper_state/put_if_not_exists",
-        Get = "/internal/do/helper_state/get",
-    }
-
-    fn name((version, task_id, agg_job_id): (DapVersion, &'n TaskId, &'n AggregationJobId)) -> ObjectIdFrom {
-        ObjectIdFrom::Name(format!(
-            "{}/task/{}/agg_job/{}",
-            version.as_ref(),
-            task_id.to_hex(),
-            agg_job_id.to_hex()
-        ))
-    }
-
-}
-
-#[cfg(feature = "test-utils")]
-define_do_binding! {
-    const BINDING = "DAP_TEST_STATE_CLEANER";
-    enum TestStateCleaner {
-        Put = "/internal/do/test_state_cleaner/put",
-        DeleteAll = "/internal/do/delete_all",
-    }
-
-    fn name((): ()) -> ObjectIdFrom {
-        ObjectIdFrom::Name(Self::NAME_STR.into())
-    }
-}
-
-#[cfg(feature = "test-utils")]
-impl TestStateCleaner {
-    pub const NAME_STR: &'static str = "test_do_cleaner";
-}
+pub(crate) use define_do_binding;
 
 #[cfg(test)]
 mod tests {

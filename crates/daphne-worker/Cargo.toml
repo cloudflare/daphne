@@ -16,6 +16,7 @@ description = "Workers backend for Daphne"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# TODO(mendess): delete
 bincode.workspace = true
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
 daphne = { path = "../daphne", features = ["prometheus"] }

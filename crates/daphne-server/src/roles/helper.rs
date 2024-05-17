@@ -2,73 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use axum::async_trait;
-use daphne::{
-    error::DapAbort,
-    fatal_error,
-    messages::{AggregationJobId, TaskId},
-    roles::{DapAggregator, DapHelper},
-    DapAggregationJobState, DapError,
-};
-use daphne_service_utils::{auth::DaphneAuth, durable_requests::bindings};
-use prio::codec::Encode;
+use daphne::roles::DapHelper;
+use daphne_service_utils::auth::DaphneAuth;
 
 #[async_trait]
-impl DapHelper<DaphneAuth> for crate::App {
-    async fn put_helper_state_if_not_exists(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-        helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-        let helper_state_hex = hex::encode(helper_state.get_encoded().map_err(DapError::encoding)?);
-        Ok(self
-            .durable()
-            .with_retry()
-            .request(
-                bindings::HelperState::PutIfNotExists,
-                (task_config.as_ref().version, task_id, agg_job_id),
-            )
-            .encode_bincode(helper_state_hex)
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?)
-    }
-
-    async fn get_helper_state(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-    ) -> Result<Option<DapAggregationJobState>, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-        // TODO(cjpatton) Figure out if retry is safe, since the request is not actually
-        // idempotent. (It removes the helper's state from storage if it exists.)
-        let res: Option<String> = self
-            .durable()
-            .with_retry()
-            .request(
-                bindings::HelperState::Get,
-                (task_config.as_ref().version, task_id, agg_job_id),
-            )
-            .send()
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        match res {
-            Some(helper_state_hex) => {
-                let data = hex::decode(helper_state_hex)
-                    .map_err(|e| DapAbort::from_hex_error(e, *task_id))?;
-                let helper_state =
-                    DapAggregationJobState::get_decoded(&task_config.as_ref().vdaf, &data)?;
-                Ok(Some(helper_state))
-            }
-            None => Ok(None),
-        }
-    }
-}
+impl DapHelper<DaphneAuth> for crate::App {}
