@@ -16,7 +16,6 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["console_error_panic_hook"]
-test_e2e = []
 
 [dependencies]
 cap.workspace = true
@@ -30,24 +29,6 @@ daphne = { path = "../daphne", features = ["test-utils", "wasm-compat"] }
 daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
 tracing.workspace = true
 worker.workspace = true
-
-[dev-dependencies]
-assert_matches.workspace = true
-anyhow.workspace = true
-daphne-service-utils = { path = "../daphne-service-utils" }
-futures.workspace = true
-hex.workspace = true
-hpke-rs.workspace = true
-paste.workspace = true
-prio.workspace = true
-rand.workspace = true
-reqwest = { workspace = true, features = ["json"] }
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-url.workspace = true
-webpki.workspace = true
-x509-parser.workspace = true
 
 [lints]
 workspace = true

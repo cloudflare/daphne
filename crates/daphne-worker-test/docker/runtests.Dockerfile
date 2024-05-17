@@ -12,7 +12,7 @@ RUN apt-get update && \
         capnproto
 
 COPY Cargo.toml Cargo.lock ./
-COPY crates/daphne-worker-test ./crates/daphne-worker-test
+COPY crates/daphne-server ./crates/daphne-server
 COPY crates/daphne-worker ./crates/daphne-worker
 COPY crates/daphne-service-utils ./crates/daphne-service-utils
 COPY crates/daphne ./crates/daphne
