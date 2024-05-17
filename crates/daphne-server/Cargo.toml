@@ -35,10 +35,13 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
+assert_matches.workspace = true
 clap.workspace = true
 config.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus"] }
+hpke-rs.workspace = true
 paste.workspace = true
 prometheus.workspace = true
 rand.workspace = true
@@ -49,6 +52,7 @@ x509-parser.workspace = true
 
 [features]
 test-utils = ["daphne/test-utils", "daphne-service-utils/test-utils"]
+test_e2e = []
 
 [lints]
 workspace = true

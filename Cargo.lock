@@ -793,6 +793,8 @@ dependencies = [
 name = "daphne-server"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "assert_matches",
  "axum",
  "bincode",
  "clap",
@@ -801,6 +803,7 @@ dependencies = [
  "daphne-service-utils",
  "futures",
  "hex",
+ "hpke-rs",
  "http 0.2.12",
  "hyper 0.14.28",
  "mappable-rc",
@@ -877,30 +880,13 @@ dependencies = [
 name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
- "anyhow",
- "assert_matches",
  "cap",
  "cfg-if",
  "console_error_panic_hook",
  "daphne",
- "daphne-service-utils",
  "daphne-worker",
- "futures",
- "getrandom",
- "hex",
- "hpke-rs",
- "paste",
- "prio",
- "rand",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
- "url",
- "webpki",
  "worker",
- "x509-parser",
 ]
 
 [[package]]
@@ -1263,10 +1249,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94b22e06ecb0110981051723910cbf0b5f5e09a2062dd7663334ee79a9d1286c"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi",
- "wasm-bindgen",
 ]
 
 [[package]]
