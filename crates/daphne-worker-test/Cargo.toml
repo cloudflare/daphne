@@ -26,12 +26,8 @@ cfg-if.workspace = true
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
-daphne = { path = "../daphne", features = ["test-utils"] }
+daphne = { path = "../daphne", features = ["test-utils", "wasm-compat"] }
 daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
-# We don't actually call into getrandom directly, but prio does, so we pretend
-# we depend on it just so we can activate the js feature. Idealy this would be
-# a prio feature.
-getrandom = { workspace = true, features = ["js", "std"] }
 tracing.workspace = true
 worker.workspace = true
 
