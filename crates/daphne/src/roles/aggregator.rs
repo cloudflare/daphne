@@ -14,7 +14,7 @@ use crate::{
     messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
-    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
+    taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequest, DapResponse, DapTaskConfig,
 };
 
@@ -63,7 +63,7 @@ pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
     ) -> Result<Option<String>, DapError>;
 
     /// Look up the DAP global configuration.
-    fn get_global_config(&self) -> &DapGlobalConfig;
+    async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError>;
 
     /// taskprov: The VDAF verification key initializer. Used to derive the VDAF verify key for all
     /// tasks configured by this extension.
@@ -73,15 +73,22 @@ pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
     /// extension.
     fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig>;
 
-    /// taskprov: Decide whether to opt-in or out-out of a task provisioned via taskprov.
+    /// taskprov: Complete the opt-in process.
     ///
-    /// If the return value is `None`, then the decision is to opt-in. If the return value is
-    /// `Some(reason)`, then the decision is to opt-out; `reason` conveys details about how the
-    /// decision was reached (e.g.., the minimum batch size is too smal).
-    fn taskprov_opt_out_reason(
+    /// # Notes
+    ///
+    /// - Changing the number of aggregate spans for a task is not safe; see [`DapGlobalConfig`]
+    /// for details. Implementers should ensure this parameter doesn't change over the lifetime of
+    /// the task.
+    ///
+    /// - If you'd like your implementation to opt-out, then return
+    /// `Err(DapError::Abort(DapAbort::InvalidTask{..}))`.
+    async fn taskprov_opt_in(
         &self,
-        task_config: &DapTaskConfig,
-    ) -> Result<Option<String>, DapError>;
+        task_id: &TaskId,
+        task_config: taskprov::DapTaskConfigNeedsOptIn,
+        global_config: &DapGlobalConfig,
+    ) -> Result<DapTaskConfig, DapError>;
 
     /// taskprov: Configure a task. This is called after opting in. If successful, the next call to
     /// `get_task_config_for()` will return the configure task. Otherwise this call will return

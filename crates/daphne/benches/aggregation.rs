@@ -1,7 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::{Duration, Instant, SystemTime};
+use std::{
+    num::NonZeroUsize,
+    time::{Duration, Instant, SystemTime},
+};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use daphne::{
@@ -80,11 +83,15 @@ fn make_tasks() -> Vec<(TaskId, DapTaskConfig)> {
                     num_proofs: 2,
                 },
             ),
-            expiration: (SystemTime::now()
+            not_after: (SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 + Duration::from_secs(5000))
             .as_secs(),
+            not_before: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             vdaf_verify_key: VdafVerifyKey::L32(VERIFY_KEY),
             collector_hpke_config: HpkeConfig {
                 id: 1,
@@ -94,6 +101,7 @@ fn make_tasks() -> Vec<(TaskId, DapTaskConfig)> {
                 public_key: HpkePublicKey::new(vec![]),
             },
             method: daphne::DapTaskConfigMethod::Unknown,
+            num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         })
         .map(|task| (TaskId(thread_rng().gen()), task))
         .collect()
@@ -116,6 +124,7 @@ fn make_aggregator(
             max_batch_interval_end: u64::MAX,
             supported_hpke_kems: vec![HpkeKemId::P256HkdfSha256],
             allow_taskprov: false,
+            default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         },
         token.clone(),
         collector_hpke,
@@ -166,7 +175,7 @@ async fn make_request(
                 task_config.min_batch_size.try_into().unwrap(),
                 &task_config.vdaf.gen_measurement().unwrap(),
                 VERSION,
-                task_config.expiration - 10,
+                task_config.not_after - 10,
                 vec![],
             ),
             aggregator.metrics(),

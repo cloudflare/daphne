@@ -182,6 +182,7 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<(), DapError> {
+    let global_config = aggregator.get_global_config().await?;
     let metrics = aggregator.metrics();
     let task_id = req.task_id()?;
     debug!("upload for task {task_id}");
@@ -192,8 +193,8 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
     debug!("report id is {}", report.report_metadata.id);
 
-    if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req).await?;
+    if global_config.allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
     let task_config = aggregator
         .get_task_config_for(task_id)
@@ -228,8 +229,16 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
     }
 
     // Check that the task has not expired.
-    if report.report_metadata.time >= task_config.as_ref().expiration {
+    if report.report_metadata.time >= task_config.as_ref().not_after {
         return Err(DapAbort::ReportTooLate.into());
+    }
+    if report.report_metadata.time
+        < task_config.as_ref().not_before - task_config.as_ref().time_precision
+    {
+        return Err(DapAbort::ReportRejected {
+            detail: "The timestamp preceeds the start of the task's validity window".into(),
+        }
+        .into());
     }
 
     // Store the report for future processing. At this point, the report may be rejected if
@@ -247,6 +256,7 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<Url, DapError> {
+    let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
     let task_id = req.task_id()?;
@@ -254,8 +264,8 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
 
     check_request_content_type(req, DapMediaType::CollectReq)?;
 
-    if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req).await?;
+    if global_config.allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
@@ -294,6 +304,7 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
         &coll_job_req.query,
         &coll_job_req.agg_param,
         now,
+        &global_config,
     )
     .await?;
 

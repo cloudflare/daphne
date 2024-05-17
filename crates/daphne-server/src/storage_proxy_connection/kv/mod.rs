@@ -30,10 +30,24 @@ pub trait KvPrefix {
 }
 
 pub mod prefix {
-    use daphne::{auth::BearerToken, messages::TaskId, DapTaskConfig, DapVersion};
+    use std::marker::PhantomData;
+
+    use daphne::{auth::BearerToken, messages::TaskId, taskprov, DapTaskConfig, DapVersion};
     use daphne_service_utils::config::HpkeRecieverConfigList;
+    use serde::{de::DeserializeOwned, Serialize};
 
     use super::KvPrefix;
+
+    pub struct GlobalConfigOverride<V>(PhantomData<V>);
+    impl<V> KvPrefix for GlobalConfigOverride<V>
+    where
+        V: Send + Sync + Serialize + DeserializeOwned + 'static,
+    {
+        const PREFIX: &'static str = "global_config/override";
+
+        type Key = &'static str;
+        type Value = V;
+    }
 
     pub struct TaskConfig();
     impl KvPrefix for TaskConfig {
@@ -41,6 +55,14 @@ pub mod prefix {
 
         type Key = TaskId;
         type Value = DapTaskConfig;
+    }
+
+    pub struct TaskprovOptInParam();
+    impl KvPrefix for TaskprovOptInParam {
+        const PREFIX: &'static str = "taskprov/opt_in_param";
+
+        type Key = TaskId;
+        type Value = taskprov::OptInParam;
     }
 
     pub struct HpkeReceiverConfigSet();
@@ -68,6 +90,20 @@ pub mod prefix {
     }
 }
 
+/// Options for getting items from KV.
+#[derive(Default)]
+pub(crate) struct KvGetOptions {
+    /// Cache the response from KV regardless of whether a value was found. If the value was not
+    /// found, then [`Kv::get`] and its cousins will return `None` until the cache line expires.
+    ///
+    /// In most cases we want this option to be disabled. This option is useful in situations where
+    /// we don't expect the value to be in KV and the user is not latency-sensitive. For example,
+    /// we store overrides for [`DapGlobalConfig`] in KV, but we can wait a few minutes for these
+    /// overrides to take effect. Setting this option prevents us from hitting KV harder than we
+    /// need to.
+    pub(crate) cache_not_found: bool,
+}
+
 impl<'h> Kv<'h> {
     pub fn new(
         config: &'h StorageProxyConfig,
@@ -81,24 +117,33 @@ impl<'h> Kv<'h> {
         }
     }
 
-    pub async fn get<P>(&self, key: &P::Key) -> Result<Option<Marc<P::Value>>, Error>
+    pub async fn get<P>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+    ) -> Result<Option<Marc<P::Value>>, Error>
     where
         P: KvPrefix,
     {
-        self.get_mapped::<P, _, _>(key, |t| Some(t)).await
+        self.get_mapped::<P, _, _>(key, opt, |t| Some(t)).await
     }
 
-    pub async fn get_cloned<P>(&self, key: &P::Key) -> Result<Option<P::Value>, Error>
+    pub async fn get_cloned<P>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+    ) -> Result<Option<P::Value>, Error>
     where
         P: KvPrefix,
         P::Value: Clone,
     {
-        Ok(self.get::<P>(key).await?.map(|t| t.as_ref().clone()))
+        Ok(self.get::<P>(key, opt).await?.map(|t| t.as_ref().clone()))
     }
 
     pub async fn get_mapped<P, R, F>(
         &self,
         key: &P::Key,
+        opt: &KvGetOptions,
         mapper: F,
     ) -> Result<Option<Marc<R>>, Error>
     where
@@ -107,20 +152,31 @@ impl<'h> Kv<'h> {
         R: 'static,
     {
         Ok(self
-            .get_impl::<P, _, _>(key, |marc| Marc::try_map(marc, mapper).ok())
+            .get_impl::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
             .await?
             .flatten())
     }
 
-    pub async fn peek<P, R, F>(&self, key: &P::Key, peeker: F) -> Result<Option<R>, Error>
+    pub async fn peek<P, R, F>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+        peeker: F,
+    ) -> Result<Option<R>, Error>
     where
         P: KvPrefix,
         F: FnOnce(&P::Value) -> R,
     {
-        self.get_impl::<P, _, _>(key, |marc| peeker(&marc)).await
+        self.get_impl::<P, _, _>(key, opt, |marc| peeker(&marc))
+            .await
     }
 
-    async fn get_impl<P, R, F>(&self, key: &P::Key, mapper: F) -> Result<Option<R>, Error>
+    async fn get_impl<P, R, F>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+        mapper: F,
+    ) -> Result<Option<R>, Error>
     where
         P: KvPrefix,
         F: for<'s> FnOnce(Marc<P::Value>) -> R,
@@ -128,7 +184,11 @@ impl<'h> Kv<'h> {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "GET");
         match self.cache.read().await.get::<P>(&key) {
-            cache::GetResult::NoFound => {}
+            cache::GetResult::NotFound { read_through } => {
+                if !read_through {
+                    return Ok(None);
+                }
+            }
             cache::GetResult::Found(t) => return Ok(Some(mapper(t))),
             cache::GetResult::MismatchedType => {
                 tracing::warn!(
@@ -144,12 +204,15 @@ impl<'h> Kv<'h> {
             .send()
             .await?;
         if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
+            if opt.cache_not_found {
+                self.cache.write().await.put::<P>(key, None);
+            }
             Ok(None)
         } else {
             let resp = resp.error_for_status()?;
             let t = Marc::new(resp.json::<P::Value>().await?);
             let r = mapper(t.clone());
-            self.cache.write().await.put::<P>(key, t);
+            self.cache.write().await.put::<P>(key, Some(t));
             Ok(Some(r))
         }
     }
@@ -167,7 +230,7 @@ impl<'h> Kv<'h> {
             .send()
             .await?
             .error_for_status()?;
-        self.cache.write().await.put::<P>(key, value.into());
+        self.cache.write().await.put::<P>(key, Some(value.into()));
         Ok(())
     }
 
@@ -197,7 +260,7 @@ impl<'h> Kv<'h> {
             Ok(Some(value))
         } else {
             response.error_for_status()?;
-            self.cache.write().await.put::<P>(key, value.into());
+            self.cache.write().await.put::<P>(key, Some(value.into()));
             Ok(None)
         }
     }
@@ -207,7 +270,7 @@ impl<'h> Kv<'h> {
         P: KvPrefix,
     {
         let key = Self::to_key::<P>(key);
-        self.cache.write().await.put::<P>(key, value.into());
+        self.cache.write().await.put::<P>(key, Some(value.into()));
     }
 
     fn to_key<P: KvPrefix>(key: &P::Key) -> String {

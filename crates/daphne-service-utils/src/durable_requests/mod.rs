@@ -299,7 +299,10 @@ mod test {
             (
                 DapVersion::Draft09,
                 "some-task-id-hex",
-                &DapBatchBucket::TimeInterval { batch_window: 0 },
+                &DapBatchBucket::TimeInterval {
+                    batch_window: 0,
+                    shard: 17,
+                },
             ),
         );
 
@@ -316,7 +319,10 @@ mod test {
             (
                 DapVersion::Draft09,
                 "some-task-id-hex",
-                &DapBatchBucket::TimeInterval { batch_window: 0 },
+                &DapBatchBucket::TimeInterval {
+                    batch_window: 0,
+                    shard: 16,
+                },
             ),
         );
 

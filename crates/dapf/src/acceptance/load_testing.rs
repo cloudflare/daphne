@@ -309,10 +309,15 @@ async fn execute(t: &Test, test_config: &TestOptions) -> TestResults {
     }
 }
 
-pub async fn execute_multiple_combinations(helper_url: Url) {
+pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: bool) {
     // This vdaf config is later replaced on each of the runs
-    let mut t = Test::from_env(helper_url, VdafConfig::Prio2 { dimension: 44 }, None)
-        .expect("env to be present");
+    let mut t = Test::from_env(
+        helper_url,
+        VdafConfig::Prio2 { dimension: 44 },
+        None,
+        re_use_http_client,
+    )
+    .expect("env to be present");
 
     let config = t.get_hpke_config(&t.helper_url).await.expect("test failed");
     let mut test_config = TestOptions {
@@ -362,10 +367,12 @@ pub async fn execute_single_combination_from_env(
     vdaf_config: VdafConfig,
     reports_per_batch: usize,
     reports_per_agg_job: usize,
+    re_use_http_client: bool,
 ) {
     const VERSION: daphne::DapVersion = daphne::DapVersion::Latest;
 
-    let t = Test::from_env(helper_url, vdaf_config, None).expect("env to be present");
+    let t = Test::from_env(helper_url, vdaf_config, None, re_use_http_client)
+        .expect("env to be present");
 
     let system_now = now();
     let (test_task_config, hpke_config_fetch_time) = t
@@ -424,20 +431,3 @@ pub async fn execute_single_combination_from_env(
         println!("running count: {success_count}/{run_count}");
     }
 }
-
-// async fn main() {
-//     tracing_subscriber::fmt()
-//         .compact()
-//         .with_writer(std::io::stderr)
-//         .init();
-//     match std::env::args().nth(1) {
-//         Some(arg) if arg == "bench" => execute_multiple_combinations().await,
-//         Some(arg) => eprintln!("invalid arg {arg}. Only nothing and 'bench' are supported"),
-//         None => match std::env::var("TARGET").as_deref() {
-//             Ok("bench") => execute_multiple_combinations().await,
-//             _ => loop {
-//                 execute_single_combination_from_env().await;
-//             },
-//         },
-//     }
-// }

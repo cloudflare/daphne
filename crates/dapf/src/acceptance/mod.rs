@@ -44,7 +44,7 @@ use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, TextEncoder};
 use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reqwest::Client;
+use reqwest::{Client, Identity};
 use std::{
     convert::TryFrom,
     env,
@@ -76,12 +76,54 @@ impl DaphneMetrics for TestMetrics {
     fn agg_job_put_span_retry_inc(&self) {}
 }
 
+pub enum HttpClient {
+    NoReuse(Option<Identity>),
+    Reuse(Client),
+}
+
+impl HttpClient {
+    fn reused(leader_tls_identity: Option<Identity>) -> Self {
+        // Build the HTTP client.
+        let mut http_client_builder = reqwest::Client::builder()
+            // it takes too long to generate reports for larger dimensions, causing the worker
+            // to drop idle connections
+            .pool_max_idle_per_host(0)
+            // Don't handle redirects automatically so that we can control the client behavior.
+            .redirect(reqwest::redirect::Policy::none())
+            // We might as well use rustls because we already need the feature for
+            // `Identity::from_pem()`.
+            .use_rustls_tls();
+        if let Some(identity) = leader_tls_identity {
+            // Configure TLS certificate, if available.
+            http_client_builder = http_client_builder.identity(identity);
+        }
+        let http_client = http_client_builder
+            .build()
+            .expect("failed to build http client");
+        Self::Reuse(http_client)
+    }
+
+    fn no_reuse(leader_tls_identity: Option<Identity>) -> Self {
+        Self::NoReuse(leader_tls_identity)
+    }
+
+    pub fn client(&self) -> Client {
+        match self {
+            Self::Reuse(c) => c.clone(),
+            Self::NoReuse(identity) => match Self::reused(identity.clone()) {
+                Self::Reuse(client) => client,
+                Self::NoReuse(_) => unreachable!(),
+            },
+        }
+    }
+}
+
 pub struct Test {
     pub helper_url: Url,
     bearer_token: Option<BearerToken>,
     using_mtls: bool,
     vdaf_verify_init: [u8; 32],
-    http_client: Client,
+    http_client: HttpClient,
     metrics: TestMetrics,
     vdaf_config: VdafConfig,
     /// The path to the hpke signing certificate, which can be used to verify the hpke config
@@ -129,7 +171,7 @@ struct TestTaskConfig {
 
 impl Test {
     pub fn new(
-        http_client: reqwest::Client,
+        http_client: HttpClient,
         using_mtls: bool,
         helper_url: Url,
         vdaf_verify_init: &str,
@@ -150,18 +192,18 @@ impl Test {
 
         let metrics = TestMetrics {
             aggregated: prometheus::register_int_counter_vec!(
-                "aggregated",
+                "daphne_server_acceptance_aggregated",
                 "Counts the number of times tests ran",
                 &["using_mtls", "using_bearer_token", "success"],
             )?,
             test_durations: prometheus::register_histogram_vec!(
-                "test_durations",
+                "daphne_server_acceptance_test_durations",
                 "The time tests take in milliseconds",
                 &["section"],
                 prometheus::exponential_buckets(100., 2., 12).unwrap(),
             )?,
             report_counter: prometheus::register_int_counter_vec!(
-                "report_counter",
+                "daphne_server_acceptance_report_counter",
                 "Total number reports rejected, aggregated, and collected.",
                 &["status"],
             )?,
@@ -183,6 +225,7 @@ impl Test {
         helper_url: Url,
         vdaf_config: VdafConfig,
         hpke_signing_certificate_path: Option<PathBuf>,
+        re_use_http_client: bool,
     ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
         const LEADER_TLS_CLIENT_CERT_VAR: &str = "LEADER_TLS_CLIENT_CERT";
@@ -211,24 +254,12 @@ impl Test {
             (None, Some(_)) => bail!("{LEADER_TLS_CLIENT_CERT_VAR} is not set"),
         };
 
-        // Build the HTTP client.
-        let mut http_client_builder = reqwest::Client::builder()
-            // it takes too long to generate reports for larger dimensions, causing the worker
-            // to drop idle connections
-            .pool_max_idle_per_host(0)
-            // Don't handle redirects automatically so that we can control the client behavior.
-            .redirect(reqwest::redirect::Policy::none())
-            // We might as well use rustls because we already need the feature for
-            // `Identity::from_pem()`.
-            .use_rustls_tls();
         let using_mtls = leader_tls_identity.is_some();
-        if let Some(identity) = leader_tls_identity {
-            // Configure TLS certificate, if available.
-            http_client_builder = http_client_builder.identity(identity);
-        }
-        let http_client = http_client_builder
-            .build()
-            .with_context(|| "failed to build HTTP client")?;
+        let http_client = if re_use_http_client {
+            HttpClient::reused(leader_tls_identity)
+        } else {
+            HttpClient::no_reuse(leader_tls_identity)
+        };
 
         let mut test = Test::new(
             http_client,
@@ -280,6 +311,7 @@ impl Test {
     pub async fn get_hpke_config(&self, aggregator: &Url) -> anyhow::Result<HpkeConfig> {
         Ok(self
             .http_client
+            .client()
             .get_hpke_config(aggregator, self.hpke_signing_certificate_path.as_deref())
             .await?
             .hpke_configs
@@ -311,6 +343,7 @@ impl Test {
             let start = Instant::now();
             let helper_hpke_config = self
                 .http_client
+                .client()
                 .get_hpke_config(
                     &self.helper_url,
                     self.hpke_signing_certificate_path.as_deref(),
@@ -341,6 +374,7 @@ impl Test {
                 max_batch_size: Some(reports_per_batch.try_into().unwrap()),
             },
             vdaf: self.vdaf_config,
+            ..Default::default()
         }
         .to_config_with_taskprov(
             b"cool task".to_vec(),
@@ -468,6 +502,7 @@ impl Test {
         let start = Instant::now();
         let resp = send(
             self.http_client
+                .client()
                 .put(url)
                 .body(
                     agg_job_init_req
@@ -644,6 +679,7 @@ impl Test {
         ))?;
         let resp = send(
             self.http_client
+                .client()
                 .post(url)
                 .body(agg_share_req.get_encoded_with_param(&version).unwrap())
                 .headers(headers),

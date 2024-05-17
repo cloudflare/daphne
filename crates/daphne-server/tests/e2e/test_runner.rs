@@ -23,6 +23,7 @@ use serde_json::json;
 use std::time::SystemTime;
 use std::{
     any::{self, Any},
+    num::NonZeroUsize,
     ops::Range,
 };
 use url::Url;
@@ -96,11 +97,21 @@ impl TestRunner {
         let collector_hpke_receiver =
             HpkeReceiverConfig::gen(rng.gen(), HpkeKemId::X25519HkdfSha256).unwrap();
 
+        let global_config = DapGlobalConfig {
+            max_batch_duration: 360_000,
+            min_batch_interval_start: 259_200,
+            max_batch_interval_end: 259_200,
+            supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
+            allow_taskprov: true,
+            default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
+        };
+
         let task_config = DapTaskConfig {
             version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
-            expiration: now + 604_800, // one week from now
+            not_before: now,
+            not_after: now + 604_800, // one week from now
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
@@ -108,16 +119,10 @@ impl TestRunner {
             vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
             method: Default::default(),
+            num_agg_span_shards: global_config.default_num_agg_span_shards,
         };
 
         // This block needs to be kept in-sync with daphne-worker-test/wrangler.toml.
-        let global_config = DapGlobalConfig {
-            max_batch_duration: 360_000,
-            min_batch_interval_start: 259_200,
-            max_batch_interval_end: 259_200,
-            supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-            allow_taskprov: true,
-        };
         let taskprov_vdaf_verify_key_init =
             hex::decode("b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18")
                 .unwrap()
@@ -224,7 +229,7 @@ impl TestRunner {
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
-            "task_expiration": t.task_config.expiration,
+            "task_expiration": t.task_config.not_after,
         });
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestCommandResult = t
@@ -251,7 +256,7 @@ impl TestRunner {
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
-            "task_expiration": t.task_config.expiration,
+            "task_expiration": t.task_config.not_after,
         });
         let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)

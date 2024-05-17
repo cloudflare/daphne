@@ -250,7 +250,7 @@ async fn leader_upload(version: DapVersion) {
         .vdaf
         .produce_report(
             &hpke_config_list,
-            t.task_config.expiration, // past the expiration date
+            t.task_config.not_after, // past the expiration date
             &t.task_id,
             DapMeasurement::U64(23),
             version,

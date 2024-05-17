@@ -51,7 +51,7 @@
 //!     (
 //!         daphne::DapVersion::Draft09,
 //!         "some-task-id-in-hex",
-//!         &daphne::DapBatchBucket::TimeInterval { batch_window: 50 }
+//!         &daphne::DapBatchBucket::TimeInterval { batch_window: 50, shard: 0 }
 //!     ),
 //! );
 //!
@@ -218,11 +218,26 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             }
         }
         worker::Method::Post => {
-            ctx.env
+            match ctx
+                .env
                 .kv(KV_BINDING_DAP_CONFIG)?
-                .put_bytes(key, &ctx.req.bytes().await?)?
-                .execute()
-                .await?;
+                .put_bytes(key, &ctx.req.bytes().await?)
+            {
+                Ok(put) => {
+                    if let Err(error) = put.execute().await {
+                        tracing::warn!(
+                            ?error,
+                            "Swallowed error from KV POST, this will hopefully retry later"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        "Swallowed error from KV POST creation, this will hopefully retry later"
+                    );
+                }
+            }
 
             Response::empty()
         }
@@ -239,9 +254,22 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             {
                 Response::error(String::new(), 409 /* Conflict */)
             } else {
-                kv.put_bytes(key, &ctx.req.bytes().await?)?
-                    .execute()
-                    .await?;
+                match kv.put_bytes(key, &ctx.req.bytes().await?) {
+                    Ok(put) => {
+                        if let Err(error) = put.execute().await {
+                            tracing::warn!(
+                                ?error,
+                                "Swallowed error from KV PUT, this will hopefully retry later"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?error,
+                            "Swallowed error from KV PUT creation, this will hopefully retry later"
+                        );
+                    }
+                }
 
                 Response::empty()
             }
@@ -299,6 +327,8 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
     };
     let mut attempt = 1;
     loop {
+        tracing::warn!(id = obj.to_string(), "Getting DO stub");
+
         match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
                 ctx.metrics.durable_request_retry_count_inc(

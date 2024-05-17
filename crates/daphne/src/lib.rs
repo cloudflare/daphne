@@ -81,6 +81,7 @@ use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::Debug,
+    num::NonZeroUsize,
     str::FromStr,
 };
 use url::Url;
@@ -134,21 +135,18 @@ impl std::fmt::Display for DapVersion {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct DapGlobalConfig {
     /// Maximum interval duration permitted in [`CollectionReq`](messages::CollectionReq).
+    ///
     /// Prevents Collectors from requesting wide range or reports.
     pub max_batch_duration: Duration,
 
     /// Lower bound of an acceptable batch interval for collect requests.
     /// Batch intervals cannot start more than `min_batch_interval_start`
     /// apart from the current batch interval.
-    //
-    // TODO(cjpatton) Rename this and clarify semantics.
     pub min_batch_interval_start: Duration,
 
     /// Upper bound of an acceptable batch interval for collect requests.
     /// Batch intervals cannot end more than `max_batch_interval_end`
     /// apart from the current batch interval.
-    //
-    // TODO(cjpatton) Rename this and clarify semantics.
     pub max_batch_interval_end: Duration,
 
     /// HPKE KEM types that are supported. Used when generating HPKE
@@ -156,8 +154,47 @@ pub struct DapGlobalConfig {
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
     /// draft-wang-ppm-dap-taskprov: Indicates if the taskprov extension is enabled.
-    #[serde(default)]
     pub allow_taskprov: bool,
+
+    /// Default number of aggregate span shards for a task.
+    ///
+    /// At the end of an aggregation job, each Aggregator produces a [`DapAggregateSpan`] that maps
+    /// buckets to aggregate shares. A bucket consists of a batch window (either the batch ID or a
+    /// window of time, depending on the DAP query type) and a shard. Sharding is intended to allow
+    /// an implementation to spread transactions across multiple instances of the backend storage
+    /// mechanism (e.g., durable objects in the case of Cloudflare Workers).
+    ///
+    /// # Notes
+    ///
+    /// 1. The default number of shards is 1; the number of shards MUST NOT be 0.
+    ///
+    /// 2. Currently [`taskprov`] uses the default for choosing the number of shards for a task.
+    ///
+    /// 3. WARNING: decreasing the number of shards for a task may result on data loss, as
+    ///    collection may fail to collect aggregate shares for some shards.
+    ///
+    /// 4. WARNING: increasing the number of shards for a task breaks replay protection for reports
+    ///    that have already been aggregated.
+    #[serde(default = "default_num_agg_span_shards")]
+    pub default_num_agg_span_shards: NonZeroUsize,
+}
+
+fn default_num_agg_span_shards() -> NonZeroUsize {
+    NonZeroUsize::new(1).unwrap()
+}
+
+#[cfg(test)]
+impl Default for DapGlobalConfig {
+    fn default() -> Self {
+        Self {
+            max_batch_duration: 60,
+            min_batch_interval_start: 60,
+            max_batch_interval_end: 60,
+            supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
+            allow_taskprov: false,
+            default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
+        }
+    }
 }
 
 impl DapGlobalConfig {
@@ -253,23 +290,45 @@ impl std::fmt::Display for DapQueryConfig {
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapBatchBucket {
-    FixedSize { batch_id: BatchId },
-    TimeInterval { batch_window: Time },
+    FixedSize { batch_id: BatchId, shard: usize },
+    TimeInterval { batch_window: Time, shard: usize },
+}
+
+impl DapBatchBucket {
+    fn shard(&self) -> usize {
+        match self {
+            Self::TimeInterval {
+                batch_window: _,
+                shard,
+            }
+            | Self::FixedSize { batch_id: _, shard } => *shard,
+        }
+    }
+}
+
+impl std::fmt::Display for DapBatchBucket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimeInterval { batch_window, .. } => write!(f, "window/{batch_window}")?,
+            Self::FixedSize { batch_id, .. } => write!(f, "batch/{}", batch_id.to_hex())?,
+        };
+
+        let shard = self.shard();
+
+        // Append the shard number to the string for all shards but the first. This is for
+        // backwards compatibility with already deployed tasks.
+        if shard > 0 {
+            write!(f, "/shard/{shard}")?;
+        }
+
+        Ok(())
+    }
 }
 
 /// A set of values related to reports in the same bucket.
 #[derive(Debug)]
 pub struct DapAggregateSpan<T> {
     span: HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)>,
-}
-
-impl std::fmt::Display for DapBatchBucket {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TimeInterval { batch_window } => write!(f, "window/{batch_window}"),
-            Self::FixedSize { batch_id } => write!(f, "batch/{}", batch_id.to_hex()),
-        }
-    }
 }
 
 // We can't derive default because it will require T to be Default, which we don't need.
@@ -291,6 +350,27 @@ impl<T> IntoIterator for DapAggregateSpan<T> {
     }
 }
 
+impl ReportId {
+    fn shard(&self, num_shards: NonZeroUsize) -> usize {
+        // NOTE This sharding scheme does not evenly distribute reports across all shards.
+        //
+        // First, the clients are supposed to choose the report ID at random; by finding collisions
+        // on the first 8 bytes of SHA256, a coalition of clients can try to overwhelm a single
+        // shard. This could be addressed in the future by replacing SHA256 with HMAC-SHA256 with a
+        // securely provisioned key.
+        //
+        // Second, unless the number of shards is a power of 2 (4, 8, 16, 32, ..., 128, ...),
+        // dividing the index by the number of shards and taking the remainder will result in some
+        // shards getting more reports than others.
+        let index = u32::from_le_bytes(
+            ring::digest::digest(&ring::digest::SHA256, self.as_ref()).as_ref()[..4]
+                .try_into()
+                .unwrap(),
+        );
+        usize::try_from(index).unwrap() % num_shards
+    }
+}
+
 impl DapAggregateSpan<DapAggregateShare> {
     pub(crate) fn add_out_share(
         &mut self,
@@ -306,12 +386,15 @@ impl DapAggregateSpan<DapAggregateShare> {
             ));
         }
 
+        let shard = report_id.shard(task_config.num_agg_span_shards);
         let bucket = match part_batch_sel {
             PartialBatchSelector::TimeInterval => DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(time),
+                shard,
             },
             PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
                 batch_id: *batch_id,
+                shard,
             },
         };
 
@@ -450,6 +533,9 @@ pub struct DapTaskParameters {
 
     /// The VDAF configuration for this task.
     pub vdaf: VdafConfig,
+
+    /// Number of aggregate span shards. See [`DapGlobalConfig`] for details.
+    pub num_agg_span_shards: NonZeroUsize,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -491,14 +577,18 @@ impl DapTaskParameters {
         let task_id = taskprov::compute_task_id(&encoded_taskprov_config);
 
         // Compute the DAP task config.
-        let task_config = DapTaskConfig::try_from_taskprov(
+        let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov(
             self.version,
             &task_id,
             taskprov_config,
             vdaf_verify_key_init,
             collector_hpke_config,
         )
-        .unwrap();
+        .unwrap()
+        .into_opted_in(&taskprov::OptInParam {
+            not_before: now,
+            num_agg_span_shards: self.num_agg_span_shards,
+        });
 
         let taskprov_advertisement = encode_base64url(&encoded_taskprov_config);
 
@@ -518,6 +608,7 @@ impl Default for DapTaskParameters {
             min_batch_size: 10,
             query: DapQueryConfig::TimeInterval,
             vdaf: VdafConfig::Prio2 { dimension: 10 },
+            num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         }
     }
 }
@@ -525,7 +616,7 @@ impl Default for DapTaskParameters {
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
-#[serde(from = "ShadowDapTaskConfig")]
+#[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
     /// Same as [`DapTaskParameters`].
     pub version: DapVersion,
@@ -536,8 +627,11 @@ pub struct DapTaskConfig {
     pub query: DapQueryConfig,
     pub vdaf: VdafConfig,
 
+    /// The time at which the task first became valid.
+    pub not_before: Time,
+
     /// The time at which the task expires.
-    pub expiration: Time,
+    pub not_after: Time,
 
     /// VDAF verification key shared by the Aggregators. Used to aggregate reports.
     pub vdaf_verify_key: VdafVerifyKey,
@@ -546,8 +640,11 @@ pub struct DapTaskConfig {
     pub collector_hpke_config: HpkeConfig,
 
     /// Method by which the task was configured.
-    #[serde(default)]
     pub method: DapTaskConfigMethod,
+
+    /// Number of aggregate span shards for this task. See [`DapGlobalConfig`] for details.
+    #[serde(default = "default_num_agg_span_shards")]
+    pub num_agg_span_shards: NonZeroUsize,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -559,7 +656,8 @@ struct ShadowDapTaskConfig {
     min_batch_size: u64,
     query: DapQueryConfig,
     vdaf: VdafConfig,
-    expiration: Time,
+    not_after: Time,
+    not_before: Time,
     vdaf_verify_key: VdafVerifyKey,
     collector_hpke_config: HpkeConfig,
     #[serde(default)]
@@ -569,11 +667,15 @@ struct ShadowDapTaskConfig {
     // was replaced by `method`.
     #[serde(default, rename = "taskprov")]
     deprecated_taskprov: bool,
+
+    num_agg_span_shards: NonZeroUsize,
 }
 
-impl From<ShadowDapTaskConfig> for DapTaskConfig {
-    fn from(shadow: ShadowDapTaskConfig) -> Self {
-        Self {
+impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
+    type Error = DapError;
+
+    fn try_from(shadow: ShadowDapTaskConfig) -> Result<Self, DapError> {
+        Ok(Self {
             version: shadow.version,
             leader_url: shadow.leader_url,
             helper_url: shadow.helper_url,
@@ -581,7 +683,8 @@ impl From<ShadowDapTaskConfig> for DapTaskConfig {
             min_batch_size: shadow.min_batch_size,
             query: shadow.query,
             vdaf: shadow.vdaf,
-            expiration: shadow.expiration,
+            not_before: shadow.not_before,
+            not_after: shadow.not_after,
             vdaf_verify_key: shadow.vdaf_verify_key,
             collector_hpke_config: shadow.collector_hpke_config,
             method: match shadow.method {
@@ -592,7 +695,8 @@ impl From<ShadowDapTaskConfig> for DapTaskConfig {
                 }
                 method => method,
             },
-        }
+            num_agg_span_shards: shadow.num_agg_span_shards,
+        })
     }
 }
 
@@ -603,7 +707,8 @@ impl deepsize::DeepSizeOf for DapTaskConfig {
             + std::mem::size_of_val(self.leader_url.as_str())
             + std::mem::size_of_val(self.helper_url.as_str())
             + self.time_precision.deep_size_of_children(context)
-            + self.expiration.deep_size_of_children(context)
+            + self.not_before.deep_size_of_children(context)
+            + self.not_after.deep_size_of_children(context)
             + self.min_batch_size.deep_size_of_children(context)
             + self.query.deep_size_of_children(context)
             + self.vdaf.deep_size_of_children(context)
@@ -649,23 +754,33 @@ impl DapTaskConfig {
             ));
         }
 
+        let num_agg_span_shards = usize::from(self.num_agg_span_shards);
         match batch_sel {
             BatchSelector::TimeInterval {
                 batch_interval: Interval { start, duration },
             } => {
                 let windows = duration / self.time_precision;
-                let mut span = HashSet::with_capacity(usize::try_from(windows).unwrap());
+                let mut span =
+                    HashSet::with_capacity(usize::try_from(windows).unwrap() * num_agg_span_shards);
                 for i in 0..windows {
-                    span.insert(DapBatchBucket::TimeInterval {
-                        batch_window: start + i * self.time_precision,
-                    });
+                    for shard in 0..num_agg_span_shards {
+                        span.insert(DapBatchBucket::TimeInterval {
+                            batch_window: start + i * self.time_precision,
+                            shard,
+                        });
+                    }
                 }
                 Ok(span)
             }
             BatchSelector::FixedSizeByBatchId { batch_id } => {
-                Ok(HashSet::from([DapBatchBucket::FixedSize {
-                    batch_id: *batch_id,
-                }]))
+                let mut span = HashSet::with_capacity(num_agg_span_shards);
+                for shard in 0..num_agg_span_shards {
+                    span.insert(DapBatchBucket::FixedSize {
+                        batch_id: *batch_id,
+                        shard,
+                    });
+                }
+                Ok(span)
             }
         }
     }
