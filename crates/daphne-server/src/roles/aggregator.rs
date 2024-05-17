@@ -45,7 +45,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                         bindings::AggregateStore::Merge,
                         (task_config.version, &task_id_hex, &bucket),
                     )
-                    .encode_bincode(AggregateStoreMergeReq {
+                    .encode(&AggregateStoreMergeReq {
                         contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
                         agg_share_delta: agg_share,
                     })

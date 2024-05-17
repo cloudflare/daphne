@@ -20,18 +20,18 @@
 //! this module as well as the [`instantiate_durable_object`] macro, respectively.
 
 pub(crate) mod aggregate_store;
-pub(crate) mod helper_state_store;
 #[cfg(feature = "test-utils")]
 pub(crate) mod test_state_cleaner;
 
 use crate::tracing_utils::shorten_paths;
-use daphne_service_utils::durable_requests::bindings::DurableMethod;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use daphne_service_utils::durable_requests::bindings::{
+    DurableMethod, DurableRequestPayload, DurableRequestPayloadExt,
+};
+use serde::{Deserialize, Serialize};
 use tracing::info_span;
 use worker::{Env, Error, Request, Response, Result, ScheduledTime, State};
 
 pub use aggregate_store::AggregateStore;
-pub use helper_state_store::HelperStateStore;
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
@@ -204,10 +204,22 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
     Ok(None)
 }
 
-async fn req_parse<T: DeserializeOwned>(req: &mut Request) -> Result<T> {
+async fn req_parse<T>(req: &mut Request) -> Result<T>
+where
+    T: DurableRequestPayload,
+    // TODO(mendess): delete
+    T: serde::de::DeserializeOwned,
+{
     let bytes = req.bytes().await?;
-    bincode::deserialize(&bytes)
-        .map_err(|e| Error::RustError(format!("failed to deserialize bincode: {e:?}")))
+    T::decode_from_bytes(&bytes)
+        .map_err(|e| Error::RustError(e.to_string()))
+        .or_else(|cap_error| {
+            bincode::deserialize(&bytes).map_err(|e| {
+                Error::RustError(format!(
+                    "failed to deserialize capnproto ({cap_error:?}) and bincode ({e:?})"
+                ))
+            })
+        })
 }
 
 fn create_span_from_request(req: &Request) -> tracing::Span {

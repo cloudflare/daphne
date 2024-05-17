@@ -10,11 +10,3 @@ instantiate_durable_object! {
         daphne_worker::tracing_utils::initialize_tracing(env);
     }
 }
-
-instantiate_durable_object! {
-    struct HelperStateStore < durable::HelperStateStore;
-
-    fn pre_init(_state: State, env: Env) {
-        daphne_worker::tracing_utils::initialize_tracing(env);
-    }
-}

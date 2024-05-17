@@ -11,9 +11,10 @@ use std::fmt::Debug;
 
 use axum::http::{Method, StatusCode};
 use daphne_service_utils::durable_requests::{
-    bindings::DurableMethod, DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
+    bindings::{DurableMethod, DurableRequestPayload, DurableRequestPayloadExt},
+    DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
 
 pub(crate) use kv::Kv;
 
@@ -96,8 +97,8 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
 }
 
 impl<'d, B: DurableMethod> RequestBuilder<'d, B, [u8; 0]> {
-    pub fn encode_bincode<T: Serialize>(self, payload: T) -> RequestBuilder<'d, B, Vec<u8>> {
-        self.with_body(bincode::serialize(&payload).unwrap())
+    pub fn encode<T: DurableRequestPayload>(self, payload: &T) -> RequestBuilder<'d, B, Vec<u8>> {
+        self.with_body(payload.encode_to_bytes().unwrap())
     }
 
     pub fn with_body<T: AsRef<[u8]>>(self, payload: T) -> RequestBuilder<'d, B, T> {

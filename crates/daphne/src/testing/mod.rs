@@ -1009,54 +1009,7 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapHelper<BearerToken> for InMemoryAggregator {
-    async fn put_helper_state_if_not_exists(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-        helper_state: &DapAggregationJobState,
-    ) -> Result<bool, DapError> {
-        let helper_state_info = HelperStateInfo {
-            task_id: *task_id,
-            agg_job_id: *agg_job_id,
-        };
-
-        let mut helper_state_store = self
-            .helper_state_store
-            .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        if helper_state_store.contains_key(&helper_state_info) {
-            return Ok(false);
-        }
-
-        // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
-        // For VDAFs with more rounds, the helper state blob will need to be updated here.
-        helper_state_store.insert(helper_state_info, helper_state.clone());
-
-        Ok(true)
-    }
-
-    async fn get_helper_state(
-        &self,
-        task_id: &TaskId,
-        agg_job_id: &AggregationJobId,
-    ) -> Result<Option<DapAggregationJobState>, DapError> {
-        let helper_state_info = HelperStateInfo {
-            task_id: *task_id,
-            agg_job_id: *agg_job_id,
-        };
-
-        let helper_state_store = self
-            .helper_state_store
-            .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        // NOTE: This code is only correct for VDAFs with exactly one round of preparation.
-        // For VDAFs with more rounds, the helper state blob will need to be updated here.
-        Ok(helper_state_store.get(&helper_state_info).cloned())
-    }
-}
+impl DapHelper<BearerToken> for InMemoryAggregator {}
 
 #[async_trait]
 impl DapLeader<BearerToken> for InMemoryAggregator {
