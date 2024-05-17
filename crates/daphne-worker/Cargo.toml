@@ -21,7 +21,7 @@ chrono = { workspace = true, default-features = false, features = ["clock", "was
 daphne = { path = "../daphne", features = ["prometheus"] }
 futures = { workspace = true, optional = true }
 hex.workspace = true
-prio.workspace = true
+prio = { workspace = true, features = ["wasm-compat"] }
 prometheus.workspace = true
 rand.workspace = true
 reqwest-wasm.workspace = true

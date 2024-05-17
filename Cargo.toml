@@ -44,7 +44,6 @@ config = "0.13.4"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 deepsize = { version = "0.2.0" }
 futures = "0.3.30"
-getrandom = "0.2.12"
 hex = { version = "0.4.3", features = ["serde"] }
 hpke-rs = "0.2.0"
 hpke-rs-crypto = "0.2.0"
@@ -56,7 +55,7 @@ matchit = "0.7.3"
 p256 = { version = "0.13.2", features = ["ecdsa-core", "ecdsa", "pem"] }
 paste = "1.0.14"
 pin-project = "1.1.5"
-prio = "0.16.4"
+prio = "0.16.5"
 prometheus = "0.13.3"
 rand = "0.8.5"
 rayon = "1.9.0"
