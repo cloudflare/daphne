@@ -10,7 +10,7 @@ pub mod leader;
 use crate::{
     constants::DapMediaType,
     messages::{Base64Encode, Query, TaskId, Time},
-    taskprov, DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig,
+    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig,
 };
 use tracing::warn;
 
@@ -25,9 +25,8 @@ async fn check_batch<S: Sync>(
     query: &Query,
     agg_param: &[u8],
     now: Time,
+    global_config: &DapGlobalConfig,
 ) -> Result<(), DapError> {
-    let global_config = agg.get_global_config();
-
     // Check that the aggregation parameter is suitable for the given VDAF.
     if !task_config.vdaf.is_valid_agg_param(agg_param) {
         // TODO spec: Define this behavior.
@@ -108,6 +107,7 @@ async fn resolve_taskprov<S: Sync>(
     agg: &impl DapAggregator<S>,
     task_id: &TaskId,
     req: &DapRequest<S>,
+    global_config: &DapGlobalConfig,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
         // Task already configured, so nothing to do.
@@ -136,12 +136,9 @@ async fn resolve_taskprov<S: Sync>(
     };
 
     // This is the opt-in / opt-out decision point.
-    if let Some(reason) = agg.taskprov_opt_out_reason(&task_config)? {
-        return Err(DapError::Abort(DapAbort::InvalidTask {
-            detail: reason,
-            task_id: *task_id,
-        }));
-    }
+    let task_config = agg
+        .taskprov_opt_in(task_id, task_config, global_config)
+        .await?;
 
     agg.taskprov_put(req, task_config).await?;
     Ok(())
@@ -176,7 +173,7 @@ mod test {
         vdaf::poplar1::Poplar1AggregationParam,
     };
     use rand::{thread_rng, Rng};
-    use std::{collections::HashMap, sync::Arc, time::SystemTime, vec};
+    use std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::SystemTime, vec};
     use url::Url;
 
     pub(super) struct TestData {
@@ -215,6 +212,7 @@ mod test {
                 max_batch_interval_end: 259_200,
                 supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
                 allow_taskprov: true,
+                default_num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
             };
 
             // Task Parameters that the Leader and Helper must agree on.
@@ -238,12 +236,14 @@ mod test {
                     leader_url: leader_url.clone(),
                     helper_url: helper_url.clone(),
                     time_precision: Self::TASK_TIME_PRECISION,
-                    expiration: now + Self::TASK_TIME_PRECISION,
+                    not_before: now,
+                    not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
+                    num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
             );
             tasks.insert(
@@ -254,7 +254,8 @@ mod test {
                     leader_url: leader_url.clone(),
                     helper_url: helper_url.clone(),
                     time_precision: Self::TASK_TIME_PRECISION,
-                    expiration: now + Self::TASK_TIME_PRECISION,
+                    not_before: now,
+                    not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::FixedSize {
                         max_batch_size: Some(2),
@@ -262,6 +263,7 @@ mod test {
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
+                    num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
             );
             tasks.insert(
@@ -272,12 +274,14 @@ mod test {
                     leader_url: leader_url.clone(),
                     helper_url: helper_url.clone(),
                     time_precision: Self::TASK_TIME_PRECISION,
-                    expiration: now, // Expires this second
+                    not_before: now,
+                    not_after: now, // Expires this second
                     min_batch_size: 1,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
+                    num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
             );
 
@@ -293,12 +297,14 @@ mod test {
                     leader_url,
                     helper_url,
                     time_precision: Self::TASK_TIME_PRECISION,
-                    expiration: now + Self::TASK_TIME_PRECISION,
+                    not_before: now,
+                    not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 10,
                     query: DapQueryConfig::TimeInterval,
                     vdaf: mastic,
                     vdaf_verify_key: mastic.gen_verify_key(),
                     method: Default::default(),
+                    num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
             );
 
@@ -958,6 +964,10 @@ mod test {
         {
             let bucket = DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(t.now),
+                shard: report
+                    .report_metadata
+                    .id
+                    .shard(task_config.num_agg_span_shards),
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
             agg_store
@@ -997,6 +1007,10 @@ mod test {
         {
             let bucket = DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(t.now),
+                shard: report
+                    .report_metadata
+                    .id
+                    .shard(task_config.num_agg_span_shards),
             };
             let mut agg_store = t.helper.agg_store.lock().unwrap();
             agg_store.for_bucket(task_id, &bucket).collected = true;

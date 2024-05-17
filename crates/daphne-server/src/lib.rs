@@ -29,6 +29,7 @@ mod storage_proxy_connection;
 ///
 /// # Examples
 /// ```
+/// use std::num::NonZeroUsize;
 /// use url::Url;
 /// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
 /// use daphne_server::{App, router, StorageProxyConfig};
@@ -46,6 +47,7 @@ mod storage_proxy_connection;
 ///     max_batch_interval_end: 259_200,
 ///     supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
 ///     allow_taskprov: true,
+///     default_num_agg_span_shards: NonZeroUsize::new(2).unwrap(),
 /// };
 /// let service_config = DaphneServiceConfig {
 ///     env: "some-machine-identifier".into(),

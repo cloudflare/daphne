@@ -105,7 +105,7 @@ impl EarlyReportStateConsumed {
         report_share: ReportShare,
         prep_init_payload: Option<Vec<u8>>,
     ) -> Result<EarlyReportStateConsumed, DapError> {
-        if report_share.report_metadata.time >= task_config.expiration {
+        if report_share.report_metadata.time >= task_config.not_after {
             return Ok(Self::Rejected {
                 metadata: report_share.report_metadata,
                 failure: TransitionFailure::TaskExpired,

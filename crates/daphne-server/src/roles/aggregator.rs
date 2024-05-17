@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, future::ready, ops::Range, time::SystemTime};
+use std::{borrow::Cow, future::ready, num::NonZeroUsize, ops::Range, time::SystemTime};
 
 use axum::async_trait;
 use daphne::{
@@ -13,8 +13,8 @@ use daphne::{
     messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
-    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
-    DapGlobalConfig, DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
+    taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
+    DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
     EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
@@ -25,7 +25,7 @@ use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-use crate::storage_proxy_connection::kv;
+use crate::storage_proxy_connection::kv::{self, KvGetOptions};
 
 #[async_trait]
 impl DapAggregator<DaphneAuth> for crate::App {
@@ -213,8 +213,29 @@ impl DapAggregator<DaphneAuth> for crate::App {
         }
     }
 
-    fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.service_config.global
+    async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
+        let mut global_config = self.service_config.global.clone();
+
+        // Check KV for overrides to the global configuration.
+        let opt = KvGetOptions {
+            // If an override is not found, then don't try again until the cache line expires.
+            cache_not_found: true,
+        };
+
+        // "global_config/override/default_num_agg_span_shards"
+        if let Some(default_num_agg_span_shards) = self
+            .kv()
+            .get_cloned::<kv::prefix::GlobalConfigOverride<NonZeroUsize>>(
+                &"default_num_agg_span_shards",
+                &opt,
+            )
+            .await
+            .map_err(|e| fatal_error!(err = ?e))?
+        {
+            global_config.default_num_agg_span_shards = default_num_agg_span_shards;
+        }
+
+        Ok(global_config)
     }
 
     fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
@@ -231,12 +252,35 @@ impl DapAggregator<DaphneAuth> for crate::App {
             .map(|c| &c.hpke_collector_config)
     }
 
-    fn taskprov_opt_out_reason(
+    async fn taskprov_opt_in(
         &self,
-        _task_config: &DapTaskConfig,
-    ) -> Result<Option<String>, DapError> {
+        task_id: &TaskId,
+        task_config: taskprov::DapTaskConfigNeedsOptIn,
+        global_config: &DapGlobalConfig,
+    ) -> Result<DapTaskConfig, DapError> {
         // For now we always opt-in.
-        Ok(None)
+        //
+        // Opt-in parameters are backed by KV. If not found, then use the default number of shards.
+        let param = if let Some(param) = self
+            .kv()
+            .get_cloned::<kv::prefix::TaskprovOptInParam>(task_id, &KvGetOptions::default())
+            .await
+            .map_err(|e| fatal_error!(err = ?e))?
+        {
+            param
+        } else {
+            let param = taskprov::OptInParam {
+                not_before: self.get_current_time(),
+                num_agg_span_shards: global_config.default_num_agg_span_shards,
+            };
+            self.kv()
+                .put::<kv::prefix::TaskprovOptInParam>(task_id, param.clone())
+                .await
+                .map_err(|e| fatal_error!(err = ?e))?;
+            param
+        };
+
+        Ok(task_config.into_opted_in(&param))
     }
 
     async fn taskprov_put(
@@ -264,7 +308,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         task_id: &'req TaskId,
     ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
         self.kv()
-            .get_cloned::<kv::prefix::TaskConfig>(task_id)
+            .get_cloned::<kv::prefix::TaskConfig>(task_id, &KvGetOptions::default())
             .await
             .map_err(|e| fatal_error!(err = ?e))
     }
@@ -312,24 +356,33 @@ impl DapAggregator<DaphneAuth> for crate::App {
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+        let version = task_config.as_ref().version;
 
-        let agg_share: DapAggregateShare = self
-            .durable()
-            .request(
-                bindings::AggregateStore::Get,
-                (
-                    task_config.as_ref().version,
-                    &task_id.to_hex(),
-                    &DapBatchBucket::FixedSize {
-                        batch_id: *batch_id,
-                    },
-                ),
-            )
-            .send()
+        let agg_span = task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
+            batch_id: *batch_id,
+        })?;
+
+        futures::stream::iter(agg_span)
+            .map(|bucket| async move {
+                Ok::<bool, DapError>(
+                    !self
+                        .durable()
+                        .request(
+                            bindings::AggregateStore::Get,
+                            (version, &task_id.to_hex(), &bucket),
+                        )
+                        .send::<DapAggregateShare>()
+                        .await
+                        .map_err(|e| fatal_error!(err = ?e))?
+                        .empty(),
+                )
+            })
+            .buffer_unordered(usize::MAX)
+            .collect::<Vec<_>>()
             .await
-            .map_err(|e| fatal_error!(err = ?e))?;
-
-        Ok(!agg_share.empty())
+            .into_iter()
+            .reduce(|a, b| Ok(a? || b?))
+            .unwrap_or(Ok(false))
     }
 
     fn metrics(&self) -> &dyn DaphneMetrics {
@@ -400,13 +453,17 @@ impl HpkeProvider for crate::App {
         _task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig<'static>, DapError> {
         self.kv()
-            .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
-                // Assume the first HPKE config in the receiver list has the highest preference.
-                //
-                // TODO draft02 cleanup: Return the entire list and not just a single HPKE config.
-                // Note that we previously returned one because this was required in draft02.
-                config_list.iter().next().map(|hpke| &hpke.config)
-            })
+            .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(
+                &version,
+                &KvGetOptions::default(),
+                |config_list| {
+                    // Assume the first HPKE config in the receiver list has the highest preference.
+                    //
+                    // TODO draft02 cleanup: Return the entire list and not just a single HPKE config.
+                    // Note that we previously returned one because this was required in draft02.
+                    config_list.iter().next().map(|hpke| &hpke.config)
+                },
+            )
             .await
             .map_err(|e| fatal_error!(err = ?e))?
             .ok_or_else(|| fatal_error!(err = "there are no hpke configs in kv!!", %version))
@@ -422,9 +479,11 @@ impl HpkeProvider for crate::App {
 
         Ok(self
             .kv()
-            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
-                config_list.iter().any(|r| r.config.id == config_id)
-            })
+            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(
+                &version,
+                &KvGetOptions::default(),
+                |config_list| config_list.iter().any(|r| r.config.id == config_id),
+            )
             .await
             .map_err(|e| fatal_error!(err = ?e))?
             .unwrap_or(false))
@@ -447,12 +506,16 @@ impl HpkeDecrypter for crate::App {
             .ok_or(DapAbort::UnrecognizedTask)?
             .version;
         self.kv()
-            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(&version, |config_list| {
-                config_list
-                    .iter()
-                    .find(|receiver| receiver.config.id == ciphertext.config_id)
-                    .map(|receiver| receiver.decrypt(info, aad, ciphertext))
-            })
+            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(
+                &version,
+                &KvGetOptions::default(),
+                |config_list| {
+                    config_list
+                        .iter()
+                        .find(|receiver| receiver.config.id == ciphertext.config_id)
+                        .map(|receiver| receiver.decrypt(info, aad, ciphertext))
+                },
+            )
             .await
             .map_err(|e| fatal_error!(err = ?e))?
             .flatten()
@@ -482,7 +545,7 @@ impl BearerTokenProvider for crate::App {
         }
 
         self.kv()
-            .get_cloned::<kv::prefix::LeaderBearerToken>(task_id)
+            .get_cloned::<kv::prefix::LeaderBearerToken>(task_id, &KvGetOptions::default())
             .await
             .map_err(|e| fatal_error!(err = ?e))
             .map(|r| r.map(Cow::Owned))
@@ -506,7 +569,7 @@ impl BearerTokenProvider for crate::App {
         }
 
         self.kv()
-            .get_cloned::<kv::prefix::CollectorBearerToken>(task_id)
+            .get_cloned::<kv::prefix::CollectorBearerToken>(task_id, &KvGetOptions::default())
             .await
             .map_err(|e| fatal_error!(err = ?e))
             .map(|r| r.map(Cow::Owned))

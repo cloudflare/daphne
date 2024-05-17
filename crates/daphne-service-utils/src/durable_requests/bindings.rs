@@ -174,13 +174,40 @@ mod tests {
             format!(
                 "{}",
                 DapBatchBucket::FixedSize {
-                    batch_id: BatchId([17; 32])
+                    batch_id: BatchId([17; 32]),
+                    shard: 0,
                 }
             )
         );
         assert_eq!(
             "window/1337",
-            format!("{}", DapBatchBucket::TimeInterval { batch_window: 1337 })
+            format!(
+                "{}",
+                DapBatchBucket::TimeInterval {
+                    batch_window: 1337,
+                    shard: 0,
+                }
+            )
+        );
+        assert_eq!(
+            "batch/1111111111111111111111111111111111111111111111111111111111111111/shard/2323",
+            format!(
+                "{}",
+                DapBatchBucket::FixedSize {
+                    batch_id: BatchId([17; 32]),
+                    shard: 2323,
+                }
+            )
+        );
+        assert_eq!(
+            "window/1337/shard/99",
+            format!(
+                "{}",
+                DapBatchBucket::TimeInterval {
+                    batch_window: 1337,
+                    shard: 99,
+                }
+            )
         );
     }
 }

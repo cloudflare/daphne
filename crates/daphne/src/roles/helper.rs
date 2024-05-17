@@ -53,6 +53,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &'req DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
+    let global_config = aggregator.get_global_config().await?;
     let task_id = req.task_id()?;
     let metrics = aggregator.metrics();
     let agg_job_init_req =
@@ -62,8 +63,8 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
 
     // taskprov: Resolve the task config to use for the request.
-    if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req).await?;
+    if global_config.allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
@@ -153,14 +154,15 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
 ) -> Result<DapResponse, DapError> {
+    let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
     let task_id = req.task_id()?;
 
     check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
-    if aggregator.get_global_config().allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req).await?;
+    if global_config.allow_taskprov {
+        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
@@ -199,6 +201,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
         &agg_share_req.batch_sel.clone().into(),
         &agg_share_req.agg_param,
         now,
+        &global_config,
     )
     .await?;
 

@@ -251,6 +251,8 @@ enum Action {
     LoadTest {
         #[arg(env)]
         helper_url: Url,
+        #[arg(long, env)]
+        no_reuse_http_client: bool,
         #[command(subcommand)]
         params: LoadTestParameters,
     },
@@ -636,6 +638,7 @@ async fn main() -> Result<()> {
                 helper_url,
                 vdaf_config.into_vdaf(),
                 hpke_signing_certificate_path,
+                true,
             )?;
 
             let res = t
@@ -651,13 +654,15 @@ async fn main() -> Result<()> {
         }
         Action::LoadTest {
             helper_url,
+            no_reuse_http_client,
             params: LoadTestParameters::Multiple,
         } => {
-            load_testing::execute_multiple_combinations(helper_url).await;
+            load_testing::execute_multiple_combinations(helper_url, !no_reuse_http_client).await;
             Ok(())
         }
         Action::LoadTest {
             helper_url,
+            no_reuse_http_client,
             params:
                 LoadTestParameters::Single {
                     reports_per_batch,
@@ -670,6 +675,7 @@ async fn main() -> Result<()> {
                 vdaf_config.into_vdaf(),
                 reports_per_batch,
                 reports_per_agg_job,
+                !no_reuse_http_client,
             )
             .await;
             Ok(())

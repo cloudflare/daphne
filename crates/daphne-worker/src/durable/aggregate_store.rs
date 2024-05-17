@@ -81,10 +81,8 @@ struct DapAggregateShareMetadata {
 }
 
 impl DapAggregateShareMetadata {
-    fn from_agg_share(
-        share: DapAggregateShare,
-    ) -> (Self, Option<daphne::vdaf::VdafAggregateShare>) {
-        let this = Self {
+    fn from_agg_share(share: &DapAggregateShare) -> Self {
+        Self {
             report_count: share.report_count,
             min_time: share.min_time,
             max_time: share.max_time,
@@ -94,9 +92,7 @@ impl DapAggregateShareMetadata {
                 daphne::vdaf::VdafAggregateShare::Field128(_) => VdafKind::Field128,
                 daphne::vdaf::VdafAggregateShare::FieldPrio2(_) => VdafKind::FieldPrio2,
             }),
-        };
-
-        (this, share.data)
+        }
     }
 
     fn into_agg_share_with_data(self, data: daphne::vdaf::VdafAggregateShare) -> DapAggregateShare {
@@ -117,114 +113,160 @@ impl DapAggregateShareMetadata {
     }
 }
 
-fn js_map_to_chunks<T: DeserializeOwned>(keys: &[String], map: js_sys::Map) -> Vec<T> {
+fn js_map_to_chunks<'s, T: DeserializeOwned + 's>(
+    keys: &'s [&str],
+    map: &'s js_sys::Map,
+) -> impl Iterator<Item = Vec<T>> + 's {
     keys.iter()
         .map(|k| JsValue::from_str(k))
         .filter(|k| map.has(k))
         .map(|k| map.get(&k))
-        .flat_map(|js_v| {
+        .map(|js_v| {
             serde_wasm_bindgen::from_value::<Vec<T>>(js_v).expect("expect an array of bytes")
         })
-        .collect()
 }
 
 impl AggregateStore {
-    fn agg_share_shard_keys() -> Vec<String> {
-        (0..MAX_AGG_SHARE_CHUNK_KEY_COUNT)
-            .map(|n| format!("chunk_v2_{n:03}"))
-            .collect()
+    const fn agg_share_shard_keys() -> &'static [&'static str; MAX_AGG_SHARE_CHUNK_KEY_COUNT] {
+        &[
+            "chunk_v2_000",
+            "chunk_v2_001",
+            "chunk_v2_002",
+            "chunk_v2_003",
+            "chunk_v2_004",
+            "chunk_v2_005",
+            "chunk_v2_006",
+            "chunk_v2_007",
+        ]
     }
 
-    fn aggregated_reports_keys() -> Vec<String> {
-        (0..MAX_REPORT_ID_CHUNK_KEY_COUNT)
-            .map(|n| format!("aggregated_report_ids_{n:03}"))
-            .collect()
+    const fn aggregated_reports_keys() -> &'static [&'static str; MAX_REPORT_ID_CHUNK_KEY_COUNT] {
+        &[
+            "aggregated_report_ids_000",
+            "aggregated_report_ids_001",
+            "aggregated_report_ids_002",
+            "aggregated_report_ids_003",
+            "aggregated_report_ids_004",
+        ]
     }
 
-    async fn get_agg_share(&self, keys: &[String]) -> Result<DapAggregateShare> {
-        let all_keys = keys
-            .iter()
-            .map(String::as_str)
-            .chain([METADATA_KEY])
-            .collect::<Vec<_>>();
-        let values = self.state.storage().get_multiple(all_keys).await?;
+    async fn get_agg_share(&mut self, keys: &[&str]) -> Result<&mut DapAggregateShare> {
+        let agg_share = if let Some(agg_share) = self.agg_share.take() {
+            agg_share
+        } else {
+            let all_keys = keys
+                .iter()
+                .copied()
+                .chain([METADATA_KEY])
+                .collect::<Vec<_>>();
+            let values = self.state.storage().get_multiple(all_keys).await?;
 
-        if values.size() == 0 {
-            return Ok(DapAggregateShare::default());
-        }
-
-        let meta_key = JsValue::from_str(METADATA_KEY);
-        let meta =
-            serde_wasm_bindgen::from_value::<DapAggregateShareMetadata>(values.get(&meta_key))
+            if values.size() == 0 {
+                DapAggregateShare::default()
+            } else {
+                let meta_key = JsValue::from_str(METADATA_KEY);
+                let meta = serde_wasm_bindgen::from_value::<DapAggregateShareMetadata>(
+                    values.get(&meta_key),
+                )
                 .unwrap_or_else(|e| {
                     tracing::error!("failed to deser DapAggregateShareMeta: {e:?}");
                     panic!("{e}")
                 });
 
-        let chunks = js_map_to_chunks(keys, values);
+                let mut chunks = js_map_to_chunks(keys, &values).peekable();
 
-        Ok(if chunks.is_empty() {
-            meta.into_agg_share_without_data()
-        } else {
-            let kind = meta.kind.expect("if there is data there should be a type");
+                if chunks.peek().is_none() {
+                    meta.into_agg_share_without_data()
+                } else {
+                    let kind = meta.kind.expect("if there is data there should be a type");
 
-            fn from_slice<F: FieldElement>(chunks: &[u8]) -> Result<AggregateShare<F>> {
-                let mut share = Vec::new();
-                let mut bytes = Cursor::new(chunks);
-                let l = u64::try_from(chunks.len()).unwrap();
-                while bytes.position() < l {
-                    let x = F::decode(&mut bytes).map_err(|e| {
-                        worker::Error::Internal(
-                            serde_wasm_bindgen::to_value(&format!(
-                                "failed to decode aggregate share: {e}"
-                            ))
-                            .expect("string never fails to convert to JsValue"),
-                        )
-                    })?;
-                    share.push(x);
+                    fn from_slices<F, I>(chunks: I) -> Result<AggregateShare<F>>
+                    where
+                        F: FieldElement,
+                        I: Iterator<Item = Vec<u8>>,
+                    {
+                        let mut share = Vec::new();
+                        for chunk in chunks {
+                            let len = u64::try_from(chunk.len()).unwrap();
+                            let mut bytes = Cursor::new(chunk.as_slice());
+                            while bytes.position() < len {
+                                let x = F::decode(&mut bytes).map_err(|e| {
+                                    worker::Error::Internal(
+                                        serde_wasm_bindgen::to_value(&format!(
+                                            "failed to decode aggregate share: {e}"
+                                        ))
+                                        .expect("string never fails to convert to JsValue"),
+                                    )
+                                })?;
+                                share.push(x);
+                            }
+                            if bytes.position() < len {
+                                return Err(worker::Error::Internal(
+                                serde_wasm_bindgen::to_value(
+                                    "failed to decode aggregate share: bytes remaining in buffer",
+                                )
+                                .expect("string never fails to convert to JsValue"),
+                            ));
+                            }
+                        }
+
+                        Ok(AggregateShare::from(share))
+                    }
+
+                    let data = match kind {
+                        VdafKind::Field64 => VdafAggregateShare::Field64(from_slices(chunks)?),
+                        VdafKind::Field128 => VdafAggregateShare::Field128(from_slices(chunks)?),
+                        VdafKind::FieldPrio2 => {
+                            VdafAggregateShare::FieldPrio2(from_slices(chunks)?)
+                        }
+                    };
+
+                    meta.into_agg_share_with_data(data)
                 }
-                if bytes.position() < l {
-                    return Err(worker::Error::Internal(
-                        serde_wasm_bindgen::to_value(
-                            "failed to decode aggregate share: bytes remaining in buffer",
-                        )
-                        .expect("string never fails to convert to JsValue"),
-                    ));
-                }
-
-                Ok(AggregateShare::from(share))
             }
+        };
 
-            let data = match kind {
-                VdafKind::Field64 => VdafAggregateShare::Field64(from_slice(&chunks)?),
-                VdafKind::Field128 => VdafAggregateShare::Field128(from_slice(&chunks)?),
-                VdafKind::FieldPrio2 => VdafAggregateShare::FieldPrio2(from_slice(&chunks)?),
-            };
-
-            meta.into_agg_share_with_data(data)
-        })
+        self.agg_share = Some(agg_share);
+        Ok(self.agg_share.as_mut().unwrap())
     }
 
-    async fn load_aggregated_report_ids(&self) -> Result<HashSet<ReportId>> {
+    async fn load_aggregated_report_ids(&mut self) -> Result<&mut HashSet<ReportId>> {
+        if self.report_ids.is_none() {
+            self.cold_load_aggregated_report_ids().await?;
+        }
+
+        Ok(self.report_ids.as_mut().unwrap())
+    }
+
+    async fn cold_load_aggregated_report_ids(&mut self) -> Result<()> {
         let chunks_map = self
             .state
             .storage()
-            .get_multiple(Self::aggregated_reports_keys())
+            .get_multiple(Self::aggregated_reports_keys().to_vec())
             .await?;
 
-        let bytes = js_map_to_chunks::<u8>(&Self::aggregated_reports_keys(), chunks_map);
+        let report_keys = Self::aggregated_reports_keys();
+        let bytes = js_map_to_chunks::<u8>(report_keys, &chunks_map);
 
-        assert_eq!(bytes.len() % std::mem::size_of::<ReportId>(), 0);
-        let mut ids = HashSet::with_capacity(bytes.len() / size_of::<ReportId>());
-        for chunk in bytes.chunks_exact(size_of::<ReportId>()) {
-            ids.insert(ReportId::get_decoded(chunk).map_err(|_| Error::BadEncoding)?);
+        let report_count_estimate = {
+            let (lower, _) = bytes.size_hint();
+            (lower * MAX_CHUNK_SIZE) / size_of::<ReportId>()
+        };
+        let mut ids = HashSet::with_capacity(report_count_estimate);
+        for chunk in bytes {
+            for id in chunk.chunks_exact(size_of::<ReportId>()) {
+                ids.insert(ReportId::get_decoded(id).map_err(|_| Error::BadEncoding)?);
+            }
         }
-        Ok(ids)
+
+        self.report_ids = Some(ids);
+
+        Ok(())
     }
 }
 
 fn shard_bytes_to_object(
-    keys: &[String],
+    keys: &[&str],
     bytes: Vec<u8>,
     object_to_fill: &js_sys::Object,
 ) -> Result<()> {
@@ -248,7 +290,7 @@ fn shard_bytes_to_object(
 
     let mut base_idx = 0;
     for key in &keys[..num_chunks] {
-        let end = usize::min(base_idx + MAX_CHUNK_SIZE + 1, bytes.len());
+        let end = usize::min(base_idx + MAX_CHUNK_SIZE, bytes.len());
         let chunk = &bytes[base_idx..end];
 
         // unwrap cannot fail because chunk len is bounded by MAX_CHUNK_SIZE which is smaller than
@@ -256,11 +298,7 @@ fn shard_bytes_to_object(
         let value = js_sys::Uint8Array::new_with_length(u32::try_from(chunk.len()).unwrap());
         value.copy_from(chunk);
 
-        js_sys::Reflect::set(
-            object_to_fill,
-            &JsValue::from_str(key.as_str()),
-            &value.into(),
-        )?;
+        js_sys::Reflect::set(object_to_fill, &JsValue::from_str(key), &value.into())?;
 
         base_idx = end;
     }
@@ -271,6 +309,8 @@ crate::mk_durable_object! {
     struct AggregateStore {
         state: State,
         env: Env,
+        report_ids: Option<HashSet<ReportId>>,
+        agg_share: Option<DapAggregateShare>,
         collected: Option<bool>,
     }
 }
@@ -294,6 +334,8 @@ impl GcDurableObject for AggregateStore {
         Self {
             state,
             env,
+            report_ids: None,
+            agg_share: None,
             collected: None,
         }
     }
@@ -322,7 +364,7 @@ impl GcDurableObject for AggregateStore {
 
                 {
                     // check for replays
-                    let mut merged_report_ids = self.load_aggregated_report_ids().await?;
+                    let merged_report_ids = self.load_aggregated_report_ids().await?;
                     let repeat_ids = contained_reports
                         .iter()
                         .filter(|id| merged_report_ids.contains(id))
@@ -333,27 +375,30 @@ impl GcDurableObject for AggregateStore {
                             repeat_ids,
                         ));
                     }
+
                     merged_report_ids.extend(contained_reports);
                     let mut as_bytes =
                         Vec::with_capacity(merged_report_ids.len() * size_of::<ReportId>());
-                    merged_report_ids.into_iter().try_for_each(|id| {
+                    merged_report_ids.iter().try_for_each(|id| {
                         id.encode(&mut as_bytes).map_err(|e| {
                             Error::RustError(format!("failed to encode report ID: {e}"))
                         })
                     })?;
-                    shard_bytes_to_object(&Self::aggregated_reports_keys(), as_bytes, &chunks_map)?;
+                    shard_bytes_to_object(Self::aggregated_reports_keys(), as_bytes, &chunks_map)?;
                 };
 
                 let keys = Self::agg_share_shard_keys();
-                let mut agg_share = self.get_agg_share(&keys).await?;
+                let agg_share = self.get_agg_share(keys).await?;
                 agg_share.merge(agg_share_delta).map_err(int_err)?;
 
-                let (meta, data) = DapAggregateShareMetadata::from_agg_share(agg_share);
+                let meta = DapAggregateShareMetadata::from_agg_share(agg_share);
 
-                data.as_ref()
+                agg_share
+                    .data
+                    .as_ref()
                     .map(|data| {
                         shard_bytes_to_object(
-                            &keys,
+                            keys,
                             data.get_encoded().map_err(|e| {
                                 Error::RustError(format!("failed to encode agg share: {e}"))
                             })?,
@@ -380,7 +425,7 @@ impl GcDurableObject for AggregateStore {
             // Idempotent
             // Output: `DapAggregateShare`
             Some(bindings::AggregateStore::Get) => {
-                let agg_share = self.get_agg_share(&Self::agg_share_shard_keys()).await?;
+                let agg_share = self.get_agg_share(Self::agg_share_shard_keys()).await?;
                 Response::from_json(&agg_share)
             }
 

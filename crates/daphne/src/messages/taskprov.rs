@@ -121,7 +121,6 @@ impl Encode for DpConfig {
             Self::None => {
                 DP_MECHANISM_NONE.encode(bytes)?;
             }
-
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes)?;
                 bytes.extend_from_slice(param);

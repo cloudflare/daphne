@@ -25,6 +25,7 @@ use crate::{
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
         DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer,
     },
+    taskprov,
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
@@ -37,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
+    num::NonZeroUsize,
     ops::{DerefMut, Range},
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -182,13 +184,15 @@ impl AggregationJobTest {
                 leader_url: Url::parse("http://leader.com").unwrap(),
                 helper_url: Url::parse("https://helper.org").unwrap(),
                 time_precision: 500,
-                expiration: now + 500,
+                not_before: now,
+                not_after: now + 500,
                 min_batch_size: 10,
                 query: DapQueryConfig::TimeInterval,
                 vdaf: *vdaf,
                 vdaf_verify_key,
                 collector_hpke_config,
                 method: Default::default(),
+                num_agg_span_shards: NonZeroUsize::new(3).unwrap(),
             },
             leader_registry,
             leader_metrics,
@@ -467,15 +471,6 @@ macro_rules! async_test_versions {
             $crate::async_test_version! { $fname, Latest }
         )*
     };
-}
-
-impl From<DapBatchBucket> for PartialBatchSelector {
-    fn from(bucket: DapBatchBucket) -> Self {
-        match bucket {
-            DapBatchBucket::FixedSize { batch_id } => Self::FixedSizeByBatchId { batch_id },
-            DapBatchBucket::TimeInterval { .. } => Self::TimeInterval,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -818,8 +813,8 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         self.bearer_token_authorized(task_config, req).await
     }
 
-    fn get_global_config(&self) -> &DapGlobalConfig {
-        &self.global_config
+    async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
+        Ok(self.global_config.clone())
     }
 
     fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
@@ -830,12 +825,17 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         Some(&self.collector_hpke_config)
     }
 
-    fn taskprov_opt_out_reason(
+    async fn taskprov_opt_in(
         &self,
-        _task_config: &DapTaskConfig,
-    ) -> Result<Option<String>, DapError> {
-        // Always opt-in.
-        Ok(None)
+        _task_id: &TaskId,
+        task_config: taskprov::DapTaskConfigNeedsOptIn,
+        _global_config: &DapGlobalConfig,
+    ) -> Result<DapTaskConfig, DapError> {
+        // Always opt-in with four shards.
+        Ok(task_config.into_opted_in(&taskprov::OptInParam {
+            not_before: self.get_current_time(),
+            num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
+        }))
     }
 
     async fn taskprov_put(
@@ -885,13 +885,23 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
     }
 
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
-        let bucket = DapBatchBucket::FixedSize {
-            batch_id: *batch_id,
-        };
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
 
         let aggregated = {
             let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
-            !agg_store.for_bucket(task_id, &bucket).agg_share.empty()
+            let mut aggregated = false;
+            for bucket in task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
+                batch_id: *batch_id,
+            })? {
+                if !agg_store.for_bucket(task_id, &bucket).agg_share.empty() {
+                    aggregated = true;
+                    break;
+                }
+            }
+            aggregated
         };
 
         let uploaded = {

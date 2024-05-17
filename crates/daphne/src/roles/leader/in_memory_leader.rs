@@ -5,7 +5,10 @@
 //! leader. For a real production implementation this should not be used as it means a machine
 //! crash or shutdown would cause in progress tasks to be lost.
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    num::NonZeroUsize,
+};
 
 use rand::{thread_rng, Rng};
 use url::Url;
@@ -156,7 +159,11 @@ impl InMemoryLeaderState {
             }
 
             // The batch will be collected, so remove it from the batch queue.
-            if let DapBatchBucket::FixedSize { ref batch_id } = bucket {
+            if let DapBatchBucket::FixedSize {
+                ref batch_id,
+                shard: _,
+            } = bucket
+            {
                 per_task
                     .batch_queue
                     .retain(|(queued_batch_id, _batch_count)| batch_id != queued_batch_id);
@@ -234,6 +241,18 @@ impl MockLeaderMemoryPerTask {
         report: &Report,
     ) -> DapBatchBucket {
         let mut rng = thread_rng();
+
+        // Use one shard for storage.
+        //
+        // NOTE Later on, in `init_collect_job()`, we use `batch_span_for_sel()` to enumerate the
+        // buckets of the pending reports pertaining to a collection job. There is a unique bucket
+        // for each aggregate span shard specified by the task. However, only the first shard
+        // actually exists, so that loop is inefficient.
+        let shard = report
+            .report_metadata
+            .id
+            .shard(NonZeroUsize::new(1).unwrap());
+
         match task_config.query {
             // For fixed-size queries, the bucket corresponds to a single batch.
             DapQueryConfig::FixedSize { .. } => {
@@ -243,6 +262,7 @@ impl MockLeaderMemoryPerTask {
                         *report_count += 1;
                         return DapBatchBucket::FixedSize {
                             batch_id: *batch_id,
+                            shard,
                         };
                     }
                 }
@@ -250,13 +270,14 @@ impl MockLeaderMemoryPerTask {
                 // No unsaturated batch exists, so create a new batch.
                 let batch_id = BatchId(rng.gen());
                 self.batch_queue.push_back((batch_id, 1));
-                DapBatchBucket::FixedSize { batch_id }
+                DapBatchBucket::FixedSize { batch_id, shard }
             }
 
             // For time-interval queries, the bucket is the batch window computed by truncating the
             // report timestamp.
             DapQueryConfig::TimeInterval => DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
+                shard,
             },
         }
     }

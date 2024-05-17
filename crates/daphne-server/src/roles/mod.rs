@@ -12,6 +12,7 @@ mod test_utils {
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
+        roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
         DapError, DapQueryConfig, DapTaskConfig, DapVersion,
     };
@@ -20,6 +21,7 @@ mod test_utils {
         DapRole,
     };
     use prio::codec::Decode;
+    use std::num::NonZeroUsize;
 
     use crate::storage_proxy_connection::kv;
 
@@ -191,13 +193,15 @@ mod test_utils {
                         leader_url: cmd.leader,
                         helper_url: cmd.helper,
                         time_precision: cmd.time_precision,
-                        expiration: cmd.task_expiration,
+                        not_before: self.get_current_time(),
+                        not_after: cmd.task_expiration,
                         min_batch_size: cmd.min_batch_size,
                         query,
                         vdaf,
                         vdaf_verify_key,
                         collector_hpke_config,
                         method: Default::default(),
+                        num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
                     },
                 )
                 .await
@@ -222,7 +226,7 @@ mod test_utils {
         ) -> Result<(), DapError> {
             let mut config_list = self
                 .kv()
-                .get_cloned::<kv::prefix::HpkeReceiverConfigSet>(&version)
+                .get_cloned::<kv::prefix::HpkeReceiverConfigSet>(&version, &Default::default())
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?
                 .unwrap_or_default();
