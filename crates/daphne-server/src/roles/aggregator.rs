@@ -273,10 +273,13 @@ impl DapAggregator<DaphneAuth> for crate::App {
                 not_before: self.get_current_time(),
                 num_agg_span_shards: global_config.default_num_agg_span_shards,
             };
-            self.kv()
+            if let Err(e) = self
+                .kv()
                 .put::<kv::prefix::TaskprovOptInParam>(task_id, param.clone())
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?;
+            {
+                tracing::warn!(error = ?e, "failed to store taskprov opt in param");
+            }
             param
         };
 
