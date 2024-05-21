@@ -5,12 +5,14 @@ use std::{
     collections::HashMap,
     fmt::Display,
     time::{Duration, Instant},
+    usize,
 };
 
 use crate::{
     acceptance::{now, Test, TestOptions},
     test_durations::TestDurations,
 };
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use daphne::{
     messages::{self, BatchId, PartialBatchSelector},
@@ -111,9 +113,17 @@ struct TestError {
     error: anyhow::Error,
 }
 
-#[derive(Debug)]
+impl From<anyhow::Error> for TestError {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            when: Utc::now(),
+            error,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
 struct TestResults {
-    success_rate: u32,
     tests: Vec<Result<TestDurations, TestError>>,
 }
 
@@ -121,6 +131,10 @@ impl TestResults {
     const RUNS: u32 = 1;
     fn average_duration(&self) -> Option<TestDurations> {
         average(self.tests.iter().flatten())
+    }
+
+    fn success_rate(&self) -> usize {
+        self.tests.iter().filter(|x| x.is_ok()).count()
     }
 
     fn measurements_of(
@@ -150,26 +164,56 @@ impl TestResults {
         )
     }
 
+    fn hpke_config_fetch(&self) -> (Duration, Duration, Duration) {
+        self.measurements_of(|d| d.hpke_config_fetch)
+    }
     fn agg_init(&self) -> (Duration, Duration, Duration) {
         self.measurements_of(|d| d.aggregate_init_req)
     }
     fn agg_share(&self) -> (Duration, Duration, Duration) {
         self.measurements_of(|d| d.aggregate_share_req)
     }
+
+    fn add_run(&mut self, run: Result<TestDurations, TestError>) {
+        self.tests.push(run);
+    }
+}
+fn print_failures(param: &MeasurementParameters, test_results: &TestResults) {
+    let error_map = test_results
+        .tests
+        .iter()
+        .filter_map(|r| r.as_ref().err())
+        .fold(
+            HashMap::<_, Vec<_>>::new(),
+            |mut acc, TestError { when, error }| {
+                acc.entry(format!("{error:?}")).or_default().push(when);
+                acc
+            },
+        );
+    for (error, whens) in error_map {
+        print!("{param:?};{error};");
+        for when in whens {
+            print!("{when};");
+        }
+        println!();
+    }
 }
 
-fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) {
+fn print_perf_report<'s, I>(measurments: I)
+where
+    I: Iterator<Item = (&'s MeasurementParameters, &'s TestResults)> + Clone,
+{
     println!("#### Final Performance Report ####");
     {
         println!("Scaling based on reports per batch:");
         let mut reports_per_batch = measurments
-            .iter()
+            .clone()
             .map(|(m, _)| m.reports_per_batch)
             .collect::<Vec<_>>();
         reports_per_batch.sort_unstable();
         reports_per_batch.dedup();
         for r in reports_per_batch {
-            let avg = average(measurments.iter().filter_map(move |(params, results)| {
+            let avg = average(measurments.clone().filter_map(move |(params, results)| {
                 (params.reports_per_batch == r)
                     .then_some(results.average_duration())
                     .flatten()
@@ -181,13 +225,13 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
     {
         println!("Scaling based on reports per aggregation job:");
         let mut reports_per_agg_job = measurments
-            .iter()
+            .clone()
             .map(|(m, _)| m.reports_per_agg_job)
             .collect::<Vec<_>>();
         reports_per_agg_job.sort_unstable();
         reports_per_agg_job.dedup();
         for r in reports_per_agg_job {
-            let avg = average(measurments.iter().filter_map(move |(params, results)| {
+            let avg = average(measurments.clone().filter_map(move |(params, results)| {
                 (params.reports_per_agg_job == r)
                     .then_some(results.average_duration())
                     .flatten()
@@ -197,14 +241,14 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
     }
     {
         let mut vdaf_configs = measurments
-            .iter()
+            .clone()
             .map(|(m, _)| m.vdaf_config)
             .collect::<Vec<_>>();
         vdaf_configs.sort();
         vdaf_configs.dedup();
         println!("Scaling based on dimension:");
         for r in vdaf_configs {
-            let avg = average(measurments.iter().filter_map(move |(params, results)| {
+            let avg = average(measurments.clone().filter_map(move |(params, results)| {
                 (params.vdaf_config == r)
                     .then_some(results.average_duration())
                     .flatten()
@@ -229,21 +273,8 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
         T(min, avg, max)
     }
     println!("====== FAILURES ======");
-    for (param, results) in measurments {
-        let error_map = results.tests.iter().filter_map(|r| r.as_ref().err()).fold(
-            HashMap::<_, Vec<_>>::new(),
-            |mut acc, TestError { when, error }| {
-                acc.entry(format!("{error:?}")).or_default().push(when);
-                acc
-            },
-        );
-        for (error, whens) in error_map {
-            print!("{param:?};{error};");
-            for when in whens {
-                print!("{when};");
-            }
-            println!();
-        }
+    for (param, results) in measurments.clone() {
+        print_failures(param, results)
     }
     println!("====== SUCCESS RATE ======");
     println!(";;;;;agg_init;;;agg_share");
@@ -252,7 +283,7 @@ fn print_perf_report(measurments: &HashMap<MeasurementParameters, TestResults>) 
     for (param, results) in measurments {
         println!(
             "{param};{};{};{};{};{}",
-            results.success_rate,
+            results.success_rate(),
             results.tests.len(),
             tabularize_durations(results.agg_init()),
             tabularize_durations(results.agg_share()),
@@ -298,15 +329,7 @@ async fn execute(t: &Test, test_config: &TestOptions) -> TestResults {
         .collect::<Vec<_>>()
         .await;
 
-    TestResults {
-        success_rate: tests
-            .iter()
-            .filter(|x| x.is_ok())
-            .count()
-            .try_into()
-            .unwrap(),
-        tests,
-    }
+    TestResults { tests }
 }
 
 pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: bool) {
@@ -350,14 +373,12 @@ pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: 
 
             println!("durations:\n{results:#?}");
 
-            let old_results = measurments.entry(params).or_insert_with(|| TestResults {
-                success_rate: 0,
-                tests: vec![],
-            });
-            old_results.success_rate += results.success_rate;
+            let old_results = measurments
+                .entry(params)
+                .or_insert_with(|| TestResults { tests: vec![] });
             old_results.tests.extend(results.tests);
 
-            print_perf_report(&measurments);
+            print_perf_report(measurments.iter());
         }
     }
 }
@@ -375,17 +396,12 @@ pub async fn execute_single_combination_from_env(
         .expect("env to be present");
 
     let system_now = now();
-    let (test_task_config, hpke_config_fetch_time) = t
-        .generate_task_config(VERSION, None, reports_per_batch, system_now)
-        .await
-        .expect("failed to generate task config");
 
     println!("Generating reports");
 
     let measurment = t.gen_measurement().unwrap();
 
-    let mut success_count = 0;
-    let mut run_count = 0;
+    let mut test_results = TestResults::default();
     loop {
         println!("STARTED WITH");
         println!("\t- reports_per_batch:   {reports_per_batch}");
@@ -395,39 +411,88 @@ pub async fn execute_single_combination_from_env(
         let batch_id = BatchId(thread_rng().gen());
         let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
 
-        let now = Instant::now();
-        let r = t
-            .run_agg_jobs(
-                reports_per_batch,
-                &test_task_config,
-                &part_batch_sel,
-                reports_per_agg_job,
-                |reports_per_job| {
-                    ReportGenerator::new(
-                        &test_task_config.task_config.vdaf,
-                        &test_task_config.hpke_config_list,
-                        test_task_config.task_id,
-                        reports_per_job,
-                        &measurment,
-                        VERSION,
-                        system_now.0,
-                        vec![messages::Extension::Taskprov],
-                    )
-                },
-            )
-            .await;
+        let run = async {
+            let (test_task_config, hpke_config_fetch_time) = t
+                .generate_task_config(VERSION, None, reports_per_batch, system_now)
+                .await
+                .context("failed to generate task config")?;
 
-        println!("Agg jobs took {:?}", now.elapsed());
-        run_count += 1;
-        match r {
-            Ok((_, times)) => {
-                success_count += 1;
-                println!("durations: {:?}", times + hpke_config_fetch_time);
-            }
+            let now = Instant::now();
+            let r = t
+                .run_agg_jobs(
+                    reports_per_batch,
+                    &test_task_config,
+                    &part_batch_sel,
+                    reports_per_agg_job,
+                    |reports_per_job| {
+                        ReportGenerator::new(
+                            &test_task_config.task_config.vdaf,
+                            &test_task_config.hpke_config_list,
+                            test_task_config.task_id,
+                            reports_per_job,
+                            &measurment,
+                            VERSION,
+                            system_now.0,
+                            vec![messages::Extension::Taskprov],
+                        )
+                    },
+                )
+                .await;
+            println!("Agg jobs took a total time of {:?}", now.elapsed());
+            let (leader_agg_share, agg_job_init_time) = r.context("running agg jobs")?;
+
+            let aggregate_share_time = t
+                .get_aggregate_share(
+                    leader_agg_share,
+                    batch_id,
+                    VERSION,
+                    test_task_config.taskprov_advertisement.as_deref(),
+                    test_task_config.task_id,
+                )
+                .await
+                .context("getting agg share")?;
+
+            anyhow::Ok(TestDurations {
+                hpke_config_fetch: hpke_config_fetch_time,
+                aggregate_init_req: agg_job_init_time,
+                aggregate_share_req: aggregate_share_time,
+            })
+        }
+        .await;
+
+        match &run {
+            Ok(times) => println!("lattest run times: {times:?}"),
             Err(e) => {
-                println!("run failed: {e:?}");
+                println!("Run Failed");
+                println!("{e:?}");
             }
         }
-        println!("running count: {success_count}/{run_count}");
+
+        test_results.add_run(run.map_err(Into::into));
+
+        let param = MeasurementParameters {
+            reports_per_batch,
+            reports_per_agg_job,
+            vdaf_config,
+        };
+        println!("========= RUN SUMMARY =========");
+        println!(
+            "success rate: {}/{}",
+            test_results.success_rate(),
+            test_results.tests.len()
+        );
+        println!("########## FAILURES");
+        print_failures(&param, &test_results);
+        fn min_avg_max(name: &'static str, (min, avg, max): (Duration, Duration, Duration)) {
+            println!("{name}:");
+            println!(" - min: {min:?}");
+            println!(" - avg: {avg:?}");
+            println!(" - max: {max:?}");
+        }
+        println!("########## RUNNING AVERAGES");
+        min_avg_max("hpke_config_fetch_time", test_results.hpke_config_fetch());
+        min_avg_max("aggregate_init_req_time", test_results.agg_init());
+        min_avg_max("aggregate_share_time", test_results.agg_share());
+        println!("===============================");
     }
 }
