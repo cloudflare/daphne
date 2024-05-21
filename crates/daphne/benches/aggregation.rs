@@ -104,6 +104,8 @@ fn make_tasks() -> Vec<(TaskId, DapTaskConfig)> {
             num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         })
         .map(|task| (TaskId(thread_rng().gen()), task))
+        .last()
+        .into_iter()
         .collect()
 }
 

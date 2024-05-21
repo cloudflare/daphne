@@ -28,15 +28,15 @@ use daphne::{
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
         self, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
-        BatchSelector, PartialBatchSelector, ReportId, TaskId,
+        BatchSelector, PartialBatchSelector, TaskId,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
-    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchBucket, DapError,
-    DapMeasurement, DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion,
-    EarlyReportStateConsumed, EarlyReportStateInitialized,
+    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapMeasurement,
+    DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion, EarlyReportStateConsumed,
+    EarlyReportStateInitialized,
 };
 use daphne_service_utils::http_headers;
 use futures::{StreamExt, TryStreamExt};
@@ -324,7 +324,7 @@ impl Test {
         helper_hpke_config: Option<&HpkeConfig>,
         reports_per_batch: usize,
         now: Now,
-    ) -> anyhow::Result<(TestTaskConfig, TestDurations)> {
+    ) -> anyhow::Result<(TestTaskConfig, Duration)> {
         // We generate a fake Leader and Collector HPKE configs for testing purposes. In practice
         // the Collector HPKE config used by the Leader needs to match the one useed by the Helper.
         // The Helper's is configured by the DAP_TASKPROV_HPKE_COLLECTOR_CONFIG variable in the
@@ -391,10 +391,7 @@ impl Test {
                 task_config,
                 taskprov_advertisement: Some(taskprov_advertisement),
             },
-            TestDurations {
-                hpke_config_fetch: hpke_config_fetch_time,
-                ..Default::default()
-            },
+            hpke_config_fetch_time,
         ))
     }
 
@@ -405,10 +402,7 @@ impl Test {
         part_batch_sel: &PartialBatchSelector,
         reports_per_agg_job: usize,
         report_generator: F,
-    ) -> anyhow::Result<(
-        Vec<(DapBatchBucket, (DapAggregateShare, Vec<(ReportId, u64)>))>,
-        TestDurations,
-    )>
+    ) -> anyhow::Result<(DapAggregateShare, Duration)>
     where
         F: Fn(usize) -> ReportGenerator,
     {
@@ -430,14 +424,24 @@ impl Test {
         })
         .buffer_unordered((report_count / reports_per_agg_job) + 1)
         .try_fold(
-            (0, Vec::new(), TestDurations::default()),
+            (0, Vec::new(), Duration::ZERO),
             |(count, mut out_shares, durations), (new_shares, new_durations)| async move {
                 out_shares.extend(new_shares);
                 Ok((count + 1, out_shares, durations + new_durations))
             },
         )
         .await?;
-        Ok((out_shares_for_batch, agg_job_durations / count))
+        Ok((
+            out_shares_for_batch
+                .into_iter()
+                .map(|(_, share)| share.0)
+                .reduce(|mut acc, other| {
+                    acc.merge(other).unwrap();
+                    acc
+                })
+                .unwrap(),
+            agg_job_durations / count,
+        ))
     }
 
     #[instrument(skip(
@@ -455,7 +459,7 @@ impl Test {
         reports_for_agg_job: ReportGenerator,
         part_batch_sel: &PartialBatchSelector,
         barrier: &Barrier,
-    ) -> anyhow::Result<(DapAggregateSpan<DapAggregateShare>, TestDurations)> {
+    ) -> anyhow::Result<(DapAggregateSpan<DapAggregateShare>, Duration)> {
         let report_count = reports_for_agg_job.len();
         info!(report_count, "Starting aggregation job");
         let TestTaskConfig {
@@ -465,7 +469,6 @@ impl Test {
             taskprov_advertisement,
             ..
         } = test_task_config;
-        let mut durations = TestDurations::default();
 
         // Prepare AggregationJobInitReq.
         let agg_job_id = AggregationJobId(rngs::OsRng.gen());
@@ -512,11 +515,9 @@ impl Test {
                 .headers(headers),
         )
         .await?;
-        {
-            let duration = start.elapsed();
-            info!("Finished AggregationJobInitReq in {duration:#?}");
-            durations.aggregate_init_req = duration;
-        }
+        let duration = start.elapsed();
+        info!("Finished AggregationJobInitReq in {duration:#?}");
+
         if resp.status() == 400 {
             let text = resp.text().await?;
             let problem_details: ProblemDetails =
@@ -559,7 +560,67 @@ impl Test {
             bail!("aggregated report count ({aggregated_report_count}) < expected count ({report_count})");
         }
 
-        Ok((agg_share_span, durations))
+        Ok((agg_share_span, duration))
+    }
+
+    pub async fn get_aggregate_share(
+        &self,
+        leader_agg_share: DapAggregateShare,
+        batch_id: BatchId,
+        version: DapVersion,
+        taskprov_advertisement: Option<&str>,
+        task_id: TaskId,
+    ) -> Result<Duration> {
+        // Prepare AggregateShareReq.
+        let agg_share_req = AggregateShareReq {
+            batch_sel: BatchSelector::FixedSizeByBatchId { batch_id },
+            agg_param: Vec::new(),
+            report_count: leader_agg_share.report_count,
+            checksum: leader_agg_share.checksum,
+        };
+
+        // Send AggregateShareReq.
+        info!("Starting AggregationJobInitReq");
+        let start = Instant::now();
+        let headers = construct_request_headers(
+            DapMediaType::AggregateShareReq.as_str_for_version(version),
+            taskprov_advertisement,
+            &self.bearer_token,
+        )?;
+        let url = self.helper_url.join(&format!(
+            "tasks/{}/aggregate_shares",
+            task_id.to_base64url()
+        ))?;
+        let resp = send(
+            self.http_client
+                .client()
+                .post(url)
+                .body(agg_share_req.get_encoded_with_param(&version).unwrap())
+                .headers(headers),
+        )
+        .await?;
+        let duration = start.elapsed();
+        info!("Finished AggregateShareReq in {duration:#?}");
+        if resp.status() == 400 {
+            let problem_details: ProblemDetails = serde_json::from_slice(
+                &resp
+                    .bytes()
+                    .await
+                    .context("transfering bytes for AggregateShareReq")?,
+            )
+            .with_context(|| "400 Bad Request: failed to parse problem details document")?;
+            return Err(anyhow!("400 Bad Request: {problem_details:?}"));
+        } else if resp.status() == 500 {
+            return Err(anyhow::anyhow!(
+                "500 Internal Server Error: {}",
+                resp.text().await?
+            ));
+        } else if !resp.status().is_success() {
+            return Err(anyhow!(
+                "unexpected response while running an AggregateInitReq: {resp:?}"
+            ));
+        }
+        Ok(duration)
     }
 
     pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
@@ -603,9 +664,11 @@ impl Test {
         let version = deduce_dap_version_from_url(&self.helper_url)?;
         let now = now();
 
-        let (test_task_config, mut durations) = self
+        let mut durations = TestDurations::default();
+        let (test_task_config, hpke_config_fetch_time) = self
             .generate_task_config(version, None, opt.reports_per_batch, now)
             .await?;
+        durations.hpke_config_fetch = hpke_config_fetch_time;
 
         let TestTaskConfig {
             task_id,
@@ -626,7 +689,7 @@ impl Test {
         let batch_id = BatchId(rngs::OsRng.gen());
         let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
 
-        let (out_shares_for_batch, agg_job_duration) = self
+        let (leader_agg_share, agg_job_duration) = self
             .run_agg_jobs(
                 opt.reports_per_batch,
                 &test_task_config,
@@ -647,68 +710,17 @@ impl Test {
             )
             .await?;
 
-        durations = durations + agg_job_duration;
+        durations.aggregate_init_req = agg_job_duration;
 
-        // Prepare AggregateShareReq.
-        let leader_agg_share = out_shares_for_batch
-            .into_iter()
-            .map(|(_, share)| share.0)
-            .reduce(|mut acc, other| {
-                acc.merge(other).unwrap();
-                acc
-            })
-            .unwrap();
-        let agg_share_req = AggregateShareReq {
-            batch_sel: BatchSelector::FixedSizeByBatchId { batch_id },
-            agg_param: Vec::new(),
-            report_count: leader_agg_share.report_count,
-            checksum: leader_agg_share.checksum,
-        };
-
-        // Send AggregateShareReq.
-        info!("Starting AggregationJobInitReq");
-        let start = Instant::now();
-        let headers = construct_request_headers(
-            DapMediaType::AggregateShareReq.as_str_for_version(version),
-            taskprov_advertisement.as_deref(),
-            &self.bearer_token,
-        )?;
-        let url = self.helper_url.join(&format!(
-            "tasks/{}/aggregate_shares",
-            task_id.to_base64url()
-        ))?;
-        let resp = send(
-            self.http_client
-                .client()
-                .post(url)
-                .body(agg_share_req.get_encoded_with_param(&version).unwrap())
-                .headers(headers),
-        )
-        .await?;
-        {
-            let duration = start.elapsed();
-            info!("Finished AggregateShareReq in {duration:#?}");
-            durations.aggregate_share_req = duration;
-        }
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails = serde_json::from_slice(
-                &resp
-                    .bytes()
-                    .await
-                    .context("transfering bytes for AggregateShareReq")?,
+        durations.aggregate_share_req = self
+            .get_aggregate_share(
+                leader_agg_share,
+                batch_id,
+                version,
+                taskprov_advertisement.as_deref(),
+                *task_id,
             )
-            .with_context(|| "400 Bad Request: failed to parse problem details document")?;
-            return Err(anyhow!("400 Bad Request: {problem_details:?}"));
-        } else if resp.status() == 500 {
-            return Err(anyhow::anyhow!(
-                "500 Internal Server Error: {}",
-                resp.text().await?
-            ));
-        } else if !resp.status().is_success() {
-            return Err(anyhow!(
-                "unexpected response while running an AggregateInitReq: {resp:?}"
-            ));
-        }
+            .await?;
         Ok(durations)
     }
 }
