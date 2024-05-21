@@ -154,6 +154,7 @@ pub struct DapGlobalConfig {
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
     /// draft-wang-ppm-dap-taskprov: Indicates if the taskprov extension is enabled.
+    #[serde(default)]
     pub allow_taskprov: bool,
 
     /// Default number of aggregate span shards for a task.
