@@ -215,7 +215,7 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
 /// ```
 /// use daphne_worker::durable::{self, instantiate_durable_object};
 ///
-/// instantiate_durable_object!(MyAggregateStore < durable::AggregateStore);
+/// instantiate_durable_object!(struct MyAggregateStore < durable::AggregateStore);
 /// ```
 ///
 /// The `MyAggregateStore` name is the name that must be specified in the `class_name` field in the
@@ -232,48 +232,86 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
 /// ```
 /// use daphne_worker::durable::{self, instantiate_durable_object};
 ///
-/// instantiate_durable_object!{
-///     MyAggregateStore < durable::AggregateStore;
+/// struct RequestCounter {
+///     counter: usize,
+/// }
 ///
-///     fn pre_init(_state, _env, name) {
-///         worker::console_log!("durable object initialized: {name}");
+/// instantiate_durable_object!{
+///     struct MyAggregateStore < durable::AggregateStore;
+///
+///     fn pre_init(_state: State, _env: Env) -> RequestCounter {
+///         worker::console_log!("MyAggregateStore durable object initialized");
+///         RequestCounter { counter: 0 }
+///     }
+///
+///     fn pre_fetch(this: &mut Self, request: Request) {
+///         worker::console_log!("[{}] fetching: {}", this.internal_state.counter, request.path());
+///     }
+///
+///     fn post_fetch(this: &mut Self, response: Result<Response>) {
+///         this.internal_state.counter += 1;
+///         worker::console_log!(
+///             "responding with {}",
+///             if response.is_ok() { "success" } else { "failure" },
+///         );
 ///     }
 /// }
 /// ```
 #[macro_export]
 macro_rules! instantiate_durable_object {
-    ($name:ident < $durable_object:ty) => {
-        instantiate_durable_object!($name < $durable_object; fn pre_init(_state, _env, _name) {});
+    (struct $name:ident < $durable_object:ty) => {
+        instantiate_durable_object!(struct $name < $durable_object;);
     };
     (
-        $name:ident < $durable_object:ty;
+        struct $name:ident < $durable_object:ty;
 
-        fn pre_init($state:pat, $env:pat, $do_name:pat) $new_block:block
+        $(
+            fn pre_init($state:ident: State, $env:ident: Env) $(-> $internal_state:ty)?
+            $new_block:block
+        )?
+
+        $(fn pre_fetch($pre_fetch_this:ident: &mut Self, $pre_fetch_req:ident: Request) $pre_fetch:block)?
+
+        $(fn post_fetch($post_fetch_this:ident: &mut Self, $post_fetch_req:ident: Result<Response>) $post_fetch:block)?
     ) => {
         const _: () = {
             use worker::{wasm_bindgen, async_trait, wasm_bindgen_futures};
             #[worker::durable_object]
             struct $name {
-                inner: $durable_object
+                inner: $durable_object,
+                $($(internal_state: $internal_state)*)*
             }
 
             #[worker::durable_object]
             impl DurableObject for $name {
                 fn new(state: ::worker::State, env: ::worker::Env) -> Self {
-                    {
+                    $(let internal_state = {
                         let $state = &state;
                         let $env = &env;
-                        let $do_name = ::std::stringify!($do_name);
                         $new_block
+                    };)*
+                    Self {
+                        inner: <$durable_object>::new(state, env),
+                        $($(internal_state: internal_state as $internal_state)*)*
                     }
-                    Self { inner: <$durable_object>::new(state, env) }
                 }
 
                 pub async fn fetch(
                     &mut self,
-                    req: ::worker::Request
+                    mut req: ::worker::Request
                 ) -> ::worker::Result<::worker::Response> {
-                    self.inner.fetch(req).await
+                    $({
+                        let $pre_fetch_this = &mut *self;
+                        let $pre_fetch_req = &mut req;
+                        $pre_fetch
+                    };)*
+                    let mut response = self.inner.fetch(req).await;
+                    $({
+                        let $post_fetch_this = self;
+                        let $post_fetch_req = &mut response;
+                        $post_fetch
+                    };)*
+                    response
                 }
 
                 pub async fn alarm(&mut self) -> ::worker::Result<::worker::Response> {
