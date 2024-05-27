@@ -371,6 +371,21 @@ impl GcDurableObject for AggregateStore {
                         .copied()
                         .collect::<HashSet<_>>();
                     if !repeat_ids.is_empty() {
+                        if repeat_ids.len()
+                            == usize::try_from(agg_share_delta.report_count).unwrap()
+                        {
+                            // If all reports in the aggregation job are already
+                            // aggregated, then allow processing to continue, but don't aggregate
+                            // them so that they're not double counted.
+                            //
+                            // This condition is triggered when a failed aggregation job is retried
+                            // by the Leader. For example, if a request to durable objects times
+                            // out (this is not uncommon at all), the Helper might aggregate the
+                            // reports but return a 500 anyway; if the Leader retries, the reports
+                            // will incorrectly be treated as replayed.
+                            return Response::from_json(&AggregateStoreMergeResp::Ok);
+                        }
+
                         return Response::from_json(&AggregateStoreMergeResp::ReplaysDetected(
                             repeat_ids,
                         ));
