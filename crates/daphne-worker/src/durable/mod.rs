@@ -179,6 +179,6 @@ async fn req_parse<T: DeserializeOwned>(req: &mut Request) -> Result<T> {
 fn create_span_from_request(req: &Request) -> tracing::Span {
     let path = req.path();
     let span = info_span!("DO span", p = %shorten_paths(path.split('/')).display());
-    span.in_scope(|| tracing::info!("{}", path));
+    span.in_scope(|| tracing::info!(path, "DO handling new request"));
     span
 }
