@@ -4,17 +4,17 @@
 use daphne_worker::durable::{self, instantiate_durable_object};
 
 instantiate_durable_object! {
-    AggregateStore < durable::AggregateStore;
+    struct AggregateStore < durable::AggregateStore;
 
-    fn pre_init(_state, env, _name) {
+    fn pre_init(_state: State, env: Env) {
         daphne_worker::tracing_utils::initialize_tracing(env);
     }
 }
 
 instantiate_durable_object! {
-    HelperStateStore < durable::HelperStateStore;
+    struct HelperStateStore < durable::HelperStateStore;
 
-    fn pre_init(_state, env, _name) {
+    fn pre_init(_state: State, env: Env) {
         daphne_worker::tracing_utils::initialize_tracing(env);
     }
 }
