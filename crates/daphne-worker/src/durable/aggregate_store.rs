@@ -41,8 +41,7 @@ use prio::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use worker::{
-    async_trait, js_sys, wasm_bindgen, wasm_bindgen::JsValue, wasm_bindgen_futures, Env, Error,
-    Request, Response, Result, ScheduledTime, State,
+    js_sys, wasm_bindgen::JsValue, Env, Error, Request, Response, Result, ScheduledTime, State,
 };
 
 use super::{req_parse, GcDurableObject};
@@ -305,7 +304,9 @@ fn shard_bytes_to_object(
     Ok(())
 }
 
-crate::mk_durable_object! {
+super::mk_durable_object! {
+    /// Where the aggregate share is stored. For the binding name see its
+    /// [`BINDING`](bindings::HelperState::BINDING)
     struct AggregateStore {
         state: State,
         env: Env,

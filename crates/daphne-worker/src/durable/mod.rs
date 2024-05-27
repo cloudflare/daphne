@@ -1,6 +1,24 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! This module defines the durable object implementations needed to run the DAP service. It
+//! doesn't however instantiate them. They must be instantiated by the user of the library using
+//! the [`instantiate_durable_object`] macro.
+//!
+//! When deploying the `storage_proxy` the durable object `name` and `class_name` must be defined
+//! in the wrangler toml.
+//!
+//! # Example
+//! ```toml
+//! [durable_objects]
+//! bindings = [
+//!     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" }
+//! ]
+//! ```
+//!
+//! To know what values to provide to the `name` and `class_name` fields see each type exported by
+//! this module as well as the [`instantiate_durable_object`] macro, respectively.
+
 pub(crate) mod aggregate_store;
 pub(crate) mod helper_state_store;
 #[cfg(feature = "test-utils")]
@@ -11,6 +29,9 @@ use daphne_service_utils::durable_requests::bindings::DurableMethod;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::info_span;
 use worker::{Env, Error, Request, Response, Result, ScheduledTime, State};
+
+pub use aggregate_store::AggregateStore;
+pub use helper_state_store::HelperStateStore;
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
@@ -33,29 +54,31 @@ trait GcDurableObject {
 /// Generate a durable object based on a `DapDurableObject`.
 ///
 /// This object must hold the `State` and `Env`. Thus the macro forces it.
-#[macro_export]
 macro_rules! mk_durable_object {
-    (struct $name:ident {
-        state: State,
-        env: Env,
-        $($field:ident : $type:ty),*
-        $(,)?
-    }) => {
-        #[worker::durable_object]
-        struct $name {
+    (
+        $(#[$docs:meta])*
+        struct $name:ident {
+            state: State,
+            env: Env,
+            $($field:ident : $type:ty),*
+            $(,)?
+        }
+    ) => {
+        $(#[$docs])*
+        pub struct $name {
             state: ::worker::State,
             env: ::worker::Env,
             $($field: $type),*
         }
 
-        #[worker::durable_object]
-        impl DurableObject for $name {
-            fn new(state: ::worker::State, env: ::worker::Env) -> Self {
-                $crate::tracing_utils::initialize_tracing(&env);
+        impl $name {
+            #[doc(hidden)]
+            pub fn new(state: ::worker::State, env: ::worker::Env) -> Self {
                 <Self as $crate::durable::GcDurableObject>::with_state_and_env(state, env)
             }
 
-            async fn fetch(
+            #[doc(hidden)]
+            pub async fn fetch(
                 &mut self,
                 #[allow(unused_mut)] mut req: ::worker::Request
             ) -> ::worker::Result<::worker::Response> {
@@ -89,7 +112,8 @@ macro_rules! mk_durable_object {
                 <$name as GcDurableObject>::handle(self, req).instrument(span).await
             }
 
-            async fn alarm(&mut self) -> Result<Response> {
+            #[doc(hidden)]
+            pub async fn alarm(&mut self) -> Result<Response> {
                 self.state.storage().delete_all().await?;
                 ::tracing::trace!(
                     instance = self.state.id().to_string(),
@@ -125,6 +149,8 @@ macro_rules! mk_durable_object {
         }
     };
 }
+
+pub(crate) use mk_durable_object;
 
 /// Fetch the value associated with the given key from durable storage. If the key/value pair does
 /// not exist, then return the default value.
@@ -182,3 +208,80 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
     span.in_scope(|| tracing::info!(path, "DO handling new request"));
     span
 }
+
+/// Instantiate a durable object.
+///
+/// # Syntax
+/// ```
+/// use daphne_worker::durable::{self, instantiate_durable_object};
+///
+/// instantiate_durable_object!(MyAggregateStore < durable::AggregateStore);
+/// ```
+///
+/// The `MyAggregateStore` name is the name that must be specified in the `class_name` field in the
+/// wrangler toml.
+/// ```toml
+/// [durable_objects]
+/// bindings = [
+///     { name = "AGGREGATE_STORE", class_name = "MyAggregateStore" }
+/// ]
+/// ```
+///
+/// If you want to run some extra intialization logic before the durable object intializes, you can
+/// provide it like so:
+/// ```
+/// use daphne_worker::durable::{self, instantiate_durable_object};
+///
+/// instantiate_durable_object!{
+///     MyAggregateStore < durable::AggregateStore;
+///
+///     fn pre_init(_state, _env, name) {
+///         worker::console_log!("durable object initialized: {name}");
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! instantiate_durable_object {
+    ($name:ident < $durable_object:ty) => {
+        instantiate_durable_object!($name < $durable_object; fn pre_init(_state, _env, _name) {});
+    };
+    (
+        $name:ident < $durable_object:ty;
+
+        fn pre_init($state:pat, $env:pat, $do_name:pat) $new_block:block
+    ) => {
+        const _: () = {
+            use worker::{wasm_bindgen, async_trait, wasm_bindgen_futures};
+            #[worker::durable_object]
+            struct $name {
+                inner: $durable_object
+            }
+
+            #[worker::durable_object]
+            impl DurableObject for $name {
+                fn new(state: ::worker::State, env: ::worker::Env) -> Self {
+                    {
+                        let $state = &state;
+                        let $env = &env;
+                        let $do_name = ::std::stringify!($do_name);
+                        $new_block
+                    }
+                    Self { inner: <$durable_object>::new(state, env) }
+                }
+
+                pub async fn fetch(
+                    &mut self,
+                    req: ::worker::Request
+                ) -> ::worker::Result<::worker::Response> {
+                    self.inner.fetch(req).await
+                }
+
+                pub async fn alarm(&mut self) -> ::worker::Result<::worker::Response> {
+                    self.inner.alarm().await
+                }
+            }
+        };
+    };
+}
+
+pub use instantiate_durable_object;

@@ -15,14 +15,13 @@ use std::{sync::OnceLock, time::Duration};
 
 use crate::int_err;
 use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
-use worker::{
-    async_trait, wasm_bindgen, wasm_bindgen_futures, Env, Request, Response, Result, ScheduledTime,
-    State,
-};
+use worker::{Env, Request, Response, Result, ScheduledTime, State};
 
 use super::{req_parse, GcDurableObject};
 
-crate::mk_durable_object! {
+super::mk_durable_object! {
+    /// Where the helper state is stored. For the binding name see its
+    /// [`BINDING`](bindings::HelperState::BINDING)
     struct HelperStateStore {
         state: State,
         env: Env,

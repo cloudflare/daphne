@@ -5,6 +5,7 @@ use daphne_worker::initialize_tracing;
 use tracing::info;
 use worker::{event, Env, Request, Response, Result};
 
+mod durable;
 mod utils;
 
 #[global_allocator]

@@ -3,9 +3,9 @@
 
 //! Workers backend for `daphne-server`.
 
-mod durable;
+pub mod durable;
 pub mod storage_proxy;
-mod tracing_utils;
+pub mod tracing_utils;
 
 use tracing::error;
 use worker::Error;
