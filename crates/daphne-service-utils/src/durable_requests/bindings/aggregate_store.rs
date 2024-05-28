@@ -48,6 +48,19 @@ fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
 pub struct AggregateStoreMergeReq {
     pub contained_reports: Vec<ReportId>,
     pub agg_share_delta: DapAggregateShare,
+    pub options: AggregateStoreMergeOptions,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+// TODO(mendess): delete. Only here to suport deserialization with bincode for backwards
+// compatibility.
+#[derive(serde::Deserialize)]
+pub struct AggregateStoreMergeOptions {
+    /// Note:
+    /// - privacy is degraded when this is enabled.
+    /// - it's intended to be used in an incident and needs to be re-enabled after the incident is
+    ///   mitigated.
+    pub skip_replay_protection: bool,
 }
 
 impl DurableRequestPayload for AggregateStoreMergeReq {
@@ -168,8 +181,9 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                 data,
             }
         };
-        Ok(Self {
-            contained_reports: request
+        let contained_reports = {
+            request
+                .reborrow()
                 .get_contained_reports()?
                 .into_iter()
                 .map(|report| {
@@ -181,8 +195,14 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                     buffer[8..].copy_from_slice(&high.to_le_bytes());
                     ReportId(buffer)
                 })
-                .collect(),
+                .collect()
+        };
+        Ok(Self {
+            contained_reports,
             agg_share_delta,
+            options: AggregateStoreMergeOptions {
+                skip_replay_protection: request.get_options()?.get_skip_replay_protection(),
+            },
         })
     }
 }
@@ -253,6 +273,9 @@ mod test {
                         max_time: rng.gen(),
                         checksum: rng.gen(),
                         data,
+                    },
+                    options: AggregateStoreMergeOptions {
+                        skip_replay_protection: false,
                     },
                 };
                 let other =

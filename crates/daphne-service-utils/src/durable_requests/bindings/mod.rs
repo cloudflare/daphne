@@ -12,7 +12,9 @@ mod test_state_cleaner;
 
 use super::ObjectIdFrom;
 
-pub use aggregate_store::{AggregateStore, AggregateStoreMergeReq, AggregateStoreMergeResp};
+pub use aggregate_store::{
+    AggregateStore, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
+};
 #[cfg(feature = "test-utils")]
 pub use test_state_cleaner::TestStateCleaner;
 

@@ -39,10 +39,14 @@ pub mod prefix {
     use super::KvPrefix;
 
     pub struct GlobalConfigOverride<V>(PhantomData<V>);
+
+    /// List of global overrides stored in kv.
     #[derive(Debug)]
     #[cfg_attr(feature = "test-utils", derive(serde::Serialize, serde::Deserialize))]
     pub enum GlobalOverrides {
+        /// A `bool` describing whether to skip replay protection.
         SkipReplayProtection,
+        /// The default number of aggregate span shards to use in new tasks.
         DefaultNumAggSpanShards,
     }
 
