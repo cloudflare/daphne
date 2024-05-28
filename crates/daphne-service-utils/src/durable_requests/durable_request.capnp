@@ -47,4 +47,10 @@ struct AggregateStoreMergeReq @0xbaad7bdeb4b06161 {
 
     containedReports @0 :List(ReportId);
     aggShareDelta @1 :DapAggregateShare;
+    options @2 :MergeReqOptions;
 }
+
+struct MergeReqOptions @0x9e03186eae71ca92 {
+    skipReplayProtection @0 :Bool;
+}
+

@@ -32,7 +32,8 @@ use daphne::{
     DapAggregateShare,
 };
 use daphne_service_utils::durable_requests::bindings::{
-    self, AggregateStoreMergeReq, AggregateStoreMergeResp, DurableMethod,
+    self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
+    DurableMethod,
 };
 use prio::{
     codec::{Decode, Encode},
@@ -355,6 +356,10 @@ impl GcDurableObject for AggregateStore {
                 let AggregateStoreMergeReq {
                     contained_reports,
                     agg_share_delta,
+                    options:
+                        AggregateStoreMergeOptions {
+                            skip_replay_protection,
+                        },
                 } = req_parse(&mut req).await?;
 
                 let chunks_map = js_sys::Object::default();
@@ -363,7 +368,7 @@ impl GcDurableObject for AggregateStore {
                     return Response::from_json(&AggregateStoreMergeResp::AlreadyCollected);
                 }
 
-                {
+                if !skip_replay_protection {
                     // check for replays
                     let merged_report_ids = self.load_aggregated_report_ids().await?;
                     let repeat_ids = contained_reports

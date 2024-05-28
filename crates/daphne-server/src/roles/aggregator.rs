@@ -19,7 +19,9 @@ use daphne::{
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
-    durable_requests::bindings::{self, AggregateStoreMergeReq, AggregateStoreMergeResp},
+    durable_requests::bindings::{
+        self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
+    },
 };
 use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
@@ -38,6 +40,22 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_id_hex = task_id.to_hex();
         let durable = self.durable();
 
+        let skip_replay_protection = self
+            .kv()
+            .get_cloned::<kv::prefix::GlobalConfigOverride<bool>>(
+                &kv::prefix::GlobalOverrides::SkipReplayProtection,
+                &KvGetOptions {
+                    cache_not_found: true,
+                },
+            )
+            .await
+            .inspect_err(
+                |e| tracing::error!(error = ?e, "failed to fetch skip_replay_protection from kv"),
+            )
+            .ok() // treat error as false
+            .flatten()
+            .unwrap_or_default(); // treat missing as false
+
         futures::stream::iter(agg_share_span)
             .map(|(bucket, (agg_share, report_metadatas))| async {
                 let result = durable
@@ -48,6 +66,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
                     .encode(&AggregateStoreMergeReq {
                         contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
                         agg_share_delta: agg_share,
+                        options: AggregateStoreMergeOptions {
+                            skip_replay_protection,
+                        },
                     })
                     .send::<AggregateStoreMergeResp>()
                     .await
