@@ -30,7 +30,7 @@ pub trait KvPrefix {
 }
 
 pub mod prefix {
-    use std::marker::PhantomData;
+    use std::{fmt::Display, marker::PhantomData};
 
     use daphne::{auth::BearerToken, messages::TaskId, taskprov, DapTaskConfig, DapVersion};
     use daphne_service_utils::config::HpkeRecieverConfigList;
@@ -39,13 +39,30 @@ pub mod prefix {
     use super::KvPrefix;
 
     pub struct GlobalConfigOverride<V>(PhantomData<V>);
+    #[derive(Debug)]
+    #[cfg_attr(feature = "test-utils", derive(serde::Serialize, serde::Deserialize))]
+    pub enum GlobalOverrides {
+        SkipReplayProtection,
+        DefaultNumAggSpanShards,
+    }
+
+    impl Display for GlobalOverrides {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let key = match self {
+                Self::SkipReplayProtection => "skip_replay_protection",
+                Self::DefaultNumAggSpanShards => "default_num_agg_span_shards",
+            };
+            f.write_str(key)
+        }
+    }
+
     impl<V> KvPrefix for GlobalConfigOverride<V>
     where
         V: Send + Sync + Serialize + DeserializeOwned + 'static,
     {
         const PREFIX: &'static str = "global_config/override";
 
-        type Key = &'static str;
+        type Key = GlobalOverrides;
         type Value = V;
     }
 

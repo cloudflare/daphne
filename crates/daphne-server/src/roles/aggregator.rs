@@ -226,7 +226,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         if let Some(default_num_agg_span_shards) = self
             .kv()
             .get_cloned::<kv::prefix::GlobalConfigOverride<NonZeroUsize>>(
-                &"default_num_agg_span_shards",
+                &kv::prefix::GlobalOverrides::DefaultNumAggSpanShards,
                 &opt,
             )
             .await
