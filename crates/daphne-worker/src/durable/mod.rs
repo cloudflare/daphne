@@ -125,10 +125,13 @@ macro_rules! mk_durable_object {
                 }
                 ::worker::Response::from_json(&())
             }
-        }
 
-        #[allow(dead_code)]
-        impl $name {
+            #[doc(hidden)]
+            pub fn state(&self) -> &::worker::State {
+                &self.state
+            }
+
+            #[allow(dead_code)]
             async fn get<T>(&self, key: &str) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned,
@@ -136,6 +139,7 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get(&self.state, key).await
             }
 
+            #[allow(dead_code)]
             async fn get_or_default<T>(&self, key: &str) -> ::worker::Result<T>
                 where
                     T: ::serde::de::DeserializeOwned + std::default::Default,
@@ -143,6 +147,7 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get_or_default(&self.state, key).await
             }
 
+            #[allow(dead_code)]
             async fn set_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned + ::serde::Serialize,
@@ -319,6 +324,16 @@ macro_rules! instantiate_durable_object {
 
                 pub async fn alarm(&mut self) -> ::worker::Result<::worker::Response> {
                     self.inner.alarm().await
+                }
+            }
+
+            impl $name {
+                /// See <https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil>
+                pub fn wait_until<F>(&self, future: F)
+                where
+                    F: ::std::future::Future<Output = ()> + 'static
+                {
+                    self.inner.state().wait_until(future)
                 }
             }
         };
