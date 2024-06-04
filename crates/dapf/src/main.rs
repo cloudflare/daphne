@@ -4,7 +4,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use dapf::{
-    acceptance::{load_testing, TestOptions},
+    acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     deduce_dap_version_from_url, HttpClientExt,
 };
 use daphne::{
@@ -24,7 +24,7 @@ use std::{
     path::PathBuf,
     process::Command,
     str::FromStr,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
@@ -236,6 +236,8 @@ enum Action {
         reports_per_batch: usize,
         #[arg(env, default_value_t = 10)]
         reports_per_agg_job: usize,
+        #[command(flatten)]
+        load_control: LoadControlParamsCli,
     },
     /// Perform multiple aggregation jobs against a helper.
     ///
@@ -253,6 +255,8 @@ enum Action {
         helper_url: Url,
         #[arg(long, env)]
         no_reuse_http_client: bool,
+        #[command(flatten)]
+        load_control: LoadControlParamsCli,
         #[command(subcommand)]
         params: LoadTestParameters,
     },
@@ -271,6 +275,47 @@ enum LoadTestParameters {
         #[arg(short, long, env)]
         vdaf_config: CliVdafConfig,
     },
+}
+
+#[derive(Debug, Clone, Parser)]
+struct LoadControlParamsCli {
+    #[arg(long, env)]
+    stride_wait_time: Option<u64>,
+    #[arg(long, env)]
+    stride_len: Option<usize>,
+    #[arg(long, env)]
+    min_requests_before_starting: Option<usize>,
+    #[arg(long, env)]
+    max_concurrent_requests: Option<usize>,
+}
+
+impl LoadControlParamsCli {
+    fn into_params(
+        self,
+        reports_per_agg_job: usize,
+        reports_per_batch: usize,
+    ) -> LoadControlParams {
+        LoadControlParams::new(
+            self.max_concurrent_requests,
+            self.min_requests_before_starting.unwrap_or_else(|| {
+                LoadControlParams::max_requests_before_starting(
+                    reports_per_batch,
+                    reports_per_agg_job,
+                )
+            }),
+            match (self.stride_len, self.stride_wait_time) {
+                (Some(len), Some(wait_time)) => Some(LoadControlStride {
+                    len,
+                    wait_time: Duration::from_millis(wait_time),
+                }),
+                (Some(len), None) => Some(LoadControlStride {
+                    len,
+                    wait_time: Duration::from_secs(1),
+                }),
+                (None, _) => None,
+            },
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -631,14 +676,18 @@ async fn main() -> Result<()> {
             hpke_signing_certificate_path,
             reports_per_batch,
             reports_per_agg_job,
+            load_control,
         } => {
             tracing::info!("using vdaf: {:?}", vdaf_config);
+            let load_control = load_control.into_params(reports_per_agg_job, reports_per_batch);
+            tracing::info!("using load params: {load_control:?}");
 
             let t = dapf::acceptance::Test::from_env(
                 helper_url,
                 vdaf_config.into_vdaf(),
                 hpke_signing_certificate_path,
                 true,
+                load_control,
             )?;
 
             let res = t
@@ -655,14 +704,21 @@ async fn main() -> Result<()> {
         Action::LoadTest {
             helper_url,
             no_reuse_http_client,
+            load_control,
             params: LoadTestParameters::Multiple,
         } => {
-            load_testing::execute_multiple_combinations(helper_url, !no_reuse_http_client).await;
+            load_testing::execute_multiple_combinations(
+                helper_url,
+                !no_reuse_http_client,
+                load_control.into_params(usize::MAX, 1),
+            )
+            .await;
             Ok(())
         }
         Action::LoadTest {
             helper_url,
             no_reuse_http_client,
+            load_control,
             params:
                 LoadTestParameters::Single {
                     reports_per_batch,
@@ -676,6 +732,7 @@ async fn main() -> Result<()> {
                 reports_per_batch,
                 reports_per_agg_job,
                 !no_reuse_http_client,
+                load_control.into_params(reports_per_agg_job, reports_per_batch),
             )
             .await;
             Ok(())
