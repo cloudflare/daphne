@@ -39,7 +39,7 @@ use daphne::{
     EarlyReportStateInitialized,
 };
 use daphne_service_utils::http_headers;
-use futures::{StreamExt, TryStreamExt};
+use futures::{future::OptionFuture, StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, TextEncoder};
 use rand::{rngs, Rng};
@@ -50,11 +50,92 @@ use std::{
     env,
     ops::Range,
     path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant, SystemTime},
 };
-use tokio::sync::Barrier;
+use tokio::sync::{Barrier, Semaphore};
 use tracing::{info, instrument};
 use url::Url;
+
+/// Stride controls the rate at which requests are made during an aggregation job.
+///
+/// For example, for `len` = 10 and `wait_time` = 1s, every one second 10 requests will be made
+/// simultaneously.
+#[derive(Clone, Copy, Debug)]
+pub struct LoadControlStride {
+    pub len: usize,
+    pub wait_time: Duration,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LoadControlParams {
+    max_concurrent_requests: Option<usize>,
+    min_requests_before_starting: usize,
+    stride: Option<LoadControlStride>,
+}
+
+impl LoadControlParams {
+    pub fn new<M, B>(
+        max_concurrent_requests: M,
+        min_requests_before_starting: usize,
+        stride: B,
+    ) -> Self
+    where
+        M: Into<Option<usize>>,
+        B: Into<Option<LoadControlStride>>,
+    {
+        Self {
+            max_concurrent_requests: max_concurrent_requests.into(),
+            min_requests_before_starting,
+            stride: stride.into(),
+        }
+    }
+
+    pub fn max_requests_before_starting(
+        reports_per_batch: usize,
+        reports_per_agg_job: usize,
+    ) -> usize {
+        // total reports / job + (0 if reports divide by reports_per_agg_job else 1)
+        reports_per_batch / reports_per_agg_job
+            + usize::from(reports_per_batch % reports_per_agg_job != 0)
+    }
+}
+
+struct LoadControl {
+    max_concurrent_requests: Option<Semaphore>,
+    min_requests_before_starting: Barrier,
+    stride: Option<LoadControlStride>,
+    current_batch_len: AtomicUsize,
+}
+
+impl From<LoadControlParams> for LoadControl {
+    fn from(params: LoadControlParams) -> Self {
+        Self {
+            max_concurrent_requests: params.max_concurrent_requests.map(Semaphore::new),
+            min_requests_before_starting: Barrier::new(params.min_requests_before_starting),
+            stride: params.stride,
+            current_batch_len: AtomicUsize::default(),
+        }
+    }
+}
+
+impl LoadControl {
+    #[must_use]
+    pub async fn wait(&self) -> Option<tokio::sync::SemaphorePermit> {
+        let id = self.current_batch_len.fetch_add(1, Ordering::SeqCst);
+        self.min_requests_before_starting.wait().await;
+        if let Some(LoadControlStride { len, wait_time }) = self.stride {
+            let batch_number = u32::try_from(id.checked_div(len).unwrap()).unwrap();
+            tokio::time::sleep(wait_time * batch_number).await;
+        }
+        OptionFuture::from(
+            self.max_concurrent_requests
+                .as_ref()
+                .map(|s| async { s.acquire().await.unwrap() }),
+        )
+        .await
+    }
+}
 
 struct TestMetrics {
     aggregated: IntCounterVec,
@@ -129,6 +210,7 @@ pub struct Test {
     /// The path to the hpke signing certificate, which can be used to verify the hpke config
     /// signature.
     hpke_signing_certificate_path: Option<PathBuf>,
+    load_control: LoadControlParams,
 }
 
 pub struct TestOptions {
@@ -176,6 +258,7 @@ impl Test {
         helper_url: Url,
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
+        load_control: LoadControlParams,
     ) -> Result<Self> {
         let vdaf_verify_init = <[u8; 32]>::try_from(
             hex::decode(vdaf_verify_init)
@@ -218,6 +301,7 @@ impl Test {
             metrics,
             vdaf_config,
             hpke_signing_certificate_path: None,
+            load_control,
         })
     }
 
@@ -226,6 +310,7 @@ impl Test {
         vdaf_config: VdafConfig,
         hpke_signing_certificate_path: Option<PathBuf>,
         re_use_http_client: bool,
+        load_control: LoadControlParams,
     ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
         const LEADER_TLS_CLIENT_CERT_VAR: &str = "LEADER_TLS_CLIENT_CERT";
@@ -267,6 +352,7 @@ impl Test {
             helper_url,
             &vdaf_verify_init,
             vdaf_config,
+            load_control,
         )?;
         if let Some(token) = leader_bearer_token {
             test = test.with_bearer_token(token);
@@ -406,9 +492,7 @@ impl Test {
     where
         F: Fn(usize) -> ReportGenerator,
     {
-        let job_count = report_count / reports_per_agg_job
-            + usize::from(report_count % reports_per_agg_job != 0);
-        let barrier = Barrier::new(job_count);
+        let load_control = LoadControl::from(self.load_control);
         let (count, out_shares_for_batch, agg_job_durations) = futures::stream::iter(
             distribute_reports_in_chunks(report_count, reports_per_agg_job),
         )
@@ -419,7 +503,7 @@ impl Test {
                 agg_job_index,
                 report_generator(reports_for_agg_job),
                 part_batch_sel,
-                &barrier,
+                &load_control,
             )
         })
         .buffer_unordered((report_count / reports_per_agg_job) + 1)
@@ -450,7 +534,7 @@ impl Test {
         // agg_job_index is kept
         reports_for_agg_job,
         part_batch_sel,
-        barrier,
+        load_control,
     ))]
     pub async fn run_agg_job(
         &self,
@@ -458,7 +542,7 @@ impl Test {
         agg_job_index: usize,
         reports_for_agg_job: ReportGenerator,
         part_batch_sel: &PartialBatchSelector,
-        barrier: &Barrier,
+        load_control: &LoadControl,
     ) -> anyhow::Result<(DapAggregateSpan<DapAggregateShare>, Duration)> {
         let report_count = reports_for_agg_job.len();
         info!(report_count, "Starting aggregation job");
@@ -500,7 +584,8 @@ impl Test {
         ))?;
 
         // wait for all agg jobs to be ready to fire.
-        barrier.wait().await;
+        info!("Reports generated, waiting for other tasks...");
+        let _guard = load_control.wait().await;
         info!("Starting AggregationJobInitReq");
         let start = Instant::now();
         let resp = send(

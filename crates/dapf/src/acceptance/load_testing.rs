@@ -23,6 +23,8 @@ use futures::StreamExt;
 use rand::{thread_rng, Rng};
 use url::Url;
 
+use super::LoadControlParams;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct MeasurementParameters {
     reports_per_batch: usize,
@@ -332,13 +334,18 @@ async fn execute(t: &Test, test_config: &TestOptions) -> TestResults {
     TestResults { tests }
 }
 
-pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: bool) {
+pub async fn execute_multiple_combinations(
+    helper_url: Url,
+    re_use_http_client: bool,
+    load_control: LoadControlParams,
+) {
     // This vdaf config is later replaced on each of the runs
     let mut t = Test::from_env(
         helper_url,
         VdafConfig::Prio2 { dimension: 44 },
         None,
         re_use_http_client,
+        load_control,
     )
     .expect("env to be present");
 
@@ -350,6 +357,7 @@ pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: 
 
     let mut measurments = HashMap::new();
 
+    let min_requests_before_starting = t.load_control.min_requests_before_starting;
     loop {
         for params @ MeasurementParameters {
             reports_per_batch,
@@ -362,12 +370,17 @@ pub async fn execute_multiple_combinations(helper_url: Url, re_use_http_client: 
             test_config.reports_per_agg_job = reports_per_agg_job;
             t.vdaf_config = vdaf_config;
             test_config.measurement = Some(t.gen_measurement().unwrap());
+            t.load_control.min_requests_before_starting = std::cmp::max(
+                min_requests_before_starting,
+                reports_per_batch / reports_per_agg_job,
+            );
 
             println!("===== Performance Report =====");
             println!("parameters:");
             println!("\t- reports_per_batch:   {reports_per_batch}");
             println!("\t- reports_per_agg_job: {reports_per_agg_job}");
             println!("\t- vdaf_config:         {vdaf_config:?}");
+            println!("\t- load_control:        {:?}", t.load_control);
 
             let results = execute(&t, &test_config).await;
 
@@ -389,11 +402,18 @@ pub async fn execute_single_combination_from_env(
     reports_per_batch: usize,
     reports_per_agg_job: usize,
     re_use_http_client: bool,
+    load_control: LoadControlParams,
 ) {
     const VERSION: daphne::DapVersion = daphne::DapVersion::Latest;
 
-    let t = Test::from_env(helper_url, vdaf_config, None, re_use_http_client)
-        .expect("env to be present");
+    let t = Test::from_env(
+        helper_url,
+        vdaf_config,
+        None,
+        re_use_http_client,
+        load_control,
+    )
+    .expect("env to be present");
 
     let system_now = now();
 
@@ -407,6 +427,7 @@ pub async fn execute_single_combination_from_env(
         println!("\t- reports_per_batch:   {reports_per_batch}");
         println!("\t- reports_per_agg_job: {reports_per_agg_job}");
         println!("\t- vdaf_config:         {:?}", t.vdaf_config);
+        println!("\t- load_control:        {load_control:?}");
 
         let batch_id = BatchId(thread_rng().gen());
         let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
