@@ -21,8 +21,9 @@ bincode.workspace = true
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
 daphne = { path = "../daphne", features = ["prometheus"] }
 futures = { workspace = true, optional = true }
+getrandom = { workspace = true, features = ["js"] }
 hex.workspace = true
-prio = { workspace = true, features = ["wasm-compat"] }
+prio.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 reqwest-wasm.workspace = true

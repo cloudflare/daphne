@@ -25,8 +25,9 @@ cfg-if.workspace = true
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
-daphne = { path = "../daphne", features = ["test-utils", "wasm-compat"] }
+daphne = { path = "../daphne", features = ["test-utils"] }
 daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
+getrandom = { workspace = true, features = ["js"] }
 tracing.workspace = true
 worker.workspace = true
 
