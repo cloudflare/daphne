@@ -33,6 +33,7 @@ use std::{
     iter::zip,
     pin::pin,
 };
+use tracing::{info_span, Instrument};
 
 use super::{
     CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR,
@@ -505,7 +506,7 @@ impl DapTaskConfig {
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut consumed_reports = Vec::with_capacity(num_reports);
-        {
+        async {
             let mut processed = HashSet::with_capacity(num_reports);
             for prep_init in agg_job_init_req.prep_inits {
                 if processed.contains(&prep_init.report_share.report_metadata.id) {
@@ -533,7 +534,10 @@ impl DapTaskConfig {
                     .await?,
                 );
             }
+            Ok::<_, DapError>(())
         }
+        .instrument(info_span!("consume reports"))
+        .await?;
 
         let agg_param =
             DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_job_init_req.agg_param)

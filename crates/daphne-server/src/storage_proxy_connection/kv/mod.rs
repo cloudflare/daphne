@@ -10,6 +10,7 @@ use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
 use mappable_rc::Marc;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::RwLock;
+use tracing::{info_span, Instrument};
 
 use crate::StorageProxyConfig;
 
@@ -38,6 +39,7 @@ pub mod prefix {
 
     use super::KvPrefix;
 
+    #[derive(Debug)]
     pub struct GlobalConfigOverride<V>(PhantomData<V>);
 
     /// List of global overrides stored in kv.
@@ -112,7 +114,7 @@ pub mod prefix {
 }
 
 /// Options for getting items from KV.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct KvGetOptions {
     /// Cache the response from KV regardless of whether a value was found. If the value was not
     /// found, then [`Kv::get`] and its cousins will return `None` until the cache line expires.
@@ -145,6 +147,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<Marc<P::Value>>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
     {
         self.get_mapped::<P, _, _>(key, opt, |t| Some(t)).await
     }
@@ -156,6 +159,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<P::Value>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
         P::Value: Clone,
     {
         Ok(self.get::<P>(key, opt).await?.map(|t| t.as_ref().clone()))
@@ -169,6 +173,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<Marc<R>>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
         F: for<'s> FnOnce(&'s P::Value) -> Option<&'s R>,
         R: 'static,
     {
@@ -186,6 +191,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<R>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
         F: FnOnce(&P::Value) -> R,
     {
         self.get_impl::<P, _, _>(key, opt, |marc| peeker(&marc))
@@ -200,6 +206,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<R>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
         F: for<'s> FnOnce(Marc<P::Value>) -> R,
     {
         let key = Self::to_key::<P>(key);
@@ -218,29 +225,45 @@ impl<'h> Kv<'h> {
                 );
             }
         }
-        let resp = self
-            .http
-            .get(self.config.url.join(&key).unwrap())
-            .bearer_auth(&self.config.auth_token)
-            .send()
-            .await?;
-        if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
-            if opt.cache_not_found {
-                self.cache.write().await.put::<P>(key, None);
+        let span = info_span!(
+            "uncached kv_get",
+            ?key,
+            ?opt,
+            prefix = std::any::type_name::<P>()
+        );
+        async {
+            let resp = self
+                .http
+                .get(self.config.url.join(&key).unwrap())
+                .bearer_auth(&self.config.auth_token)
+                .send()
+                .await?;
+            if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
+                if opt.cache_not_found {
+                    self.cache.write().await.put::<P>(key, None);
+                }
+                Ok(None)
+            } else {
+                let resp = resp.error_for_status()?;
+                let t = Marc::new(resp.json::<P::Value>().await?);
+                let r = mapper(t.clone());
+                self.cache.write().await.put::<P>(key, Some(t));
+                Ok(Some(r))
             }
-            Ok(None)
-        } else {
-            let resp = resp.error_for_status()?;
-            let t = Marc::new(resp.json::<P::Value>().await?);
-            let r = mapper(t.clone());
-            self.cache.write().await.put::<P>(key, Some(t));
-            Ok(Some(r))
         }
+        .instrument(span)
+        .await
     }
 
+    #[tracing::instrument(
+        name = "kv_put",
+        skip_all,
+        fields(key, prefix = std::any::type_name::<P>()),
+    )]
     pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<(), Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
     {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "PUT");
@@ -258,6 +281,11 @@ impl<'h> Kv<'h> {
     /// Stores a value in kv if it doesn't already exist.
     ///
     /// If the value already exists, returns the passed in value inside the Ok variant.
+    #[tracing::instrument(
+        name = "kv_put_if_not_exists",
+        skip_all,
+        fields(key, prefix = std::any::type_name::<P>()),
+    )]
     pub async fn put_if_not_exists<P>(
         &self,
         key: &P::Key,
@@ -265,6 +293,7 @@ impl<'h> Kv<'h> {
     ) -> Result<Option<P::Value>, Error>
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
     {
         let key = Self::to_key::<P>(key);
 
@@ -286,9 +315,11 @@ impl<'h> Kv<'h> {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(key, prefix = std::any::type_name::<P>()))]
     pub async fn only_cache_put<P>(&self, key: &P::Key, value: P::Value)
     where
         P: KvPrefix,
+        P::Key: std::fmt::Debug,
     {
         let key = Self::to_key::<P>(key);
         self.cache.write().await.put::<P>(key, Some(value.into()));
