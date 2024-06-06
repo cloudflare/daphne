@@ -31,6 +31,7 @@ use crate::storage_proxy_connection::kv::{self, KvGetOptions};
 
 #[async_trait]
 impl DapAggregator<DaphneAuth> for crate::App {
+    #[tracing::instrument(skip(self, task_config, agg_share_span))]
     async fn try_put_agg_share_span(
         &self,
         task_id: &TaskId,
@@ -90,6 +91,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_agg_share(
         &self,
         task_id: &TaskId,
@@ -123,6 +125,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         Ok(agg_share)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn mark_collected(
         &self,
         task_id: &TaskId,
@@ -436,6 +439,7 @@ impl DapReportInitializer for crate::App {
         start..end
     }
 
+    #[tracing::instrument(skip(self, task_config, agg_param, consumed_reports))]
     async fn initialize_reports(
         &self,
         is_leader: bool,

@@ -61,6 +61,7 @@ pub struct RequestBuilder<'d, B: DurableMethod, P: AsRef<[u8]>> {
 }
 
 impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
+    #[tracing::instrument(skip_all, fields(path = ?self.path))]
     pub async fn send<R>(self) -> Result<R, Error>
     where
         R: DeserializeOwned,
