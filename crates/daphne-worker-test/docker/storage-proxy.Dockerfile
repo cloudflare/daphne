@@ -19,7 +19,7 @@ WORKDIR /tmp/dap_test/crates/daphne-worker-test
 RUN worker-build --dev
 
 FROM node:bookworm AS final
-RUN npm install -g wrangler@3.50.0 && npm cache clean --force
+RUN npm install -g wrangler@3.60.1 && npm cache clean --force
 COPY --from=builder /tmp/dap_test/crates/daphne-worker-test/build/ /build
 COPY crates/daphne-worker-test/wrangler.storage-proxy.toml /
 
