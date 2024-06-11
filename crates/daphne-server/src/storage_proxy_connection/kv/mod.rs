@@ -207,18 +207,14 @@ impl<'h> Kv<'h> {
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
-        F: for<'s> FnOnce(Marc<P::Value>) -> R,
+        F: FnOnce(Marc<P::Value>) -> R,
     {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "GET");
         match self.cache.read().await.get::<P>(&key) {
-            cache::GetResult::NotFound { read_through } => {
-                if !read_through {
-                    return Ok(None);
-                }
-            }
-            cache::GetResult::Found(t) => return Ok(Some(mapper(t))),
-            cache::GetResult::MismatchedType => {
+            cache::CacheResult::Miss => {}
+            cache::CacheResult::Hit(t) => return Ok(t.map(mapper)),
+            cache::CacheResult::MismatchedType => {
                 tracing::warn!(
                     "cache mismatched type, wanted {}",
                     std::any::type_name::<P::Value>()
