@@ -29,44 +29,37 @@ pub struct Cache {
     kv: HashMap<&'static str, HashMap<String, CacheLine>>,
 }
 
-pub enum GetResult<T: 'static> {
-    NotFound {
-        /// Whether the caller should check KV for the value.
-        read_through: bool,
-    },
+pub enum CacheResult<T: 'static> {
+    /// Cache hit.
+    ///
+    /// `None` indicates that the value is known to not exist.
+    Hit(Option<Marc<T>>),
+    /// Cache Miss. It was never cached or it has expired.
+    Miss,
+    /// There is a value associated with this key, but it's type is not [`T`].
     MismatchedType,
-    Found(Marc<T>),
 }
 
 impl Cache {
-    pub fn get<P>(&self, key: &str) -> GetResult<P::Value>
+    pub fn get<P>(&self, key: &str) -> CacheResult<P::Value>
     where
         P: KvPrefix,
     {
         match self.kv.get(P::PREFIX) {
             Some(cache) => match cache.get(key) {
                 // Cache hit
-                Some(CacheLine { ts, entry }) if ts.elapsed() < CACHE_VALUE_LIFETIME => {
-                    if let Some(value) = entry {
-                        // There is a value in KV, and its value isn't stale.
-                        Marc::try_map(entry.clone().unwrap(), |value| {
-                            value.downcast_ref::<P::Value>()
-                        })
-                        .map_or(GetResult::MismatchedType, GetResult::Found)
-                    } else {
-                        // There is no value in KV, but we shouldn't read through to KV.
-                        GetResult::NotFound {
-                            read_through: false,
-                        }
-                    }
-                }
+                Some(CacheLine { ts, entry }) if ts.elapsed() < CACHE_VALUE_LIFETIME => entry
+                    .as_ref()
+                    .map(|entry| Marc::try_map(entry.clone(), |v| v.downcast_ref::<P::Value>()))
+                    .transpose() // bring out the try_map error
+                    .map_or(CacheResult::MismatchedType, CacheResult::Hit),
 
                 // Cache miss or the cached value is stale.
-                Some(_) | None => GetResult::NotFound { read_through: true },
+                Some(_) | None => CacheResult::Miss,
             },
 
             // Cache miss
-            None => GetResult::NotFound { read_through: true },
+            None => CacheResult::Miss,
         }
     }
 
@@ -83,27 +76,23 @@ impl Cache {
         );
     }
 
-    pub fn delete<P>(&mut self, key: &str) -> GetResult<P::Value>
+    pub fn delete<P>(&mut self, key: &str) -> CacheResult<P::Value>
     where
         P: KvPrefix,
     {
         match self.kv.get_mut(P::PREFIX) {
             Some(cache) => match cache.remove(key) {
                 // Cache hit
-                Some(CacheLine { ts: _, entry }) => {
-                    if let Some(value) = entry {
-                        Marc::try_map(value, |value| value.downcast_ref::<P::Value>())
-                            .map_or(GetResult::MismatchedType, GetResult::Found)
-                    } else {
-                        GetResult::NotFound { read_through: true }
-                    }
-                }
+                Some(CacheLine { ts: _, entry }) => entry
+                    .map(|entry| Marc::try_map(entry, |v| v.downcast_ref::<P::Value>()))
+                    .transpose() // bring out the try_map error
+                    .map_or(CacheResult::MismatchedType, CacheResult::Hit),
 
-                None => GetResult::NotFound { read_through: true },
+                None => CacheResult::Miss,
             },
 
             // Cache miss
-            None => GetResult::NotFound { read_through: true },
+            None => CacheResult::Miss,
         }
     }
 }
