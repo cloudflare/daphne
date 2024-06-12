@@ -47,6 +47,7 @@ pub mod error;
 pub mod hpke;
 pub mod messages;
 pub mod metrics;
+pub mod pine;
 pub(crate) mod protocol;
 pub mod roles;
 pub mod taskprov;

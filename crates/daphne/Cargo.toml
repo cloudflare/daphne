@@ -65,5 +65,9 @@ harness = false
 name = "aggregation"
 harness = false
 
+[[bench]]
+name = "pine"
+harness = false
+
 [lints]
 workspace = true
