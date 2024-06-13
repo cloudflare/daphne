@@ -5,7 +5,6 @@ use std::{
     collections::HashMap,
     fmt::Display,
     time::{Duration, Instant},
-    usize,
 };
 
 use crate::{

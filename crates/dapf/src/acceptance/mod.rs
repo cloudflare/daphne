@@ -814,7 +814,7 @@ impl Test {
 impl DapReportInitializer for Test {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
-        0..u64::max_value()
+        0..u64::MAX
     }
 
     async fn initialize_reports(
