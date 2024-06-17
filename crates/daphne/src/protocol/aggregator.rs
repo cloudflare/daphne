@@ -552,6 +552,7 @@ impl DapTaskConfig {
 
     /// Helper -> Leader: Produce the `AggregationJobResp` message to send to the Leader and
     /// compute Helper's aggregate share span.
+    #[tracing::instrument(skip_all, fields(report_count = report_status.len()))]
     pub(crate) fn produce_agg_job_resp(
         &self,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
