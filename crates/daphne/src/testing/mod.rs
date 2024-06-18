@@ -262,6 +262,7 @@ impl AggregationJobTest {
                         self,
                         &self.task_id,
                         agg_job_init_req,
+                        Default::default(),
                     )
                     .await
                     .unwrap(),
@@ -1107,6 +1108,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
             Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),
                 &req,
+                Default::default(),
             )
             .await
             .expect("peer aborted unexpectedly")),
@@ -1129,6 +1131,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
             Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),
                 &req,
+                Default::default(),
             )
             .await
             .expect("peer aborted unexpectedly"))

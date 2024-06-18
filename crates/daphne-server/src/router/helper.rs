@@ -16,11 +16,12 @@ use daphne::{
 use daphne_service_utils::auth::DaphneAuth;
 use http::StatusCode;
 
+use crate::{roles::fetch_replay_protection_override, App};
+
 use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
 
-pub(super) fn add_helper_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
+pub(super) fn add_helper_routes<B>(router: super::Router<App, B>) -> super::Router<App, B>
 where
-    A: DapHelper<DaphneAuth> + DaphneService + Send + Sync + 'static,
     B: Send + HttpBody + 'static,
     B::Data: Send,
     B::Error: Send + Sync,
@@ -41,16 +42,18 @@ where
         version = ?req.version
     )
 )]
-async fn agg_job<A>(
-    State(app): State<Arc<A>>,
+async fn agg_job(
+    State(app): State<Arc<App>>,
     DapRequestExtractor(req): DapRequestExtractor,
-) -> AxumDapResponse
-where
-    A: DapHelper<DaphneAuth> + DaphneService + Send + Sync,
-{
+) -> AxumDapResponse {
     match req.media_type {
         Some(DapMediaType::AggregationJobInitReq) => {
-            let resp = helper::handle_agg_job_init_req(&*app, &req).await;
+            let resp = helper::handle_agg_job_init_req(
+                &*app,
+                &req,
+                fetch_replay_protection_override(app.kv()).await,
+            )
+            .await;
             AxumDapResponse::from_result_with_success_code(
                 resp,
                 app.server_metrics(),

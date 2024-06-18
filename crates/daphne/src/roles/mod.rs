@@ -657,7 +657,7 @@ mod test {
             )
             .await;
         assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req)
+            helper::handle_agg_job_req(&*t.helper, &req, Default::default())
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
@@ -712,14 +712,14 @@ mod test {
 
         // Expect failure due to missing bearer token.
         assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req).await,
+            helper::handle_agg_job_req(&*t.helper, &req, Default::default()).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
         // Expect failure due to incorrect bearer token.
         req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
         assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req).await,
+            helper::handle_agg_job_req(&*t.helper, &req, Default::default()).await,
             Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
         );
 
@@ -904,7 +904,7 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req)
+            &helper::handle_agg_job_req(&*t.helper, &req, Default::default())
                 .await
                 .unwrap()
                 .payload,
@@ -932,7 +932,7 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req)
+            &helper::handle_agg_job_req(&*t.helper, &req, Default::default())
                 .await
                 .unwrap()
                 .payload,

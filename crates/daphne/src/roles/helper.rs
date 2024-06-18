@@ -17,7 +17,7 @@ use crate::{
         AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
-    protocol::aggregator::ReportProcessedStatus,
+    protocol::aggregator::{ReplayProtection, ReportProcessedStatus},
     roles::aggregator::MergeAggShareError,
     DapAggregationParam, DapError, DapRequest, DapResource, DapResponse, DapTaskConfig,
     EarlyReportStateInitialized,
@@ -30,6 +30,7 @@ pub trait DapHelper<S: Sync>: DapAggregator<S> {}
 pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &'req DapRequest<S>,
+    replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let global_config = aggregator.get_global_config().await?;
     let task_id = req.task_id()?;
@@ -80,7 +81,13 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     let prep_init_count = agg_job_init_req.prep_inits.len();
     let part_batch_sel = agg_job_init_req.part_batch_sel.clone();
     let initialized_reports = task_config
-        .consume_agg_job_req(aggregator, aggregator, task_id, agg_job_init_req)
+        .consume_agg_job_req(
+            aggregator,
+            aggregator,
+            task_id,
+            agg_job_init_req,
+            replay_protection,
+        )
         .await?;
 
     let agg_job_resp = {
@@ -119,9 +126,12 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
 pub async fn handle_agg_job_req<'req, S: Sync, A: DapHelper<S>>(
     aggregator: &A,
     req: &DapRequest<S>,
+    replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     match req.media_type {
-        Some(DapMediaType::AggregationJobInitReq) => handle_agg_job_init_req(aggregator, req).await,
+        Some(DapMediaType::AggregationJobInitReq) => {
+            handle_agg_job_init_req(aggregator, req, replay_protection).await
+        }
         _ => Err(DapAbort::BadRequest("unexpected media type".into()).into()),
     }
 }

@@ -46,7 +46,9 @@ fn aggregate(c: &mut Criterion) {
                     let mut total = Duration::ZERO;
                     for _ in 0..iters {
                         let now = Instant::now();
-                        let ret = black_box(helper::handle_agg_job_req(aggregator, req).await);
+                        let ret = black_box(
+                            helper::handle_agg_job_req(aggregator, req, Default::default()).await,
+                        );
                         total += now.elapsed();
                         aggregator.clear_storage();
                         drop(ret.unwrap());

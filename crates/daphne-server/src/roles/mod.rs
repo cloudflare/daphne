@@ -1,9 +1,36 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use daphne::ReplayProtection;
+
+use crate::storage_proxy_connection::kv::{self, Kv, KvGetOptions};
+
 mod aggregator;
 mod helper;
 mod leader;
+
+pub async fn fetch_replay_protection_override(kv: Kv<'_>) -> ReplayProtection {
+    let skip_replay_protection = kv
+        .get_cloned::<kv::prefix::GlobalConfigOverride<bool>>(
+            &kv::prefix::GlobalOverrides::SkipReplayProtection,
+            &KvGetOptions {
+                cache_not_found: true,
+            },
+        )
+        .await
+        .inspect_err(
+            |e| tracing::error!(error = ?e, "failed to fetch skip_replay_protection from kv"),
+        )
+        .ok() // treat error as false
+        .flatten()
+        .unwrap_or_default(); // treat missing as false
+    if skip_replay_protection {
+        tracing::debug!("replay protection is disabled");
+        ReplayProtection::Disabled
+    } else {
+        ReplayProtection::Enabled
+    }
+}
 
 #[cfg(feature = "test-utils")]
 mod test_utils {

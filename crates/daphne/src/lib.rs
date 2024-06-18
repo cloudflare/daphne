@@ -76,6 +76,7 @@ use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
 };
+pub use protocol::aggregator::ReplayProtection;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},
