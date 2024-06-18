@@ -126,6 +126,58 @@ fn js_map_to_chunks<'s, T: DeserializeOwned + 's>(
         })
 }
 
+fn shard_bytes_to_object(
+    keys: &[&str],
+    bytes: Vec<u8>,
+    object_to_fill: &js_sys::Object,
+) -> Result<()> {
+    // stolen from
+    // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
+    // because it's nightly only
+    fn div_ceil(lhs: usize, rhs: usize) -> usize {
+        let d = lhs / rhs;
+        let r = lhs % rhs;
+        if r > 0 && rhs > 0 {
+            d + 1
+        } else {
+            d
+        }
+    }
+
+    let num_chunks = div_ceil(bytes.len(), MAX_CHUNK_SIZE);
+    if num_chunks > keys.len() {
+        return Err(format!("too many chunks {num_chunks}. max is {}", keys.len()).into());
+    }
+
+    let mut base_idx = 0;
+    for key in &keys[..num_chunks] {
+        let end = usize::min(base_idx + MAX_CHUNK_SIZE, bytes.len());
+        let chunk = &bytes[base_idx..end];
+
+        // unwrap cannot fail because chunk len is bounded by MAX_CHUNK_SIZE which is smaller than
+        // u32::MAX
+        let value = js_sys::Uint8Array::new_with_length(u32::try_from(chunk.len()).unwrap());
+        value.copy_from(chunk);
+
+        js_sys::Reflect::set(object_to_fill, &JsValue::from_str(key), &value.into())?;
+
+        base_idx = end;
+    }
+    Ok(())
+}
+
+super::mk_durable_object! {
+    /// Where the aggregate share is stored. For the binding name see its
+    /// [`BINDING`](bindings::AggregateStore::BINDING)
+    struct AggregateStore {
+        state: State,
+        env: Env,
+        report_ids: Option<HashSet<ReportId>>,
+        agg_share: Option<DapAggregateShare>,
+        collected: Option<bool>,
+    }
+}
+
 impl AggregateStore {
     const fn agg_share_shard_keys() -> &'static [&'static str; MAX_AGG_SHARE_CHUNK_KEY_COUNT] {
         &[
@@ -263,61 +315,6 @@ impl AggregateStore {
 
         Ok(())
     }
-}
-
-fn shard_bytes_to_object(
-    keys: &[&str],
-    bytes: Vec<u8>,
-    object_to_fill: &js_sys::Object,
-) -> Result<()> {
-    // stolen from
-    // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
-    // because it's nightly only
-    fn div_ceil(lhs: usize, rhs: usize) -> usize {
-        let d = lhs / rhs;
-        let r = lhs % rhs;
-        if r > 0 && rhs > 0 {
-            d + 1
-        } else {
-            d
-        }
-    }
-
-    let num_chunks = div_ceil(bytes.len(), MAX_CHUNK_SIZE);
-    if num_chunks > keys.len() {
-        return Err(format!("too many chunks {num_chunks}. max is {}", keys.len()).into());
-    }
-
-    let mut base_idx = 0;
-    for key in &keys[..num_chunks] {
-        let end = usize::min(base_idx + MAX_CHUNK_SIZE, bytes.len());
-        let chunk = &bytes[base_idx..end];
-
-        // unwrap cannot fail because chunk len is bounded by MAX_CHUNK_SIZE which is smaller than
-        // u32::MAX
-        let value = js_sys::Uint8Array::new_with_length(u32::try_from(chunk.len()).unwrap());
-        value.copy_from(chunk);
-
-        js_sys::Reflect::set(object_to_fill, &JsValue::from_str(key), &value.into())?;
-
-        base_idx = end;
-    }
-    Ok(())
-}
-
-super::mk_durable_object! {
-    /// Where the aggregate share is stored. For the binding name see its
-    /// [`BINDING`](bindings::AggregateStore::BINDING)
-    struct AggregateStore {
-        state: State,
-        env: Env,
-        report_ids: Option<HashSet<ReportId>>,
-        agg_share: Option<DapAggregateShare>,
-        collected: Option<bool>,
-    }
-}
-
-impl AggregateStore {
     async fn is_collected(&mut self) -> Result<bool> {
         Ok(if let Some(collected) = self.collected {
             collected
