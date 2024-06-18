@@ -4,8 +4,8 @@
 use std::{
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Mutex, OnceLock,
     },
     task::Context,
     time::Instant,
@@ -14,7 +14,7 @@ use std::{
 use crate::{
     fatal_error,
     hpke::HpkeConfig,
-    messages::{self, TaskId, Time},
+    messages::{self, Report, TaskId, Time},
     vdaf::VdafConfig,
     DapError, DapMeasurement, DapVersion,
 };
@@ -56,6 +56,14 @@ impl Stream for ReportGenerator {
     }
 }
 
+static REPLAY_REPORTS: AtomicBool = AtomicBool::new(false);
+pub fn replay_reports(b: bool) {
+    REPLAY_REPORTS.store(b, Ordering::SeqCst);
+}
+pub fn generator_replaying_reports() -> bool {
+    REPLAY_REPORTS.load(Ordering::SeqCst)
+}
+
 impl ReportGenerator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -89,14 +97,31 @@ impl ReportGenerator {
                     let now = Instant::now();
                     // ----
 
-                    let report = vdaf.produce_report_with_extensions(
-                        &hpke_config_list,
-                        report_time_dist.sample(&mut thread_rng()),
-                        &task_id,
-                        measurement.clone(),
-                        extensions.clone(),
-                        version,
-                    )?;
+                    static LAST_REPORT: OnceLock<Report> = OnceLock::new();
+                    let report = if REPLAY_REPORTS.load(Ordering::SeqCst) {
+                        LAST_REPORT
+                            .get_or_init(|| {
+                                vdaf.produce_report_with_extensions(
+                                    &hpke_config_list,
+                                    report_time_dist.sample(&mut thread_rng()),
+                                    &task_id,
+                                    measurement.clone(),
+                                    extensions.clone(),
+                                    version,
+                                )
+                                .expect("we have to panic here since we can't return the error")
+                            })
+                            .clone()
+                    } else {
+                        vdaf.produce_report_with_extensions(
+                            &hpke_config_list,
+                            report_time_dist.sample(&mut thread_rng()),
+                            &task_id,
+                            measurement.clone(),
+                            extensions.clone(),
+                            version,
+                        )?
+                    };
 
                     // perf measurements
                     let count = GENERATED_REPORT_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;

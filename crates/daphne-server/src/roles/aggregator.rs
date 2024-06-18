@@ -15,7 +15,7 @@ use daphne::{
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized, ReplayProtection,
+    EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
@@ -44,10 +44,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_id_hex = task_id.to_hex();
         let durable = self.durable();
 
-        let skip_replay_protection = matches!(
-            fetch_replay_protection_override(self.kv()).await,
-            ReplayProtection::Disabled
-        );
+        let replay_protection = fetch_replay_protection_override(self.kv()).await;
 
         futures::stream::iter(agg_share_span)
             .map(|(bucket, (agg_share, report_metadatas))| async {
@@ -60,7 +57,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                         contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
                         agg_share_delta: agg_share,
                         options: AggregateStoreMergeOptions {
-                            skip_replay_protection,
+                            skip_replay_protection: replay_protection.disabled(),
                         },
                     })
                     .send::<AggregateStoreMergeResp>()

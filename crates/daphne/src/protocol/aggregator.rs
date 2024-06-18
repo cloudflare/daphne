@@ -382,8 +382,12 @@ pub enum ReplayProtection {
 }
 
 impl ReplayProtection {
-    const fn enabled(&self) -> bool {
+    pub const fn enabled(&self) -> bool {
         matches!(self, ReplayProtection::Enabled)
+    }
+
+    pub const fn disabled(&self) -> bool {
+        matches!(self, ReplayProtection::Disabled)
     }
 }
 
@@ -411,7 +415,15 @@ impl DapTaskConfig {
             let mut processed = HashSet::with_capacity(report_count_hint);
             let mut reports = pin!(reports);
             while let Some(report) = reports.next().await {
-                if processed.contains(&report.report_metadata.id) {
+                let enforce_replay_check = {
+                    #[cfg(feature = "report-generator")]
+                    {
+                        !crate::testing::report_generator::generator_replaying_reports()
+                    }
+                    #[cfg(not(feature = "report-generator"))]
+                    true
+                };
+                if enforce_replay_check && processed.contains(&report.report_metadata.id) {
                     return Err(fatal_error!(
                         err = "tried to process report sequence with non-unique report IDs",
                         non_unique_id = %report.report_metadata.id,
