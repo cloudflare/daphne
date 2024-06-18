@@ -5,12 +5,15 @@
 
 leader:
 	cargo run --profile release-symbols --features test-utils --example service -- -c ./crates/daphne-server/examples/configuration-leader.toml
+l: leader
 
 helper:
 	cargo run --profile release-symbols --features test-utils --example service -- -c ./crates/daphne-server/examples/configuration-helper.toml
+h: helper
 
-storage_proxy:
-	docker-compose -f ./crates/daphne-worker-test/docker-compose-storage-proxy.yaml up --build
+storage-proxy:
+	docker compose -f ./crates/daphne-worker-test/docker-compose-storage-proxy.yaml up --build
+s: storage-proxy
 
 e2e: /tmp/private-key /tmp/certificate
 	export HPKE_SIGNING_KEY="$$(cat /tmp/private-key)"; \
@@ -28,3 +31,7 @@ run_interop:
 
 /tmp/certificate:
 	openssl req -key /tmp/private-key -new -x509 -days 1 -out /tmp/certificate -subj '/C=US/L=Palo Alto/O=Cloudflare Lda/CN=dap.cloudflare.com'
+
+reset-storage:
+	-cargo run --bin dapf -- clear-storage -s p256_hkdf_sha256 http://localhost:8787/v09/
+	-cargo run --bin dapf -- clear-storage -s p256_hkdf_sha256 http://localhost:8788/v09/
