@@ -374,6 +374,19 @@ pub(crate) enum ReportProcessedStatus {
     Rejected(TransitionFailure),
 }
 
+#[derive(Default, Debug)]
+pub enum ReplayProtection {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+impl ReplayProtection {
+    const fn enabled(&self) -> bool {
+        matches!(self, ReplayProtection::Enabled)
+    }
+}
+
 impl DapTaskConfig {
     /// Leader -> Helper: Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the outbound `AggregationJobInitReq` message.
@@ -503,13 +516,16 @@ impl DapTaskConfig {
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         agg_job_init_req: AggregationJobInitReq,
+        replay_protection: ReplayProtection,
     ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut consumed_reports = Vec::with_capacity(num_reports);
         async {
             let mut processed = HashSet::with_capacity(num_reports);
             for prep_init in agg_job_init_req.prep_inits {
-                if processed.contains(&prep_init.report_share.report_metadata.id) {
+                if replay_protection.enabled()
+                    && processed.contains(&prep_init.report_share.report_metadata.id)
+                {
                     return Err(DapAbort::InvalidMessage {
                         detail: format!(
                             "report ID {} appears twice in the same aggregation job",

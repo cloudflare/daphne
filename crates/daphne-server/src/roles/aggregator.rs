@@ -15,7 +15,7 @@ use daphne::{
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized,
+    EarlyReportStateInitialized, ReplayProtection,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
@@ -27,7 +27,10 @@ use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-use crate::storage_proxy_connection::kv::{self, KvGetOptions};
+use crate::{
+    roles::fetch_replay_protection_override,
+    storage_proxy_connection::kv::{self, KvGetOptions},
+};
 
 #[async_trait]
 impl DapAggregator<DaphneAuth> for crate::App {
@@ -41,21 +44,10 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_id_hex = task_id.to_hex();
         let durable = self.durable();
 
-        let skip_replay_protection = self
-            .kv()
-            .get_cloned::<kv::prefix::GlobalConfigOverride<bool>>(
-                &kv::prefix::GlobalOverrides::SkipReplayProtection,
-                &KvGetOptions {
-                    cache_not_found: true,
-                },
-            )
-            .await
-            .inspect_err(
-                |e| tracing::error!(error = ?e, "failed to fetch skip_replay_protection from kv"),
-            )
-            .ok() // treat error as false
-            .flatten()
-            .unwrap_or_default(); // treat missing as false
+        let skip_replay_protection = matches!(
+            fetch_replay_protection_override(self.kv()).await,
+            ReplayProtection::Disabled
+        );
 
         futures::stream::iter(agg_share_span)
             .map(|(bucket, (agg_share, report_metadatas))| async {
