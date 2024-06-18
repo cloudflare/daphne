@@ -65,11 +65,16 @@ pub struct AggregateStoreMergeOptions {
 
 impl DurableRequestPayload for AggregateStoreMergeReq {
     fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator> {
+        let Self {
+            contained_reports,
+            agg_share_delta,
+            options,
+        } = self;
         let mut message = capnp::message::Builder::new_default();
         let mut request = message.init_root::<aggregate_store_merge_req::Builder>();
         {
             let mut contained_reports = request.reborrow().init_contained_reports(
-                self.contained_reports
+                contained_reports
                     .len()
                     .try_into()
                     .expect("can't serialize more than u32::MAX reports"),
@@ -84,15 +89,15 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
             }
         }
         {
-            let mut agg_share_delta = request.init_agg_share_delta();
-            agg_share_delta.set_report_count(self.agg_share_delta.report_count);
-            agg_share_delta.set_min_time(self.agg_share_delta.min_time);
-            agg_share_delta.set_max_time(self.agg_share_delta.max_time);
+            let mut agg_share_delta_packet = request.reborrow().init_agg_share_delta();
+            agg_share_delta_packet.set_report_count(agg_share_delta.report_count);
+            agg_share_delta_packet.set_min_time(agg_share_delta.min_time);
+            agg_share_delta_packet.set_max_time(agg_share_delta.max_time);
             {
-                let checksum = agg_share_delta
+                let checksum = agg_share_delta_packet
                     .reborrow()
-                    .init_checksum(self.agg_share_delta.checksum.len().try_into().unwrap());
-                checksum.copy_from_slice(&self.agg_share_delta.checksum);
+                    .init_checksum(agg_share_delta.checksum.len().try_into().unwrap());
+                checksum.copy_from_slice(&agg_share_delta.checksum);
             }
             {
                 fn encode<'b, F, B, const ENCODED_SIZE: usize>(
@@ -113,7 +118,7 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                         bytes = &mut bytes[ENCODED_SIZE..];
                     }
                 }
-                let mut data = agg_share_delta.init_data();
+                let mut data = agg_share_delta_packet.init_data();
                 match &self.agg_share_delta.data {
                     Some(VdafAggregateShare::Field64(field)) => {
                         encode(field, |len| data.init_field64(len));
@@ -127,6 +132,13 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                     None => data.set_none(()),
                 };
             }
+        }
+        {
+            let AggregateStoreMergeOptions {
+                skip_replay_protection,
+            } = options;
+            let mut options_packet = request.init_options();
+            options_packet.set_skip_replay_protection(*skip_replay_protection);
         }
         message
     }
@@ -262,7 +274,7 @@ mod test {
             .map(Some)
             .into_iter()
             .chain([None]);
-            for data in test_data {
+            for (i, data) in test_data.enumerate() {
                 let this = AggregateStoreMergeReq {
                     contained_reports: (0..len)
                         .map(|_| ReportId::get_decoded(&rng.gen::<[_; 16]>()).unwrap())
@@ -275,7 +287,7 @@ mod test {
                         data,
                     },
                     options: AggregateStoreMergeOptions {
-                        skip_replay_protection: false,
+                        skip_replay_protection: i % 2 == 0,
                     },
                 };
                 let other =

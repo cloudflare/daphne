@@ -370,6 +370,9 @@ async fn main() -> Result<()> {
         .build()
         .with_context(|| "failed to create HTTP client")?;
 
+    if std::env::var("REPLAY_REPORTS").unwrap_or_default() == "1" {
+        daphne::testing::report_generator::replay_reports(true);
+    }
     match cli.action {
         Action::GetHpkeConfig {
             aggregator_url,
