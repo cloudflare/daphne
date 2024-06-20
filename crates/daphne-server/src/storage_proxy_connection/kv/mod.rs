@@ -7,6 +7,7 @@ use std::{any::Any, fmt::Display};
 
 use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
+use http::HeaderValue;
 use mappable_rc::Marc;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::RwLock;
@@ -14,7 +15,7 @@ use tracing::{info_span, Instrument};
 
 use crate::StorageProxyConfig;
 
-use super::{status_http_1_0_to_reqwest_0_11, Error};
+use super::Error;
 pub(crate) use cache::Cache;
 use daphne::messages::Time;
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
@@ -230,13 +231,16 @@ impl<'h> Kv<'h> {
             prefix = std::any::type_name::<P>()
         );
         async {
-            let resp = self
+            let mut req = self
                 .http
                 .get(self.config.url.join(&key).unwrap())
                 .bearer_auth(&self.config.auth_token)
-                .send()
-                .await?;
-            if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
+                .build()?;
+            super::add_tracing_headers(&mut req);
+
+            let resp = self.http.execute(req).await?;
+
+            if resp.status() == StatusCode::NOT_FOUND {
                 if opt.cache_not_found {
                     self.cache.write().await.put::<P>(key, None);
                 }
@@ -276,13 +280,19 @@ impl<'h> Kv<'h> {
             .http
             .post(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap());
+            .body(serde_json::to_vec(&value).unwrap())
+            .build()?;
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+            request.headers_mut().insert(
+                STORAGE_PROXY_PUT_KV_EXPIRATION,
+                HeaderValue::from(expiration),
+            );
         }
 
-        request.send().await?.error_for_status()?;
+        super::add_tracing_headers(&mut request);
+
+        self.http.execute(request).await?.error_for_status()?;
 
         self.cache.write().await.put::<P>(key, Some(value.into()));
         Ok(())
@@ -337,15 +347,21 @@ impl<'h> Kv<'h> {
             .http
             .put(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap());
+            .body(serde_json::to_vec(&value).unwrap())
+            .build()?;
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+            request.headers_mut().insert(
+                STORAGE_PROXY_PUT_KV_EXPIRATION,
+                HeaderValue::from(expiration),
+            );
         }
 
-        let response = request.send().await?;
+        super::add_tracing_headers(&mut request);
 
-        if response.status() == status_http_1_0_to_reqwest_0_11(StatusCode::CONFLICT) {
+        let response = self.http.execute(request).await?;
+
+        if response.status() == StatusCode::CONFLICT {
             Ok(Some(value))
         } else {
             response.error_for_status()?;

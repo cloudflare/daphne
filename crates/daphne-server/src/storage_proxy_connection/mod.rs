@@ -9,14 +9,17 @@ pub(crate) mod kv;
 
 use std::fmt::Debug;
 
-use axum::http::{Method, StatusCode};
+use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::{
     bindings::{DurableMethod, DurableRequestPayload, DurableRequestPayloadExt},
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
 };
+use opentelemetry_http::HeaderInjector;
 use serde::de::DeserializeOwned;
 
 pub(crate) use kv::Kv;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::StorageProxyConfig;
 
@@ -77,20 +80,23 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
             .url
             .join(&format!("{DO_PATH_PREFIX}{}", self.path.to_uri()))
             .unwrap();
-        let resp = self
+        let mut req = self
             .durable
             .http
             .post(url)
             .body(self.request.into_bytes())
             .bearer_auth(&self.durable.config.auth_token)
-            .send()
-            .await?;
+            .build()?;
+
+        add_tracing_headers(&mut req);
+
+        let resp = self.durable.http.execute(req).await?;
 
         if resp.status().is_success() {
             Ok(resp.json().await?)
         } else {
             Err(Error::Http {
-                status: status_reqwest_0_11_to_http_1_0(resp.status()),
+                status: resp.status(),
                 body: resp.text().await?,
             })
         }
@@ -147,37 +153,9 @@ impl<'w> Do<'w> {
     }
 }
 
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn method_http_1_0_to_reqwest_0_11(method: Method) -> reqwest::Method {
-    match method {
-        Method::GET => reqwest::Method::GET,
-        Method::POST => reqwest::Method::POST,
-        Method::PUT => reqwest::Method::PUT,
-        Method::PATCH => reqwest::Method::PATCH,
-        Method::HEAD => reqwest::Method::HEAD,
-        Method::TRACE => reqwest::Method::TRACE,
-        Method::OPTIONS => reqwest::Method::OPTIONS,
-        Method::CONNECT => reqwest::Method::CONNECT,
-        Method::DELETE => reqwest::Method::DELETE,
-        _ => unreachable!(),
-    }
-}
-
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn status_http_1_0_to_reqwest_0_11(status: StatusCode) -> reqwest::StatusCode {
-    reqwest::StatusCode::from_u16(status.as_u16()).unwrap()
-}
-
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn status_reqwest_0_11_to_http_1_0(status: reqwest::StatusCode) -> StatusCode {
-    StatusCode::from_u16(status.as_u16()).unwrap()
+pub fn add_tracing_headers(req: &mut reqwest::Request) {
+    let ctx = Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&ctx, &mut HeaderInjector(req.headers_mut()));
+    });
 }

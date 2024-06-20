@@ -20,7 +20,9 @@ futures.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
-mappable-rc = "0.1.1"
+mappable-rc.workspace = true
+opentelemetry.workspace = true
+opentelemetry-http.workspace = true
 p256.workspace = true
 prio.workspace = true
 rayon.workspace = true
@@ -31,6 +33,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tower.workspace = true
 tracing.workspace = true
+tracing-opentelemetry.workspace = true
 url.workspace = true
 
 [dev-dependencies]
