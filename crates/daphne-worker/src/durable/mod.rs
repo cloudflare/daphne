@@ -23,12 +23,12 @@ pub(crate) mod aggregate_store;
 #[cfg(feature = "test-utils")]
 pub(crate) mod test_state_cleaner;
 
-use crate::tracing_utils::shorten_paths;
 use daphne_service_utils::durable_requests::bindings::{
     DurableMethod, DurableRequestPayload, DurableRequestPayloadExt,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info_span;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use worker::{Env, Error, Request, Response, Result, ScheduledTime, State};
 
 pub use aggregate_store::AggregateStore;
@@ -227,9 +227,11 @@ where
 }
 
 fn create_span_from_request(req: &Request) -> tracing::Span {
-    let path = req.path();
-    let span = info_span!("DO span", p = %shorten_paths(path.split('/')).display());
-    span.in_scope(|| tracing::info!(path, "DO handling new request"));
+    let extractor = crate::tracing_utils::HeaderExtractor::new(req);
+    let remote_context =
+        opentelemetry::global::get_text_map_propagator(|propagator| propagator.extract(&extractor));
+    let span = info_span!("durable object", path = req.path());
+    span.set_parent(remote_context);
     span
 }
 
