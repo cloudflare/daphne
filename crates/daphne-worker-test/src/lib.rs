@@ -22,7 +22,5 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
 
     info!(method = ?req.method(), "{}", req.path());
 
-    daphne_worker::storage_proxy::handle_request(req, &env)
-        .await
-        .map(|(r, _metrics)| r)
+    daphne_worker::storage_proxy::handle_request(req, &env, &prometheus::Registry::new()).await
 }

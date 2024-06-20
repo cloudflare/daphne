@@ -131,6 +131,10 @@ macro_rules! mk_durable_object {
                 &self.state
             }
 
+            pub fn env(&self) -> &::worker::Env {
+                &self.env
+            }
+
             #[allow(dead_code)]
             async fn get<T>(&self, key: &str) -> ::worker::Result<Option<T>>
                 where
@@ -259,17 +263,17 @@ fn create_span_from_request(req: &Request) -> tracing::Span {
 /// instantiate_durable_object!{
 ///     struct MyAggregateStore < durable::AggregateStore;
 ///
-///     fn pre_init(_state: State, _env: Env) -> RequestCounter {
+///     fn init_user_data(_state: State, _env: Env) -> RequestCounter {
 ///         worker::console_log!("MyAggregateStore durable object initialized");
 ///         RequestCounter { counter: 0 }
 ///     }
 ///
 ///     fn pre_fetch(this: &mut Self, request: Request) {
-///         worker::console_log!("[{}] fetching: {}", this.internal_state.counter, request.path());
+///         worker::console_log!("[{}] fetching: {}", this.user_data.counter, request.path());
 ///     }
 ///
 ///     fn post_fetch(this: &mut Self, response: Result<Response>) {
-///         this.internal_state.counter += 1;
+///         this.user_data.counter += 1;
 ///         worker::console_log!(
 ///             "responding with {}",
 ///             if response.is_ok() { "success" } else { "failure" },
@@ -286,7 +290,7 @@ macro_rules! instantiate_durable_object {
         struct $name:ident < $durable_object:ty;
 
         $(
-            fn pre_init($state:ident: State, $env:ident: Env) $(-> $internal_state:ty)?
+            fn init_user_data($state:ident: State, $env:ident: Env) $(-> $user_data:ty)?
             $new_block:block
         )?
 
@@ -298,21 +302,21 @@ macro_rules! instantiate_durable_object {
             use worker::{wasm_bindgen, async_trait, wasm_bindgen_futures};
             #[worker::durable_object]
             struct $name {
-                inner: $durable_object,
-                $($(internal_state: $internal_state)*)*
+                obj: $durable_object,
+                $($(user_data: $user_data)*)*
             }
 
             #[worker::durable_object]
             impl DurableObject for $name {
                 fn new(state: ::worker::State, env: ::worker::Env) -> Self {
-                    $(let internal_state = {
+                    $(let user_data = {
                         let $state = &state;
                         let $env = &env;
                         $new_block
                     };)*
                     Self {
-                        inner: <$durable_object>::new(state, env),
-                        $($(internal_state: internal_state as $internal_state)*)*
+                        obj: <$durable_object>::new(state, env),
+                        $($(user_data: user_data as $user_data)*)*
                     }
                 }
 
@@ -325,7 +329,7 @@ macro_rules! instantiate_durable_object {
                         let $pre_fetch_req = &mut req;
                         $pre_fetch
                     };)*
-                    let mut response = self.inner.fetch(req).await;
+                    let mut response = self.obj.fetch(req).await;
                     $({
                         let $post_fetch_this = self;
                         let $post_fetch_req = &mut response;
@@ -335,7 +339,7 @@ macro_rules! instantiate_durable_object {
                 }
 
                 pub async fn alarm(&mut self) -> ::worker::Result<::worker::Response> {
-                    self.inner.alarm().await
+                    self.obj.alarm().await
                 }
             }
 
@@ -345,7 +349,7 @@ macro_rules! instantiate_durable_object {
                 where
                     F: ::std::future::Future<Output = ()> + 'static
                 {
-                    self.inner.state().wait_until(future)
+                    self.obj.state().wait_until(future)
                 }
             }
         };
