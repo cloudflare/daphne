@@ -1,15 +1,9 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
-
-use prometheus::{
-    register_int_counter_vec_with_registry, Encoder, IntCounterVec, Registry, TextEncoder,
-};
+use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
 pub struct Metrics {
-    registry: Registry,
-
     /// Number of retries done in durable object requests before returning (whether by success
     /// or failure).
     durable_request_retry_count: IntCounterVec,
@@ -19,13 +13,7 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(host: &str) -> Self {
-        let registry = Registry::new_custom(
-            Option::None,
-            Option::Some(HashMap::from([("host".to_string(), host.to_string())])),
-        )
-        .unwrap();
-
+    pub fn new(registry: &Registry) -> Self {
         let durable_request_retry_count = register_int_counter_vec_with_registry!(
             "durable_request_retry_count",
             "The number of times a request to a durable object was retried. count = -1 means the number of retries was exhausted",
@@ -42,7 +30,6 @@ impl Metrics {
         .unwrap();
 
         Self {
-            registry,
             durable_request_retry_count,
             http_status_code_counter,
         }
@@ -58,15 +45,5 @@ impl Metrics {
         self.http_status_code_counter
             .with_label_values(&[&status_code.to_string()])
             .inc();
-    }
-
-    pub fn encode_metrics(self) -> String {
-        let encoder = TextEncoder::new();
-        let metrics = self.registry.gather();
-        let mut encoded_metrics = Vec::new();
-        if let Err(e) = encoder.encode(&metrics, &mut encoded_metrics) {
-            tracing::error!(error = ?e, "failed to encode metrics");
-        }
-        String::from_utf8(encoded_metrics).unwrap()
     }
 }

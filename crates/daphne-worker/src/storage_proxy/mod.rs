@@ -77,6 +77,7 @@ use daphne::auth::BearerToken;
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
+use prometheus::Registry;
 use tracing::warn;
 use url::Url;
 use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
@@ -126,9 +127,13 @@ fn unauthorized_reason(ctx: &RequestContext) -> Option<worker::Result<Response>>
 
 /// Handle a proxy request. This is the entry point of the Worker.
 #[allow(clippy::no_effect_underscore_binding)]
-pub async fn handle_request(req: Request, env: &Env) -> worker::Result<(Response, Metrics)> {
+pub async fn handle_request(
+    req: Request,
+    env: &Env,
+    registry: &Registry,
+) -> worker::Result<Response> {
     let mut ctx = RequestContext {
-        metrics: Metrics::new(req.url()?.host_str().unwrap_or("unspecified-host")),
+        metrics: Metrics::new(registry),
         req,
         env,
     };
@@ -171,7 +176,7 @@ pub async fn handle_request(req: Request, env: &Env) -> worker::Result<(Response
         Err(_) => ctx.metrics.count_http_status_code(500),
     }
 
-    response.map(|r| (r, ctx.metrics))
+    response
 }
 
 #[cfg(feature = "test-utils")]

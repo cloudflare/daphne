@@ -28,6 +28,7 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne = { path = "../daphne", features = ["test-utils"] }
 daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
 getrandom = { workspace = true, features = ["js"] }
+prometheus.workspace = true
 tracing.workspace = true
 worker.workspace = true
 
