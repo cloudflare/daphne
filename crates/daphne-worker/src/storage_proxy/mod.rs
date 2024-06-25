@@ -211,32 +211,30 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
     match ctx.req.method() {
         worker::Method::Get => {
             let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
-
             match bytes {
                 Some(bytes) => Response::from_bytes(bytes),
                 None => Response::error("value not found", 404),
             }
         }
         worker::Method::Post => {
-            match ctx
-                .env
-                .kv(KV_BINDING_DAP_CONFIG)?
-                .put_bytes(key, &ctx.req.bytes().await?)
-            {
-                Ok(put) => {
-                    if let Err(error) = put.execute().await {
-                        tracing::warn!(
-                            ?error,
-                            "Swallowed error from KV POST, this will hopefully retry later"
-                        );
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        "Swallowed error from KV POST creation, this will hopefully retry later"
-                    );
-                }
+            let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
+            let body = ctx.req.bytes().await?;
+
+            let json_body: serde_json::Value = serde_json::from_slice(&body)?;
+            let value = json_body["value"].as_str().ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?.as_bytes();
+            let expiration = json_body["expiration"].as_u64();
+
+            let mut put_request = kv.put_bytes(key, &value)?;
+
+            if let Some(exp) = expiration {
+                put_request = put_request.expiration(exp);
+            }
+
+            if let Err(error) = put_request.execute().await {
+                tracing::warn!(
+                    ?error,
+                    "Swallowed error from KV POST, this will hopefully retry later"
+                );
             }
 
             Response::empty()
@@ -254,21 +252,23 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             {
                 Response::error(String::new(), 409 /* Conflict */)
             } else {
-                match kv.put_bytes(key, &ctx.req.bytes().await?) {
-                    Ok(put) => {
-                        if let Err(error) = put.execute().await {
-                            tracing::warn!(
-                                ?error,
-                                "Swallowed error from KV PUT, this will hopefully retry later"
-                            );
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            ?error,
-                            "Swallowed error from KV PUT creation, this will hopefully retry later"
-                        );
-                    }
+                let body = ctx.req.bytes().await?;
+
+                let json_body: serde_json::Value = serde_json::from_slice(&body)?;
+                let value = json_body["value"].as_str().ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?.as_bytes();
+                let expiration = json_body["expiration"].as_u64();
+
+                let mut put_request = kv.put_bytes(key, &value)?;
+
+                if let Some(exp) = expiration {
+                    put_request = put_request.expiration(exp);
+                }
+
+                if let Err(error) = put_request.execute().await {
+                    tracing::warn!(
+                        ?error,
+                        "Swallowed error from KV PUT, this will hopefully retry later"
+                    );
                 }
 
                 Response::empty()
@@ -276,12 +276,12 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
         }
         worker::Method::Delete => {
             ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
-
             Response::empty()
         }
         _ => Response::error(String::new(), 405 /* Method not allowed */),
     }
 }
+
 
 /// Handle a durable object request
 async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::Result<Response> {
