@@ -309,7 +309,11 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
         if self.service_config.role.is_leader() || req.taskprov.is_none() {
             self.kv()
-                .put_with_expiration::<kv::prefix::TaskConfig>(&task_id, task_config, expiration_time)
+                .put_with_expiration::<kv::prefix::TaskConfig>(
+                    &task_id,
+                    task_config,
+                    expiration_time,
+                )
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?;
         } else {

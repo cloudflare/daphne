@@ -270,7 +270,8 @@ impl<'h> Kv<'h> {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "PUT");
 
-        let mut put_request = self.http
+        let mut put_request = self
+            .http
             .post(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
             .body(serde_json::to_vec(&value).unwrap());
@@ -280,10 +281,7 @@ impl<'h> Kv<'h> {
             put_request = put_request.json(&serde_json::json!({ "expiration": exp }));
         }
 
-        put_request
-            .send()
-            .await?
-            .error_for_status()?;
+        put_request.send().await?.error_for_status()?;
 
         self.cache.write().await.put::<P>(key, Some(value.into()));
         Ok(())
@@ -308,17 +306,12 @@ impl<'h> Kv<'h> {
         self.put_internal::<P>(key, value, Some(expiration)).await
     }
 
-
     #[tracing::instrument(
         name = "kv_put",
         skip_all,
         fields(key, prefix = std::any::type_name::<P>()),
     )]
-    pub async fn put<P>(
-        &self,
-        key: &P::Key,
-        value: P::Value,
-    ) -> Result<(), Error>
+    pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<(), Error>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
