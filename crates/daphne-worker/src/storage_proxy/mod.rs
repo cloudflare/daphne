@@ -221,7 +221,10 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             let body = ctx.req.bytes().await?;
 
             let json_body: serde_json::Value = serde_json::from_slice(&body)?;
-            let value = json_body["value"].as_str().ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?.as_bytes();
+            let value = json_body["value"]
+                .as_str()
+                .ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?
+                .as_bytes();
             let expiration = json_body["expiration"].as_u64();
 
             let mut put_request = kv.put_bytes(key, &value)?;
@@ -255,7 +258,10 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 let body = ctx.req.bytes().await?;
 
                 let json_body: serde_json::Value = serde_json::from_slice(&body)?;
-                let value = json_body["value"].as_str().ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?.as_bytes();
+                let value = json_body["value"]
+                    .as_str()
+                    .ok_or_else(|| worker::Error::RustError("Missing value".to_string()))?
+                    .as_bytes();
                 let expiration = json_body["expiration"].as_u64();
 
                 let mut put_request = kv.put_bytes(key, &value)?;
@@ -281,7 +287,6 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
         _ => Response::error(String::new(), 405 /* Method not allowed */),
     }
 }
-
 
 /// Handle a durable object request
 async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::Result<Response> {
