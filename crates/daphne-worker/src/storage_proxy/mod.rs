@@ -227,7 +227,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 .as_bytes();
             let expiration = json_body["expiration"].as_u64();
 
-            let mut put_request = kv.put_bytes(key, &value)?;
+            let mut put_request = kv.put_bytes(key, value)?;
 
             if let Some(exp) = expiration {
                 put_request = put_request.expiration(exp);
@@ -264,7 +264,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                     .as_bytes();
                 let expiration = json_body["expiration"].as_u64();
 
-                let mut put_request = kv.put_bytes(key, &value)?;
+                let mut put_request = kv.put_bytes(key, value)?;
 
                 if let Some(exp) = expiration {
                     put_request = put_request.expiration(exp);
