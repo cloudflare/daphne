@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use daphne::pine::Pine64;
+use daphne::pine::Pine;
 use prio::{
     field::random_vector,
     flp::Type,
@@ -17,7 +17,7 @@ fn pine(c: &mut Criterion) {
         (100_000, 320 * 6),
         (1_000_000, 1_000 * 8),
     ] {
-        let pine = Pine64::new(1.0, dimension, 15, chunk_len).unwrap();
+        let pine = Pine::new_64(1.0, dimension, 15, chunk_len).unwrap();
         let measurement = vec![0.0; dimension];
         let wr_joint_rand_seed = Seed::generate().unwrap();
         let nonce = [0; 16];

@@ -19,9 +19,9 @@ use rand::prelude::*;
 use crate::pine::USAGE_QUERY_RAND;
 
 use super::{
-    dst, field_to_f64, msg, Pine, USAGE_MEAS_SHARE, USAGE_PROOF_SHARE, USAGE_PROVE_RAND,
+    field_to_f64, msg, Pine, USAGE_MEAS_SHARE, USAGE_PROOF_SHARE, USAGE_PROVE_RAND,
     USAGE_VF_JOINT_RAND, USAGE_VF_JOINT_RAND_PART, USAGE_VF_JOINT_RAND_SEED,
-    USAGE_WR_JOINT_RAND_PART, USAGE_WR_JOINT_RAND_SEED, VDAF_ID,
+    USAGE_WR_JOINT_RAND_PART, USAGE_WR_JOINT_RAND_SEED,
 };
 
 const NUM_SHARD_RAND_SEEDS: usize = 7;
@@ -43,11 +43,9 @@ impl<F: FftFriendlyFieldElement> Encode for PineVec<F> {
     }
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> ParameterizedDecode<(&Pine<F, PROOFS>, &())>
-    for PineVec<F>
-{
+impl<F: FftFriendlyFieldElement> ParameterizedDecode<(&Pine<F>, &())> for PineVec<F> {
     fn decode_with_param(
-        (pine, _agg_param): &(&Pine<F, PROOFS>, &()),
+        (pine, _agg_param): &(&Pine<F>, &()),
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         iter::repeat_with(|| F::decode(bytes))
@@ -77,7 +75,7 @@ impl<F: FftFriendlyFieldElement> Aggregatable for PineVec<F> {
 
 // Vdaf
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Vdaf for Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Vdaf for Pine<F> {
     type Measurement = Vec<f64>;
     type AggregateResult = Vec<f64>;
     type AggregationParam = ();
@@ -87,7 +85,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Vdaf for Pine<F, PROOFS> {
     type AggregateShare = PineVec<F>;
 
     fn algorithm_id(&self) -> u32 {
-        VDAF_ID
+        self.flp.cfg.algorithm_id
     }
 
     fn num_aggregators(&self) -> usize {
@@ -95,15 +93,16 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Vdaf for Pine<F, PROOFS> {
     }
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Pine<F> {
     fn joint_rand_part(
+        &self,
         agg_id: u8,
         blind: &[u8; 16],
         nonce: &[u8; 16],
         meas_share: &[F],
         usage: u16,
     ) -> Seed<16> {
-        let mut xof = XofTurboShake128::init(blind, &dst(usage));
+        let mut xof = XofTurboShake128::init(blind, &self.flp.cfg.dst(usage));
         xof.update(&[agg_id]);
         xof.update(nonce);
         let mut buf = Vec::with_capacity(F::ENCODED_SIZE);
@@ -115,31 +114,31 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         xof.into_seed()
     }
 
-    fn joint_rand_seed(joint_rand_parts: &[Seed<16>; 2], usage: u16) -> Seed<16> {
-        let mut xof = XofTurboShake128::init(&[0; 16], &dst(usage));
+    fn joint_rand_seed(&self, joint_rand_parts: &[Seed<16>; 2], usage: u16) -> Seed<16> {
+        let mut xof = XofTurboShake128::init(&[0; 16], &self.flp.cfg.dst(usage));
         xof.update(joint_rand_parts[0].as_ref());
         xof.update(joint_rand_parts[1].as_ref());
         xof.into_seed()
     }
 
     fn helper_meas_share(&self, seed: &[u8; 16]) -> Vec<F> {
-        let mut xof = XofTurboShake128::init(seed, &dst(USAGE_MEAS_SHARE));
+        let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_MEAS_SHARE));
         xof.update(&[1]); // agg_id
         xof.into_seed_stream()
             .into_field_vec(self.flp.cfg.encoded_input_len)
     }
 
     fn helper_proof_share(&self, seed: &[u8; 16]) -> Vec<F> {
-        let mut xof = XofTurboShake128::init(seed, &dst(USAGE_PROOF_SHARE));
-        xof.update(&[PROOFS, 1]); // PROOFS, agg_id
+        let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
+        xof.update(&[self.flp.cfg.num_proofs, 1]); // num_proofs, agg_id
         xof.into_seed_stream()
-            .into_field_vec(self.flp.proof_len() * usize::from(PROOFS))
+            .into_field_vec(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs))
     }
 }
 
 // Client
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Client<16> for Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Client<16> for Pine<F> {
     fn shard(
         &self,
         gradient: &Vec<f64>,
@@ -150,7 +149,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Client<16> for Pine<F, PROOFS
     }
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Pine<F> {
     pub(crate) fn shard_with_rand(
         &self,
         gradient: &[f64],
@@ -176,14 +175,14 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         debug_assert_eq!(meas_share_1.len(), self.flp.cfg.encoded_input_len);
 
         let wr_joint_rand_parts = [
-            Self::joint_rand_part(
+            self.joint_rand_part(
                 0,
                 &wr_blind_0,
                 nonce,
                 &meas_share_0,
                 USAGE_WR_JOINT_RAND_PART,
             ),
-            Self::joint_rand_part(
+            self.joint_rand_part(
                 1,
                 &wr_blind_1,
                 nonce,
@@ -195,7 +194,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         // Run the wraparound tests and complete the Leader's measurement share.
         {
             let wr_joint_rand_seed =
-                Self::joint_rand_seed(&wr_joint_rand_parts, USAGE_WR_JOINT_RAND_SEED);
+                self.joint_rand_seed(&wr_joint_rand_parts, USAGE_WR_JOINT_RAND_SEED);
 
             let i = meas.len();
             let wr_test_results = self
@@ -212,14 +211,14 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         debug_assert_eq!(meas_share_0.len(), self.flp.cfg.encoded_input_len);
 
         let vf_joint_rand_parts = [
-            Self::joint_rand_part(
+            self.joint_rand_part(
                 0,
                 &vf_blind_0,
                 nonce,
                 &meas_share_0,
                 USAGE_VF_JOINT_RAND_PART,
             ),
-            Self::joint_rand_part(
+            self.joint_rand_part(
                 1,
                 &vf_blind_1,
                 nonce,
@@ -232,24 +231,27 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         let proofs_share_0 = {
             let vf_joint_rands = {
                 let vf_joint_rand_seed =
-                    Self::joint_rand_seed(&vf_joint_rand_parts, USAGE_VF_JOINT_RAND_SEED);
+                    self.joint_rand_seed(&vf_joint_rand_parts, USAGE_VF_JOINT_RAND_SEED);
 
                 XofTurboShake128::seed_stream(
                     &vf_joint_rand_seed,
-                    &dst(USAGE_VF_JOINT_RAND),
-                    &[PROOFS],
+                    &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
+                    &[self.flp.cfg.num_proofs],
                 )
-                .into_field_vec(self.flp.joint_rand_len() * usize::from(PROOFS))
+                .into_field_vec(self.flp.joint_rand_len() * usize::from(self.flp.cfg.num_proofs))
             };
 
             let prove_rands = {
-                let mut xof = XofTurboShake128::init(&prove_seed, &dst(USAGE_PROVE_RAND));
-                xof.update(&[PROOFS]);
-                xof.into_seed_stream()
-                    .into_field_vec(self.flp.prove_rand_len() * usize::from(PROOFS))
+                let mut xof =
+                    XofTurboShake128::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
+                xof.update(&[self.flp.cfg.num_proofs]);
+                xof.into_seed_stream().into_field_vec(
+                    self.flp.prove_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                )
             };
 
-            let mut proofs = Vec::with_capacity(self.flp.proof_len() * usize::from(PROOFS));
+            let mut proofs =
+                Vec::with_capacity(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs));
             for (prove_rand, vf_joint_rand) in prove_rands
                 .chunks(self.flp.prove_rand_len())
                 .zip(vf_joint_rands.chunks(self.flp.joint_rand_len()))
@@ -308,7 +310,7 @@ impl<F: FftFriendlyFieldElement> PartialEq for PinePrepState<F> {
 
 impl<F: FftFriendlyFieldElement> Eq for PinePrepState<F> {}
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
     type PrepareState = PinePrepState<F>;
     type PrepareShare = msg::PrepShare<F>;
     type PrepareMessage = msg::Prep;
@@ -368,7 +370,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
             }
         };
 
-        let wr_joint_rand_part = Self::joint_rand_part(
+        let wr_joint_rand_part = self.joint_rand_part(
             agg_id.try_into().unwrap(),
             wr_blind.as_ref(),
             nonce,
@@ -379,7 +381,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
         let corrected_wr_joint_rand_seed = {
             let mut corrected_wr_joint_rand_parts = wr_joint_rand_parts.clone();
             corrected_wr_joint_rand_parts[agg_id] = wr_joint_rand_part.clone();
-            Self::joint_rand_seed(&corrected_wr_joint_rand_parts, USAGE_WR_JOINT_RAND_SEED)
+            self.joint_rand_seed(&corrected_wr_joint_rand_parts, USAGE_WR_JOINT_RAND_SEED)
         };
 
         // Run the wraparound tests.
@@ -392,7 +394,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
             meas_share.extend_from_slice(&wr_test_results);
         }
 
-        let vf_joint_rand_part = Self::joint_rand_part(
+        let vf_joint_rand_part = self.joint_rand_part(
             agg_id.try_into().unwrap(),
             vf_blind.as_ref(),
             nonce,
@@ -403,7 +405,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
         let corrected_vf_joint_rand_seed = {
             let mut corrected_vf_joint_rand_parts = vf_joint_rand_parts.clone();
             corrected_vf_joint_rand_parts[agg_id] = vf_joint_rand_part.clone();
-            Self::joint_rand_seed(&corrected_vf_joint_rand_parts, USAGE_VF_JOINT_RAND_SEED)
+            self.joint_rand_seed(&corrected_vf_joint_rand_parts, USAGE_VF_JOINT_RAND_SEED)
         };
 
         // Query the proofs.
@@ -411,22 +413,24 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
             let corrected_vf_joint_rands = {
                 XofTurboShake128::seed_stream(
                     &corrected_vf_joint_rand_seed,
-                    &dst(USAGE_VF_JOINT_RAND),
-                    &[PROOFS],
+                    &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
+                    &[self.flp.cfg.num_proofs],
                 )
-                .into_field_vec(self.flp.joint_rand_len() * usize::from(PROOFS))
+                .into_field_vec(self.flp.joint_rand_len() * usize::from(self.flp.cfg.num_proofs))
             };
 
             let query_rands = {
-                let mut xof = XofTurboShake128::init(verify_key, &dst(USAGE_QUERY_RAND));
-                xof.update(&[PROOFS]);
+                let mut xof =
+                    XofTurboShake128::init(verify_key, &self.flp.cfg.dst(USAGE_QUERY_RAND));
+                xof.update(&[self.flp.cfg.num_proofs]);
                 xof.update(nonce);
-                xof.into_seed_stream()
-                    .into_field_vec(self.flp.query_rand_len() * usize::from(PROOFS))
+                xof.into_seed_stream().into_field_vec(
+                    self.flp.query_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                )
             };
 
             let mut verifiers_share =
-                Vec::with_capacity(self.flp.verifier_len() * usize::from(PROOFS));
+                Vec::with_capacity(self.flp.verifier_len() * usize::from(self.flp.cfg.num_proofs));
             for (proof_share, (vf_joint_rand, query_rand)) in
                 proofs_share.chunks(self.flp.proof_len()).zip(
                     corrected_vf_joint_rands
@@ -498,12 +502,12 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
             }
         }
 
-        let wr_joint_rand_seed = Self::joint_rand_seed(
+        let wr_joint_rand_seed = self.joint_rand_seed(
             &[wr_joint_rand_part_0, wr_joint_rand_part_1],
             USAGE_WR_JOINT_RAND_SEED,
         );
 
-        let vf_joint_rand_seed = Self::joint_rand_seed(
+        let vf_joint_rand_seed = self.joint_rand_seed(
             &[vf_joint_rand_part_0, vf_joint_rand_part_1],
             USAGE_VF_JOINT_RAND_SEED,
         );
@@ -550,7 +554,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Aggregator<16, 16> for Pine<F
 
 // Collector
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Collector for Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Collector for Pine<F> {
     fn unshard<M: IntoIterator<Item = PineVec<F>>>(
         &self,
         _agg_param: &(),
@@ -590,14 +594,14 @@ mod tests {
         },
     };
 
-    use crate::pine::{msg, vdaf::PineVec, Pine128, Pine64};
+    use crate::pine::{msg, vdaf::PineVec, Pine};
 
     use assert_matches::assert_matches;
 
     #[test]
     fn run_128() {
         let dimension = 100;
-        let pine = Pine128::new(1000.0, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -616,7 +620,7 @@ mod tests {
     #[test]
     fn run_64() {
         let dimension = 100;
-        let pine = Pine64::new(1000.0, dimension, 15, 100).unwrap();
+        let pine = Pine::new_64(1000.0, dimension, 15, 100).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -637,7 +641,7 @@ mod tests {
     fn aggregate() {
         let dimension = 100;
         let reports = 5;
-        let pine = Pine128::new(1000.0, dimension, 15, 100).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 100).unwrap();
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
@@ -670,7 +674,7 @@ mod tests {
     #[test]
     fn prep_failure_mutated_pub_share_wr_joint_rand() {
         let dimension = 100;
-        let pine = Pine128::new(1000.0, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -689,7 +693,7 @@ mod tests {
     #[test]
     fn prep_failure_mutated_pub_share_vf_joint_rand() {
         let dimension = 100;
-        let pine = Pine128::new(1000.0, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -708,7 +712,7 @@ mod tests {
     #[test]
     fn prep_failure_mutated_input_share_proof() {
         let dimension = 100;
-        let pine = Pine128::new(1000.0, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -727,7 +731,7 @@ mod tests {
     #[test]
     fn prep_failure_mutated_input_share_meas() {
         let dimension = 100;
-        let pine = Pine128::new(1000.0, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();

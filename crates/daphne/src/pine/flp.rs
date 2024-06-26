@@ -30,7 +30,7 @@ use prio::{
 use rand::Rng;
 
 use super::{
-    chunk_count, dst, f64_to_field, field_to_f64, PineConfig, NUM_WR_SUCCESSES, NUM_WR_TESTS,
+    chunk_count, f64_to_field, field_to_f64, PineConfig, NUM_WR_SUCCESSES, NUM_WR_TESTS,
     USAGE_WR_JOINT_RAND,
 };
 
@@ -152,8 +152,11 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         gradient: &[F],
         wr_joint_rand_seed: &Seed<16>,
     ) -> [F; NUM_WR_TESTS] {
-        let mut xof =
-            XofTurboShake128::seed_stream(wr_joint_rand_seed, &dst(USAGE_WR_JOINT_RAND), &[]);
+        let mut xof = XofTurboShake128::seed_stream(
+            wr_joint_rand_seed,
+            &self.cfg.dst(USAGE_WR_JOINT_RAND),
+            &[],
+        );
         let mut buf = vec![0_u8; chunk_count(4, NUM_WR_TESTS * self.cfg.dimension)];
         xof.fill(&mut buf[..]);
 
@@ -507,7 +510,7 @@ mod tests {
     fn encode_gradient() {
         let dimension = 10;
         let frac_bits = 4;
-        let pine = Pine::<Field128, 1>::new(100.0, dimension, frac_bits, 4).unwrap();
+        let pine = Pine::new_128(100.0, dimension, frac_bits, 4).unwrap();
 
         // We use whole numbers here so that we can test gradient decoding without losing any
         // precision.
@@ -548,7 +551,7 @@ mod tests {
     #[test]
     fn encode_wr_tests() {
         let mut rng = thread_rng();
-        let pine = Pine::<Field128, 1>::new(10.0, 10, 15, 4).unwrap();
+        let pine = Pine::new_128(10.0, 10, 15, 4).unwrap();
         let gradient = iter::repeat_with(|| rng.gen_range(-0.1..0.1)).take(10);
 
         let (input, wr_test_results) = pine
@@ -579,7 +582,7 @@ mod tests {
         }
     }
 
-    impl<F: FftFriendlyFieldElement> Pine<F, 1> {
+    impl<F: FftFriendlyFieldElement> Pine<F> {
         fn run_valid_test_case(&self, gradient: impl Iterator<Item = f64>) {
             let (mut input, wr_test_results) = self
                 .flp
@@ -594,28 +597,28 @@ mod tests {
     #[test]
     fn valid() {
         const DIM: usize = 1000;
-        let pine = Pine::<Field128, 1>::new(1000.0, DIM, 15, 27).unwrap();
+        let pine = Pine::new_128(1000.0, DIM, 15, 27).unwrap();
         pine.run_valid_test_case((0..DIM).map(|i| i as f64 * 0.01));
     }
 
     #[test]
     fn valid_small_dimension() {
         const DIM: usize = 1;
-        let pine = Pine::<Field128, 1>::new(1.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(1.0, DIM, 15, 4).unwrap();
         pine.run_valid_test_case([0.75].into_iter());
     }
 
     #[test]
     fn valid_negative_values() {
         const DIM: usize = 1337;
-        let pine = Pine::<Field128, 1>::new(1000.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(1000.0, DIM, 15, 4).unwrap();
         pine.run_valid_test_case((0..DIM).map(|i| i as f64 * -0.01));
     }
 
     #[test]
     fn valid_random_values() {
         const DIM: usize = 1000;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 99).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 99).unwrap();
         let mut rng = thread_rng();
         pine.run_valid_test_case(iter::repeat_with(|| rng.gen_range(-0.1..0.1)).take(DIM));
     }
@@ -623,7 +626,7 @@ mod tests {
     #[test]
     fn invalid_mutated_gradient() {
         const DIM: usize = 10;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 4).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -639,7 +642,7 @@ mod tests {
     #[test]
     fn invalid_mutated_sq_norm() {
         const DIM: usize = 10;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 4).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -659,7 +662,7 @@ mod tests {
     #[test]
     fn invalid_mutated_wr_result() {
         const DIM: usize = 10;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 4).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -680,7 +683,7 @@ mod tests {
     #[test]
     fn invalid_mutated_success_bit() {
         const DIM: usize = 10;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 4).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -702,7 +705,7 @@ mod tests {
     #[test]
     fn invalid_dot_prod_mismatch() {
         const DIM: usize = 10;
-        let pine = Pine::<Field128, 1>::new(100.0, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(100.0, DIM, 15, 4).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.1; DIM].into_iter(), &Seed::generate().unwrap())
