@@ -89,6 +89,8 @@ impl VdafConfig {
                 input_size: _,
                 weight_config,
             } => mastic_unshard(*weight_config, agg_param, agg_shares),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine(pine) => pine.unshard(num_measurements, agg_shares),
         }
         .map_err(DapError::from_vdaf)
     }
