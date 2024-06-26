@@ -862,6 +862,8 @@ pub enum DapMeasurement {
         input: Vec<u8>,
         weight: MasticWeight,
     },
+    #[cfg(any(test, feature = "test-utils"))]
+    F64Vec(Vec<f64>),
 }
 
 /// An aggregation parameter.
@@ -909,7 +911,7 @@ impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
 }
 
 /// The aggregate result computed by the Collector.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DapAggregateResult {
     U32Vec(Vec<u32>),
@@ -917,6 +919,8 @@ pub enum DapAggregateResult {
     U64Vec(Vec<u64>),
     U128(u128),
     U128Vec(Vec<u128>),
+    #[cfg(any(test, feature = "test-utils"))]
+    F64Vec(Vec<f64>),
 }
 
 #[derive(Clone)]

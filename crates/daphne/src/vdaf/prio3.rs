@@ -11,24 +11,22 @@ use crate::{
     VdafPrepState,
 };
 use prio::{
-    codec::{Encode, ParameterizedDecode},
+    codec::ParameterizedDecode,
     field::Field64,
     flp::{
         gadgets::{Mul, ParallelSum},
         types::SumVec,
     },
     vdaf::{
-        prio3::{
-            Prio3, Prio3InputShare, Prio3PrepareMessage, Prio3PrepareShare, Prio3PrepareState,
-            Prio3PublicShare,
-        },
+        prio3::{Prio3, Prio3InputShare, Prio3PrepareShare, Prio3PrepareState, Prio3PublicShare},
         xof::XofHmacSha256Aes128,
-        AggregateShare, Aggregator, Client, Collector, OutputShare, PrepareTransition, Vdaf,
+        Aggregator,
     },
 };
 use std::io::Cursor;
 
-const ERR_EXPECT_FINISH: &str = "unexpected transition (continued)";
+use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
+
 const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
 
 type Prio3SumVecField64MultiproofHmacSha256Aes128 =
@@ -56,7 +54,7 @@ pub(crate) fn prio3_shard(
     measurement: DapMeasurement,
     nonce: &[u8; 16],
 ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
-    return match (&config, measurement) {
+    match (config, measurement) {
         (Prio3Config::Count, DapMeasurement::U64(measurement)) => {
             let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
             // TODO(cjpatton) Make this constant time.
@@ -69,7 +67,7 @@ pub(crate) fn prio3_shard(
                     )))
                 }
             };
-            shard(vdaf, &measurement, nonce)
+            shard_then_encode(&vdaf, &measurement, nonce)
         }
         (
             Prio3Config::Histogram {
@@ -81,12 +79,12 @@ pub(crate) fn prio3_shard(
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
             let m: usize = measurement.try_into().unwrap();
-            shard(vdaf, &m, nonce)
+            shard_then_encode(&vdaf, &m, nonce)
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
             let vdaf =
                 Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
-            shard(vdaf, &u128::from(measurement), nonce)
+            shard_then_encode(&vdaf, &u128::from(measurement), nonce)
         }
         (
             Prio3Config::SumVec {
@@ -98,7 +96,7 @@ pub(crate) fn prio3_shard(
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
-            shard(vdaf, &measurement, nonce)
+            shard_then_encode(&vdaf, &measurement, nonce)
         }
         (
             Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
@@ -115,40 +113,11 @@ pub(crate) fn prio3_shard(
                 *chunk_length,
                 *num_proofs,
             )?;
-            shard(vdaf, &measurement, nonce)
+            shard_then_encode(&vdaf, &measurement, nonce)
         }
-        _ => {
-            return Err(VdafError::Dap(fatal_error!(
-                err = format!("prio3_shard: unexpected VDAF config {config:?}")
-            )))
-        }
-    };
-
-    fn shard<T, P, const SEED_SIZE: usize>(
-        vdaf: Prio3<T, P, SEED_SIZE>,
-        measurement: &T::Measurement,
-        nonce: &[u8; 16],
-    ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError>
-    where
-        T: prio::flp::Type,
-        P: prio::vdaf::xof::Xof<SEED_SIZE>,
-    {
-        // Split measurement into input shares.
-        let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
-
-        Ok((
-            public_share.get_encoded()?,
-            input_shares
-                .iter()
-                .map(|input_share| input_share.get_encoded())
-                .collect::<Result<Vec<_>, _>>()?
-                .try_into()
-                .map_err(|e: Vec<_>| {
-                    VdafError::Dap(fatal_error!(
-                        err = format!("expected 2 input shares got {}", e.len())
-                    ))
-                })?,
-        ))
+        _ => Err(VdafError::Dap(fatal_error!(
+            err = format!("prio3_shard: unexpected VDAF config {config:?}")
+        ))),
     }
 }
 
@@ -393,41 +362,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
         }
     };
 
-    return Ok((agg_share, outbound));
-
-    fn prep_finish_from_shares<T, P, const SEED_SIZE: usize>(
-        vdaf: &Prio3<T, P, SEED_SIZE>,
-        agg_id: usize,
-        host_state: Prio3PrepareState<T::Field, SEED_SIZE>,
-        host_share: Prio3PrepareShare<T::Field, SEED_SIZE>,
-        peer_share_data: &[u8],
-    ) -> Result<(OutputShare<T::Field>, Vec<u8>), VdafError>
-    where
-        T: prio::flp::Type,
-        P: prio::vdaf::xof::Xof<SEED_SIZE>,
-    {
-        // Decode the Helper's inbound message.
-        let peer_share = Prio3PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
-
-        // Preprocess the inbound messages.
-        let message = vdaf.prepare_shares_to_prepare_message(
-            &(),
-            if agg_id == 0 {
-                [host_share, peer_share]
-            } else {
-                [peer_share, host_share]
-            },
-        )?;
-        let message_data = message.get_encoded()?;
-
-        // Compute the host's output share.
-        match vdaf.prepare_next(host_state, message)? {
-            PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
-                err = format!("prio3_prep_finish_from_shares: {ERR_EXPECT_FINISH}")
-            ))),
-            PrepareTransition::Finish(out_share) => Ok((out_share, message_data)),
-        }
-    }
+    Ok((agg_share, outbound))
 }
 
 /// Consume the prep message and output our output share.
@@ -499,30 +434,7 @@ pub(crate) fn prio3_prep_finish(
         }
     };
 
-    return Ok(agg_share);
-
-    fn prep_finish<T, P, const SEED_SIZE: usize>(
-        vdaf: &Prio3<T, P, SEED_SIZE>,
-        helper_state: Prio3PrepareState<T::Field, SEED_SIZE>,
-        leader_message_data: &[u8],
-    ) -> Result<OutputShare<T::Field>, VdafError>
-    where
-        T: prio::flp::Type,
-        P: prio::vdaf::xof::Xof<SEED_SIZE>,
-    {
-        // Decode the inbound message from the Leader, which contains the preprocessed prepare
-        // message.
-        let leader_message =
-            Prio3PrepareMessage::get_decoded_with_param(&helper_state, leader_message_data)?;
-
-        // Compute the Helper's output share.
-        match vdaf.prepare_next(helper_state, leader_message)? {
-            PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
-                err = format!("prio3_prep_finish: {ERR_EXPECT_FINISH}"),
-            ))),
-            PrepareTransition::Finish(out_share) => Ok(out_share),
-        }
-    }
+    Ok(agg_share)
 }
 
 /// Parse our prep state.
@@ -591,7 +503,7 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
     num_measurements: usize,
     agg_shares: M,
 ) -> Result<DapAggregateResult, VdafError> {
-    return match &config {
+    match config {
         Prio3Config::Count => {
             let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
@@ -637,24 +549,6 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64Vec(agg_res))
         }
-    };
-
-    fn unshard<T, P, M, const SEED_SIZE: usize>(
-        vdaf: &Prio3<T, P, SEED_SIZE>,
-        num_measurements: usize,
-        agg_shares: M,
-    ) -> Result<T::AggregateResult, VdafError>
-    where
-        T: prio::flp::Type,
-        P: prio::vdaf::xof::Xof<SEED_SIZE>,
-        M: IntoIterator<Item = Vec<u8>>,
-    {
-        let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
-        for data in agg_shares {
-            let agg_share = AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
-            agg_shares_vec.push(agg_share);
-        }
-        Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
     }
 }
 
