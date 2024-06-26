@@ -45,9 +45,9 @@ impl Encode for PublicShare {
     }
 }
 
-impl<F, const PROOFS: u8> ParameterizedDecode<Pine<F, PROOFS>> for PublicShare {
+impl<F> ParameterizedDecode<Pine<F>> for PublicShare {
     fn decode_with_param(
-        _pine: &Pine<F, PROOFS>,
+        _pine: &Pine<F>,
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
@@ -138,11 +138,9 @@ impl<F: FftFriendlyFieldElement> Encode for InputShare<F> {
     }
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> ParameterizedDecode<(&Pine<F, PROOFS>, usize)>
-    for InputShare<F>
-{
+impl<F: FftFriendlyFieldElement> ParameterizedDecode<(&Pine<F>, usize)> for InputShare<F> {
     fn decode_with_param(
-        (pine, agg_id): &(&Pine<F, PROOFS>, usize),
+        (pine, agg_id): &(&Pine<F>, usize),
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match agg_id {
@@ -152,7 +150,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> ParameterizedDecode<(&Pine<F,
                     .take(pine.flp.cfg.encoded_input_len)
                     .collect::<Result<Vec<_>, _>>()?,
                 proofs_share: iter::repeat_with(|| F::decode(bytes))
-                    .take(pine.flp.proof_len() * usize::from(PROOFS))
+                    .take(pine.flp.proof_len() * usize::from(pine.flp.cfg.num_proofs))
                     .collect::<Result<Vec<_>, _>>()?,
                 wr_blind: Seed::decode(bytes)?,
                 vf_blind: Seed::decode(bytes)?,

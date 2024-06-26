@@ -24,8 +24,6 @@ const ALPHA: f64 = 8.7;
 const NUM_WR_TESTS: usize = 100;
 const NUM_WR_SUCCESSES: usize = 100;
 
-const VDAF_ID: u32 = 0xffff_ffff;
-
 const DST_SIZE: usize = 7;
 
 const USAGE_MEAS_SHARE: u16 = 1;
@@ -41,12 +39,37 @@ const USAGE_WR_JOINT_RAND_PART: u16 = 10;
 
 /// The PINE VDAF.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Pine<F, const PROOFS: u8> {
+pub struct Pine<F> {
     pub flp: PineType<F>,
 }
 
-pub type Pine128 = Pine<Field128, 1>;
-pub type Pine64 = Pine<Field64, 3>;
+pub type Pine128 = Pine<Field128>;
+
+impl Pine128 {
+    /// Construct an instance of [`Pine128`] with the provided parameters.
+    pub fn new_128(
+        norm_bound: f64,
+        dimension: usize,
+        frac_bits: usize,
+        chunk_len: usize,
+    ) -> Result<Self, VdafError> {
+        Self::new(norm_bound, dimension, frac_bits, chunk_len, 1, 0xffff_ffff)
+    }
+}
+
+pub type Pine64 = Pine<Field64>;
+
+impl Pine64 {
+    /// Construct an instance of [`Pine64`] with the provided parameters.
+    pub fn new_64(
+        norm_bound: f64,
+        dimension: usize,
+        frac_bits: usize,
+        chunk_len: usize,
+    ) -> Result<Self, VdafError> {
+        Self::new(norm_bound, dimension, frac_bits, chunk_len, 3, 0xffff_ffff)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PineConfig<F> {
@@ -57,6 +80,8 @@ pub(crate) struct PineConfig<F> {
     sq_norm_bits: usize,
     wr_test_bound: F,
     wr_test_bits: usize,
+    num_proofs: u8,
+    algorithm_id: u32,
 
     // FLP parameters
     chunk_len: usize,
@@ -66,7 +91,17 @@ pub(crate) struct PineConfig<F> {
     gadget_calls: usize,
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
+impl<F> PineConfig<F> {
+    fn dst(&self, usage: u16) -> [u8; DST_SIZE] {
+        let mut dst = [0; DST_SIZE];
+        dst[0] = 0; // VERSION, draft-cheng-cfrg-vdaf-pine-00
+        dst[1..5].copy_from_slice(&self.algorithm_id.to_be_bytes()); // algo
+        dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
+        dst
+    }
+}
+
+impl<F: FftFriendlyFieldElement> Pine<F> {
     /// Construct an instance of the Pine VDAF.
     ///
     /// # Parameters
@@ -80,11 +115,17 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
     ///
     /// * `chunk_len`: FLP parameter used to for proof generation. Any positive integer can be
     ///   used. The optimal value depends on the other parameters.
-    pub fn new(
+    ///
+    /// * `num_proofs`: The number of FLP proofs to generate.
+    ///
+    /// * `algorithm_id`: The VDAF algorithm ID.
+    pub(crate) fn new(
         norm_bound: f64,
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
+        num_proofs: u8,
+        algorithm_id: u32,
     ) -> Result<Self, VdafError> {
         // 24 is the largest number of fractional bits that we know we can support.
         if frac_bits > 24 {
@@ -190,6 +231,8 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
                     sq_norm_bits,
                     wr_test_bound,
                     wr_test_bits,
+                    num_proofs,
+                    algorithm_id,
                     chunk_len,
                     bit_checked_len,
                     encoded_gradient_len,
@@ -243,14 +286,6 @@ fn field_to_f64<F: FftFriendlyFieldElement>(x: F, two_to_frac_bits: f64) -> Resu
     let out = if neg { -out } else { out };
     let out = out / two_to_frac_bits;
     Ok(out)
-}
-
-fn dst(usage: u16) -> [u8; DST_SIZE] {
-    let mut dst = [0; DST_SIZE];
-    dst[0] = 0; // VERSION, draft-cheng-cfrg-vdaf-pine-00
-    dst[1..5].copy_from_slice(&VDAF_ID.to_be_bytes()); // algo
-    dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
-    dst
 }
 
 /// Compute the number of bits required to encode `x` in binary.
@@ -497,7 +532,7 @@ mod tests {
                 expected_wr_test_bits: 15,
             },
         ] {
-            let pine = Pine128::new(
+            let pine = Pine::new_128(
                 t.norm_bound,
                 10, // not used by test
                 t.frac_bits,
