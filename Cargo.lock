@@ -886,6 +886,7 @@ dependencies = [
  "daphne",
  "daphne-worker",
  "getrandom",
+ "prometheus",
  "tracing",
  "worker",
 ]
