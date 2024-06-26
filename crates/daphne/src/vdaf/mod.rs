@@ -6,11 +6,16 @@
 
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) mod mastic;
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) mod pine;
 pub(crate) mod prio2;
 pub(crate) mod prio3;
 
+#[cfg(any(test, feature = "test-utils"))]
+use crate::pine::vdaf::PinePrepState;
 use crate::{
     error::DapAbort,
+    fatal_error,
     vdaf::{prio2::prio2_decode_prep_state, prio3::prio3_decode_prep_state},
     DapError,
 };
@@ -22,6 +27,7 @@ use prio::{
     vdaf::{
         prio2::{Prio2PrepareShare, Prio2PrepareState},
         prio3::{Prio3PrepareShare, Prio3PrepareState},
+        Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
 use rand::prelude::*;
@@ -32,6 +38,9 @@ use std::io::Read;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub use self::mastic::MasticWeightConfig;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub use self::pine::PineConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
@@ -44,7 +53,7 @@ pub(crate) enum VdafError {
 }
 
 /// Specification of a concrete VDAF.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
@@ -60,6 +69,8 @@ pub enum VdafConfig {
         /// The type of each weight.
         weight_config: MasticWeightConfig,
     },
+    #[cfg(any(test, feature = "test-utils"))]
+    Pine(PineConfig),
 }
 
 impl std::str::FromStr for VdafConfig {
@@ -80,6 +91,8 @@ impl std::fmt::Display for VdafConfig {
                 input_size,
                 weight_config,
             } => write!(f, "Mastic({input_size}, {weight_config})"),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Pine(pine_config) => write!(f, "{pine_config}"),
         }
     }
 }
@@ -197,6 +210,8 @@ pub enum VdafPrepState {
     Mastic {
         out_share: Vec<Field64>,
     },
+    #[cfg(any(test, feature = "test-utils"))]
+    Pine128(PinePrepState<Field128>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -213,6 +228,8 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             | Self::Prio3Field128(_) => 0,
             #[cfg(any(test, feature = "test-utils"))]
             Self::Mastic { .. } => 0,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine128(_) => 0,
         }
     }
 }
@@ -225,7 +242,9 @@ impl Encode for VdafPrepState {
             Self::Prio3Field128(state) => state.encode(bytes),
             Self::Prio2(state) => state.encode(bytes),
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => todo!("mastic: decoding of prep state is not implemented"),
+            Self::Mastic { .. } => todo!("mastic: encoding of prep state is not implemented"),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine128(_) => todo!("pine: encoding of prep state is not implemented"),
         }
     }
 }
@@ -246,7 +265,11 @@ impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPre
                     .map_err(|e| CodecError::Other(Box::new(e)))?)
             }
             #[cfg(any(test, feature = "test-utils"))]
-            VdafConfig::Mastic { .. } => todo!("mastic: decoding of prep state is not implemented"),
+            VdafConfig::Mastic { .. } => {
+                unreachable!("mastic: decoding of prep state is not implemented")
+            }
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Pine(..) => unreachable!("pine: decoding of prep state is not implemented"),
         }
     }
 }
@@ -261,6 +284,8 @@ pub enum VdafPrepMessage {
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
     #[cfg(any(test, feature = "test-utils"))]
     MasticShare(Field64),
+    #[cfg(any(test, feature = "test-utils"))]
+    Pine128Share(crate::pine::msg::PrepShare<Field128>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -278,7 +303,7 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
             | Self::Prio3ShareField64HmacSha256Aes128(..)
             | Self::Prio3ShareField128(..) => 0,
             #[cfg(any(test, feature = "test-utils"))]
-            Self::MasticShare(..) => 0,
+            Self::MasticShare(..) | Self::Pine128Share(_) => 0,
         }
     }
 }
@@ -291,7 +316,9 @@ impl Encode for VdafPrepMessage {
             Self::Prio3ShareField128(share) => share.encode(bytes),
             Self::Prio2Share(share) => share.encode(bytes),
             #[cfg(any(test, feature = "test-utils"))]
-            Self::MasticShare(weight) => weight.encode(bytes),
+            Self::MasticShare(share) => share.encode(bytes),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine128Share(share) => share.encode(bytes),
         }
     }
 }
@@ -320,6 +347,10 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
             VdafPrepState::Mastic { .. } => {
                 todo!("mastic: decoding of prep messages is not implemented")
             }
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafPrepState::Pine128(state) => Ok(VdafPrepMessage::Pine128Share(
+                crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
+            )),
         }
     }
 }
@@ -361,6 +392,8 @@ impl VdafConfig {
             Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
             #[cfg(any(test, feature = "test-utils"))]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine(..) => VdafVerifyKey::L16([0; 16]),
         }
     }
 
@@ -382,6 +415,10 @@ impl VdafConfig {
                     |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
                 )?))
             }
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
+                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
+            )?)),
         }
     }
 
@@ -402,6 +439,8 @@ impl VdafConfig {
             // TODO(cjpatton) Implement agg param validation once we know what we need. In the
             // meantime, permit everything.
             Self::Mastic { .. } => true,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Pine(..) => agg_param.is_empty(),
         }
     }
 }
@@ -420,4 +459,96 @@ pub(crate) fn decode_field_vec<F: FieldElement>(
         v.push(F::get_decoded(&buf[..F::ENCODED_SIZE])?);
     }
     Ok(v)
+}
+
+fn shard_then_encode<V: Vdaf + Client<16>>(
+    vdaf: &V,
+    measurement: &V::Measurement,
+    nonce: &[u8; 16],
+) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
+    let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
+
+    Ok((
+        public_share.get_encoded()?,
+        input_shares
+            .iter()
+            .map(|input_share| input_share.get_encoded())
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|e: Vec<_>| {
+                VdafError::Dap(fatal_error!(
+                    err = format!("expected 2 input shares got {}", e.len())
+                ))
+            })?,
+    ))
+}
+
+fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
+    vdaf: &V,
+    agg_id: usize,
+    host_state: V::PrepareState,
+    host_share: V::PrepareShare,
+    peer_share_data: &[u8],
+) -> Result<(V::OutputShare, Vec<u8>), VdafError>
+where
+    V: Vdaf<AggregationParam = ()> + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+{
+    // Decode the Helper's inbound message.
+    let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
+
+    // Preprocess the inbound messages.
+    let message = vdaf.prepare_shares_to_prepare_message(
+        &(),
+        if agg_id == 0 {
+            [host_share, peer_share]
+        } else {
+            [peer_share, host_share]
+        },
+    )?;
+    let message_data = message.get_encoded()?;
+
+    // Compute the host's output share.
+    match vdaf.prepare_next(host_state, message)? {
+        PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
+            err = format!("prep_finish_from_shares: unexpected transition")
+        ))),
+        PrepareTransition::Finish(out_share) => Ok((out_share, message_data)),
+    }
+}
+
+fn prep_finish<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
+    vdaf: &V,
+    host_state: V::PrepareState,
+    peer_message_data: &[u8],
+) -> Result<V::OutputShare, VdafError>
+where
+    V: Vdaf + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+{
+    // Decode the inbound message from the peer, which contains the preprocessed prepare message.
+    let peer_message = V::PrepareMessage::get_decoded_with_param(&host_state, peer_message_data)?;
+
+    // Compute the host's output share.
+    match vdaf.prepare_next(host_state, peer_message)? {
+        PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
+            err = format!("prep_finish: unexpected transition"),
+        ))),
+        PrepareTransition::Finish(out_share) => Ok(out_share),
+    }
+}
+
+fn unshard<V, M>(
+    vdaf: &V,
+    num_measurements: usize,
+    agg_shares: M,
+) -> Result<V::AggregateResult, VdafError>
+where
+    V: Vdaf<AggregationParam = ()> + Collector,
+    M: IntoIterator<Item = Vec<u8>>,
+{
+    let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
+    for data in agg_shares {
+        let agg_share = V::AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
+        agg_shares_vec.push(agg_share);
+    }
+    Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
 }
