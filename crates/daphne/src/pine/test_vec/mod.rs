@@ -53,7 +53,7 @@ struct TestVec {
     agg_result: Vec<f64>,
 }
 
-impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
+impl<F: FftFriendlyFieldElement> Pine<F> {
     fn run_test_vec(&self, test_vec: &TestVec) {
         // Check that the test vector parameters have the values we expect.
         //
@@ -65,7 +65,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         assert_eq!(test_vec.num_wr_checks, NUM_WR_TESTS);
         assert_eq!(test_vec.num_wr_successes, NUM_WR_SUCCESSES);
         assert_eq!(test_vec.shares, 2);
-        assert_eq!(test_vec.proofs, usize::from(PROOFS));
+        assert_eq!(test_vec.proofs, usize::from(self.flp.cfg.num_proofs));
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
@@ -176,13 +176,13 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
 mod tests {
     use super::*;
 
-    use crate::pine::{Pine128, Pine64};
+    use crate::pine::Pine;
 
     #[test]
     fn run_64() {
         let test_vec =
             serde_json::from_str::<TestVec>(include_str!("00/Pine_Field64.json")).unwrap();
-        Pine64::new(
+        Pine::new_64(
             test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
@@ -196,7 +196,7 @@ mod tests {
     fn run_128() {
         let test_vec =
             serde_json::from_str::<TestVec>(include_str!("00/Pine_Field128.json")).unwrap();
-        Pine128::new(
+        Pine::new_128(
             test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
