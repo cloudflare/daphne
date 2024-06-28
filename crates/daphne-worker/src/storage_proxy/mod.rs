@@ -164,7 +164,7 @@ pub async fn handle_request(req: Request, env: &Env) -> worker::Result<(Response
             Response::error("invalid base path", 400)
         }
     }
-    .await;
+        .await;
 
     match &response {
         Ok(r) => ctx.metrics.count_http_status_code(r.status_code()),
@@ -218,29 +218,42 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             }
         }
         worker::Method::Post => {
-            match ctx
-                .env
-                .kv(KV_BINDING_DAP_CONFIG)?
-                .put_bytes(key, &ctx.req.bytes().await?)
-            {
-                Ok(put) => {
-                    if let Err(error) = put.execute().await {
-                        tracing::warn!(
-                            ?error,
-                            "Swallowed error from KV POST, this will hopefully retry later"
-                        );
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        "Swallowed error from KV POST creation, this will hopefully retry later"
-                    );
-                }
+            let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
+            let body = ctx.req.bytes().await?;
+            tracing::debug!("Received POST body: {:?}", String::from_utf8_lossy(&body));
+
+            // Parse JSON body
+            let json_body: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
+                worker::Error::RustError(format!("Failed to parse JSON body: {:?}", e))
+            })?;
+            tracing::debug!("Parsed POST JSON body: {:?}", json_body);
+
+            // Extract the entire body as the value
+            let value = serde_json::to_vec(&json_body).map_err(|e| {
+                worker::Error::RustError(format!("Failed to serialize value: {:?}", e))
+            })?;
+
+            // Extract optional expiration field
+            let expiration = json_body["expiration"].as_u64();
+
+            // Create put request
+            let mut put_request = kv.put_bytes(key, &value)?;
+
+            if let Some(exp) = expiration {
+                put_request = put_request.expiration(exp);
+            }
+
+            // Execute put request
+            if let Err(error) = put_request.execute().await {
+                tracing::warn!(
+                    ?error,
+                    "Swallowed error from KV POST, this will hopefully retry later"
+                );
             }
 
             Response::empty()
         }
+
         worker::Method::Put => {
             let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
             if kv

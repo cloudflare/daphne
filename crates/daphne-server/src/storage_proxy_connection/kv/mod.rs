@@ -252,6 +252,61 @@ impl<'h> Kv<'h> {
     }
 
     #[tracing::instrument(
+        name = "kv_delete",
+        skip_all,
+        fields(key, prefix = std::any::type_name::<P>()),
+    )]
+    async fn put_internal<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+        expiration: Option<u64>,
+    ) -> Result<(), Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        let key = Self::to_key::<P>(key);
+        tracing::debug!(key, "PUT");
+
+        let mut put_request = self
+            .http
+            .post(self.config.url.join(&key).unwrap())
+            .bearer_auth(&self.config.auth_token)
+            .body(serde_json::to_vec(&value).unwrap());
+
+        // Add expiration if provided
+        if let Some(exp) = expiration {
+            put_request = put_request.json(&serde_json::json!({ "expiration": exp }));
+        }
+
+        put_request.send().await?.error_for_status()?;
+
+        self.cache.write().await.put::<P>(key, Some(value.into()));
+        Ok(())
+    }
+
+    #[tracing::instrument(
+        name = "kv_delete",
+        skip_all,
+        fields(key, prefix = std::any::type_name::<P>()),
+    )]
+    pub async fn put_with_expiration<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+        expiration: u64,
+    ) -> Result<(), Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        self.put_internal::<P>(key, value, Some(expiration)).await
+    }
+
+    #[tracing::instrument(
         name = "kv_put",
         skip_all,
         fields(key, prefix = std::any::type_name::<P>()),
@@ -260,18 +315,9 @@ impl<'h> Kv<'h> {
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
+        P::Value: Serialize,
     {
-        let key = Self::to_key::<P>(key);
-        tracing::debug!(key, "PUT");
-        self.http
-            .post(self.config.url.join(&key).unwrap())
-            .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap())
-            .send()
-            .await?
-            .error_for_status()?;
-        self.cache.write().await.put::<P>(key, Some(value.into()));
-        Ok(())
+        self.put_internal::<P>(key, value, None).await
     }
 
     /// Stores a value in kv if it doesn't already exist.
