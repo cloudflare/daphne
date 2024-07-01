@@ -374,7 +374,7 @@ mod test {
             // Temporarily overwrite the valid report time range so that the Leader accepts the
             // out-of-range report and produces the request.
             let tmp = t.valid_report_range.clone();
-            t.valid_report_range = 0..u64::max_value();
+            t.valid_report_range = 0..u64::MAX;
             let (_, agg_job_init_req) = t
                 .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
                 .await;
@@ -410,7 +410,7 @@ mod test {
             // Temporarily overwrite the valid report time range so that the Leader accepts the
             // out-of-range report and produces the request.
             let tmp = t.valid_report_range.clone();
-            t.valid_report_range = 0..u64::max_value();
+            t.valid_report_range = 0..u64::MAX;
             let (_, agg_job_init_req) = t
                 .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
                 .await;
