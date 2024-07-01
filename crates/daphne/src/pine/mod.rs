@@ -319,15 +319,15 @@ mod tests {
         for t in [
             TestCase {
                 float: -100.0,
-                elem: Field128::from(340282366920938462946865773367897489409),
+                elem: Field128::from(340_282_366_920_938_462_946_865_773_367_897_489_409),
             },
             TestCase {
                 float: -1.0,
-                elem: Field128::from(340282366920938462946865773367900733441),
+                elem: Field128::from(340_282_366_920_938_462_946_865_773_367_900_733_441),
             },
             TestCase {
                 float: -0.0001,
-                elem: Field128::from(340282366920938462946865773367900766205),
+                elem: Field128::from(340_282_366_920_938_462_946_865_773_367_900_766_205),
             },
             TestCase {
                 float: -0.0,
@@ -355,7 +355,7 @@ mod tests {
             },
             TestCase {
                 float: 10_000.0,
-                elem: Field128::from(327680000),
+                elem: Field128::from(327_680_000),
             },
         ] {
             assert_eq!(
@@ -388,7 +388,7 @@ mod tests {
             },
             TestCase {
                 input: -0.0001,
-                expected_output: -0.0001220703125,
+                expected_output: -0.000_122_070_312_5,
             },
             TestCase {
                 input: -0.0,
@@ -400,11 +400,11 @@ mod tests {
             },
             TestCase {
                 input: 0.0001,
-                expected_output: 9.1552734375e-05,
+                expected_output: 9.155_273_437_5e-05,
             },
             TestCase {
                 input: 0.1,
-                expected_output: 0.0999755859375,
+                expected_output: 0.099_975_585_937_5,
             },
             TestCase {
                 input: 0.5,
@@ -419,16 +419,20 @@ mod tests {
                 expected_output: 10_000.0,
             },
         ] {
-            assert_eq!(
-                field_to_f64(
-                    f64_to_field::<Field128>(t.input, two_to_frac_bits).unwrap(),
-                    two_to_frac_bits
-                )
-                .unwrap(),
-                t.expected_output,
-                "{}",
-                t.input,
-            );
+            // clippy: We expect the values to match precisely.
+            #[allow(clippy::float_cmp)]
+            {
+                assert_eq!(
+                    field_to_f64(
+                        f64_to_field::<Field128>(t.input, two_to_frac_bits).unwrap(),
+                        two_to_frac_bits
+                    )
+                    .unwrap(),
+                    t.expected_output,
+                    "{}",
+                    t.input,
+                );
+            }
         }
     }
 
@@ -447,25 +451,25 @@ mod tests {
             TestCase {
                 norm_bound: 1.0,
                 frac_bits: 15,
-                expected_sq_norm_bound: Field128::from(1073741824),
+                expected_sq_norm_bound: Field128::from(1_073_741_824),
                 expected_sq_norm_bits: 31,
-                expected_wr_test_bound: Field128::from(524288),
+                expected_wr_test_bound: Field128::from(524_288),
                 expected_wr_test_bits: 20,
             },
             TestCase {
                 norm_bound: 1.0,
                 frac_bits: 24,
-                expected_sq_norm_bound: Field128::from(281474976710656),
+                expected_sq_norm_bound: Field128::from(281_474_976_710_656),
                 expected_sq_norm_bits: 49,
-                expected_wr_test_bound: Field128::from(268435456),
+                expected_wr_test_bound: Field128::from(268_435_456),
                 expected_wr_test_bits: 29,
             },
             TestCase {
                 norm_bound: 1000.0,
                 frac_bits: 15,
-                expected_sq_norm_bound: Field128::from(1073741824000000),
+                expected_sq_norm_bound: Field128::from(1_073_741_824_000_000),
                 expected_sq_norm_bits: 50,
-                expected_wr_test_bound: Field128::from(536870912),
+                expected_wr_test_bound: Field128::from(536_870_912),
                 expected_wr_test_bits: 30,
             },
             TestCase {
@@ -487,7 +491,7 @@ mod tests {
             TestCase {
                 norm_bound: 1337.0,
                 frac_bits: 0,
-                expected_sq_norm_bound: Field128::from(1787569),
+                expected_sq_norm_bound: Field128::from(1_787_569),
                 expected_sq_norm_bits: 21,
                 expected_wr_test_bound: Field128::from(16384),
                 expected_wr_test_bits: 15,

@@ -56,7 +56,12 @@ struct TestVec {
 impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
     fn run_test_vec(&self, test_vec: &TestVec) {
         // Check that the test vector parameters have the values we expect.
-        assert_eq!(test_vec.alpha, ALPHA);
+        //
+        // clippy: These are test vectors, so we expect the value to match precisely.
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(test_vec.alpha, ALPHA);
+        }
         assert_eq!(test_vec.num_wr_checks, NUM_WR_TESTS);
         assert_eq!(test_vec.num_wr_successes, NUM_WR_SUCCESSES);
         assert_eq!(test_vec.shares, 2);
@@ -65,7 +70,7 @@ impl<F: FftFriendlyFieldElement, const PROOFS: u8> Pine<F, PROOFS> {
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
         let verify_key = <[u8; 16]>::try_from(test_vec.verify_key.as_ref()).unwrap();
-        for report in test_vec.reports.iter() {
+        for report in &test_vec.reports {
             let rand = report
                 .rand
                 .as_ref()
