@@ -603,7 +603,7 @@ mod test_util {
 
         let mut agg_shares: Vec<Option<V::AggregateShare>> = vec![None; vdaf.num_aggregators()];
         let mut num_measurements: usize = 0;
-        for measurement in measurements.into_iter() {
+        for measurement in measurements {
             num_measurements += 1;
             let nonce = rng.gen();
             let (public_share, input_shares) = vdaf.shard(&measurement, &nonce)?;
@@ -635,7 +635,7 @@ mod test_util {
             }
         }
 
-        for agg_share in agg_shares.iter() {
+        for agg_share in &agg_shares {
             // Check serialization of aggregate shares
             let encoded_agg_share = agg_share.as_ref().unwrap().get_encoded().unwrap();
             let round_trip_agg_share =
@@ -705,7 +705,7 @@ mod test_util {
         let mut out_shares = Vec::new();
         loop {
             let mut outbound = Vec::new();
-            for state in states.iter_mut() {
+            for state in &mut states {
                 match vdaf.prepare_next(
                     state.clone(),
                     V::PrepareMessage::get_decoded_with_param(state, &inbound)
@@ -713,7 +713,7 @@ mod test_util {
                 )? {
                     PrepareTransition::Continue(new_state, msg) => {
                         outbound.push(msg.get_encoded().unwrap());
-                        *state = new_state
+                        *state = new_state;
                     }
                     PrepareTransition::Finish(out_share) => {
                         out_shares.push(out_share);
@@ -808,13 +808,13 @@ mod tests {
         let mut out_shares_1 = Vec::new();
         for _ in 0..reports {
             let (_, input_shares) = pine.shard(&vec![1.0; dimension], &[0; 16]).unwrap();
-            let out_share_0 = match input_shares[0] {
+            let out_share_0 = match input_shares.first().unwrap() {
                 msg::InputShare(msg::InputShareFor::Leader { ref meas_share, .. }) => {
                     PineVec(meas_share[..dimension].to_vec())
                 }
                 _ => unreachable!(),
             };
-            let out_share_1 = match input_shares[1] {
+            let out_share_1 = match input_shares.get(1).unwrap() {
                 msg::InputShare(msg::InputShareFor::Helper { ref meas_share, .. }) => {
                     PineVec(pine.helper_meas_share(meas_share.as_ref())[..dimension].to_vec())
                 }

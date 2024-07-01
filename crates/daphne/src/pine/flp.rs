@@ -711,7 +711,7 @@ mod tests {
         input.extend_from_slice(&wr_test_results);
 
         // Garble several dot products so that they don't match the range-checked version.
-        for x in input[i..].iter_mut() {
+        for x in &mut input[i..] {
             *x *= Field128::from(1337);
         }
 
