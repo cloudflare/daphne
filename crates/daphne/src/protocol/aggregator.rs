@@ -331,6 +331,14 @@ impl EarlyReportStateInitialized {
                 &public_share,
                 input_share.as_ref(),
             ),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Pine(pine) => pine.prep_init(
+                vdaf_verify_key,
+                agg_id,
+                &metadata.id.0,
+                &public_share,
+                &input_share,
+            ),
         };
 
         let early_report_state_initialized = match res {
@@ -627,6 +635,13 @@ impl DapTaskConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
+                            #[cfg(any(test, feature = "test-utils"))]
+                            VdafConfig::Pine(pine) => pine.prep_finish_from_shares(
+                                1,
+                                helper_prep_state.clone(),
+                                helper_prep_share.clone(),
+                                leader_prep_share,
+                            ),
                         };
 
                         match res {
@@ -751,6 +766,8 @@ impl DapTaskConfig {
                 }
                 #[cfg(any(test, feature = "test-utils"))]
                 VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),
+                #[cfg(any(test, feature = "test-utils"))]
+                VdafConfig::Pine(pine) => pine.prep_finish(leader.prep_state, prep_msg),
             };
 
             match res {

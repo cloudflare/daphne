@@ -143,6 +143,8 @@ impl VdafConfig {
                 input_size,
                 weight_config,
             } => Ok(mastic_shard(*input_size, *weight_config, measurement)?),
+            #[cfg(any(test, feature = "test-utils"))]
+            VdafConfig::Pine(pine) => Ok(pine.shard(measurement, nonce)?),
         }
     }
 
