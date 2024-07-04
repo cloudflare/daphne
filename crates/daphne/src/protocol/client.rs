@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_shard;
 use crate::{
     hpke::HpkeConfig,
@@ -138,12 +138,12 @@ impl VdafConfig {
         match self {
             Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
             Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
             } => Ok(mastic_shard(*input_size, *weight_config, measurement)?),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Pine(pine) => Ok(pine.shard(measurement, nonce)?),
         }
     }

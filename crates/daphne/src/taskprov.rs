@@ -370,7 +370,7 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
             VdafConfig::Prio3(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Mastic { .. } | VdafConfig::Pine(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),

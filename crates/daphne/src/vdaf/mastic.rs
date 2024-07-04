@@ -22,19 +22,8 @@ use prio::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    deepsize::DeepSizeOf,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 /// The type of each input's weight.
 pub enum MasticWeightConfig {
     /// Each weight is a `0` or `1`.
@@ -50,8 +39,7 @@ impl std::fmt::Display for MasticWeightConfig {
 }
 
 /// A weight.
-#[derive(Clone, Deserialize, Serialize)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum MasticWeight {
     Bool(bool),
 }

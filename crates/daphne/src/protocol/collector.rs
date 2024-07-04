@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_unshard;
 use crate::{
     fatal_error,
@@ -84,12 +84,12 @@ impl VdafConfig {
         match self {
             Self::Prio3(prio3_config) => prio3_unshard(prio3_config, num_measurements, agg_shares),
             Self::Prio2 { dimension } => prio2_unshard(*dimension, num_measurements, agg_shares),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::Mastic {
                 input_size: _,
                 weight_config,
             } => mastic_unshard(*weight_config, agg_param, agg_shares),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::Pine(pine) => pine.unshard(num_measurements, agg_shares),
         }
         .map_err(DapError::from_vdaf)

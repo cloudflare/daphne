@@ -71,7 +71,7 @@ pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::encode_base64url;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
@@ -87,7 +87,7 @@ use std::{
     str::FromStr,
 };
 use url::Url;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use vdaf::mastic::MasticWeight;
 
 pub use protocol::aggregator::{
@@ -857,12 +857,12 @@ pub enum DapMeasurement {
     U32Vec(Vec<u32>),
     U64Vec(Vec<u64>),
     U128Vec(Vec<u128>),
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Mastic {
         input: Vec<u8>,
         weight: MasticWeight,
     },
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     F64Vec(Vec<f64>),
 }
 
@@ -870,7 +870,7 @@ pub enum DapMeasurement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DapAggregationParam {
     Empty,
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Mastic(Poplar1AggregationParam),
 }
 
@@ -890,7 +890,7 @@ impl Encode for DapAggregationParam {
         let _ = bytes;
         match self {
             Self::Empty => Ok(()),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::Mastic(agg_param) => agg_param.encode(bytes),
         }
     }
@@ -903,7 +903,7 @@ impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
     ) -> Result<Self, CodecError> {
         let _ = bytes;
         match vdaf_config {
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Mastic { .. } => Ok(Self::Mastic(Poplar1AggregationParam::decode(bytes)?)),
             _ => Ok(Self::Empty),
         }
@@ -919,7 +919,7 @@ pub enum DapAggregateResult {
     U64Vec(Vec<u64>),
     U128(u128),
     U128Vec(Vec<u128>),
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     F64Vec(Vec<f64>),
 }
 

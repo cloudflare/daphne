@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use crate::vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init};
 use crate::{
     error::DapAbort,
@@ -284,8 +284,8 @@ impl EarlyReportStateInitialized {
         agg_param: &DapAggregationParam,
         early_report_state_consumed: EarlyReportStateConsumed,
     ) -> Result<Self, DapError> {
-        // We need to use this variable for Mastic, which is currently only enabled in tests or
-        // when the feature "test-utils" is enabled.
+        // We need to use this variable for Mastic, which is currently fenced by the "experimental
+        // feature".
         let _ = agg_param;
 
         let (metadata, public_share, input_share, peer_prep_share) =
@@ -319,7 +319,7 @@ impl EarlyReportStateInitialized {
                 &public_share,
                 &input_share,
             ),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
@@ -331,7 +331,7 @@ impl EarlyReportStateInitialized {
                 &public_share,
                 input_share.as_ref(),
             ),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Pine(pine) => pine.prep_init(
                 vdaf_verify_key,
                 agg_id,
@@ -625,7 +625,7 @@ impl DapTaskConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
-                            #[cfg(any(test, feature = "test-utils"))]
+                            #[cfg(feature = "experimental")]
                             VdafConfig::Mastic {
                                 input_size: _,
                                 weight_config,
@@ -635,7 +635,7 @@ impl DapTaskConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
-                            #[cfg(any(test, feature = "test-utils"))]
+                            #[cfg(feature = "experimental")]
                             VdafConfig::Pine(pine) => pine.prep_finish_from_shares(
                                 1,
                                 helper_prep_state.clone(),
@@ -764,9 +764,9 @@ impl DapTaskConfig {
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
                 }
-                #[cfg(any(test, feature = "test-utils"))]
+                #[cfg(feature = "experimental")]
                 VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),
-                #[cfg(any(test, feature = "test-utils"))]
+                #[cfg(feature = "experimental")]
                 VdafConfig::Pine(pine) => pine.prep_finish(leader.prep_state, prep_msg),
             };
 
