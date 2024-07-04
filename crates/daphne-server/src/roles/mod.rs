@@ -213,7 +213,7 @@ mod test_utils {
 
             if self
                 .kv()
-                .put_if_not_exists::<kv::prefix::TaskConfig>(
+                .put_if_not_exists_with_expiration::<kv::prefix::TaskConfig>(
                     &cmd.task_id,
                     DapTaskConfig {
                         version,
@@ -230,6 +230,7 @@ mod test_utils {
                         method: Default::default(),
                         num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
                     },
+                    cmd.task_expiration,
                 )
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?

@@ -73,17 +73,17 @@ mod metrics;
 
 use std::{sync::OnceLock, time::Duration};
 
+pub use self::metrics::Metrics;
 use daphne::auth::BearerToken;
+use daphne::messages::Time;
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
+use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
 use prometheus::Registry;
 use tracing::warn;
 use url::Url;
 use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
-
-pub use self::metrics::Metrics;
-
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 struct RequestContext<'e> {
@@ -197,6 +197,17 @@ async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
     Response::empty()
 }
 
+fn parse_expiration_header(ctx: &RequestContext) -> Result<Option<Time>, worker::Error> {
+    let expiration_header = ctx.req.headers().get(STORAGE_PROXY_PUT_KV_EXPIRATION)?;
+    expiration_header
+        .map(|expiration| {
+            expiration.parse::<Time>().map_err(|e| {
+                worker::Error::RustError(format!("Failed to parse expiration header: {e:?}"))
+            })
+        })
+        .transpose()
+}
+
 /// Handle a kv request.
 async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::Result<Response> {
     match ctx.req.method() {
@@ -209,12 +220,17 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             }
         }
         worker::Method::Post => {
+            let expiration_unix_timestamp = parse_expiration_header(ctx)?;
+
             match ctx
                 .env
                 .kv(KV_BINDING_DAP_CONFIG)?
                 .put_bytes(key, &ctx.req.bytes().await?)
             {
-                Ok(put) => {
+                Ok(mut put) => {
+                    if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
+                        put = put.expiration(expiration_unix_timestamp);
+                    }
                     if let Err(error) = put.execute().await {
                         tracing::warn!(
                             ?error,
@@ -232,7 +248,10 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
 
             Response::empty()
         }
+
         worker::Method::Put => {
+            let expiration_unix_timestamp = parse_expiration_header(ctx)?;
+
             let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
             if kv
                 .list()
@@ -246,7 +265,10 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 Response::error(String::new(), 409 /* Conflict */)
             } else {
                 match kv.put_bytes(key, &ctx.req.bytes().await?) {
-                    Ok(put) => {
+                    Ok(mut put) => {
+                        if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
+                            put = put.expiration(expiration_unix_timestamp);
+                        }
                         if let Err(error) = put.execute().await {
                             tracing::warn!(
                                 ?error,

@@ -288,7 +288,11 @@ impl DapAggregator<DaphneAuth> for crate::App {
             };
             if let Err(e) = self
                 .kv()
-                .put::<kv::prefix::TaskprovOptInParam>(task_id, param.clone())
+                .put_with_expiration::<kv::prefix::TaskprovOptInParam>(
+                    task_id,
+                    param.clone(),
+                    param.not_before,
+                )
                 .await
             {
                 tracing::warn!(error = ?e, "failed to store taskprov opt in param");
@@ -305,10 +309,15 @@ impl DapAggregator<DaphneAuth> for crate::App {
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
+        let expiration_time = task_config.not_after;
 
         if self.service_config.role.is_leader() || req.taskprov.is_none() {
             self.kv()
-                .put::<kv::prefix::TaskConfig>(task_id, task_config)
+                .put_with_expiration::<kv::prefix::TaskConfig>(
+                    task_id,
+                    task_config,
+                    expiration_time,
+                )
                 .await
                 .map_err(|e| fatal_error!(err = ?e))?;
         } else {
