@@ -147,6 +147,8 @@ async fn resolve_taskprov<S: Sync>(
 #[cfg(test)]
 mod test {
     use super::{aggregator, helper, leader, DapAuthorizedSender, DapLeader};
+    #[cfg(feature = "experimental")]
+    use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
     use crate::{
         assert_metrics_include, async_test_version, async_test_versions,
         auth::BearerToken,
@@ -160,18 +162,16 @@ mod test {
         },
         roles::leader::WorkItem,
         testing::InMemoryAggregator,
-        vdaf::{mastic::MasticWeight, MasticWeightConfig, Prio3Config, VdafConfig},
+        vdaf::{Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
         DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
         DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
-    use prio::{
-        codec::{Decode, Encode, ParameterizedEncode},
-        idpf::IdpfInput,
-        vdaf::poplar1::Poplar1AggregationParam,
-    };
+    use prio::codec::{Decode, Encode, ParameterizedEncode};
+    #[cfg(feature = "experimental")]
+    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
     use std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::SystemTime, vec};
     use url::Url;
@@ -184,6 +184,7 @@ mod test {
         pub time_interval_task_id: TaskId,
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
+        #[cfg(feature = "experimental")]
         pub mastic_task_id: TaskId,
         helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
@@ -226,6 +227,7 @@ mod test {
             let time_interval_task_id = TaskId(rng.gen());
             let fixed_size_task_id = TaskId(rng.gen());
             let expired_task_id = TaskId(rng.gen());
+            #[cfg(feature = "experimental")]
             let mastic_task_id = TaskId(rng.gen());
             let mut tasks = HashMap::new();
             tasks.insert(
@@ -285,28 +287,31 @@ mod test {
                 },
             );
 
-            let mastic = VdafConfig::Mastic {
-                input_size: 1,
-                weight_config: MasticWeightConfig::Count,
-            };
-            tasks.insert(
-                mastic_task_id,
-                DapTaskConfig {
-                    version,
-                    collector_hpke_config: collector_hpke_receiver_config.config.clone(),
-                    leader_url,
-                    helper_url,
-                    time_precision: Self::TASK_TIME_PRECISION,
-                    not_before: now,
-                    not_after: now + Self::TASK_TIME_PRECISION,
-                    min_batch_size: 10,
-                    query: DapQueryConfig::TimeInterval,
-                    vdaf: mastic,
-                    vdaf_verify_key: mastic.gen_verify_key(),
-                    method: Default::default(),
-                    num_agg_span_shards: global_config.default_num_agg_span_shards,
-                },
-            );
+            #[cfg(feature = "experimental")]
+            {
+                let mastic = VdafConfig::Mastic {
+                    input_size: 1,
+                    weight_config: MasticWeightConfig::Count,
+                };
+                tasks.insert(
+                    mastic_task_id,
+                    DapTaskConfig {
+                        version,
+                        collector_hpke_config: collector_hpke_receiver_config.config.clone(),
+                        leader_url,
+                        helper_url,
+                        time_precision: Self::TASK_TIME_PRECISION,
+                        not_before: now,
+                        not_after: now + Self::TASK_TIME_PRECISION,
+                        min_batch_size: 10,
+                        query: DapQueryConfig::TimeInterval,
+                        vdaf: mastic,
+                        vdaf_verify_key: mastic.gen_verify_key(),
+                        method: Default::default(),
+                        num_agg_span_shards: global_config.default_num_agg_span_shards,
+                    },
+                );
+            }
 
             // Authorization tokens. These are normally chosen at random.
             let leader_token = BearerToken::from("leader_token");
@@ -342,6 +347,7 @@ mod test {
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
+                #[cfg(feature = "experimental")]
                 mastic_task_id,
                 helper_registry,
                 tasks,
@@ -394,6 +400,7 @@ mod test {
                 time_interval_task_id: self.time_interval_task_id,
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
+                #[cfg(feature = "experimental")]
                 mastic_task_id: self.mastic_task_id,
                 helper_registry: self.helper_registry,
                 leader_registry: self.leader_registry,
@@ -410,6 +417,7 @@ mod test {
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
+        #[cfg(feature = "experimental")]
         mastic_task_id: TaskId,
         pub helper_registry: prometheus::Registry,
         pub leader_registry: prometheus::Registry,
@@ -1765,6 +1773,7 @@ mod test {
 
     async_test_versions! { multi_task }
 
+    #[cfg(feature = "experimental")]
     #[tokio::test]
     async fn mastic() {
         let t = Test::new(DapVersion::Latest);

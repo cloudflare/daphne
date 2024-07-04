@@ -1216,6 +1216,7 @@ macro_rules! assert_metrics_include {
 
 impl VdafConfig {
     pub fn gen_measurement(&self) -> Result<DapMeasurement, DapError> {
+        #[allow(clippy::match_wildcard_for_single_variants)]
         match self {
             Self::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
             Self::Prio3(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {

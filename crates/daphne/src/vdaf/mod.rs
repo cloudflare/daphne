@@ -4,14 +4,14 @@
 //! Verifiable, Distributed Aggregation Functions
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 pub(crate) mod mastic;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 pub(crate) mod pine;
 pub(crate) mod prio2;
 pub(crate) mod prio3;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use crate::pine::vdaf::PinePrepState;
 use crate::{
     error::DapAbort,
@@ -19,7 +19,7 @@ use crate::{
     vdaf::{prio2::prio2_decode_prep_state, prio3::prio3_decode_prep_state},
     DapError,
 };
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "test-utils", feature = "experimental"))]
 use prio::field::FieldElement;
 use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
@@ -33,14 +33,11 @@ use prio::{
 use rand::prelude::*;
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 use std::io::Read;
 
-#[cfg(any(test, feature = "test-utils"))]
-pub use self::mastic::MasticWeightConfig;
-
-#[cfg(any(test, feature = "test-utils"))]
-pub use self::pine::PineConfig;
+#[cfg(feature = "experimental")]
+pub use self::{mastic::MasticWeightConfig, pine::PineConfig};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
@@ -61,7 +58,7 @@ pub enum VdafConfig {
     Prio2 {
         dimension: usize,
     },
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Mastic {
         /// Length of each input, in number of bytes.
         input_size: usize,
@@ -69,7 +66,7 @@ pub enum VdafConfig {
         /// The type of each weight.
         weight_config: MasticWeightConfig,
     },
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Pine(PineConfig),
 }
 
@@ -86,12 +83,12 @@ impl std::fmt::Display for VdafConfig {
         match self {
             VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
                 input_size,
                 weight_config,
             } => write!(f, "Mastic({input_size}, {weight_config})"),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafConfig::Pine(pine_config) => write!(f, "{pine_config}"),
         }
     }
@@ -206,11 +203,11 @@ pub enum VdafPrepState {
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Mastic {
         out_share: Vec<Field64>,
     },
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Pine128(PinePrepState<Field128>),
 }
 
@@ -226,10 +223,8 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             | Self::Prio3Field64(_)
             | Self::Prio3Field64HmacSha256Aes128(_)
             | Self::Prio3Field128(_) => 0,
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => 0,
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Pine128(_) => 0,
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } | Self::Pine128(_) => 0,
         }
     }
 }
@@ -241,10 +236,10 @@ impl Encode for VdafPrepState {
             Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
             Self::Prio3Field128(state) => state.encode(bytes),
             Self::Prio2(state) => state.encode(bytes),
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => todo!("mastic: encoding of prep state is not implemented"),
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Pine128(_) => todo!("pine: encoding of prep state is not implemented"),
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } | Self::Pine128(_) => {
+                unreachable!("encoding of prep state is not implemented")
+            }
         }
     }
 }
@@ -264,12 +259,10 @@ impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPre
                 Ok(prio2_decode_prep_state(*dimension, agg_id, bytes)
                     .map_err(|e| CodecError::Other(Box::new(e)))?)
             }
-            #[cfg(any(test, feature = "test-utils"))]
-            VdafConfig::Mastic { .. } => {
-                unreachable!("mastic: decoding of prep state is not implemented")
+            #[cfg(feature = "experimental")]
+            VdafConfig::Mastic { .. } | VdafConfig::Pine(..) => {
+                unreachable!("decoding of prep state is not implemented")
             }
-            #[cfg(any(test, feature = "test-utils"))]
-            VdafConfig::Pine(..) => unreachable!("pine: decoding of prep state is not implemented"),
         }
     }
 }
@@ -282,9 +275,9 @@ pub enum VdafPrepMessage {
     Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
     Prio3ShareField64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     MasticShare(Field64),
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "experimental")]
     Pine128Share(crate::pine::msg::PrepShare<Field128>),
 }
 
@@ -302,7 +295,7 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
             Self::Prio3ShareField64(..)
             | Self::Prio3ShareField64HmacSha256Aes128(..)
             | Self::Prio3ShareField128(..) => 0,
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::MasticShare(..) | Self::Pine128Share(_) => 0,
         }
     }
@@ -315,9 +308,9 @@ impl Encode for VdafPrepMessage {
             Self::Prio3ShareField64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3ShareField128(share) => share.encode(bytes),
             Self::Prio2Share(share) => share.encode(bytes),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::MasticShare(share) => share.encode(bytes),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::Pine128Share(share) => share.encode(bytes),
         }
     }
@@ -343,11 +336,11 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
             VdafPrepState::Prio2(state) => Ok(VdafPrepMessage::Prio2Share(
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
             )),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafPrepState::Mastic { .. } => {
                 todo!("mastic: decoding of prep messages is not implemented")
             }
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             VdafPrepState::Pine128(state) => Ok(VdafPrepMessage::Pine128Share(
                 crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
             )),
@@ -390,10 +383,8 @@ impl VdafConfig {
             Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
             | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
             Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Pine(..) => VdafVerifyKey::L16([0; 16]),
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } | Self::Pine(..) => VdafVerifyKey::L16([0; 16]),
         }
     }
 
@@ -409,16 +400,12 @@ impl VdafConfig {
             Self::Prio3(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
                 |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
             )?)),
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Mastic { .. } => {
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } | Self::Pine(..) => {
                 Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
                     |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
                 )?))
             }
-            #[cfg(any(test, feature = "test-utils"))]
-            Self::Pine(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
-                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
-            )?)),
         }
     }
 
@@ -435,17 +422,15 @@ impl VdafConfig {
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
             Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
-            #[cfg(any(test, feature = "test-utils"))]
-            // TODO(cjpatton) Implement agg param validation once we know what we need. In the
-            // meantime, permit everything.
+            #[cfg(feature = "experimental")]
             Self::Mastic { .. } => true,
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(feature = "experimental")]
             Self::Pine(..) => agg_param.is_empty(),
         }
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "experimental")]
 pub(crate) fn decode_field_vec<F: FieldElement>(
     bytes: &[u8],
     len: usize,
