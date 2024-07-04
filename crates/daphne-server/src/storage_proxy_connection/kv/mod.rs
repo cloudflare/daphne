@@ -16,6 +16,8 @@ use crate::StorageProxyConfig;
 
 use super::{status_http_1_0_to_reqwest_0_11, Error};
 pub(crate) use cache::Cache;
+use daphne::messages::Time;
+use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
 
 pub(crate) struct Kv<'h> {
     config: &'h StorageProxyConfig,
@@ -256,22 +258,57 @@ impl<'h> Kv<'h> {
         skip_all,
         fields(key, prefix = std::any::type_name::<P>()),
     )]
+    pub async fn put_internal<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+        expiration: Option<Time>,
+    ) -> Result<(), Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        let key = Self::to_key::<P>(key);
+        tracing::debug!(key, "PUT");
+
+        let mut request = self
+            .http
+            .post(self.config.url.join(&key).unwrap())
+            .bearer_auth(&self.config.auth_token)
+            .body(serde_json::to_vec(&value).unwrap());
+
+        if let Some(expiration) = expiration {
+            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+        }
+
+        request.send().await?.error_for_status()?;
+
+        self.cache.write().await.put::<P>(key, Some(value.into()));
+        Ok(())
+    }
+
+    pub async fn put_with_expiration<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+        expiration: Time,
+    ) -> Result<(), Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        self.put_internal::<P>(key, value, Some(expiration)).await
+    }
+
     pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<(), Error>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
+        P::Value: Serialize,
     {
-        let key = Self::to_key::<P>(key);
-        tracing::debug!(key, "PUT");
-        self.http
-            .post(self.config.url.join(&key).unwrap())
-            .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap())
-            .send()
-            .await?
-            .error_for_status()?;
-        self.cache.write().await.put::<P>(key, Some(value.into()));
-        Ok(())
+        self.put_internal::<P>(key, value, None).await
     }
 
     /// Stores a value in kv if it doesn't already exist.
@@ -282,10 +319,11 @@ impl<'h> Kv<'h> {
         skip_all,
         fields(key, prefix = std::any::type_name::<P>()),
     )]
-    pub async fn put_if_not_exists<P>(
+    pub async fn put_if_not_exists_internal<P>(
         &self,
         key: &P::Key,
         value: P::Value,
+        expiration: Option<Time>,
     ) -> Result<Option<P::Value>, Error>
     where
         P: KvPrefix,
@@ -294,13 +332,18 @@ impl<'h> Kv<'h> {
         let key = Self::to_key::<P>(key);
 
         tracing::debug!(key, "PUT if not exists");
-        let response = self
+
+        let mut request = self
             .http
             .put(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap())
-            .send()
-            .await?;
+            .body(serde_json::to_vec(&value).unwrap());
+
+        if let Some(expiration) = expiration {
+            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+        }
+
+        let response = request.send().await?;
 
         if response.status() == status_http_1_0_to_reqwest_0_11(StatusCode::CONFLICT) {
             Ok(Some(value))
@@ -309,6 +352,34 @@ impl<'h> Kv<'h> {
             self.cache.write().await.put::<P>(key, Some(value.into()));
             Ok(None)
         }
+    }
+
+    pub async fn put_if_not_exists_with_expiration<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+        expiration: Time,
+    ) -> Result<Option<P::Value>, Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        self.put_if_not_exists_internal::<P>(key, value, Some(expiration))
+            .await
+    }
+
+    pub async fn put_if_not_exists<P>(
+        &self,
+        key: &P::Key,
+        value: P::Value,
+    ) -> Result<Option<P::Value>, Error>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        P::Value: Serialize,
+    {
+        self.put_if_not_exists_internal::<P>(key, value, None).await
     }
 
     #[tracing::instrument(skip_all, fields(key, prefix = std::any::type_name::<P>()))]
