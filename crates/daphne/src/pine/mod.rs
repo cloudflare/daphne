@@ -48,7 +48,7 @@ pub type Pine128 = Pine<Field128>;
 impl Pine128 {
     /// Construct an instance of [`Pine128`] with the provided parameters.
     pub fn new_128(
-        norm_bound: f64,
+        norm_bound: u64,
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
@@ -62,7 +62,7 @@ pub type Pine64 = Pine<Field64>;
 impl Pine64 {
     /// Construct an instance of [`Pine64`] with the provided parameters.
     pub fn new_64(
-        norm_bound: f64,
+        norm_bound: u64,
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
@@ -106,7 +106,9 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     ///
     /// # Parameters
     ///
-    /// * `norm_bound`: Maximum L2-norm of each gradient
+    /// * `norm_bound`: Maximum L2-norm of each gradient, encoded as follows. Let `b: f64` denote
+    /// the desired L2-norm bound. We expect this parameter to be computed by multiplying `b` by
+    /// `2^frac_bits`, taking the floor, and converting to an integer.
     ///
     /// * `dimension`: Length of each gradient
     ///
@@ -120,13 +122,30 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     ///
     /// * `algorithm_id`: The VDAF algorithm ID.
     pub(crate) fn new(
-        norm_bound: f64,
+        norm_bound: u64,
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
         num_proofs: u8,
         algorithm_id: u32,
     ) -> Result<Self, VdafError> {
+        if norm_bound == 0
+            || F::Integer::try_from(usize::try_from(norm_bound).map_err(|e| {
+                VdafError::Uncategorized(format!(
+                    "init failed: error while converting norm bound to usize: {e}"
+                ))
+            })?)
+            .map_err(|e| {
+                VdafError::Uncategorized(format!(
+                    "init failed: error while converting norm bound to field integer: {e}"
+                ))
+            })? > F::modulus() >> 1
+        {
+            return Err(VdafError::Uncategorized(
+                "init failed: norm bound must be positive".into(),
+            ));
+        }
+
         // 24 is the largest number of fractional bits that we know we can support.
         if frac_bits > 24 {
             return Err(VdafError::Uncategorized(
@@ -134,17 +153,9 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
             ));
         }
 
-        let two_to_frac_bits = f64::from(1 << frac_bits);
-
         if dimension == 0 {
             return Err(VdafError::Uncategorized(
                 "init failed: 0-dimension inputs are invalid".into(),
-            ));
-        }
-
-        if norm_bound <= 0_f64 {
-            return Err(VdafError::Uncategorized(
-                "init failed: norm bound must be positive".into(),
             ));
         }
 
@@ -154,40 +165,33 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
             ));
         }
 
+        let Some(sq_norm_bound_int) = norm_bound.checked_mul(norm_bound) else {
+            return Err(VdafError::Uncategorized(
+                "init failed: squared norm is too large for u64".into(),
+            ));
+        };
+
         let (sq_norm_bound, sq_norm_bits) = {
-            let norm_bound = f64_to_field(norm_bound, two_to_frac_bits)?;
-            let sq_norm_bound = norm_bound * norm_bound;
-
-            // Check if the square wraps around the field modulus.
-            if F::Integer::from(sq_norm_bound) < F::Integer::from(norm_bound) {
-                return Err(VdafError::Uncategorized(
-                    "init failed: squared norm bound exceeds field modulus".into(),
-                ));
-            }
-
-            let sq_norm_bound_int: u64 =
-                F::Integer::from(sq_norm_bound).try_into().map_err(|e| {
-                    VdafError::Uncategorized(format!(
-                        "init failed: failed to convert squared norm bound to u64: {e}"
-                    ))
-                })?;
             let sq_norm_bits = bits(sq_norm_bound_int);
+            let sq_norm_bound = usize::try_from(sq_norm_bound_int).map_err(|e| {
+                VdafError::Uncategorized(format!(
+                    "init failed: failed to convert squared norm bound to usize: {e}"
+                ))
+            })?;
+            let sq_norm_bound = F::Integer::try_from(sq_norm_bound).map_err(|e| {
+                VdafError::Uncategorized(format!(
+                    "init failed: failed to convert squared norm bound to field integer: {e}"
+                ))
+            })?;
+            let sq_norm_bound = F::from(sq_norm_bound);
             (sq_norm_bound, sq_norm_bits)
         };
 
         let (wr_test_bound, wr_test_bits) = {
-            let norm_bound_int: u64 = F::Integer::from(f64_to_field(norm_bound, two_to_frac_bits)?)
-                .try_into()
-                .map_err(|e| {
-                    VdafError::Uncategorized(format!(
-                        "init failed: failed to convert norm bound to u64: {e}"
-                    ))
-                })?;
-
             #[allow(clippy::cast_possible_truncation)]
             #[allow(clippy::cast_sign_loss)]
             let wr_test_bound_int =
-                (((norm_bound_int as f64) * ALPHA).ceil() as u64 + 1).next_power_of_two();
+                (((norm_bound as f64) * ALPHA).ceil() as u64 + 1).next_power_of_two();
             let wr_test_bits = bits(2 * wr_test_bound_int - 1);
             let wr_test_bound = usize::try_from(wr_test_bound_int).map_err(|e| {
                 VdafError::Uncategorized(format!(
@@ -307,6 +311,15 @@ fn bits(x: u64) -> usize {
 
 fn chunk_count(chunk_length: usize, length: usize) -> usize {
     (length + chunk_length - 1) / chunk_length
+}
+
+#[cfg(test)]
+fn norm_bound_f64_to_u64(norm_bound: f64, frac_bits: usize) -> u64 {
+    let two_to_frac_bits = f64::from(1 << frac_bits);
+    let norm_bound = norm_bound * two_to_frac_bits;
+    let norm_bound = norm_bound.floor();
+    let norm_bound = norm_bound as u64;
+    norm_bound
 }
 
 pub mod flp;
@@ -533,7 +546,7 @@ mod tests {
             },
         ] {
             let pine = Pine::new_128(
-                t.norm_bound,
+                norm_bound_f64_to_u64(t.norm_bound, t.frac_bits),
                 10, // not used by test
                 t.frac_bits,
                 1, // not used by tests

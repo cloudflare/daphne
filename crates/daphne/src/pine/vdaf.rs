@@ -594,14 +594,15 @@ mod tests {
         },
     };
 
-    use crate::pine::{msg, vdaf::PineVec, Pine};
+    use crate::pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine};
 
     use assert_matches::assert_matches;
 
     #[test]
     fn run_128() {
         let dimension = 100;
-        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -620,7 +621,8 @@ mod tests {
     #[test]
     fn run_64() {
         let dimension = 100;
-        let pine = Pine::new_64(1000.0, dimension, 15, 100).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_64(norm_bound, dimension, 15, 100).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -641,7 +643,8 @@ mod tests {
     fn aggregate() {
         let dimension = 100;
         let reports = 5;
-        let pine = Pine::new_128(1000.0, dimension, 15, 100).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 100).unwrap();
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
@@ -674,7 +677,8 @@ mod tests {
     #[test]
     fn prep_failure_mutated_pub_share_wr_joint_rand() {
         let dimension = 100;
-        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -693,7 +697,8 @@ mod tests {
     #[test]
     fn prep_failure_mutated_pub_share_vf_joint_rand() {
         let dimension = 100;
-        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -712,7 +717,8 @@ mod tests {
     #[test]
     fn prep_failure_mutated_input_share_proof() {
         let dimension = 100;
-        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -731,7 +737,8 @@ mod tests {
     #[test]
     fn prep_failure_mutated_input_share_meas() {
         let dimension = 100;
-        let pine = Pine::new_128(1000.0, dimension, 15, 4).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
