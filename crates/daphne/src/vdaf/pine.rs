@@ -15,54 +15,15 @@ use prio::{codec::ParameterizedDecode, field::FftFriendlyFieldElement, vdaf::Agg
 use serde::{Deserialize, Serialize};
 
 /// [Pine](crate::pine::Pine) parameters.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct PineConfig {
-    pub norm_bound: f64,
+    pub norm_bound: u64,
     pub dimension: usize,
     pub frac_bits: usize,
     pub chunk_len: usize,
     pub var: PineVariant,
-}
-
-impl PartialEq for PineConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.norm_bound.total_cmp(&other.norm_bound).is_eq()
-            && self.dimension == other.dimension
-            && self.frac_bits == other.frac_bits
-            && self.chunk_len == other.chunk_len
-            && self.var == other.var
-    }
-}
-
-impl Eq for PineConfig {}
-
-impl Ord for PineConfig {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.norm_bound
-            .total_cmp(&other.norm_bound)
-            .then(self.dimension.cmp(&other.dimension))
-            .then(self.frac_bits.cmp(&other.frac_bits))
-            .then(self.chunk_len.cmp(&other.chunk_len))
-            .then(self.var.cmp(&self.var))
-    }
-}
-
-impl PartialOrd for PineConfig {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl std::hash::Hash for PineConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.norm_bound.to_bits().hash(state);
-        self.dimension.hash(state);
-        self.frac_bits.hash(state);
-        self.chunk_len.hash(state);
-        self.var.hash(state);
-    }
 }
 
 impl std::fmt::Display for PineConfig {
@@ -278,7 +239,7 @@ mod test {
     async fn roundtrip_128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig {
-                norm_bound: 1.0,
+                norm_bound: 32_000,
                 dimension: 1_000,
                 frac_bits: 20,
                 chunk_len: 50,

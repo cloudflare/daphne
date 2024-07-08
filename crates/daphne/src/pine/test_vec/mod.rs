@@ -176,14 +176,15 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 mod tests {
     use super::*;
 
-    use crate::pine::Pine;
+    use crate::pine::{norm_bound_f64_to_u64, Pine};
 
     #[test]
     fn run_64() {
         let test_vec =
             serde_json::from_str::<TestVec>(include_str!("00/Pine_Field64.json")).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(test_vec.l2_norm_bound, test_vec.num_frac_bits);
         Pine::new_64(
-            test_vec.l2_norm_bound,
+            norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
@@ -196,8 +197,9 @@ mod tests {
     fn run_128() {
         let test_vec =
             serde_json::from_str::<TestVec>(include_str!("00/Pine_Field128.json")).unwrap();
+        let norm_bound = norm_bound_f64_to_u64(test_vec.l2_norm_bound, test_vec.num_frac_bits);
         Pine::new_128(
-            test_vec.l2_norm_bound,
+            norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
