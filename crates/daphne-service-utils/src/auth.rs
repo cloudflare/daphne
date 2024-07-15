@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 #[derive(PartialEq, Eq)]
 pub struct TlsClientAuth {
     pub verified: String,
-    pub issuer: String,
-    pub subject: String,
 }
 
 /// HTTP client authorization for Daphne-Worker.
@@ -32,17 +30,13 @@ pub struct DaphneAuth {
     pub bearer_token: Option<BearerToken>,
 
     /// TLS client authentication. The client uses a certificate when establishing the TLS
-    /// connection with the expected issuer and subject. This authorization method is
-    /// Cloudflare-specific: Verifying the certificate itself is handled by the process that
-    /// invoked this Worker. The customer zone is also expected to be configured to require mutual
-    /// TLS for the route on which this Worker is listening.
+    /// connection. This authorization method is Cloudflare-specific: Verifying the certificate
+    /// itself is handled by the process that invoked this Worker. The customer zone is also
+    /// expected to be configured to require mutual TLS for the route on which this Worker is
+    /// listening.
     ///
-    /// When this authorization method is used, we verify that the following:
-    ///
-    /// * A certificate was presented and was successfully verified by the TLS server
-    ///
-    /// * The certificate details match those of one of a preconfigured set of trusted
-    /// certificates.
+    /// When this authorization method is used, we verify that a certificate was presented and was
+    /// successfully verified by the TLS server.
     ///
     /// # Caveats
     ///
@@ -96,23 +90,6 @@ pub struct DaphneWorkerAuthMethod {
     /// Expected bearer token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<BearerToken>,
-
-    /// Details of trusted TLS client certificates.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cf_tls_client_auth: Option<Vec<TlsCertInfo>>,
-}
-
-/// TLS certificate details related to authorization.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct TlsCertInfo {
-    /// Certificate issuer. Checked against the value of the "certIssuerDNRFC2253" field from the
-    /// "tlsClientAuth" object passed by the Workers runtime to the request handler.
-    /// <https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties>
-    pub issuer: String,
-
-    /// Certificate subject. Checked against the value of the "certSubjectDNRFC2253" field from the
-    /// "tlsClientAuth" object passed by the Workers runtime to the request handler.
-    pub subject: String,
 }
 
 // TODO(mendess): remove this implementation. Implementations of AsRef should never panic
@@ -130,73 +107,18 @@ impl AsRef<BearerToken> for DaphneWorkerAuthMethod {
 
 #[cfg(test)]
 mod test {
-    use super::{BearerToken, DaphneWorkerAuthMethod, TlsCertInfo};
+    use super::{BearerToken, DaphneWorkerAuthMethod};
 
     #[test]
-    fn daphne_worker_auth_method_json_serialiation() {
+    fn daphne_worker_auth_method_json_serialization() {
         let daphne_worker_auth_method: DaphneWorkerAuthMethod =
             serde_json::from_str(r#"{"bearer_token":"the bearer token"}"#).unwrap();
         assert_eq!(
             daphne_worker_auth_method.bearer_token,
             Some(BearerToken::from("the bearer token".to_string()))
         );
-        assert!(daphne_worker_auth_method.cf_tls_client_auth.is_none());
 
-        let trusted_certs = vec![
-            TlsCertInfo {
-                issuer: "CN=Steve Kille,O=Isode Limited,C=GB".into(),
-                subject: "OU=Sales+CN=J. Smith,O=Widget Inc.,C=US".into(),
-            },
-            TlsCertInfo {
-                issuer: "CN=Steve Kille,O=Isode Limited,C=GB".into(),
-                subject: "CN=L. Eagle,O=Sue\\, Grabbit and Runn,C=GB".into(),
-            },
-        ];
-
-        let daphne_worker_auth_method: DaphneWorkerAuthMethod = serde_json::from_str(
-            r#"{
-            "cf_tls_client_auth": [
-                {
-                  "issuer": "CN=Steve Kille,O=Isode Limited,C=GB",
-                  "subject": "OU=Sales+CN=J. Smith,O=Widget Inc.,C=US"
-                },
-                {
-                  "issuer": "CN=Steve Kille,O=Isode Limited,C=GB",
-                  "subject": "CN=L. Eagle,O=Sue\\, Grabbit and Runn,C=GB"
-                }
-              ]
-        }"#,
-        )
-        .unwrap();
-        assert_eq!(
-            daphne_worker_auth_method.cf_tls_client_auth,
-            Some(trusted_certs.clone()),
-        );
+        let daphne_worker_auth_method: DaphneWorkerAuthMethod = serde_json::from_str("{}").unwrap();
         assert!(daphne_worker_auth_method.bearer_token.is_none());
-
-        let daphne_worker_auth_method: DaphneWorkerAuthMethod = serde_json::from_str(
-            r#"{
-            "bearer_token": "the bearer token",
-            "cf_tls_client_auth": [
-                {
-                  "issuer": "CN=Steve Kille,O=Isode Limited,C=GB",
-                  "subject": "OU=Sales+CN=J. Smith,O=Widget Inc.,C=US"
-                },
-                {
-                  "issuer": "CN=Steve Kille,O=Isode Limited,C=GB",
-                  "subject": "CN=L. Eagle,O=Sue\\, Grabbit and Runn,C=GB"
-                }
-             ]
-        }"#,
-        )
-        .unwrap();
-        assert_eq!(
-            daphne_worker_auth_method.bearer_token,
-            Some(BearerToken::from("the bearer token".to_string()))
-        );
-        assert_eq!(
-            daphne_worker_auth_method.cf_tls_client_auth,
-            Some(trusted_certs),
-        );
     }
 }
