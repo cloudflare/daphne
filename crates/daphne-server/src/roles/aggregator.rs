@@ -14,8 +14,7 @@ use daphne::{
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapSender, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized,
+    DapRequest, DapTaskConfig, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
 use daphne_service_utils::{
     auth::DaphneAuth,
@@ -169,11 +168,10 @@ impl DapAggregator<DaphneAuth> for crate::App {
             authorized = true;
         }
 
-        // If a TLS client certificate is present, verify that it is valid and that the issuer and
-        // subject are trusted.
+        // If a TLS client certificate is present verify that it is valid.
         if let Some(ref cf_tls_client_auth) = sender_auth.cf_tls_client_auth {
             // TODO(cjpatton) Add support for TLS client authentication for non-Taskprov tasks.
-            let Some(ref taskprov_config) = self.service_config.taskprov else {
+            let Some(ref _taskprov_config) = self.service_config.taskprov else {
                 return Ok(Some(
                     "TLS client authentication is currently only supported with Taskprov.".into(),
                 ));
@@ -187,35 +185,6 @@ impl DapAggregator<DaphneAuth> for crate::App {
                 )));
             }
 
-            // Resolve the trusted certificate issuers and subjects for this request.
-            let sender = req.sender();
-            let trusted_certs = if let (Some(DapSender::Leader), Some(ref trusted_certs)) =
-                (sender, &taskprov_config.leader_auth.cf_tls_client_auth)
-            {
-                trusted_certs
-            } else if let (Some(DapSender::Collector), Some(trusted_certs)) = (
-                sender,
-                taskprov_config
-                    .collector_auth
-                    .as_ref()
-                    .and_then(|auth| auth.cf_tls_client_auth.as_ref()),
-            ) {
-                trusted_certs
-            } else {
-                let unauthorized_reason =
-                    format!("TLS client authentication is not configured for sender ({sender:?}.");
-                return Ok(Some(unauthorized_reason));
-            };
-
-            if !trusted_certs.iter().any(|trusted_cert| {
-                trusted_cert.issuer == cf_tls_client_auth.issuer
-                    && trusted_cert.subject == cf_tls_client_auth.subject
-            }) {
-                return Ok(Some(format!(
-                    r#"Unexpected issuer "{}" and subject "{}"."#,
-                    cf_tls_client_auth.issuer, cf_tls_client_auth.subject,
-                )));
-            }
             authorized = true;
         }
 

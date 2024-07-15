@@ -266,15 +266,9 @@ where
         let sender_auth = DaphneAuth {
             bearer_token: extract_header_as_string(http_headers::DAP_AUTH_TOKEN)
                 .map(BearerToken::from),
-            cf_tls_client_auth: (|| {
-                // Whatever service ends up fronting this one and terminating mTLS must pass through
-                // these headers.
-                Some(TlsClientAuth {
-                    verified: extract_header_as_string("X-Client-Cert-Verified")?,
-                    issuer: extract_header_as_string("X-Client-Cert-Issuer-Dn-Rfc2253")?,
-                    subject: extract_header_as_string("X-Client-Cert-Subject-Dn-Rfc2253")?,
-                })
-            })(),
+
+            cf_tls_client_auth: extract_header_as_string("X-Client-Cert-Verified")
+                .map(|verified| TlsClientAuth { verified }),
         };
 
         if sender_auth.bearer_token.is_some() {
