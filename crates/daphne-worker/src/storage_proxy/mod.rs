@@ -138,45 +138,31 @@ pub async fn handle_request(
         env,
     };
 
-    // make an async block in order to avoid early returning and skipping the push_metrics
-    // statement
-    let response = async {
-        if let Some(error_response) = unauthorized_reason(&ctx) {
-            return error_response;
-        }
+    if let Some(error_response) = unauthorized_reason(&ctx) {
+        return error_response;
+    }
 
-        let path = ctx.req.path();
-        if let Some(uri) = path
-            .strip_prefix(KV_PATH_PREFIX)
-            .and_then(|s| s.strip_prefix('/'))
+    let path = ctx.req.path();
+    if let Some(uri) = path
+        .strip_prefix(KV_PATH_PREFIX)
+        .and_then(|s| s.strip_prefix('/'))
+    {
+        handle_kv_request(&mut ctx, uri).await
+    } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
+        handle_do_request(&mut ctx, uri).await
+    } else {
+        #[cfg(feature = "test-utils")]
+        if let Some("") = path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE) {
+            return storage_purge(&ctx).await;
+        } else if let Some("") =
+            path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
         {
-            handle_kv_request(&mut ctx, uri).await
-        } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
-            handle_do_request(&mut ctx, uri).await
-        } else {
-            #[cfg(feature = "test-utils")]
-            if let Some("") =
-                path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE)
-            {
-                return storage_purge(&ctx).await;
-            } else if let Some("") =
-                path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
-            {
-                return Response::ok("");
-            }
-
-            tracing::error!("path {path:?} was invalid");
-            Response::error("invalid base path", 400)
+            return Response::ok("");
         }
-    }
-    .await;
 
-    match &response {
-        Ok(r) => ctx.metrics.count_http_status_code(r.status_code()),
-        Err(_) => ctx.metrics.count_http_status_code(500),
+        tracing::error!("path {path:?} was invalid");
+        Response::error("invalid base path", 400)
     }
-
-    response
 }
 
 #[cfg(feature = "test-utils")]
