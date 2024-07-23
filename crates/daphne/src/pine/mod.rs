@@ -67,7 +67,7 @@ impl Pine64 {
         frac_bits: usize,
         chunk_len: usize,
     ) -> Result<Self, VdafError> {
-        Self::new(norm_bound, dimension, frac_bits, chunk_len, 3, 0xffff_ffff)
+        Self::new(norm_bound, dimension, frac_bits, chunk_len, 2, 0xffff_ffff)
     }
 }
 
@@ -94,7 +94,7 @@ pub(crate) struct PineConfig<F> {
 impl<F> PineConfig<F> {
     fn dst(&self, usage: u16) -> [u8; DST_SIZE] {
         let mut dst = [0; DST_SIZE];
-        dst[0] = 0; // VERSION, draft-cheng-cfrg-vdaf-pine-00
+        dst[0] = 1; // VERSION, draft-cheng-cfrg-vdaf-pine-01
         dst[1..5].copy_from_slice(&self.algorithm_id.to_be_bytes()); // algo
         dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
         dst
