@@ -39,7 +39,7 @@ struct TestVec {
     num_wr_successes: usize,
     alpha: f64,
     dimension: usize,
-    l2_norm_bound: f64,
+    l2_norm_bound: u64,
     num_frac_bits: usize,
     chunk_length: usize,
     shares: usize,
@@ -176,15 +176,14 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 mod tests {
     use super::*;
 
-    use crate::pine::{norm_bound_f64_to_u64, Pine};
+    use crate::pine::Pine;
 
     #[test]
     fn run_64() {
         let test_vec =
-            serde_json::from_str::<TestVec>(include_str!("00/Pine_Field64.json")).unwrap();
-        let norm_bound = norm_bound_f64_to_u64(test_vec.l2_norm_bound, test_vec.num_frac_bits);
+            serde_json::from_str::<TestVec>(include_str!("01/Pine_Field64.json")).unwrap();
         Pine::new_64(
-            norm_bound,
+            test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
@@ -196,10 +195,9 @@ mod tests {
     #[test]
     fn run_128() {
         let test_vec =
-            serde_json::from_str::<TestVec>(include_str!("00/Pine_Field128.json")).unwrap();
-        let norm_bound = norm_bound_f64_to_u64(test_vec.l2_norm_bound, test_vec.num_frac_bits);
+            serde_json::from_str::<TestVec>(include_str!("01/Pine_Field128.json")).unwrap();
         Pine::new_128(
-            norm_bound,
+            test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
