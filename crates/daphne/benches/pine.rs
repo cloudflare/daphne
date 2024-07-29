@@ -17,7 +17,7 @@ fn pine(c: &mut Criterion) {
         (100_000, 320 * 6),
         (1_000_000, 1_000 * 8),
     ] {
-        let pine = Pine::new_64(1.0, dimension, 15, chunk_len).unwrap();
+        let pine = Pine::new_64(1 << 15, dimension, 15, chunk_len).unwrap();
         let measurement = vec![0.0; dimension];
         let wr_joint_rand_seed = Seed::generate().unwrap();
         let nonce = [0; 16];
