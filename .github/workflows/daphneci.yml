@@ -32,6 +32,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Documentation
         run: RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features --workspace
+      - name: Build
+        run: cargo build --all-targets
       - name: Linting
         run: cargo hack clippy --locked --each-feature -- -D warnings
       - name: Testing
