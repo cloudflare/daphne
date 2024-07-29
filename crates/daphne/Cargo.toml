@@ -58,14 +58,6 @@ default = []
 prometheus = ["dep:prometheus"]
 
 [[bench]]
-name = "vdaf"
-harness = false
-
-[[bench]]
-name = "aggregation"
-harness = false
-
-[[bench]]
 name = "pine"
 harness = false
 
