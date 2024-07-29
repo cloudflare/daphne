@@ -303,54 +303,30 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         ))
     }
 
-    /// Check that (1) the reported squared was computed correctly and (2) the squared norm is in
-    /// range. The result is only valid if the bit checks and the wraparound tests were successful
-    /// (i.e., `eval_bit_checks()` and `eval_wr_checks()` each output `0`).
+    /// Check that the reported squared norm is in range. The result is only valid if the bit
+    /// checks and the wraparound tests were successful (i.e., `eval_bit_checks()` and
+    /// `eval_wr_checks()` each output `0`).
     fn eval_norm_check(
         &self,
         buf: &mut Vec<F>,
-        gadget: &mut [Box<dyn Gadget<F>>],
         encoded_gradient: &[F],
         sq_norm_v_bits: &[F],
         sq_norm_u_bits: &[F],
         shares_inv: F,
-    ) -> Result<(F, F), FlpError> {
+    ) -> Result<F, FlpError> {
         debug_assert_eq!(encoded_gradient.len(), self.cfg.dimension);
         debug_assert_eq!(sq_norm_v_bits.len(), self.cfg.sq_norm_bits);
         debug_assert_eq!(sq_norm_u_bits.len(), self.cfg.sq_norm_bits);
         debug_assert_eq!(buf.capacity(), self.cfg.chunk_len * 2);
         buf.clear();
 
-        // Compute the squared norm of the gradient.
-        //
-        // This corresponds to the third call to `parallel_sum()` in the validity circuit of the
-        // reference implementation.
-        let sq_norm = encoded_gradient
-            .chunks(self.cfg.chunk_len)
-            .map(|chunk| {
-                for x in chunk {
-                    buf.push(*x);
-                    buf.push(*x);
-                }
-                for _ in buf.len()..buf.capacity() {
-                    buf.push(F::zero());
-                }
-
-                let y = gadget[0].call(buf);
-                buf.clear();
-                y
-            })
-            .try_fold(F::zero(), |x, y| Ok::<_, FlpError>(x + y?))?;
-
         let sq_norm_v = F::decode_bitvector(sq_norm_v_bits)?;
         let sq_norm_u = F::decode_bitvector(sq_norm_u_bits)?;
 
-        Ok((
-            // The reported squared norm equals the computed squared norm
-            sq_norm_v - sq_norm,
+        Ok(
             // The reported squared norm is in range (see [ROCT223], Figure 1).
             sq_norm_v + sq_norm_u - self.cfg.sq_norm_bound * shares_inv,
-        ))
+        )
     }
 }
 
@@ -431,9 +407,8 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
             shares_inv,
         )?;
 
-        let (sq_norm_equality_check_result, sq_norm_range_check_result) = self.eval_norm_check(
+        let sq_norm_range_check_result = self.eval_norm_check(
             &mut buf,
-            gadget,
             encoded_gradient,
             sq_norm_v_bits,
             sq_norm_u_bits,
@@ -442,8 +417,6 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
 
         let mut result = bit_check_result;
         let mut r_power = r_final;
-        result += r_power * sq_norm_equality_check_result;
-        r_power *= r_final;
         result += r_power * sq_norm_range_check_result;
         r_power *= r_final;
         result += r_power * wr_tests_result;
@@ -491,6 +464,124 @@ fn range_checked<F: FftFriendlyFieldElement>(x: F, lower_bound: F, upper_bound: 
     let u = upper_bound - x;
     let is_in_range = F::Integer::from(v) <= F::Integer::from(upper_bound - lower_bound);
     (is_in_range, v, u)
+}
+
+/// FLP for checking that the squared norm bound is the same as what was reported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PineSquaredNormEqualityCheck<F> {
+    pub(crate) cfg: PineConfig<F>,
+}
+
+impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
+    type Measurement = (); // Not used by Pine
+    type AggregateResult = ();
+    type Field = F;
+
+    fn encode_measurement(&self, _measurement: &()) -> Result<Vec<F>, FlpError> {
+        unreachable!("not used")
+    }
+
+    fn decode_result(&self, _data: &[F], _num_measurements: usize) -> Result<(), FlpError> {
+        unreachable!("not used")
+    }
+
+    fn gadget(&self) -> Vec<Box<dyn Gadget<F>>> {
+        vec![Box::new(ParallelSum::new(
+            Mul::new(self.cfg.gadget_calls_sq_norm_equality_check),
+            self.cfg.chunk_len,
+        ))]
+    }
+
+    fn valid(
+        &self,
+        gadget: &mut Vec<Box<dyn Gadget<F>>>,
+        meas: &[F],
+        _joint_rand: &[F],
+        _num_shares: usize,
+    ) -> Result<F, FlpError> {
+        let mut buf = Vec::with_capacity(self.cfg.chunk_len * 2);
+
+        // Unpack the encoded measurement. It is composed of the following components:
+        //
+        // * The gradient `encoded_gradient`.
+        //
+        // * A pair `(sq_norm_v_bits, sq_norm_u_bits)`, the bit-encoded, range-checked, squared
+        //   norm of the gradient.
+        //
+        // * For each wraparound test, a pair `(wr_test_v_bits, wr_test_g)`: `wr_test_v_bits` is
+        //   the bit-encoded, range-checked test result; and `wr_test_g` is an indication of
+        //   whether the test succeeded (i.e., the result is in the specified range).
+        //
+        // * For each wraparound test, the result `wr_test_result`.
+        let (encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
+        let (bit_checked, rest) = rest.split_at(self.cfg.bit_checked_len);
+        let (_wr_test_results, rest) = rest.split_at(NUM_WR_TESTS);
+        assert!(rest.is_empty());
+
+        // Unpack the bit checked values.
+        let (sq_norm_v_bits, rest) = bit_checked.split_at(self.cfg.sq_norm_bits);
+        let (_sq_norm_u_bits, rest) = rest.split_at(self.cfg.sq_norm_bits);
+        let (_wr_test_bits, rest) = rest.split_at(NUM_WR_TESTS * (self.cfg.wr_test_bits + 1));
+        assert!(rest.is_empty());
+
+        // Compute the squared norm of the gradient.
+        //
+        // This corresponds to the third call to `parallel_sum()` in the validity circuit of the
+        // reference implementation.
+        let sq_norm = encoded_gradient
+            .chunks(self.cfg.chunk_len)
+            .map(|chunk| {
+                for x in chunk {
+                    buf.push(*x);
+                    buf.push(*x);
+                }
+                for _ in buf.len()..buf.capacity() {
+                    buf.push(F::zero());
+                }
+
+                let y = gadget[0].call(&mut buf);
+                buf.clear();
+                y
+            })
+            .try_fold(F::zero(), |x, y| Ok::<_, FlpError>(x + y?))?;
+
+        let sq_norm_v = F::decode_bitvector(sq_norm_v_bits)?;
+        Ok(sq_norm_v - sq_norm)
+    }
+
+    fn truncate(&self, _input: Vec<F>) -> Result<Vec<F>, FlpError> {
+        unreachable!("not used")
+    }
+
+    fn input_len(&self) -> usize {
+        self.cfg.encoded_input_len + NUM_WR_TESTS
+    }
+
+    fn proof_len(&self) -> usize {
+        2 * self.cfg.chunk_len
+            + 2 * ((1 + self.cfg.gadget_calls_sq_norm_equality_check).next_power_of_two() - 1)
+            + 1
+    }
+
+    fn verifier_len(&self) -> usize {
+        2 * self.cfg.chunk_len + 2
+    }
+
+    fn output_len(&self) -> usize {
+        self.cfg.dimension
+    }
+
+    fn joint_rand_len(&self) -> usize {
+        0
+    }
+
+    fn prove_rand_len(&self) -> usize {
+        self.cfg.chunk_len * 2
+    }
+
+    fn query_rand_len(&self) -> usize {
+        1
+    }
 }
 
 #[cfg(test)]
@@ -643,7 +734,7 @@ mod tests {
         // Tweak the last coordinate of the gradient.
         input[DIM - 1] += Field128::from(1);
 
-        FlpTest::expect_invalid::<2>(&pine.flp, &input);
+        FlpTest::expect_invalid::<2>(&pine.flp_sq_norm_equality_check, &input);
     }
 
     #[test]

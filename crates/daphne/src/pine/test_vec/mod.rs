@@ -178,6 +178,7 @@ mod tests {
 
     use crate::pine::Pine;
 
+    #[ignore = "The change we're experimenting with on this branch breaks compatibility with the draft."]
     #[test]
     fn run_64() {
         let test_vec =
@@ -192,6 +193,7 @@ mod tests {
         .run_test_vec(&test_vec);
     }
 
+    #[ignore = "The change we're experimenting with on this branch breaks compatibility with the draft."]
     #[test]
     fn run_128() {
         let test_vec =

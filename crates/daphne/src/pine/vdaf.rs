@@ -131,8 +131,10 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     fn helper_proof_share(&self, seed: &[u8; 16]) -> Vec<F> {
         let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
         xof.update(&[self.flp.cfg.num_proofs, 1]); // num_proofs, agg_id
-        xof.into_seed_stream()
-            .into_field_vec(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs))
+        xof.into_seed_stream().into_field_vec(
+            self.flp_sq_norm_equality_check.proof_len()
+                + self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs),
+        )
     }
 }
 
@@ -246,13 +248,24 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
                     XofTurboShake128::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp.prove_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                    self.flp_sq_norm_equality_check.prove_rand_len()
+                        + self.flp.prove_rand_len() * usize::from(self.flp.cfg.num_proofs),
                 )
             };
 
-            let mut proofs =
-                Vec::with_capacity(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs));
+            let mut proofs = Vec::with_capacity(
+                self.flp_sq_norm_equality_check.proof_len()
+                    + self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs),
+            );
+
+            proofs.append(&mut self.flp_sq_norm_equality_check.prove(
+                &meas,
+                &prove_rands[..self.flp_sq_norm_equality_check.prove_rand_len()],
+                &[],
+            )?);
+
             for (prove_rand, vf_joint_rand) in prove_rands
+                [self.flp_sq_norm_equality_check.prove_rand_len()..]
                 .chunks(self.flp.prove_rand_len())
                 .zip(vf_joint_rands.chunks(self.flp.joint_rand_len()))
             {
@@ -425,17 +438,32 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.update(nonce);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp.query_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                    self.flp_sq_norm_equality_check.query_rand_len()
+                        + self.flp.query_rand_len() * usize::from(self.flp.cfg.num_proofs),
                 )
             };
 
-            let mut verifiers_share =
-                Vec::with_capacity(self.flp.verifier_len() * usize::from(self.flp.cfg.num_proofs));
-            for (proof_share, (vf_joint_rand, query_rand)) in
-                proofs_share.chunks(self.flp.proof_len()).zip(
+            let mut verifiers_share = Vec::with_capacity(
+                self.flp_sq_norm_equality_check.verifier_len()
+                    + self.flp.verifier_len() * usize::from(self.flp.cfg.num_proofs),
+            );
+            verifiers_share.append(&mut self.flp_sq_norm_equality_check.query(
+                &meas_share,
+                &proofs_share[..self.flp_sq_norm_equality_check.proof_len()],
+                &query_rands[..self.flp_sq_norm_equality_check.query_rand_len()],
+                &[],
+                2,
+            )?);
+            for (proof_share, (vf_joint_rand, query_rand)) in proofs_share
+                [self.flp_sq_norm_equality_check.proof_len()..]
+                .chunks(self.flp.proof_len())
+                .zip(
                     corrected_vf_joint_rands
                         .chunks(self.flp.joint_rand_len())
-                        .zip(query_rands.chunks(self.flp.query_rand_len())),
+                        .zip(
+                            query_rands[self.flp_sq_norm_equality_check.query_rand_len()..]
+                                .chunks(self.flp.query_rand_len()),
+                        ),
                 )
             {
                 verifiers_share.append(&mut self.flp.query(
@@ -495,7 +523,18 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
                 *v += s1;
             }
 
-            for verifier in verifiers.chunks(self.flp.verifier_len()) {
+            if !self
+                .flp_sq_norm_equality_check
+                .decide(&verifiers[..self.flp_sq_norm_equality_check.verifier_len()])?
+            {
+                return Err(VdafError::Uncategorized(
+                    "squared norm equality check failed".into(),
+                ));
+            }
+
+            for verifier in verifiers[self.flp_sq_norm_equality_check.verifier_len()..]
+                .chunks(self.flp.verifier_len())
+            {
                 if !self.flp.decide(verifier)? {
                     return Err(VdafError::Uncategorized("proof check failed".into()));
                 }

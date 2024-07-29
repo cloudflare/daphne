@@ -13,6 +13,7 @@
 //!
 //! PINE is based on the scheme from [Rothblum et al. 2023](https://arxiv.org/abs/2311.10237).
 
+use flp::PineSquaredNormEqualityCheck;
 use prio::{
     field::{FftFriendlyFieldElement, Field128, Field64, FieldPrio2},
     vdaf::VdafError,
@@ -41,6 +42,7 @@ const USAGE_WR_JOINT_RAND_PART: u16 = 10;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pine<F> {
     pub flp: PineType<F>,
+    pub flp_sq_norm_equality_check: PineSquaredNormEqualityCheck<F>,
 }
 
 pub type Pine128 = Pine<Field128>;
@@ -71,7 +73,7 @@ impl Pine64 {
     }
 }
 
-// XXX Rename FieldPrio2 to Field32?
+// TODO Rename FieldPrio2 to Field32 in libprio.
 pub type Pine32 = Pine<FieldPrio2>;
 
 impl Pine32 {
@@ -104,6 +106,7 @@ pub(crate) struct PineConfig<F> {
     encoded_gradient_len: usize,
     encoded_input_len: usize,
     gadget_calls: usize,
+    gadget_calls_sq_norm_equality_check: usize,
 }
 
 impl<F> PineConfig<F> {
@@ -237,28 +240,30 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 
         // Number of gadget calls. The gadget is used for the bit checks, wraparound tests, and
         // squared norm computation.
-        let gadget_calls = chunk_count(chunk_len, bit_checked_len)
-            + chunk_count(chunk_len, dimension)
-            + chunk_count(chunk_len, NUM_WR_TESTS);
+        let gadget_calls =
+            chunk_count(chunk_len, bit_checked_len) + chunk_count(chunk_len, NUM_WR_TESTS);
+        let gadget_calls_sq_norm_equality_check = chunk_count(chunk_len, dimension);
+
+        let cfg = PineConfig {
+            dimension,
+            frac_bits,
+            sq_norm_bound,
+            sq_norm_bits,
+            wr_test_bound,
+            wr_test_bits,
+            num_proofs,
+            algorithm_id,
+            chunk_len,
+            bit_checked_len,
+            encoded_gradient_len,
+            encoded_input_len,
+            gadget_calls,
+            gadget_calls_sq_norm_equality_check,
+        };
 
         Ok(Self {
-            flp: PineType {
-                cfg: PineConfig {
-                    dimension,
-                    frac_bits,
-                    sq_norm_bound,
-                    sq_norm_bits,
-                    wr_test_bound,
-                    wr_test_bits,
-                    num_proofs,
-                    algorithm_id,
-                    chunk_len,
-                    bit_checked_len,
-                    encoded_gradient_len,
-                    encoded_input_len,
-                    gadget_calls,
-                },
-            },
+            flp: PineType { cfg: cfg.clone() },
+            flp_sq_norm_equality_check: PineSquaredNormEqualityCheck { cfg },
         })
     }
 }
