@@ -69,7 +69,9 @@ impl PineConfig {
         } = self;
 
         let DapMeasurement::F64Vec(gradient) = &measurement else {
-            return Err(VdafError::Dap(fatal_error!(err = "XXX")));
+            return Err(VdafError::Dap(fatal_error!(
+                err = "unexpected measurement type"
+            )));
         };
 
         match var {
