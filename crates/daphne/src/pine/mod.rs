@@ -14,7 +14,7 @@
 //! PINE is based on the scheme from [Rothblum et al. 2023](https://arxiv.org/abs/2311.10237).
 
 use prio::{
-    field::{FftFriendlyFieldElement, Field128, Field64},
+    field::{FftFriendlyFieldElement, Field128, Field64, FieldPrio2},
     vdaf::VdafError,
 };
 
@@ -68,6 +68,21 @@ impl Pine64 {
         chunk_len: usize,
     ) -> Result<Self, VdafError> {
         Self::new(norm_bound, dimension, frac_bits, chunk_len, 2, 0xffff_ffff)
+    }
+}
+
+// XXX Rename FieldPrio2 to Field32?
+pub type Pine32 = Pine<FieldPrio2>;
+
+impl Pine32 {
+    /// Construct an instance of [`Pine32`] with the provided parameters.
+    pub fn new_32(
+        norm_bound: u64,
+        dimension: usize,
+        frac_bits: usize,
+        chunk_len: usize,
+    ) -> Result<Self, VdafError> {
+        Self::new(norm_bound, dimension, frac_bits, chunk_len, 5, 0xffff_ffff)
     }
 }
 
