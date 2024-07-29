@@ -22,13 +22,13 @@ impl VdafConfig {
     ///
     /// # Inputs
     ///
-    /// * `hpke_config_list` is the sequence of HPKE configs, the first belonging to the Leader and the
-    /// remainder belonging to the Helpers. Note that the current draft only supports one Helper,
-    /// so this method will return an error if `hpke_config_list.len() != 2`.
+    /// * `hpke_config_list` is the sequence of HPKE configs, the first belonging to the Leader and
+    ///   the remainder belonging to the Helpers. Note that the current draft only supports one
+    ///   Helper, so this method will return an error if `hpke_config_list.len() != 2`.
     ///
     /// * `now` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
-    /// ensure this value is truncated to the nearest `min_batch_duration`, as required by the
-    /// spec.
+    ///   ensure this value is truncated to the nearest `min_batch_duration`, as required by the
+    ///   spec.
     ///
     /// * `task_id` is the DAP task for which this report is being generated.
     ///
@@ -152,13 +152,13 @@ impl VdafConfig {
     ///
     /// # Inputs
     ///
-    /// * `hpke_config_list` is the sequence of HPKE configs, the first belonging to the Leader and the
-    /// remainder belonging to the Helpers. Note that the current draft only supports one Helper,
-    /// so this method will return an error if `hpke_config_list.len() != 2`.
+    /// * `hpke_config_list` is the sequence of HPKE configs, the first belonging to the Leader and
+    ///   the remainder belonging to the Helpers. Note that the current draft only supports one
+    ///   Helper, so this method will return an error if `hpke_config_list.len() != 2`.
     ///
-    /// * `time` is the number of seconds since the UNIX epoch. It is the caller's responsibility to
-    /// ensure this value is truncated to the nearest `min_batch_duration`, as required by the
-    /// spec.
+    /// * `time` is the number of seconds since the UNIX epoch. It is the caller's responsibility
+    ///   to ensure this value is truncated to the nearest `min_batch_duration`, as required by the
+    ///   spec.
     ///
     /// * `task_id` is the DAP task for which this report is being generated.
     ///

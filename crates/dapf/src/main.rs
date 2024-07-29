@@ -224,7 +224,7 @@ enum Action {
     /// - Bearer Token: Export `LEADER_BEARER_TOKEN` containing the bearer token to use.
     ///
     /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
-    /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
+    ///   `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
     Aggregate {
         #[arg(env)]
         helper_url: Url,
@@ -249,7 +249,7 @@ enum Action {
     /// - Bearer Token: Export `LEADER_BEARER_TOKEN` containing the bearer token to use.
     ///
     /// - Mutual TLS: Export `LEADER_TLS_CLIENT_CERT` containing a client certificate and
-    /// `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
+    ///   `LEADER_TLS_CLIENT_KEY` containing the certificate's private key.
     LoadTest {
         #[arg(env)]
         helper_url: Url,

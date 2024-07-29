@@ -107,8 +107,8 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     /// # Parameters
     ///
     /// * `norm_bound`: Maximum L2-norm of each gradient, encoded as follows. Let `b: f64` denote
-    /// the desired L2-norm bound. We expect this parameter to be computed by multiplying `b` by
-    /// `2^frac_bits`, taking the floor, and converting to an integer.
+    ///   the desired L2-norm bound. We expect this parameter to be computed by multiplying `b` by
+    ///   `2^frac_bits`, taking the floor, and converting to an integer.
     ///
     /// * `dimension`: Length of each gradient
     ///
@@ -318,6 +318,8 @@ fn norm_bound_f64_to_u64(norm_bound: f64, frac_bits: usize) -> u64 {
     let two_to_frac_bits = f64::from(1 << frac_bits);
     let norm_bound = norm_bound * two_to_frac_bits;
     let norm_bound = norm_bound.floor();
+    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_possible_truncation)]
     let norm_bound = norm_bound as u64;
     norm_bound
 }
