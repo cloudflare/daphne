@@ -27,7 +27,7 @@ impl VdafConfig {
     /// * `batch_interval` is the batch interval for the aggregate share.
     ///
     /// * `encrypted_agg_shares` is the set of encrypted aggregate shares produced by the
-    /// Aggregators. The first encrypted aggregate shares must be the Leader's.
+    ///   Aggregators. The first encrypted aggregate shares must be the Leader's.
     ///
     /// * `version` is the `DapVersion` to use.
     #[allow(clippy::too_many_arguments)]

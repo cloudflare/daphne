@@ -10,7 +10,7 @@
 //! * either:
 //!     - `$LEADER_BEARER_TOKEN`: The bearer token (a string)
 //!     - `$LEADER_TLS_CLIENT_CERT` and `$LEADER_TLS_CLIENT_KEY`: The client certificate and client
-//!     private key.
+//!        private key.
 //!
 //! Optionally the following variables can also be defined to override default values:
 //! * `$VDAF_CONFIG`: A json serialized vdaf configuration to run.

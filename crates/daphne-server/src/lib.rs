@@ -23,7 +23,7 @@ mod storage_proxy_connection;
 ///
 /// It can be constructed from:
 /// - a `url` that points to a cloudflare worker which serves as proxy for the storage
-/// implementation.
+///   implementation.
 /// - an implementation of [`DaphneServiceMetrics`].
 /// - a [`DaphneServiceConfig`].
 ///
