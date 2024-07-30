@@ -19,7 +19,7 @@
 use prio::{
     field::FftFriendlyFieldElement,
     flp::{
-        gadgets::{Mul, ParallelSum, ParallelSumGadget},
+        gadgets::{Mul, ParallelSum, ParallelSumGadget, PolyEval},
         FlpError, Gadget, Type,
     },
     vdaf::{
@@ -487,7 +487,10 @@ impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
 
     fn gadget(&self) -> Vec<Box<dyn Gadget<F>>> {
         vec![Box::new(ParallelSum::new(
-            Mul::new(self.cfg.gadget_calls_sq_norm_equality_check),
+            PolyEval::new(
+                vec![F::zero(), F::zero(), F::one()], // Square
+                self.cfg.gadget_calls_sq_norm_equality_check,
+            ),
             self.cfg.chunk_len,
         ))]
     }
@@ -499,7 +502,7 @@ impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
         _joint_rand: &[F],
         _num_shares: usize,
     ) -> Result<F, FlpError> {
-        let mut buf = Vec::with_capacity(self.cfg.chunk_len * 2);
+        let mut buf = Vec::with_capacity(self.cfg.chunk_len);
 
         // Unpack the encoded measurement. It is composed of the following components:
         //
@@ -533,7 +536,6 @@ impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
             .map(|chunk| {
                 for x in chunk {
                     buf.push(*x);
-                    buf.push(*x);
                 }
                 for _ in buf.len()..buf.capacity() {
                     buf.push(F::zero());
@@ -558,13 +560,13 @@ impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
     }
 
     fn proof_len(&self) -> usize {
-        2 * self.cfg.chunk_len
+        self.cfg.chunk_len
             + 2 * ((1 + self.cfg.gadget_calls_sq_norm_equality_check).next_power_of_two() - 1)
             + 1
     }
 
     fn verifier_len(&self) -> usize {
-        2 * self.cfg.chunk_len + 2
+        self.cfg.chunk_len + 2
     }
 
     fn output_len(&self) -> usize {
@@ -576,7 +578,7 @@ impl<F: FftFriendlyFieldElement> Type for PineSquaredNormEqualityCheck<F> {
     }
 
     fn prove_rand_len(&self) -> usize {
-        self.cfg.chunk_len * 2
+        self.cfg.chunk_len
     }
 
     fn query_rand_len(&self) -> usize {
