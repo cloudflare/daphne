@@ -9,7 +9,6 @@ use tracing::error;
 
 use super::{check_batch, check_request_content_type, resolve_taskprov, DapAggregator};
 use crate::{
-    audit_log::AggregationJobAuditAction,
     constants::DapMediaType,
     error::DapAbort,
     messages::{
@@ -78,7 +77,6 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
         &agg_job_init_req.agg_param,
     )?;
 
-    let prep_init_count = agg_job_init_req.prep_inits.len();
     let part_batch_sel = agg_job_init_req.part_batch_sel.clone();
     let initialized_reports = task_config
         .consume_agg_job_req(
@@ -107,11 +105,10 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     };
 
     aggregator.audit_log().on_aggregation_job(
-        aggregator.host(),
         task_id,
         task_config,
-        prep_init_count as u64,
-        AggregationJobAuditAction::Init,
+        agg_job_resp.transitions.len() as u64,
+        0, /* vdaf step */
     );
 
     metrics.inbound_req_inc(DaphneRequestType::Aggregate);

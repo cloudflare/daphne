@@ -36,8 +36,6 @@ pub type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;
 /// Daphne service configuration, including long-lived parameters used across DAP tasks.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DaphneServiceConfig {
-    pub env: String,
-
     /// Indicates the role the service should play.
     pub role: DapRole,
 
