@@ -7,7 +7,7 @@
 pub mod report_generator;
 
 use crate::{
-    audit_log::{AggregationJobAuditAction, AuditLog},
+    audit_log::AuditLog,
     auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     fatal_error,
@@ -488,11 +488,10 @@ impl MockAuditLog {
 impl AuditLog for MockAuditLog {
     fn on_aggregation_job(
         &self,
-        _host: &str,
         _task_id: &TaskId,
         _task_config: &DapTaskConfig,
         _report_count: u64,
-        _action: AggregationJobAuditAction,
+        _vdaf_step: u8,
     ) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
@@ -1002,10 +1001,6 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 
     fn audit_log(&self) -> &dyn AuditLog {
         &self.audit_log
-    }
-
-    fn host(&self) -> &str {
-        "unspecified-host"
     }
 }
 

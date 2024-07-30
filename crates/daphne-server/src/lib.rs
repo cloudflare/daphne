@@ -3,7 +3,12 @@
 
 use std::sync::Arc;
 
-use daphne::{auth::BearerToken, roles::leader::in_memory_leader::InMemoryLeaderState, DapError};
+use daphne::{
+    audit_log::{AuditLog, NoopAuditLog},
+    auth::BearerToken,
+    roles::leader::in_memory_leader::InMemoryLeaderState,
+    DapError,
+};
 use daphne_service_utils::{config::DaphneServiceConfig, metrics::DaphneServiceMetrics};
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -50,7 +55,6 @@ mod storage_proxy_connection;
 ///     default_num_agg_span_shards: NonZeroUsize::new(2).unwrap(),
 /// };
 /// let service_config = DaphneServiceConfig {
-///     env: "some-machine-identifier".into(),
 ///     role: DapRole::Helper,
 ///     global,
 ///     base_url: None,
@@ -74,6 +78,7 @@ pub struct App {
     cache: RwLock<kv::Cache>,
     metrics: Box<dyn DaphneServiceMetrics>,
     service_config: DaphneServiceConfig,
+    audit_log: Box<dyn AuditLog + Send + Sync>,
 
     /// Volatile memory for the Leader, including the work queue, pending reports, and pending
     /// colleciton requests. Note that in a production Leader, it is necessary to store this state
@@ -112,9 +117,17 @@ impl App {
             http: reqwest::Client::new(),
             cache: Default::default(),
             metrics: Box::new(daphne_service_metrics),
+            audit_log: Box::new(NoopAuditLog),
             service_config,
             test_leader_state: Default::default(),
         })
+    }
+
+    pub fn set_audit_log<A>(&mut self, audit_log: A)
+    where
+        A: AuditLog + Send + Sync + 'static,
+    {
+        self.audit_log = Box::new(audit_log);
     }
 
     pub(crate) fn durable(&self) -> Do<'_> {

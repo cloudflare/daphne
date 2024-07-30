@@ -161,10 +161,6 @@ pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
 
     /// Access the audit log.
     fn audit_log(&self) -> &dyn AuditLog;
-
-    /// Return the hostname of the request URL. The value is "unspecified-host" if the URL does not
-    /// indicate a hostname.
-    fn host(&self) -> &str;
 }
 
 /// Handle request for the Aggregator's HPKE configuration.

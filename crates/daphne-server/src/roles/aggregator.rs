@@ -5,7 +5,7 @@ use std::{borrow::Cow, future::ready, num::NonZeroUsize, ops::Range, time::Syste
 
 use axum::async_trait;
 use daphne::{
-    audit_log::{AuditLog, NoopAuditLog},
+    audit_log::AuditLog,
     auth::{BearerToken, BearerTokenProvider},
     error::DapAbort,
     fatal_error,
@@ -384,11 +384,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
     }
 
     fn audit_log(&self) -> &dyn AuditLog {
-        &NoopAuditLog
-    }
-
-    fn host(&self) -> &str {
-        &self.service_config.env
+        &*self.audit_log
     }
 }
 
