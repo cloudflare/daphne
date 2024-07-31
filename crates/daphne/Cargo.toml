@@ -18,6 +18,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 async-trait.workspace = true
 base64.workspace = true
+bitvec.workspace = true
 deepsize = { workspace = true, optional = true }
 futures.workspace = true
 hex.workspace = true

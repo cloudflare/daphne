@@ -17,7 +17,7 @@
 //! [ROCT23]: https://arxiv.org/abs/2311.10237
 
 use prio::{
-    field::FftFriendlyFieldElement,
+    field::{FftFriendlyFieldElement, FieldPrio2},
     flp::{
         gadgets::{Mul, ParallelSum, ParallelSumGadget, PolyEval},
         FlpError, Gadget, Type,
@@ -40,6 +40,54 @@ pub struct PineType<F> {
     pub(crate) cfg: PineConfig<F>,
 }
 
+impl PineType<FieldPrio2> {
+    /// XXX Avoid reductions by adding in the integer space.
+    pub fn fast_run_wr_tests(
+        &self,
+        gradient: &[FieldPrio2],
+        wr_joint_rand_seed: &Seed<32>,
+    ) -> [FieldPrio2; NUM_WR_TESTS] {
+        let mut xof = XofHmacSha256Aes128::seed_stream(
+            wr_joint_rand_seed,
+            &self.cfg.dst(USAGE_WR_JOINT_RAND),
+            &[],
+        );
+        let mut buf = vec![0_u8; chunk_count(4, NUM_WR_TESTS * self.cfg.dimension)];
+        xof.fill(&mut buf[..]);
+
+        let mut wr_test_results_add = [0_u64; NUM_WR_TESTS];
+        let mut wr_test_results_sub = [0_u64; NUM_WR_TESTS];
+        let mut i = 0;
+        for x in gradient.iter().map(|elem| u32::from(*elem) as u64) {
+            for j in 0..NUM_WR_TESTS {
+                // TODO spec: Consider reversing the order in which we read the byte. We can save a
+                // little computation if we can get rid of the subtraction below.
+                let rand_bits = (buf[i >> 3] >> (6 - (i & 7))) & 0b11;
+                match rand_bits {
+                    0b00 => wr_test_results_sub[j] += x,
+                    0b11 => wr_test_results_add[j] += x,
+                    _ => (),
+                };
+                i += 2;
+            }
+        }
+
+        wr_test_results_add
+            .into_iter()
+            .zip(wr_test_results_sub.into_iter())
+            .map(|(add, sub)| {
+                if add > sub {
+                    FieldPrio2::from(u32::try_from(add - sub).unwrap())
+                } else {
+                    -FieldPrio2::from(u32::try_from(sub - add).unwrap())
+                }
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
+
 impl<F: FftFriendlyFieldElement> PineType<F> {
     /// Encode a gradient using the provided seed for the wraparound tests.
     ///
@@ -60,7 +108,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     /// buffer is expected to be empty.
     ///
     /// In case of error, the buffer may have been modified and must be cleared before re-use.
-    pub(crate) fn append_encoded_gradient(
+    pub fn append_encoded_gradient(
         &self,
         meas: &mut Vec<F>,
         gradient: impl Iterator<Item = f64>,
@@ -147,11 +195,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
 
     /// Run the wraparound tests. For each test, compute the dot product of the gradient and a
     /// random `{-1, 0, 1}`-vector derived from the provided seed.
-    pub(crate) fn run_wr_tests(
-        &self,
-        gradient: &[F],
-        wr_joint_rand_seed: &Seed<32>,
-    ) -> [F; NUM_WR_TESTS] {
+    pub fn run_wr_tests(&self, gradient: &[F], wr_joint_rand_seed: &Seed<32>) -> [F; NUM_WR_TESTS] {
         let mut xof = XofHmacSha256Aes128::seed_stream(
             wr_joint_rand_seed,
             &self.cfg.dst(USAGE_WR_JOINT_RAND),
@@ -823,5 +867,26 @@ mod tests {
         }
 
         FlpTest::expect_invalid::<2>(&pine.flp, &input);
+    }
+
+    #[ignore = "We now consume the rand bits in a different order"]
+    #[test]
+    fn fast_run_wr_tests() {
+        const DIM: usize = 1_000;
+        let norm_bound = norm_bound_f64_to_u64(1.0, 15);
+        let pine = Pine::new_32(norm_bound, DIM, 15, 4).unwrap();
+
+        let mut meas = Vec::new();
+        pine.flp
+            .append_encoded_gradient(&mut meas, [0.001; DIM].into_iter())
+            .unwrap();
+        let seed = Seed::generate().unwrap();
+        let want = pine
+            .flp
+            .run_wr_tests(&meas[..pine.flp.cfg.dimension], &seed);
+        let got = pine
+            .flp
+            .fast_run_wr_tests(&meas[..pine.flp.cfg.dimension], &seed);
+        assert_eq!(got, want);
     }
 }
