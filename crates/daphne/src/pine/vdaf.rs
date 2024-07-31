@@ -10,7 +10,7 @@ use prio::{
     field::FftFriendlyFieldElement,
     flp::Type,
     vdaf::{
-        xof::{IntoFieldVec, Seed, Xof, XofTurboShake128},
+        xof::{IntoFieldVec, Seed, Xof, XofHmacSha256Aes128},
         Aggregatable, Aggregator, Client, Collector, PrepareTransition, Vdaf, VdafError,
     },
 };
@@ -97,12 +97,12 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     fn joint_rand_part(
         &self,
         agg_id: u8,
-        blind: &[u8; 16],
+        blind: &[u8; 32],
         nonce: &[u8; 16],
         meas_share: &[F],
         usage: u16,
-    ) -> Seed<16> {
-        let mut xof = XofTurboShake128::init(blind, &self.flp.cfg.dst(usage));
+    ) -> Seed<32> {
+        let mut xof = XofHmacSha256Aes128::init(blind, &self.flp.cfg.dst(usage));
         xof.update(&[agg_id]);
         xof.update(nonce);
         let mut buf = Vec::with_capacity(F::ENCODED_SIZE);
@@ -114,22 +114,22 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
         xof.into_seed()
     }
 
-    fn joint_rand_seed(&self, joint_rand_parts: &[Seed<16>; 2], usage: u16) -> Seed<16> {
-        let mut xof = XofTurboShake128::init(&[0; 16], &self.flp.cfg.dst(usage));
+    fn joint_rand_seed(&self, joint_rand_parts: &[Seed<32>; 2], usage: u16) -> Seed<32> {
+        let mut xof = XofHmacSha256Aes128::init(&[0; 32], &self.flp.cfg.dst(usage));
         xof.update(joint_rand_parts[0].as_ref());
         xof.update(joint_rand_parts[1].as_ref());
         xof.into_seed()
     }
 
-    fn helper_meas_share(&self, seed: &[u8; 16]) -> Vec<F> {
-        let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_MEAS_SHARE));
+    fn helper_meas_share(&self, seed: &[u8; 32]) -> Vec<F> {
+        let mut xof = XofHmacSha256Aes128::init(seed, &self.flp.cfg.dst(USAGE_MEAS_SHARE));
         xof.update(&[1]); // agg_id
         xof.into_seed_stream()
             .into_field_vec(self.flp.cfg.encoded_input_len)
     }
 
-    fn helper_proof_share(&self, seed: &[u8; 16]) -> Vec<F> {
-        let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
+    fn helper_proof_share(&self, seed: &[u8; 32]) -> Vec<F> {
+        let mut xof = XofHmacSha256Aes128::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
         xof.update(&[self.flp.cfg.num_proofs, 1]); // num_proofs, agg_id
         xof.into_seed_stream().into_field_vec(
             self.flp_sq_norm_equality_check.proof_len()
@@ -156,7 +156,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
         &self,
         gradient: &[f64],
         nonce: &[u8; 16],
-        rand: [[u8; 16]; NUM_SHARD_RAND_SEEDS],
+        rand: [[u8; 32]; NUM_SHARD_RAND_SEEDS],
     ) -> Result<(msg::PublicShare, Vec<msg::InputShare<F>>), VdafError> {
         let mut meas = Vec::with_capacity(self.flp.input_len());
         self.flp
@@ -235,7 +235,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
                 let vf_joint_rand_seed =
                     self.joint_rand_seed(&vf_joint_rand_parts, USAGE_VF_JOINT_RAND_SEED);
 
-                XofTurboShake128::seed_stream(
+                XofHmacSha256Aes128::seed_stream(
                     &vf_joint_rand_seed,
                     &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
                     &[self.flp.cfg.num_proofs],
@@ -245,7 +245,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 
             let prove_rands = {
                 let mut xof =
-                    XofTurboShake128::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
+                    XofHmacSha256Aes128::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.into_seed_stream().into_field_vec(
                     self.flp_sq_norm_equality_check.prove_rand_len()
@@ -310,8 +310,8 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 #[derive(Clone, Debug)]
 pub struct PinePrepState<F> {
     gradient_share: Vec<F>,
-    corrected_wr_joint_rand_seed: Seed<16>,
-    corrected_vf_joint_rand_seed: Seed<16>,
+    corrected_wr_joint_rand_seed: Seed<32>,
+    corrected_vf_joint_rand_seed: Seed<32>,
     pub(crate) verifiers_len: usize,
 }
 
@@ -323,14 +323,14 @@ impl<F: FftFriendlyFieldElement> PartialEq for PinePrepState<F> {
 
 impl<F: FftFriendlyFieldElement> Eq for PinePrepState<F> {}
 
-impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
+impl<F: FftFriendlyFieldElement> Aggregator<32, 16> for Pine<F> {
     type PrepareState = PinePrepState<F>;
     type PrepareShare = msg::PrepShare<F>;
     type PrepareMessage = msg::Prep;
 
     fn prepare_init(
         &self,
-        verify_key: &[u8; 16],
+        verify_key: &[u8; 32],
         agg_id: usize,
         _agg_param: &(),
         nonce: &[u8; 16],
@@ -424,7 +424,7 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
         // Query the proofs.
         let verifiers_share = {
             let corrected_vf_joint_rands = {
-                XofTurboShake128::seed_stream(
+                XofHmacSha256Aes128::seed_stream(
                     &corrected_vf_joint_rand_seed,
                     &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
                     &[self.flp.cfg.num_proofs],
@@ -434,7 +434,7 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
 
             let query_rands = {
                 let mut xof =
-                    XofTurboShake128::init(verify_key, &self.flp.cfg.dst(USAGE_QUERY_RAND));
+                    XofHmacSha256Aes128::init(verify_key, &self.flp.cfg.dst(USAGE_QUERY_RAND));
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.update(nonce);
                 xof.into_seed_stream().into_field_vec(
@@ -561,7 +561,7 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
         &self,
         state: PinePrepState<F>,
         input: msg::Prep,
-    ) -> Result<PrepareTransition<Self, 16, 16>, VdafError> {
+    ) -> Result<PrepareTransition<Self, 32, 16>, VdafError> {
         if state.corrected_wr_joint_rand_seed != input.wr_joint_rand_seed {
             return Err(VdafError::Uncategorized(
                 "wraparound joint randomness check failed".into(),
@@ -721,10 +721,10 @@ mod tests {
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
-        assert_matches!(public_share, msg::PublicShare{ ref mut wr_joint_rand_parts, .. }  => wr_joint_rand_parts[0] = Seed::get_decoded(&[0; 16]).unwrap());
+        assert_matches!(public_share, msg::PublicShare{ ref mut wr_joint_rand_parts, .. }  => wr_joint_rand_parts[0] = Seed::get_decoded(&[0; 32]).unwrap());
         assert!(run_vdaf_prepare(
             &pine,
-            &[0; 16],
+            &[0; 32],
             &(),
             &nonce,
             public_share.clone(),
@@ -741,10 +741,10 @@ mod tests {
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
-        assert_matches!(public_share, msg::PublicShare{ wr_joint_rand_parts: _, ref mut vf_joint_rand_parts, .. }  => vf_joint_rand_parts[0] = Seed::get_decoded(&[0; 16]).unwrap());
+        assert_matches!(public_share, msg::PublicShare{ wr_joint_rand_parts: _, ref mut vf_joint_rand_parts, .. }  => vf_joint_rand_parts[0] = Seed::get_decoded(&[0; 32]).unwrap());
         assert!(run_vdaf_prepare(
             &pine,
-            &[0; 16],
+            &[0; 32],
             &(),
             &nonce,
             public_share.clone(),
@@ -764,7 +764,7 @@ mod tests {
         assert_matches!(input_shares[0], msg::InputShare(msg::InputShareFor::Leader{ meas_share: _, ref mut proofs_share, ..}) => proofs_share[0] += Field128::from(1337));
         assert!(run_vdaf_prepare(
             &pine,
-            &[0; 16],
+            &[0; 32],
             &(),
             &nonce,
             public_share.clone(),
@@ -784,7 +784,7 @@ mod tests {
         assert_matches!(input_shares[0], msg::InputShare(msg::InputShareFor::Leader{ ref mut meas_share, ..}) => meas_share[0] += Field128::from(1337));
         assert!(run_vdaf_prepare(
             &pine,
-            &[0; 16],
+            &[0; 32],
             &(),
             &nonce,
             public_share.clone(),

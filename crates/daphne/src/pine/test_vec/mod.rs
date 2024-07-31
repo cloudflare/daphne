@@ -69,13 +69,13 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
-        let verify_key = <[u8; 16]>::try_from(test_vec.verify_key.as_ref()).unwrap();
+        let verify_key = <[u8; 32]>::try_from(test_vec.verify_key.as_ref()).unwrap();
         for report in &test_vec.reports {
             let rand = report
                 .rand
                 .as_ref()
                 .chunks(16)
-                .map(|seed| <[u8; 16]>::try_from(seed).unwrap())
+                .map(|seed| <[u8; 32]>::try_from(seed).unwrap())
                 .take(7)
                 .collect::<Vec<_>>();
             let nonce = <[u8; 16]>::try_from(report.nonce.as_ref()).unwrap();

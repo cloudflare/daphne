@@ -23,7 +23,7 @@ use prio::{
         FlpError, Gadget, Type,
     },
     vdaf::{
-        xof::{Seed, Xof, XofTurboShake128},
+        xof::{Seed, Xof, XofHmacSha256Aes128},
         VdafError,
     },
 };
@@ -48,7 +48,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     pub fn encode_with_wr_joint_rand(
         &self,
         gradient: impl Iterator<Item = f64>,
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<32>,
     ) -> Result<(Vec<F>, [F; NUM_WR_TESTS]), VdafError> {
         let mut meas = Vec::with_capacity(self.input_len());
         self.append_encoded_gradient(&mut meas, gradient)?;
@@ -110,7 +110,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     pub(crate) fn append_wr_test_results(
         &self,
         meas: &mut Vec<F>,
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<32>,
     ) -> Result<[F; NUM_WR_TESTS], VdafError> {
         let wr_test_results = self.run_wr_tests(&meas[..self.cfg.dimension], wr_joint_rand_seed);
 
@@ -150,9 +150,9 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     pub(crate) fn run_wr_tests(
         &self,
         gradient: &[F],
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<32>,
     ) -> [F; NUM_WR_TESTS] {
-        let mut xof = XofTurboShake128::seed_stream(
+        let mut xof = XofHmacSha256Aes128::seed_stream(
             wr_joint_rand_seed,
             &self.cfg.dst(USAGE_WR_JOINT_RAND),
             &[],

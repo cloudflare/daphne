@@ -18,7 +18,7 @@ fn pine(c: &mut Criterion) {
         let measurement = vec![0.0; dimension];
         let wr_joint_rand_seed = Seed::generate().unwrap();
         let nonce = [0; 16];
-        let verify_key = [0; 16];
+        let verify_key = [0; 32];
 
         c.bench_with_input(
             BenchmarkId::new("pine/encode", dimension),

@@ -17,8 +17,8 @@ use super::{vdaf::PinePrepState, Pine};
 /// The public share sent by the Client to each Aggregator.
 #[derive(Clone, Debug)]
 pub struct PublicShare {
-    pub(crate) wr_joint_rand_parts: [Seed<16>; 2],
-    pub(crate) vf_joint_rand_parts: [Seed<16>; 2],
+    pub(crate) wr_joint_rand_parts: [Seed<32>; 2],
+    pub(crate) vf_joint_rand_parts: [Seed<32>; 2],
 }
 
 impl std::fmt::Display for PublicShare {
@@ -41,7 +41,7 @@ impl Encode for PublicShare {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(16 * 4)
+        Some(32 * 4)
     }
 }
 
@@ -66,15 +66,15 @@ pub(crate) enum InputShareFor<F> {
     Leader {
         meas_share: Vec<F>,
         proofs_share: Vec<F>,
-        wr_blind: Seed<16>,
-        vf_blind: Seed<16>,
+        wr_blind: Seed<32>,
+        vf_blind: Seed<32>,
     },
 
     Helper {
-        meas_share: Seed<16>,
-        proofs_share: Seed<16>,
-        wr_blind: Seed<16>,
-        vf_blind: Seed<16>,
+        meas_share: Seed<32>,
+        proofs_share: Seed<32>,
+        wr_blind: Seed<32>,
+        vf_blind: Seed<32>,
     },
 }
 
@@ -131,9 +131,9 @@ impl<F: FftFriendlyFieldElement> Encode for InputShare<F> {
                 proofs_share,
                 ..
             } => Some(
-                meas_share.len() * F::ENCODED_SIZE + proofs_share.len() * F::ENCODED_SIZE + 16 * 2,
+                meas_share.len() * F::ENCODED_SIZE + proofs_share.len() * F::ENCODED_SIZE + 32 * 2,
             ),
-            InputShareFor::Helper { .. } => Some(16 * 4),
+            InputShareFor::Helper { .. } => Some(32 * 4),
         }
     }
 }
@@ -176,8 +176,8 @@ impl<F: FftFriendlyFieldElement> ParameterizedDecode<(&Pine<F>, usize)> for Inpu
 #[derive(Clone, Debug)]
 pub struct PrepShare<F> {
     pub(crate) verifiers_share: Vec<F>,
-    pub(crate) wr_joint_rand_part: Seed<16>,
-    pub(crate) vf_joint_rand_part: Seed<16>,
+    pub(crate) wr_joint_rand_part: Seed<32>,
+    pub(crate) vf_joint_rand_part: Seed<32>,
 }
 
 impl<F: FftFriendlyFieldElement> std::fmt::Display for PrepShare<F> {
@@ -201,7 +201,7 @@ impl<F: FftFriendlyFieldElement> Encode for PrepShare<F> {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(self.verifiers_share.len() * F::ENCODED_SIZE + 16 * 2)
+        Some(self.verifiers_share.len() * F::ENCODED_SIZE + 32 * 2)
     }
 }
 
@@ -223,8 +223,8 @@ impl<F: FftFriendlyFieldElement> ParameterizedDecode<PinePrepState<F>> for PrepS
 /// The prep message combined from the prep shares.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Prep {
-    pub(crate) wr_joint_rand_seed: Seed<16>,
-    pub(crate) vf_joint_rand_seed: Seed<16>,
+    pub(crate) wr_joint_rand_seed: Seed<32>,
+    pub(crate) vf_joint_rand_seed: Seed<32>,
 }
 
 impl std::fmt::Display for Prep {
@@ -245,7 +245,7 @@ impl Encode for Prep {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(16 * 2)
+        Some(32 * 2)
     }
 }
 
