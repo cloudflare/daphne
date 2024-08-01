@@ -88,7 +88,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
             assert_eq!(
                 public_share.get_encoded().unwrap(),
                 report.public_share.as_ref(),
-                "public_share",
+                "public share",
             );
             assert_eq!(
                 input_shares[0].get_encoded().unwrap(),

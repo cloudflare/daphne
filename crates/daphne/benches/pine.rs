@@ -10,7 +10,7 @@ use prio::{
 };
 
 fn pine(c: &mut Criterion) {
-    for (dimension, chunk_len, chunk_len_sq_norm_equal) in [(200_000, 150 * 2, 447 * 8)] {
+    for (dimension, chunk_len, chunk_len_sq_norm_equal) in [(200_000, 150 * 2, 447 * 18)] {
         let pine =
             Pine::new_64(1 << 15, dimension, 15, chunk_len, chunk_len_sq_norm_equal).unwrap();
         let measurement = vec![0.0; dimension];
