@@ -34,7 +34,7 @@
 use prio::{
     field::FftFriendlyFieldElement,
     flp::{
-        gadgets::{Mul, ParallelSum, ParallelSumGadget},
+        gadgets::{Mul, ParallelSum, ParallelSumGadget, PolyEval},
         FlpError, Gadget, Type,
     },
     vdaf::{
@@ -174,27 +174,43 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         gradient: &[F],
         wr_joint_rand_seed: &Seed<16>,
     ) -> [F; NUM_WR_TESTS] {
+        debug_assert_eq!(gradient.len(), self.cfg.dimension);
         let mut xof = XofTurboShake128::seed_stream(
             wr_joint_rand_seed,
             &self.cfg.dst(USAGE_WR_JOINT_RAND),
             &[],
         );
-        let mut buf = vec![0_u8; chunk_count(4, NUM_WR_TESTS * self.cfg.dimension)];
-        xof.fill(&mut buf[..]);
+        let rand_len_per_test = chunk_count(4, self.cfg.dimension);
+        let mut rand = vec![0_u8; rand_len_per_test * NUM_WR_TESTS];
+        xof.fill(&mut rand[..]);
 
         let mut wr_test_results = [F::zero(); NUM_WR_TESTS];
-        let mut i = 0;
-        for wr_test_result in &mut wr_test_results {
-            for x in gradient {
-                // TODO spec: Consider reversing the order in which we read the byte. We can save a
-                // little computation if we can get rid of the subtraction below.
-                let rand_bits = (buf[i >> 3] >> (6 - (i & 7))) & 0b11;
-                match rand_bits {
-                    0b00 => *wr_test_result -= *x,
-                    0b11 => *wr_test_result += *x,
+        for (wr_test_result, rand_per_test) in wr_test_results
+            .iter_mut()
+            .zip(rand.chunks(rand_len_per_test))
+        {
+            for (gradient_chunk, mut r) in
+                gradient.chunks_exact(4).zip(rand_per_test.iter().copied())
+            {
+                for x in gradient_chunk {
+                    match r & 3 {
+                        0 => *wr_test_result -= *x,
+                        3 => *wr_test_result += *x,
+                        _ => (),
+                    };
+                    r >>= 2;
+                }
+            }
+
+            let gradient_chunk = gradient.chunks_exact(4).remainder();
+            let mut r = rand_per_test.last().copied().unwrap();
+            for x in gradient_chunk {
+                match r & 3 {
+                    0 => *wr_test_result -= *x,
+                    3 => *wr_test_result += *x,
                     _ => (),
                 };
-                i += 2;
+                r >>= 2;
             }
         }
 
@@ -503,7 +519,10 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
 
     fn gadget(&self) -> Vec<Box<dyn Gadget<F>>> {
         vec![Box::new(ParallelSum::new(
-            Mul::new(self.cfg.gadget_calls_sq_norm_equal),
+            PolyEval::new(
+                vec![F::zero(), F::zero(), F::one()],
+                self.cfg.gadget_calls_sq_norm_equal,
+            ),
             self.cfg.chunk_len_sq_norm_equal,
         ))]
     }
@@ -515,7 +534,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
         _joint_rand: &[F],
         _num_shares: usize,
     ) -> Result<F, FlpError> {
-        let mut buf = Vec::with_capacity(self.cfg.chunk_len_sq_norm_equal * 2);
+        let mut buf = Vec::with_capacity(self.cfg.chunk_len_sq_norm_equal);
         let (encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
         let (sq_norm_v_bits, _rest) = rest.split_at(self.cfg.sq_norm_bits);
 
@@ -526,10 +545,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
         let sq_norm = encoded_gradient
             .chunks(self.cfg.chunk_len_sq_norm_equal)
             .map(|chunk| {
-                for x in chunk {
-                    buf.push(*x);
-                    buf.push(*x);
-                }
+                buf.extend(chunk);
                 for _ in buf.len()..buf.capacity() {
                     buf.push(F::zero());
                 }
@@ -549,13 +565,13 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
     }
 
     fn proof_len(&self) -> usize {
-        2 * self.cfg.chunk_len_sq_norm_equal
+        self.cfg.chunk_len_sq_norm_equal
             + 2 * ((1 + self.cfg.gadget_calls_sq_norm_equal).next_power_of_two() - 1)
             + 1
     }
 
     fn verifier_len(&self) -> usize {
-        2 * self.cfg.chunk_len_sq_norm_equal + 2
+        self.cfg.chunk_len_sq_norm_equal + 2
     }
 
     fn joint_rand_len(&self) -> usize {
@@ -563,7 +579,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
     }
 
     fn prove_rand_len(&self) -> usize {
-        self.cfg.chunk_len_sq_norm_equal * 2
+        self.cfg.chunk_len_sq_norm_equal
     }
 
     fn query_rand_len(&self) -> usize {
