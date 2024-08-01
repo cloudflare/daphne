@@ -201,22 +201,54 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             &self.cfg.dst(USAGE_WR_JOINT_RAND),
             &[],
         );
-        let mut buf = vec![0_u8; chunk_count(4, NUM_WR_TESTS * self.cfg.dimension)];
+        // XXX Calculate this properly
+        let extra_bytes_just_in_case = 100;
+        let mut buf = vec![
+            0_u8;
+            chunk_count(4, NUM_WR_TESTS * self.cfg.dimension)
+                + extra_bytes_just_in_case
+        ];
         xof.fill(&mut buf[..]);
 
         let mut wr_test_results = [F::zero(); NUM_WR_TESTS];
         let mut i = 0;
         for wr_test_result in &mut wr_test_results {
-            for x in gradient {
-                // TODO spec: Consider reversing the order in which we read the byte. We can save a
-                // little computation if we can get rid of the subtraction below.
-                let rand_bits = (buf[i >> 3] >> (6 - (i & 7))) & 0b11;
-                match rand_bits {
-                    0b00 => *wr_test_result -= *x,
-                    0b11 => *wr_test_result += *x,
+            for x in gradient.chunks(4) {
+                let b = buf[i];
+                i += 1;
+
+                match b & 0b11 {
+                    0b00 => *wr_test_result -= x[0],
+                    0b11 => *wr_test_result += x[0],
                     _ => (),
                 };
-                i += 2;
+
+                if x.len() == 1 {
+                    continue;
+                }
+                match (b >> 2) & 0b11 {
+                    0b00 => *wr_test_result -= x[1],
+                    0b11 => *wr_test_result += x[1],
+                    _ => (),
+                };
+
+                if x.len() == 2 {
+                    continue;
+                }
+                match (b >> 4) & 0b11 {
+                    0b00 => *wr_test_result -= x[2],
+                    0b11 => *wr_test_result += x[2],
+                    _ => (),
+                };
+
+                if x.len() == 3 {
+                    continue;
+                }
+                match (b >> 6) & 0b11 {
+                    0b00 => *wr_test_result -= x[3],
+                    0b11 => *wr_test_result += x[3],
+                    _ => (),
+                };
             }
         }
 
@@ -869,7 +901,6 @@ mod tests {
         FlpTest::expect_invalid::<2>(&pine.flp, &input);
     }
 
-    #[ignore = "We now consume the rand bits in a different order"]
     #[test]
     fn fast_run_wr_tests() {
         const DIM: usize = 1_000;

@@ -28,23 +28,23 @@ fn pine(c: &mut Criterion) {
             let wr_joint_rand_seed = Seed::generate().unwrap();
 
             c.bench_with_input(
-                BenchmarkId::new("pine/run_wr_tests", dimension),
-                &dimension,
-                |b, &_d| {
-                    b.iter(|| {
-                        pine.flp
-                            .run_wr_tests(&meas[..dimension], &wr_joint_rand_seed);
-                    });
-                },
-            );
-
-            c.bench_with_input(
                 BenchmarkId::new("pine/fast_run_wr_tests", dimension),
                 &dimension,
                 |b, &_d| {
                     b.iter(|| {
                         pine.flp
                             .fast_run_wr_tests(&meas[..dimension], &wr_joint_rand_seed);
+                    });
+                },
+            );
+
+            c.bench_with_input(
+                BenchmarkId::new("pine/run_wr_tests", dimension),
+                &dimension,
+                |b, &_d| {
+                    b.iter(|| {
+                        pine.flp
+                            .run_wr_tests(&meas[..dimension], &wr_joint_rand_seed);
                     });
                 },
             );
