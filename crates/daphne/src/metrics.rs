@@ -3,10 +3,9 @@
 
 //! Daphne metrics.
 
+use crate::messages::TransitionFailure;
 use core::fmt;
 use std::borrow::Cow;
-
-use crate::messages::TransitionFailure;
 
 pub trait DaphneMetrics: Send + Sync {
     fn inbound_req_inc(&self, request_type: DaphneRequestType);
