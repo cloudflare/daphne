@@ -342,7 +342,13 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
     loop {
         tracing::warn!(id = obj.to_string(), "Getting DO stub");
 
-        match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
+        let stub = if let Some(loc) = option_env!("DAPHNE_DO_REGION") {
+            obj.get_stub_with_location_hint(loc)
+        } else {
+            obj.get_stub()
+        }?;
+
+        match stub.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
                 ctx.metrics.durable_request_retry_count_inc(
                     (attempt - 1).try_into().unwrap(),
