@@ -210,13 +210,33 @@ fn parse_expiration_header(ctx: &RequestContext) -> Result<Option<Time>, worker:
 
 /// Handle a kv request.
 async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::Result<Response> {
+    let start = std::time::Instant::now();
+
     match ctx.req.method() {
         worker::Method::Get => {
-            let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
+            let bytes = ctx
+                .env
+                .kv(KV_BINDING_DAP_CONFIG)
+                .inspect_err(|_| {
+                    ctx.metrics
+                        .kv_request_time_seconds_observe("read", "error", start.elapsed())
+                })?
+                .get(key)
+                .bytes()
+                .await?;
 
-            match bytes {
-                Some(bytes) => Response::from_bytes(bytes),
-                None => Response::error("value not found", 404),
+            let elapsed = start.elapsed();
+
+            if let Some(bytes) = bytes {
+                ctx.metrics
+                    .kv_request_time_seconds_observe("read", "success", elapsed);
+
+                Response::from_bytes(bytes)
+            } else {
+                ctx.metrics
+                    .kv_request_time_seconds_observe("read", "not_found", elapsed);
+
+                Response::error("value not found", 404)
             }
         }
         worker::Method::Post => {
@@ -229,9 +249,21 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             {
                 Ok(mut put) => {
                     if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
+                        ctx.metrics.kv_request_time_seconds_observe(
+                            "post",
+                            "success",
+                            start.elapsed(),
+                        );
+
                         put = put.expiration(expiration_unix_timestamp);
                     }
                     if let Err(error) = put.execute().await {
+                        ctx.metrics.kv_request_time_seconds_observe(
+                            "post",
+                            "error_execute_post",
+                            start.elapsed(),
+                        );
+
                         tracing::warn!(
                             ?error,
                             "Swallowed error from KV POST, this will hopefully retry later"
@@ -262,14 +294,32 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 .into_iter()
                 .any(|k| k.name == key)
             {
+                ctx.metrics.kv_request_time_seconds_observe(
+                    "put",
+                    "error_conflict",
+                    start.elapsed(),
+                );
+
                 Response::error(String::new(), 409 /* Conflict */)
             } else {
                 match kv.put_bytes(key, &ctx.req.bytes().await?) {
                     Ok(mut put) => {
                         if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
+                            ctx.metrics.kv_request_time_seconds_observe(
+                                "put",
+                                "success",
+                                start.elapsed(),
+                            );
+
                             put = put.expiration(expiration_unix_timestamp);
                         }
                         if let Err(error) = put.execute().await {
+                            ctx.metrics.kv_request_time_seconds_observe(
+                                "put",
+                                "error_execute_put",
+                                start.elapsed(),
+                            );
+
                             tracing::warn!(
                                 ?error,
                                 "Swallowed error from KV PUT, this will hopefully retry later"
@@ -289,6 +339,9 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
         }
         worker::Method::Delete => {
             ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
+
+            ctx.metrics
+                .kv_request_time_seconds_observe("delete", "success", start.elapsed());
 
             Response::empty()
         }
@@ -348,8 +401,15 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
             obj.get_stub()
         }?;
 
+        let start = std::time::Instant::now();
+
         match stub.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
+                let elapsed = start.elapsed();
+
+                ctx.metrics
+                    .durable_request_time_seconds_observe(uri, "success", elapsed);
+
                 ctx.metrics.durable_request_retry_count_inc(
                     (attempt - 1).try_into().unwrap(),
                     &parsed_req.binding,
@@ -358,6 +418,11 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
                 return Ok(ok);
             }
             Err(error) => {
+                let elapsed = start.elapsed();
+
+                ctx.metrics
+                    .durable_request_time_seconds_observe(uri, "error", elapsed);
+
                 if attempt < attempts {
                     warn!(
                         binding = parsed_req.binding,
