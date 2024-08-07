@@ -81,9 +81,11 @@ use daphne_service_utils::durable_requests::{
 };
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
 use prometheus::Registry;
-use tracing::warn;
+use tracing::{info_span, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
+
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
 struct RequestContext<'e> {
@@ -132,6 +134,15 @@ pub async fn handle_request(
     env: &Env,
     registry: &Registry,
 ) -> worker::Result<Response> {
+    let span = info_span!("handle_request", path = req.path(), method = ?req.method());
+    {
+        let extractor = crate::tracing_utils::HeaderExtractor::new(&req);
+        let remote_context = opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.extract(&extractor)
+        });
+        span.set_parent(remote_context);
+    }
+
     let mut ctx = RequestContext {
         metrics: Metrics::new(registry),
         req,
@@ -180,10 +191,12 @@ async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
     };
 
     let do_delete = async {
-        let req = Request::new_with_init(
+        let mut req = Request::new_with_init(
             &format!("https://fake-host{}", TestStateCleaner::DeleteAll.to_uri(),),
             RequestInit::new().with_method(worker::Method::Post),
         )?;
+
+        crate::tracing_utils::add_tracing_headers(&mut req);
 
         ctx.env
             .durable_object(TestStateCleaner::BINDING)?
@@ -380,7 +393,9 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
         do_req.with_body(Some(buffer.into()));
     }
     let url = Url::parse("https://fake-host/").unwrap().join(uri).unwrap();
-    let do_req = Request::new_with_init(url.as_str(), &do_req)?;
+    let mut do_req = Request::new_with_init(url.as_str(), &do_req)?;
+
+    crate::tracing_utils::add_tracing_headers(&mut do_req);
 
     let obj = match &parsed_req.id {
         ObjectIdFrom::Name(name) => binding.id_from_name(name)?,
