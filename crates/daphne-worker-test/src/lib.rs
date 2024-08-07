@@ -3,7 +3,7 @@
 
 use daphne_worker::initialize_tracing;
 use tracing::info;
-use worker::{event, Env, Request, Response, Result};
+use worker::{event, Env, HttpRequest};
 
 mod durable;
 mod utils;
@@ -12,7 +12,11 @@ mod utils;
 static CAP: cap::Cap<std::alloc::System> = cap::Cap::new(std::alloc::System, 65_000_000);
 
 #[event(fetch, respond_with_errors)]
-pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
+pub async fn main(
+    req: HttpRequest,
+    env: Env,
+    _ctx: worker::Context,
+) -> worker::Result<daphne_worker::Response> {
     // Optionally, get more helpful error messages written to the console in the case of a panic.
     utils::set_panic_hook();
 
@@ -20,7 +24,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     // before we do anything likely to fail.
     initialize_tracing(&env);
 
-    info!(method = ?req.method(), "{}", req.path());
+    info!(method = ?req.method(), "{}", req.uri().path());
 
-    daphne_worker::storage_proxy::handle_request(req, &env, &prometheus::Registry::new()).await
+    Ok(daphne_worker::storage_proxy::handle_request(req, env, &prometheus::Registry::new()).await)
 }

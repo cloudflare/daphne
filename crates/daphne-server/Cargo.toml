@@ -13,16 +13,16 @@ repository.workspace = true
 description = "Workers backend for Daphne"
 
 [dependencies]
-axum.workspace = true
+axum = "0.6.0"
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 futures.workspace = true
 hex.workspace = true
-http.workspace = true
+http = "0.2"
 hyper.workspace = true
 mappable-rc.workspace = true
-opentelemetry.workspace = true
-opentelemetry-http.workspace = true
+opentelemetry = "0.23.0"
+opentelemetry-http = "0.12.0"
 p256.workspace = true
 prio.workspace = true
 rayon.workspace = true
@@ -33,7 +33,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tower.workspace = true
 tracing.workspace = true
-tracing-opentelemetry.workspace = true
+tracing-opentelemetry = "0.24.0"
 url.workspace = true
 
 [dev-dependencies]

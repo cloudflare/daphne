@@ -71,115 +71,147 @@
 
 mod metrics;
 
-use std::{sync::OnceLock, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 pub use self::metrics::Metrics;
-use daphne::auth::BearerToken;
-use daphne::messages::Time;
+use axum::{
+    extract::{Path, State},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing,
+};
+use axum_extra::{
+    headers::{authorization::Bearer, Authorization},
+    TypedHeader,
+};
+use bytes::Bytes;
+use daphne::messages::{constant_time_eq, Time};
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
+use http::{HeaderMap, Method, StatusCode};
+use opentelemetry_http::HeaderExtractor;
 use prometheus::Registry;
+use tower_service::Service;
 use tracing::{info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
-use worker::{js_sys::Uint8Array, Delay, Env, Request, RequestInit, Response};
+use worker::HttpRequest;
+use worker::{
+    js_sys::Uint8Array, send::SendFuture, Delay, Env, HttpResponse, Request, RequestInit,
+};
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
-struct RequestContext<'e> {
-    req: Request,
-    env: &'e Env,
+struct RequestContext {
+    env: Env,
     metrics: Metrics,
 }
 
-/// Check if the request's authorization. If unauthorized, return the reason why.
-fn unauthorized_reason(ctx: &RequestContext) -> Option<worker::Result<Response>> {
-    static TRUSTED_TOKEN: OnceLock<Option<BearerToken>> = OnceLock::new();
+struct Error(worker::Error);
 
-    let access_denied = |reason| Response::error(format!("Unauthorized: {reason}"), 401);
-    let auth = match ctx.req.headers().get("Authorization") {
-        Ok(Some(auth)) => auth,
-        Ok(None) => return Some(access_denied("missing Authorization header")),
-        Err(e) => return Some(Err(e)),
-    };
-    let Some(provided_token) = auth.strip_prefix("Bearer ").map(BearerToken::from) else {
-        return Some(access_denied("Authorization header has unexpected prefix"));
-    };
+impl From<worker::kv::KvError> for Error {
+    fn from(value: worker::kv::KvError) -> Self {
+        Self(worker::Error::from(value))
+    }
+}
+
+impl From<worker::Error> for Error {
+    fn from(value: worker::Error) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+    }
+}
+
+/// Check if the request's authorization. If unauthorized, return the reason why.
+async fn unauthorized_reason(
+    ctx: State<Arc<RequestContext>>,
+    bearer: TypedHeader<Authorization<Bearer>>,
+    request: axum::extract::Request,
+    mut next: Next,
+) -> axum::response::Response {
+    static TRUSTED_TOKEN: OnceLock<Option<String>> = OnceLock::new();
+
     let Some(trusted_token) = TRUSTED_TOKEN.get_or_init(|| {
         ctx.env
             .var("DAPHNE_SERVER_AUTH_TOKEN")
             .ok()
             .map(|t| t.to_string())
-            .map(BearerToken::from)
     }) else {
         tracing::warn!("trusted bearer token not configured");
-        return Some(Response::error(
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
             "Authorization token for storage proxy is not configured",
-            500,
-        ));
+        )
+            .into_response();
     };
-    if &provided_token != trusted_token {
-        return Some(access_denied("Incorrect authorization token"));
+
+    if !constant_time_eq(bearer.token().as_bytes(), trusted_token.as_bytes()) {
+        return (StatusCode::UNAUTHORIZED, "Incorrect authorization token").into_response();
     }
 
-    None
+    next.call(request.map(axum::body::Body::new)).await.unwrap()
 }
 
 /// Handle a proxy request. This is the entry point of the Worker.
-#[allow(clippy::no_effect_underscore_binding)]
-pub async fn handle_request(
-    req: Request,
-    env: &Env,
-    registry: &Registry,
-) -> worker::Result<Response> {
-    let span = info_span!("handle_request", path = req.path(), method = ?req.method());
+pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> Response {
+    let span = info_span!("handle_request", path = req.uri().path(), method = ?req.method());
     {
-        let extractor = crate::tracing_utils::HeaderExtractor::new(&req);
+        let extractor = HeaderExtractor(req.headers());
         let remote_context = opentelemetry::global::get_text_map_propagator(|propagator| {
             propagator.extract(&extractor)
         });
         span.set_parent(remote_context);
     }
 
-    let mut ctx = RequestContext {
+    let ctx = Arc::new(RequestContext {
         metrics: Metrics::new(registry),
-        req,
         env,
-    };
+    });
 
-    if let Some(error_response) = unauthorized_reason(&ctx) {
-        return error_response;
-    }
+    let router = axum::Router::new()
+        .route(
+            constcat::concat!(KV_PATH_PREFIX, "/:path"),
+            routing::any(handle_kv_request),
+        )
+        .route(
+            constcat::concat!(DO_PATH_PREFIX, "/:path"),
+            routing::any(handle_do_request),
+        );
 
-    let path = ctx.req.path();
-    if let Some(uri) = path
-        .strip_prefix(KV_PATH_PREFIX)
-        .and_then(|s| s.strip_prefix('/'))
-    {
-        handle_kv_request(&mut ctx, uri).await
-    } else if let Some(uri) = path.strip_prefix(DO_PATH_PREFIX) {
-        handle_do_request(&mut ctx, uri).await
-    } else {
-        #[cfg(feature = "test-utils")]
-        if let Some("") = path.strip_prefix(daphne_service_utils::durable_requests::PURGE_STORAGE) {
-            return storage_purge(&ctx).await;
-        } else if let Some("") =
-            path.strip_prefix(daphne_service_utils::durable_requests::STORAGE_READY)
-        {
-            return Response::ok("");
-        }
+    #[cfg(feature = "test-utils")]
+    let router = router
+        .route(
+            daphne_service_utils::durable_requests::PURGE_STORAGE,
+            routing::any(storage_purge),
+        )
+        .route(
+            daphne_service_utils::durable_requests::STORAGE_READY,
+            routing::any(StatusCode::OK),
+        );
 
-        tracing::error!("path {path:?} was invalid");
-        Response::error("invalid base path", 400)
-    }
+    let mut router = router
+        .layer(middleware::from_fn_with_state(
+            ctx.clone(),
+            unauthorized_reason,
+        ))
+        .with_state(ctx);
+    router.call(req).await.unwrap()
 }
 
 #[cfg(feature = "test-utils")]
-/// Clear all storage. Only available to tests
-async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
+async fn storage_purge(ctx: State<Arc<RequestContext>>) -> impl IntoResponse + 'static {
     use daphne_service_utils::durable_requests::bindings::{DurableMethod, TestStateCleaner};
+    use worker::send::SendFuture;
 
     let kv_delete = async {
         let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
@@ -192,7 +224,7 @@ async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
 
     let do_delete = async {
         let mut req = Request::new_with_init(
-            &format!("https://fake-host{}", TestStateCleaner::DeleteAll.to_uri(),),
+            &format!("https://fake-host{}", TestStateCleaner::DeleteAll.to_uri()),
             RequestInit::new().with_method(worker::Method::Post),
         )?;
 
@@ -206,12 +238,18 @@ async fn storage_purge(ctx: &RequestContext<'_>) -> worker::Result<Response> {
             .await
     };
 
-    futures::try_join!(kv_delete, do_delete)?;
-    Response::empty()
+    SendFuture::new(async { futures::try_join!(kv_delete, do_delete) })
+        .await
+        .map(|_| ())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
 }
 
-fn parse_expiration_header(ctx: &RequestContext) -> Result<Option<Time>, worker::Error> {
-    let expiration_header = ctx.req.headers().get(STORAGE_PROXY_PUT_KV_EXPIRATION)?;
+fn parse_expiration_header(headers: &HeaderMap) -> Result<Option<Time>, worker::Error> {
+    let expiration_header = headers
+        .get(STORAGE_PROXY_PUT_KV_EXPIRATION)
+        .map(|h| h.to_str())
+        .transpose()
+        .map_err(|e| worker::Error::RustError(e.to_string()))?;
     expiration_header
         .map(|expiration| {
             expiration.parse::<Time>().map_err(|e| {
@@ -222,62 +260,28 @@ fn parse_expiration_header(ctx: &RequestContext) -> Result<Option<Time>, worker:
 }
 
 /// Handle a kv request.
-async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::Result<Response> {
-    match ctx.req.method() {
-        worker::Method::Get => {
-            let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(key).bytes().await?;
+#[axum_macros::debug_handler]
+async fn handle_kv_request(
+    ctx: State<Arc<RequestContext>>,
+    headers: HeaderMap,
+    method: Method,
+    Path(key): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, Error> {
+    SendFuture::new(async move {
+        match method {
+            Method::GET => {
+                let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(&key).bytes().await?;
 
-            match bytes {
-                Some(bytes) => Response::from_bytes(bytes),
-                None => Response::error("value not found", 404),
-            }
-        }
-        worker::Method::Post => {
-            let expiration_unix_timestamp = parse_expiration_header(ctx)?;
-
-            match ctx
-                .env
-                .kv(KV_BINDING_DAP_CONFIG)?
-                .put_bytes(key, &ctx.req.bytes().await?)
-            {
-                Ok(mut put) => {
-                    if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
-                        put = put.expiration(expiration_unix_timestamp);
-                    }
-                    if let Err(error) = put.execute().await {
-                        tracing::warn!(
-                            ?error,
-                            "Swallowed error from KV POST, this will hopefully retry later"
-                        );
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        "Swallowed error from KV POST creation, this will hopefully retry later"
-                    );
+                match bytes {
+                    Some(bytes) => Ok((StatusCode::OK, bytes).into_response()),
+                    None => Ok((StatusCode::NOT_FOUND, "value not found").into_response()),
                 }
             }
+            Method::POST => {
+                let expiration_unix_timestamp = parse_expiration_header(&headers)?;
 
-            Response::empty()
-        }
-
-        worker::Method::Put => {
-            let expiration_unix_timestamp = parse_expiration_header(ctx)?;
-
-            let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
-            if kv
-                .list()
-                .prefix(key.into())
-                .execute()
-                .await?
-                .keys
-                .into_iter()
-                .any(|k| k.name == key)
-            {
-                Response::error(String::new(), 409 /* Conflict */)
-            } else {
-                match kv.put_bytes(key, &ctx.req.bytes().await?) {
+                match ctx.env.kv(KV_BINDING_DAP_CONFIG)?.put_bytes(&key, &body) {
                     Ok(mut put) => {
                         if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
                             put = put.expiration(expiration_unix_timestamp);
@@ -285,32 +289,78 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                         if let Err(error) = put.execute().await {
                             tracing::warn!(
                                 ?error,
-                                "Swallowed error from KV PUT, this will hopefully retry later"
+                                "Swallowed error from KV POST, this will hopefully retry later"
                             );
                         }
                     }
                     Err(error) => {
                         tracing::warn!(
-                            ?error,
-                            "Swallowed error from KV PUT creation, this will hopefully retry later"
-                        );
+                        ?error,
+                        "Swallowed error from KV POST creation, this will hopefully retry later"
+                    );
                     }
                 }
 
-                Response::empty()
+                Ok(StatusCode::OK.into_response())
             }
-        }
-        worker::Method::Delete => {
-            ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
 
-            Response::empty()
+            Method::PUT => {
+                let expiration_unix_timestamp = parse_expiration_header(&headers)?;
+
+                let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
+                if kv
+                    .list()
+                    .prefix(key.clone())
+                    .execute()
+                    .await?
+                    .keys
+                    .into_iter()
+                    .any(|k| k.name == key)
+                {
+                    Ok(StatusCode::CONFLICT.into_response())
+                } else {
+                    match kv.put_bytes(&key, &body) {
+                        Ok(mut put) => {
+                            if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
+                                put = put.expiration(expiration_unix_timestamp);
+                            }
+                            if let Err(error) = put.execute().await {
+                                tracing::warn!(
+                                    ?error,
+                                    "Swallowed error from KV PUT, this will hopefully retry later"
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                            ?error,
+                            "Swallowed error from KV PUT creation, this will hopefully retry later"
+                        );
+                        }
+                    }
+
+                    Ok(StatusCode::OK.into_response())
+                }
+            }
+            Method::DELETE => {
+                ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(&key).await?;
+
+                Ok(StatusCode::OK.into_response())
+            }
+            _ => Ok(StatusCode::METHOD_NOT_ALLOWED.into_response()),
         }
-        _ => Response::error(String::new(), 405 /* Method not allowed */),
-    }
+    })
+    .await
 }
 
 /// Handle a durable object request
-async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::Result<Response> {
+#[axum_macros::debug_handler]
+async fn handle_do_request(
+    ctx: State<Arc<RequestContext>>,
+    headers: HeaderMap,
+    Path(uri): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, Error> {
     const RETRY_DELAYS: &[Duration] = &[
         Duration::from_millis(100),
         Duration::from_millis(500),
@@ -318,71 +368,72 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
         Duration::from_millis(3_000),
     ];
 
-    let buf = ctx.req.bytes().await.map_err(|e| {
-        tracing::error!(error = ?e, "failed to get bytes");
-        e
-    })?;
-    tracing::debug!(len = buf.len(), "deserializing do request");
-    let parsed_req = DurableRequest::try_from(&buf)
-        .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
+    SendFuture::new(async move {
+        let mut do_req = RequestInit::new();
+        do_req.with_method(worker::Method::Post);
+        do_req.with_headers(headers.into());
+        tracing::debug!(len = body.len(), "deserializing do request");
+        let parsed_req = DurableRequest::try_from(body.as_ref())
+            .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
-    let binding = ctx.env.durable_object(&parsed_req.binding)?;
+        let binding = ctx.env.durable_object(&parsed_req.binding)?;
 
-    let mut do_req = RequestInit::new();
-    do_req.with_method(worker::Method::Post);
-    do_req.with_headers(ctx.req.headers().clone());
-    if let body @ [_a, ..] = parsed_req.body() {
-        let buffer =
-            Uint8Array::new_with_length(body.len().try_into().map_err(|_| {
+        if let body @ [_a, ..] = parsed_req.body() {
+            let buffer = Uint8Array::new_with_length(body.len().try_into().map_err(|_| {
                 worker::Error::RustError(format!("buffer is too long {}", body.len()))
             })?);
-        buffer.copy_from(body);
-        do_req.with_body(Some(buffer.into()));
-    }
-    let url = Url::parse("https://fake-host/").unwrap().join(uri).unwrap();
-    let mut do_req = Request::new_with_init(url.as_str(), &do_req)?;
+            buffer.copy_from(body);
+            do_req.with_body(Some(buffer.into()));
+        }
+        let url = Url::parse("https://fake-host/")
+            .unwrap()
+            .join(&uri)
+            .unwrap();
+        let mut do_req = Request::new_with_init(url.as_str(), &do_req)?;
 
-    crate::tracing_utils::add_tracing_headers(&mut do_req);
+        crate::tracing_utils::add_tracing_headers(&mut do_req);
 
-    let obj = match &parsed_req.id {
-        ObjectIdFrom::Name(name) => binding.id_from_name(name)?,
-        ObjectIdFrom::Hex(hex) => binding.id_from_string(hex)?,
-    };
-    let attempts = if parsed_req.retry {
-        RETRY_DELAYS.len() + 1
-    } else {
-        1
-    };
-    let mut attempt = 1;
-    loop {
-        tracing::warn!(id = obj.to_string(), "Getting DO stub");
+        let obj = match &parsed_req.id {
+            ObjectIdFrom::Name(name) => binding.id_from_name(name.as_str())?,
+            ObjectIdFrom::Hex(hex) => binding.id_from_string(hex.as_str())?,
+        };
+        let attempts = if parsed_req.retry {
+            RETRY_DELAYS.len() + 1
+        } else {
+            1
+        };
+        let mut attempt = 1;
+        loop {
+            tracing::warn!(id = obj.to_string(), "Getting DO stub");
 
-        match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
-            Ok(ok) => {
-                ctx.metrics.durable_request_retry_count_inc(
-                    (attempt - 1).try_into().unwrap(),
-                    &parsed_req.binding,
-                    uri,
-                );
-                return Ok(ok);
-            }
-            Err(error) => {
-                if attempt < attempts {
-                    warn!(
-                        binding = parsed_req.binding,
-                        path = uri,
-                        attempt,
-                        error = ?error,
-                        "DO request failed"
+            match obj.get_stub()?.fetch_with_request(do_req.clone()?).await {
+                Ok(ok) => {
+                    ctx.metrics.durable_request_retry_count_inc(
+                        (attempt - 1).try_into().unwrap(),
+                        &parsed_req.binding,
+                        &uri,
                     );
-                    Delay::from(RETRY_DELAYS[attempt - 1]).await;
-                    attempt += 1;
-                } else {
-                    ctx.metrics
-                        .durable_request_retry_count_inc(-1, &parsed_req.binding, uri);
-                    return Err(error);
+                    return Ok(HttpResponse::try_from(ok).unwrap());
+                }
+                Err(error) => {
+                    if attempt < attempts {
+                        warn!(
+                            binding = parsed_req.binding,
+                            path = uri,
+                            attempt,
+                            error = ?error,
+                            "DO request failed"
+                        );
+                        Delay::from(RETRY_DELAYS[attempt - 1]).await;
+                        attempt += 1;
+                    } else {
+                        ctx.metrics
+                            .durable_request_retry_count_inc(-1, &parsed_req.binding, &uri);
+                        return Err(error.into());
+                    }
                 }
             }
         }
-    }
+    })
+    .await
 }
