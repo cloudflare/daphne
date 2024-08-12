@@ -1,18 +1,33 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! The circuit for the PINE FLP.
+//! Circuits for defining validity of PINE measurements.
 //!
-//! The goal of this circuit is to recognize gradients with bounded L2-norm (hereafter "norm").
-//! This is accomplished by computing the squared norm of the gradient and checking that its value
-//! is in the desired range. We also need to ensure the squared norm is not so large that it wraps
-//! around the field modulus. Otherwise, a squared norm that is too large (or too small) may appear
-//! to be in range when in fact it is not.
+//! A PINE measurement is a vector of `f64`s with a bounded "L2-norm", hereafter "norm". To check
+//! if a given measurement is valid, we compute the squared norm and check that it falls in the
+//! range we expect. We also need to ensure the squared norm is not so large that it wraps around
+//! the field modulus. Otherwise, a squared norm that is too large may appear to be in range when
+//! in fact it is not.
 //!
 //! Wraparound enforcement is accomplished by a sequence of probabilistic tests devised by
 //! [[ROCT23]]. A successful wraparound test indicates, w.h.p., that the squared norm of the
 //! gradient, as it is represented in the field, is a value between 0 and an upper bound that
 //! depends on the circuit parameters.
+//!
+//! This functionality is split into two circuits:
+//!
+//! * [`PineTypeSquaredNormEqual`] computes the squared norm of the gradient and checks that
+//!   it is equal to the value claimed by the client.
+//!
+//! * [`PineType`] checks that the squared norm claimed by the client is in range and checks if the
+//!   wraparound checks succeeded. This type also implements the functionality for encoding the
+//!   gradient and the wraparound test results.
+//!
+//! The functionality is split into two circuits for performance reasons:
+//! [`PineTypeSquaredNormEqual`] does not require joint randomness, which means we can usually get
+//! away with generating one proof for it; [`PineType`] needs joint randomness, which means we must
+//! usually generate more than one proof in order to compensate for offline attacks, especially for
+//! smaller field sizes.
 //!
 //! [ROCT23]: https://arxiv.org/abs/2311.10237
 
@@ -34,7 +49,14 @@ use super::{
     USAGE_WR_JOINT_RAND,
 };
 
-/// The PINE FLP used to check each measurement's validity.
+/// The main FLP used to check each measurement's validity.
+///
+/// The circuit checks that the claimed squared norm is in range and that the wraparound tests
+/// succeeded. This type also implements encoding of the measurement, including running the
+/// wraparound tests.
+///
+/// To ensure a gradient is valid, it is also necessary to run [`PineTypeSquaredNormEqual`] on the
+/// encoded measurement.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PineType<F> {
     pub(crate) cfg: PineConfig<F>,
@@ -232,7 +254,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     ///
     /// (2) The number of reported successes is equal to the expected number of successes.
     ///
-    /// See [ROCT23], Figure 2 for details.
+    /// See [[ROCT23]], Figure 2 for details.
     ///
     /// A test is only successful if the reported result is in the specified range. The range is
     /// chosen so that it is sufficient to bit-check the reported result. See [ROCT23], Remark
@@ -240,6 +262,8 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     ///
     /// These checks are only valid if the bit checks were successful (i.e., the output of
     /// `eval_bit_checks()` was `0`).
+    ///
+    /// [ROCT23]: https://arxiv.org/abs/2311.10237
     fn eval_wr_checks(
         &self,
         buf: &mut Vec<F>,
@@ -303,54 +327,24 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         ))
     }
 
-    /// Check that (1) the reported squared was computed correctly and (2) the squared norm is in
-    /// range. The result is only valid if the bit checks and the wraparound tests were successful
-    /// (i.e., `eval_bit_checks()` and `eval_wr_checks()` each output `0`).
-    fn eval_norm_check(
+    /// Check that the reported squared norm is in range. The result is only valid if the bit
+    /// checks and the wraparound tests were successful, i.e., `eval_bit_checks()` and
+    /// `eval_wr_checks()` each output `0`.
+    fn eval_norm_range_check(
         &self,
-        buf: &mut Vec<F>,
-        gadget: &mut [Box<dyn Gadget<F>>],
-        encoded_gradient: &[F],
         sq_norm_v_bits: &[F],
         sq_norm_u_bits: &[F],
         shares_inv: F,
-    ) -> Result<(F, F), FlpError> {
-        debug_assert_eq!(encoded_gradient.len(), self.cfg.dimension);
+    ) -> Result<F, FlpError> {
         debug_assert_eq!(sq_norm_v_bits.len(), self.cfg.sq_norm_bits);
         debug_assert_eq!(sq_norm_u_bits.len(), self.cfg.sq_norm_bits);
-        debug_assert_eq!(buf.capacity(), self.cfg.chunk_len * 2);
-        buf.clear();
-
-        // Compute the squared norm of the gradient.
-        //
-        // This corresponds to the third call to `parallel_sum()` in the validity circuit of the
-        // reference implementation.
-        let sq_norm = encoded_gradient
-            .chunks(self.cfg.chunk_len)
-            .map(|chunk| {
-                for x in chunk {
-                    buf.push(*x);
-                    buf.push(*x);
-                }
-                for _ in buf.len()..buf.capacity() {
-                    buf.push(F::zero());
-                }
-
-                let y = gadget[0].call(buf);
-                buf.clear();
-                y
-            })
-            .try_fold(F::zero(), |x, y| Ok::<_, FlpError>(x + y?))?;
-
         let sq_norm_v = F::decode_bitvector(sq_norm_v_bits)?;
         let sq_norm_u = F::decode_bitvector(sq_norm_u_bits)?;
 
-        Ok((
-            // The reported squared norm equals the computed squared norm
-            sq_norm_v - sq_norm,
+        Ok(
             // The reported squared norm is in range (see [ROCT223], Figure 1).
             sq_norm_v + sq_norm_u - self.cfg.sq_norm_bound * shares_inv,
-        ))
+        )
     }
 }
 
@@ -360,10 +354,8 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     type Field = F;
 
     fn encode_measurement(&self, _measurement: &()) -> Result<Vec<F>, FlpError> {
-        // Pine can't use this feature of `Type` because the encoding takes an input called the
-        // "wraparound joint randomness" that is derived from secret shares of an intermediate
-        // representation of the input.
-        unreachable!()
+        // PINE uses a randomized encoding, where the randomness is derived by the protocol.
+        unimplemented!("use encode_with_wr_joint_rand() instead")
     }
 
     fn decode_result(&self, data: &[F], _num_measurements: usize) -> Result<Vec<f64>, FlpError> {
@@ -394,7 +386,8 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
 
         // Unpack the encoded measurement. It is composed of the following components:
         //
-        // * The gradient `encoded_gradient`.
+        // * The gradient `encoded_gradient`, not used by this circuit. It is used by
+        // [`PineTypeSquaredNormEqual`] instead.
         //
         // * A pair `(sq_norm_v_bits, sq_norm_u_bits)`, the bit-encoded, range-checked, squared
         //   norm of the gradient.
@@ -404,7 +397,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
         //   whether the test succeeded (i.e., the result is in the specified range).
         //
         // * For each wraparound test, the result `wr_test_result`.
-        let (encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
+        let (_encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
         let (bit_checked, rest) = rest.split_at(self.cfg.bit_checked_len);
         let (wr_test_results, rest) = rest.split_at(NUM_WR_TESTS);
         assert!(rest.is_empty());
@@ -431,19 +424,11 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
             shares_inv,
         )?;
 
-        let (sq_norm_equality_check_result, sq_norm_range_check_result) = self.eval_norm_check(
-            &mut buf,
-            gadget,
-            encoded_gradient,
-            sq_norm_v_bits,
-            sq_norm_u_bits,
-            shares_inv,
-        )?;
+        let sq_norm_range_check_result =
+            self.eval_norm_range_check(sq_norm_v_bits, sq_norm_u_bits, shares_inv)?;
 
         let mut result = bit_check_result;
         let mut r_power = r_final;
-        result += r_power * sq_norm_equality_check_result;
-        r_power *= r_final;
         result += r_power * sq_norm_range_check_result;
         r_power *= r_final;
         result += r_power * wr_tests_result;
@@ -458,7 +443,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     }
 
     fn input_len(&self) -> usize {
-        self.cfg.encoded_input_len + NUM_WR_TESTS
+        self.cfg.input_len()
     }
 
     fn proof_len(&self) -> usize {
@@ -479,6 +464,106 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
 
     fn prove_rand_len(&self) -> usize {
         self.cfg.chunk_len * 2
+    }
+
+    fn query_rand_len(&self) -> usize {
+        1
+    }
+}
+
+/// FLP used to check that the squared norm of the gradient is equal to the claimed value.
+///
+/// To ensure a gradient is valid, it is also necessary to run [`PineType`] on the encoded
+/// measurement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PineTypeSquaredNormEqual<F> {
+    pub(crate) cfg: PineConfig<F>,
+}
+
+impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
+    type Measurement = (); // Not used by this type.
+    type AggregateResult = (); // Not used by this type.
+    type Field = F;
+
+    fn encode_measurement(&self, _measurement: &()) -> Result<Vec<F>, FlpError> {
+        unimplemented!("use PineType to encode the measurement")
+    }
+
+    fn decode_result(&self, _data: &[F], _num_measurements: usize) -> Result<(), FlpError> {
+        unimplemented!("use PineType to decode the aggregate result")
+    }
+
+    fn truncate(&self, _input: Vec<F>) -> Result<Vec<F>, FlpError> {
+        unimplemented!("use PineType to truncate the input")
+    }
+
+    fn output_len(&self) -> usize {
+        unimplemented!("use PineType to truncate the input")
+    }
+
+    fn gadget(&self) -> Vec<Box<dyn Gadget<F>>> {
+        vec![Box::new(ParallelSum::new(
+            Mul::new(self.cfg.gadget_calls_sq_norm_equal),
+            self.cfg.chunk_len_sq_norm_equal,
+        ))]
+    }
+
+    fn valid(
+        &self,
+        gadget: &mut Vec<Box<dyn Gadget<F>>>,
+        meas: &[F],
+        _joint_rand: &[F],
+        _num_shares: usize,
+    ) -> Result<F, FlpError> {
+        let mut buf = Vec::with_capacity(self.cfg.chunk_len_sq_norm_equal * 2);
+        let (encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
+        let (sq_norm_v_bits, _rest) = rest.split_at(self.cfg.sq_norm_bits);
+
+        // Compute the squared norm of the gradient.
+        //
+        // This corresponds to the third call to `parallel_sum()` in the validity circuit of the
+        // reference implementation.
+        let sq_norm = encoded_gradient
+            .chunks(self.cfg.chunk_len_sq_norm_equal)
+            .map(|chunk| {
+                for x in chunk {
+                    buf.push(*x);
+                    buf.push(*x);
+                }
+                for _ in buf.len()..buf.capacity() {
+                    buf.push(F::zero());
+                }
+
+                let y = gadget[0].call(&buf);
+                buf.clear();
+                y
+            })
+            .try_fold(F::zero(), |x, y| Ok::<_, FlpError>(x + y?))?;
+
+        let sq_norm_v = F::decode_bitvector(sq_norm_v_bits)?;
+        Ok(sq_norm_v - sq_norm)
+    }
+
+    fn input_len(&self) -> usize {
+        self.cfg.input_len()
+    }
+
+    fn proof_len(&self) -> usize {
+        2 * self.cfg.chunk_len_sq_norm_equal
+            + 2 * ((1 + self.cfg.gadget_calls_sq_norm_equal).next_power_of_two() - 1)
+            + 1
+    }
+
+    fn verifier_len(&self) -> usize {
+        2 * self.cfg.chunk_len_sq_norm_equal + 2
+    }
+
+    fn joint_rand_len(&self) -> usize {
+        0
+    }
+
+    fn prove_rand_len(&self) -> usize {
+        self.cfg.chunk_len_sq_norm_equal * 2
     }
 
     fn query_rand_len(&self) -> usize {
@@ -511,7 +596,7 @@ mod tests {
         let dimension = 10;
         let frac_bits = 4;
         let norm_bound = norm_bound_f64_to_u64(100.0, frac_bits);
-        let pine = Pine::new_128(norm_bound, dimension, frac_bits, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, frac_bits, 4, 5).unwrap();
 
         // We use whole numbers here so that we can test gradient decoding without losing any
         // precision.
@@ -553,7 +638,7 @@ mod tests {
     fn encode_wr_tests() {
         let mut rng = thread_rng();
         let norm_bound = norm_bound_f64_to_u64(10.0, 15);
-        let pine = Pine::new_128(norm_bound, 10, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, 10, 15, 4, 5).unwrap();
         let gradient = iter::repeat_with(|| rng.gen_range(-0.1..0.1)).take(10);
 
         let (input, wr_test_results) = pine
@@ -593,6 +678,7 @@ mod tests {
             input.extend_from_slice(&wr_test_results);
 
             FlpTest::expect_valid_no_output::<2>(&self.flp, &input);
+            FlpTest::expect_valid_no_output::<3>(&self.flp_sq_norm_equal, &input);
         }
     }
 
@@ -600,7 +686,7 @@ mod tests {
     fn valid() {
         const DIM: usize = 1000;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 27).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 27, 100).unwrap();
         pine.run_valid_test_case((0..DIM).map(|i| i as f64 * 0.01));
     }
 
@@ -608,7 +694,7 @@ mod tests {
     fn valid_small_dimension() {
         const DIM: usize = 1;
         let norm_bound = norm_bound_f64_to_u64(1.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 1).unwrap();
         pine.run_valid_test_case([0.75].into_iter());
     }
 
@@ -616,7 +702,7 @@ mod tests {
     fn valid_negative_values() {
         const DIM: usize = 1337;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 30).unwrap();
         pine.run_valid_test_case((0..DIM).map(|i| i as f64 * -0.01));
     }
 
@@ -624,7 +710,7 @@ mod tests {
     fn valid_random_values() {
         const DIM: usize = 1000;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 99).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 99).unwrap();
         let mut rng = thread_rng();
         pine.run_valid_test_case(iter::repeat_with(|| rng.gen_range(-0.1..0.1)).take(DIM));
     }
@@ -633,7 +719,7 @@ mod tests {
     fn invalid_mutated_gradient() {
         const DIM: usize = 10;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -643,14 +729,17 @@ mod tests {
         // Tweak the last coordinate of the gradient.
         input[DIM - 1] += Field128::from(1);
 
-        FlpTest::expect_invalid::<2>(&pine.flp, &input);
+        FlpTest::expect_invalid::<2>(
+            &pine.flp_sq_norm_equal,
+            &input[..pine.flp_sq_norm_equal.input_len()],
+        );
     }
 
     #[test]
     fn invalid_mutated_sq_norm() {
         const DIM: usize = 10;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -671,7 +760,7 @@ mod tests {
     fn invalid_mutated_wr_result() {
         const DIM: usize = 10;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -693,7 +782,7 @@ mod tests {
     fn invalid_mutated_success_bit() {
         const DIM: usize = 10;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
@@ -716,7 +805,7 @@ mod tests {
     fn invalid_dot_prod_mismatch() {
         const DIM: usize = 10;
         let norm_bound = norm_bound_f64_to_u64(100.0, 15);
-        let pine = Pine::new_128(norm_bound, DIM, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
             .encode_with_wr_joint_rand([0.1; DIM].into_iter(), &Seed::generate().unwrap())

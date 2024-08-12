@@ -23,6 +23,7 @@ pub struct PineConfig {
     pub dimension: usize,
     pub frac_bits: usize,
     pub chunk_len: usize,
+    pub chunk_len_sq_norm_equal: usize,
     pub var: PineVariant,
 }
 
@@ -33,6 +34,7 @@ impl std::fmt::Display for PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
@@ -42,7 +44,7 @@ impl std::fmt::Display for PineConfig {
 
         write!(
             f,
-            "Pine{var_suffix}({norm_bound},{dimension},{frac_bits},{chunk_len})"
+            "Pine{var_suffix}({norm_bound},{dimension},{frac_bits},{chunk_len},{chunk_len_sq_norm_equal})"
         )
     }
 }
@@ -65,6 +67,7 @@ impl PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
@@ -76,8 +79,14 @@ impl PineConfig {
 
         match var {
             PineVariant::Field128 => {
-                let vdaf = Pine::new_128(*norm_bound, *dimension, *frac_bits, *chunk_len)
-                    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                let vdaf = Pine::new_128(
+                    *norm_bound,
+                    *dimension,
+                    *frac_bits,
+                    *chunk_len,
+                    *chunk_len_sq_norm_equal,
+                )
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
                 shard_then_encode(&vdaf, gradient, nonce)
             }
         }
@@ -96,13 +105,20 @@ impl PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
         match (var, verify_key) {
             (PineVariant::Field128, VdafVerifyKey::L16(verify_key)) => {
-                let vdaf = Pine::new_128(*norm_bound, *dimension, *frac_bits, *chunk_len)
-                    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                let vdaf = Pine::new_128(
+                    *norm_bound,
+                    *dimension,
+                    *frac_bits,
+                    *chunk_len,
+                    *chunk_len_sq_norm_equal,
+                )
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
                 let (state, share) = prep_init(
                     vdaf,
                     verify_key,
@@ -134,6 +150,7 @@ impl PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
@@ -143,8 +160,14 @@ impl PineConfig {
                 VdafPrepState::Pine128(state),
                 VdafPrepMessage::Pine128Share(share),
             ) => {
-                let vdaf = Pine::new_128(*norm_bound, *dimension, *frac_bits, *chunk_len)
-                    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                let vdaf = Pine::new_128(
+                    *norm_bound,
+                    *dimension,
+                    *frac_bits,
+                    *chunk_len,
+                    *chunk_len_sq_norm_equal,
+                )
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
                 let (out_share, outbound) =
                     prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field128(prio::vdaf::AggregateShare::from(
@@ -168,13 +191,20 @@ impl PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
         match (var, host_state) {
             (PineVariant::Field128, VdafPrepState::Pine128(state)) => {
-                let vdaf = Pine::new_128(*norm_bound, *dimension, *frac_bits, *chunk_len)
-                    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                let vdaf = Pine::new_128(
+                    *norm_bound,
+                    *dimension,
+                    *frac_bits,
+                    *chunk_len,
+                    *chunk_len_sq_norm_equal,
+                )
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
                 let out_share = prep_finish(&vdaf, state, peer_message_data)?;
                 let agg_share = VdafAggregateShare::Field128(prio::vdaf::AggregateShare::from(
                     prio::vdaf::OutputShare::from(out_share.0),
@@ -197,13 +227,20 @@ impl PineConfig {
             dimension,
             frac_bits,
             chunk_len,
+            chunk_len_sq_norm_equal,
             var,
         } = self;
 
         match var {
             PineVariant::Field128 => {
-                let vdaf = Pine::new_128(*norm_bound, *dimension, *frac_bits, *chunk_len)
-                    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                let vdaf = Pine::new_128(
+                    *norm_bound,
+                    *dimension,
+                    *frac_bits,
+                    *chunk_len,
+                    *chunk_len_sq_norm_equal,
+                )
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
                 let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }
@@ -244,7 +281,8 @@ mod test {
                 norm_bound: 32_000,
                 dimension: 1_000,
                 frac_bits: 20,
-                chunk_len: 50,
+                chunk_len: 10,
+                chunk_len_sq_norm_equal: 50,
                 var: PineVariant::Field128,
             }),
             HpkeKemId::X25519HkdfSha256,
