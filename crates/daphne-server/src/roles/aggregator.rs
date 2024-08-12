@@ -240,36 +240,36 @@ impl DapAggregator<DaphneAuth> for crate::App {
         task_config: taskprov::DapTaskConfigNeedsOptIn,
         global_config: &DapGlobalConfig,
     ) -> Result<DapTaskConfig, DapError> {
-        // For now we always opt-in.
-        //
-        // Opt-in parameters are backed by KV. If not found, then use the default number of shards.
-        let param = if let Some(param) = self
+        if let Some(param) = self
             .kv()
             .get_cloned::<kv::prefix::TaskprovOptInParam>(task_id, &KvGetOptions::default())
             .await
             .map_err(|e| fatal_error!(err = ?e))?
         {
-            param
+            Ok(task_config.into_opted_in(&param))
         } else {
             let param = taskprov::OptInParam {
                 not_before: self.get_current_time(),
                 num_agg_span_shards: global_config.default_num_agg_span_shards,
             };
+
+            let task_config = task_config.into_opted_in(&param);
+            let expiration_time = task_config.not_after;
+
             if let Err(e) = self
                 .kv()
                 .put_with_expiration::<kv::prefix::TaskprovOptInParam>(
                     task_id,
-                    param.clone(),
-                    param.not_before,
+                    param,
+                    expiration_time,
                 )
                 .await
             {
                 tracing::warn!(error = ?e, "failed to store taskprov opt in param");
             }
-            param
-        };
 
-        Ok(task_config.into_opted_in(&param))
+            Ok(task_config)
+        }
     }
 
     async fn taskprov_put(
