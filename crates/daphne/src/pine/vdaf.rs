@@ -131,8 +131,10 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     fn helper_proof_share(&self, seed: &[u8; 16]) -> Vec<F> {
         let mut xof = XofTurboShake128::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
         xof.update(&[self.flp.cfg.num_proofs, 1]); // num_proofs, agg_id
-        xof.into_seed_stream()
-            .into_field_vec(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs))
+        xof.into_seed_stream().into_field_vec(
+            self.flp_sq_norm_equal.proof_len()
+                + self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs),
+        )
     }
 }
 
@@ -246,13 +248,21 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
                     XofTurboShake128::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp.prove_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                    self.flp_sq_norm_equal.prove_rand_len()
+                        + self.flp.prove_rand_len() * usize::from(self.flp.cfg.num_proofs),
                 )
             };
+            let (pr_sq_norm_equal, pr) =
+                prove_rands.split_at(self.flp_sq_norm_equal.prove_rand_len());
 
-            let mut proofs =
-                Vec::with_capacity(self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs));
-            for (prove_rand, vf_joint_rand) in prove_rands
+            let mut proofs = Vec::with_capacity(
+                self.flp_sq_norm_equal.proof_len()
+                    + self.flp.proof_len() * usize::from(self.flp.cfg.num_proofs),
+            );
+
+            proofs.append(&mut self.flp_sq_norm_equal.prove(&meas, pr_sq_norm_equal, &[])?);
+
+            for (prove_rand, vf_joint_rand) in pr
                 .chunks(self.flp.prove_rand_len())
                 .zip(vf_joint_rands.chunks(self.flp.joint_rand_len()))
             {
@@ -369,6 +379,7 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
                 )))
             }
         };
+        let (ps_sq_norm_equal, ps) = proofs_share.split_at(self.flp_sq_norm_equal.proof_len());
 
         let wr_joint_rand_part = self.joint_rand_part(
             agg_id.try_into().unwrap(),
@@ -425,19 +436,30 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
                 xof.update(&[self.flp.cfg.num_proofs]);
                 xof.update(nonce);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp.query_rand_len() * usize::from(self.flp.cfg.num_proofs),
+                    self.flp_sq_norm_equal.query_rand_len()
+                        + self.flp.query_rand_len() * usize::from(self.flp.cfg.num_proofs),
                 )
             };
+            let (qr_sq_norm_equal, qr) =
+                query_rands.split_at(self.flp_sq_norm_equal.query_rand_len());
 
-            let mut verifiers_share =
-                Vec::with_capacity(self.flp.verifier_len() * usize::from(self.flp.cfg.num_proofs));
-            for (proof_share, (vf_joint_rand, query_rand)) in
-                proofs_share.chunks(self.flp.proof_len()).zip(
-                    corrected_vf_joint_rands
-                        .chunks(self.flp.joint_rand_len())
-                        .zip(query_rands.chunks(self.flp.query_rand_len())),
-                )
-            {
+            let mut verifiers_share = Vec::with_capacity(
+                self.flp_sq_norm_equal.verifier_len()
+                    + self.flp.verifier_len() * usize::from(self.flp.cfg.num_proofs),
+            );
+
+            verifiers_share.append(&mut self.flp_sq_norm_equal.query(
+                &meas_share,
+                ps_sq_norm_equal,
+                qr_sq_norm_equal,
+                &[],
+                2,
+            )?);
+            for (proof_share, (vf_joint_rand, query_rand)) in ps.chunks(self.flp.proof_len()).zip(
+                corrected_vf_joint_rands
+                    .chunks(self.flp.joint_rand_len())
+                    .zip(qr.chunks(self.flp.query_rand_len())),
+            ) {
                 verifiers_share.append(&mut self.flp.query(
                     &meas_share,
                     proof_share,
@@ -495,9 +517,16 @@ impl<F: FftFriendlyFieldElement> Aggregator<16, 16> for Pine<F> {
                 *v += s1;
             }
 
-            for verifier in verifiers.chunks(self.flp.verifier_len()) {
+            let (v_sq_norm_equal, v) = verifiers.split_at(self.flp_sq_norm_equal.verifier_len());
+            if !self.flp_sq_norm_equal.decide(v_sq_norm_equal)? {
+                return Err(VdafError::Uncategorized(
+                    "squared norm equality proof check failed".into(),
+                ));
+            }
+
+            for verifier in v.chunks(self.flp.verifier_len()) {
                 if !self.flp.decide(verifier)? {
-                    return Err(VdafError::Uncategorized("proof check failed".into()));
+                    return Err(VdafError::Uncategorized("main proof check failed".into()));
                 }
             }
         }
@@ -602,7 +631,7 @@ mod tests {
     fn run_128() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 10).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -622,7 +651,7 @@ mod tests {
     fn run_64() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_64(norm_bound, dimension, 15, 100).unwrap();
+        let pine = Pine::new_64(norm_bound, dimension, 15, 4, 100).unwrap();
         let result = run_vdaf(
             &pine,
             &(),
@@ -644,7 +673,7 @@ mod tests {
         let dimension = 100;
         let reports = 5;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 100).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 100).unwrap();
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();
@@ -678,7 +707,7 @@ mod tests {
     fn prep_failure_mutated_pub_share_wr_joint_rand() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 5).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -698,7 +727,7 @@ mod tests {
     fn prep_failure_mutated_pub_share_vf_joint_rand() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 5).unwrap();
 
         let nonce = [0; 16];
         let (mut public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -718,7 +747,7 @@ mod tests {
     fn prep_failure_mutated_input_share_proof() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 5).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
@@ -738,7 +767,7 @@ mod tests {
     fn prep_failure_mutated_input_share_meas() {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
-        let pine = Pine::new_128(norm_bound, dimension, 15, 4).unwrap();
+        let pine = Pine::new_128(norm_bound, dimension, 15, 4, 4).unwrap();
 
         let nonce = [0; 16];
         let (public_share, mut input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();

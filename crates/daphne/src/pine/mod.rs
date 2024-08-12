@@ -18,7 +18,7 @@ use prio::{
     vdaf::VdafError,
 };
 
-use self::flp::PineType;
+use flp::{PineType, PineTypeSquaredNormEqual};
 
 const ALPHA: f64 = 8.7;
 const NUM_WR_TESTS: usize = 100;
@@ -41,6 +41,7 @@ const USAGE_WR_JOINT_RAND_PART: u16 = 10;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pine<F> {
     pub flp: PineType<F>,
+    pub flp_sq_norm_equal: PineTypeSquaredNormEqual<F>,
 }
 
 pub type Pine128 = Pine<Field128>;
@@ -52,8 +53,17 @@ impl Pine128 {
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
+        chunk_len_sq_norm_equal: usize,
     ) -> Result<Self, VdafError> {
-        Self::new(norm_bound, dimension, frac_bits, chunk_len, 1, 0xffff_ffff)
+        Self::new(
+            norm_bound,
+            dimension,
+            frac_bits,
+            chunk_len,
+            chunk_len_sq_norm_equal,
+            1,
+            0xffff_ffff,
+        )
     }
 }
 
@@ -66,8 +76,17 @@ impl Pine64 {
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
+        chunk_len_sq_norm_equal: usize,
     ) -> Result<Self, VdafError> {
-        Self::new(norm_bound, dimension, frac_bits, chunk_len, 2, 0xffff_ffff)
+        Self::new(
+            norm_bound,
+            dimension,
+            frac_bits,
+            chunk_len,
+            chunk_len_sq_norm_equal,
+            2,
+            0xffff_ffff,
+        )
     }
 }
 
@@ -83,12 +102,16 @@ pub(crate) struct PineConfig<F> {
     num_proofs: u8,
     algorithm_id: u32,
 
-    // FLP parameters
+    // FLP parameters for the main circuit
     chunk_len: usize,
     bit_checked_len: usize,
     encoded_gradient_len: usize,
     encoded_input_len: usize,
     gadget_calls: usize,
+
+    // FLP parameters for the squared-norm equality check
+    chunk_len_sq_norm_equal: usize,
+    gadget_calls_sq_norm_equal: usize,
 }
 
 impl<F> PineConfig<F> {
@@ -98,6 +121,10 @@ impl<F> PineConfig<F> {
         dst[1..5].copy_from_slice(&self.algorithm_id.to_be_bytes()); // algo
         dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
         dst
+    }
+
+    pub(crate) fn input_len(&self) -> usize {
+        self.encoded_input_len + NUM_WR_TESTS
     }
 }
 
@@ -115,8 +142,9 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
     /// * `frac_bits`: Number of bits of precision used to encode the fractional component of each
     ///   gradient coordinate
     ///
-    /// * `chunk_len`: FLP parameter used to for proof generation. Any positive integer can be
-    ///   used. The optimal value depends on the other parameters.
+    /// * `chunk_len`: Chunk length for the main FLP circuit.
+    ///
+    /// * `chunk_len_sq_norm_equal`: Chunk length for the squared-norm equality check circuit.
     ///
     /// * `num_proofs`: The number of FLP proofs to generate.
     ///
@@ -126,6 +154,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
         dimension: usize,
         frac_bits: usize,
         chunk_len: usize,
+        chunk_len_sq_norm_equal: usize,
         num_proofs: u8,
         algorithm_id: u32,
     ) -> Result<Self, VdafError> {
@@ -222,28 +251,31 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
 
         // Number of gadget calls. The gadget is used for the bit checks, wraparound tests, and
         // squared norm computation.
-        let gadget_calls = chunk_count(chunk_len, bit_checked_len)
-            + chunk_count(chunk_len, dimension)
-            + chunk_count(chunk_len, NUM_WR_TESTS);
+        let gadget_calls =
+            chunk_count(chunk_len, bit_checked_len) + chunk_count(chunk_len, NUM_WR_TESTS);
+        let gadget_calls_sq_norm_equal = chunk_count(chunk_len_sq_norm_equal, dimension);
+
+        let cfg = PineConfig {
+            dimension,
+            frac_bits,
+            sq_norm_bound,
+            sq_norm_bits,
+            wr_test_bound,
+            wr_test_bits,
+            num_proofs,
+            algorithm_id,
+            chunk_len,
+            bit_checked_len,
+            encoded_gradient_len,
+            encoded_input_len,
+            gadget_calls,
+            chunk_len_sq_norm_equal,
+            gadget_calls_sq_norm_equal,
+        };
 
         Ok(Self {
-            flp: PineType {
-                cfg: PineConfig {
-                    dimension,
-                    frac_bits,
-                    sq_norm_bound,
-                    sq_norm_bits,
-                    wr_test_bound,
-                    wr_test_bits,
-                    num_proofs,
-                    algorithm_id,
-                    chunk_len,
-                    bit_checked_len,
-                    encoded_gradient_len,
-                    encoded_input_len,
-                    gadget_calls,
-                },
-            },
+            flp: PineType { cfg: cfg.clone() },
+            flp_sq_norm_equal: PineTypeSquaredNormEqual { cfg },
         })
     }
 }
@@ -551,6 +583,7 @@ mod tests {
                 norm_bound_f64_to_u64(t.norm_bound, t.frac_bits),
                 10, // not used by test
                 t.frac_bits,
+                1, // not used by tests
                 1, // not used by tests
             )
             .unwrap();

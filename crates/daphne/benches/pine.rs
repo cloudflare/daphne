@@ -10,14 +10,13 @@ use prio::{
 };
 
 fn pine(c: &mut Criterion) {
-    for (dimension, chunk_len) in [
+    for (dimension, chunk_len_sq_norm_equal) in [
         // dimension, sqrt(dimension) * some multiplier
         (1_000, 32 * 8),
         (10_000, 100 * 2),
         (100_000, 320 * 6),
-        (1_000_000, 1_000 * 8),
     ] {
-        let pine = Pine::new_64(1 << 15, dimension, 15, chunk_len).unwrap();
+        let pine = Pine::new_64(1 << 15, dimension, 15, 150, chunk_len_sq_norm_equal).unwrap();
         let measurement = vec![0.0; dimension];
         let wr_joint_rand_seed = Seed::generate().unwrap();
         let nonce = [0; 16];
@@ -35,36 +34,44 @@ fn pine(c: &mut Criterion) {
             },
         );
 
-        let (mut input, wr_test_results) = pine
-            .flp
-            .encode_with_wr_joint_rand(measurement.iter().copied(), &wr_joint_rand_seed)
-            .unwrap();
-        input.extend_from_slice(&wr_test_results);
-        let joint_rand = random_vector(pine.flp.joint_rand_len()).unwrap();
-        let prove_rand = random_vector(pine.flp.prove_rand_len()).unwrap();
+        {
+            let (mut input, wr_test_results) = pine
+                .flp
+                .encode_with_wr_joint_rand(measurement.iter().copied(), &wr_joint_rand_seed)
+                .unwrap();
+            input.extend_from_slice(&wr_test_results);
+            let prove_rand = random_vector(pine.flp_sq_norm_equal.prove_rand_len()).unwrap();
 
-        c.bench_with_input(
-            BenchmarkId::new("pine/prove", dimension),
-            &dimension,
-            |b, &_d| {
-                b.iter(|| pine.flp.prove(&input, &prove_rand, &joint_rand).unwrap());
-            },
-        );
+            c.bench_with_input(
+                BenchmarkId::new("pine/prove", dimension),
+                &dimension,
+                |b, &_d| {
+                    b.iter(|| {
+                        pine.flp_sq_norm_equal
+                            .prove(&input, &prove_rand, &[])
+                            .unwrap()
+                    });
+                },
+            );
 
-        let query_rand = random_vector(pine.flp.query_rand_len()).unwrap();
-        let proof = pine.flp.prove(&input, &prove_rand, &joint_rand).unwrap();
+            let query_rand = random_vector(pine.flp_sq_norm_equal.query_rand_len()).unwrap();
+            let proof = pine
+                .flp_sq_norm_equal
+                .prove(&input, &prove_rand, &[])
+                .unwrap();
 
-        c.bench_with_input(
-            BenchmarkId::new("pine/query", dimension),
-            &dimension,
-            |b, &_d| {
-                b.iter(|| {
-                    pine.flp
-                        .query(&input, &proof, &query_rand, &joint_rand, 1)
-                        .unwrap()
-                });
-            },
-        );
+            c.bench_with_input(
+                BenchmarkId::new("pine/query", dimension),
+                &dimension,
+                |b, &_d| {
+                    b.iter(|| {
+                        pine.flp_sq_norm_equal
+                            .query(&input, &proof, &query_rand, &[], 1)
+                            .unwrap()
+                    });
+                },
+            );
+        }
 
         c.bench_with_input(
             BenchmarkId::new("pine/shard", dimension),

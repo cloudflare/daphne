@@ -42,6 +42,7 @@ struct TestVec {
     l2_norm_bound: u64,
     num_frac_bits: usize,
     chunk_length: usize,
+    chunk_length_norm_equality: usize,
     shares: usize,
     proofs: usize,
 
@@ -180,13 +181,13 @@ mod tests {
 
     #[test]
     fn run_64() {
-        let test_vec =
-            serde_json::from_str::<TestVec>(include_str!("01/Pine_Field64.json")).unwrap();
+        let test_vec = serde_json::from_str::<TestVec>(include_str!("01/Pine64_0.json")).unwrap();
         Pine::new_64(
             test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
+            test_vec.chunk_length_norm_equality,
         )
         .unwrap()
         .run_test_vec(&test_vec);
@@ -194,13 +195,13 @@ mod tests {
 
     #[test]
     fn run_128() {
-        let test_vec =
-            serde_json::from_str::<TestVec>(include_str!("01/Pine_Field128.json")).unwrap();
+        let test_vec = serde_json::from_str::<TestVec>(include_str!("01/Pine128_0.json")).unwrap();
         Pine::new_128(
             test_vec.l2_norm_bound,
             test_vec.dimension,
             test_vec.num_frac_bits,
             test_vec.chunk_length,
+            test_vec.chunk_length_norm_equality,
         )
         .unwrap()
         .run_test_vec(&test_vec);
