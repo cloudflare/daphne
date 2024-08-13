@@ -71,7 +71,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests
-        uses: isbang/compose-action@v1.4.1
+        uses: hoverkraft-tech/compose-action@v2.0.1
         with:
           compose-file: "./crates/daphne-server/docker-compose-e2e.yaml"
           up-flags: "--build --abort-on-container-exit --exit-code-from test"
