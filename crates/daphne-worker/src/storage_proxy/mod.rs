@@ -208,9 +208,13 @@ fn parse_expiration_header(ctx: &RequestContext) -> Result<Option<Time>, worker:
         .transpose()
 }
 
+fn elapsed(date: &worker::Date) -> Duration {
+    Duration::from_millis(worker::Date::now().as_millis() - date.as_millis())
+}
+
 /// Handle a kv request.
 async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::Result<Response> {
-    let start = std::time::Instant::now();
+    let start = worker::Date::now();
 
     match ctx.req.method() {
         worker::Method::Get => {
@@ -219,13 +223,13 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 .kv(KV_BINDING_DAP_CONFIG)
                 .inspect_err(|_| {
                     ctx.metrics
-                        .kv_request_time_seconds_observe("read", "error", start.elapsed())
+                        .kv_request_time_seconds_observe("read", "error", elapsed(&start))
                 })?
                 .get(key)
                 .bytes()
                 .await?;
 
-            let elapsed = start.elapsed();
+            let elapsed = elapsed(&start);
 
             if let Some(bytes) = bytes {
                 ctx.metrics
@@ -252,7 +256,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                         ctx.metrics.kv_request_time_seconds_observe(
                             "post",
                             "success",
-                            start.elapsed(),
+                            elapsed(&start),
                         );
 
                         put = put.expiration(expiration_unix_timestamp);
@@ -261,7 +265,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                         ctx.metrics.kv_request_time_seconds_observe(
                             "post",
                             "error_execute_post",
-                            start.elapsed(),
+                            elapsed(&start),
                         );
 
                         tracing::warn!(
@@ -297,7 +301,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                 ctx.metrics.kv_request_time_seconds_observe(
                     "put",
                     "error_conflict",
-                    start.elapsed(),
+                    elapsed(&start),
                 );
 
                 Response::error(String::new(), 409 /* Conflict */)
@@ -308,7 +312,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                             ctx.metrics.kv_request_time_seconds_observe(
                                 "put",
                                 "success",
-                                start.elapsed(),
+                                elapsed(&start),
                             );
 
                             put = put.expiration(expiration_unix_timestamp);
@@ -317,7 +321,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
                             ctx.metrics.kv_request_time_seconds_observe(
                                 "put",
                                 "error_execute_put",
-                                start.elapsed(),
+                                elapsed(&start),
                             );
 
                             tracing::warn!(
@@ -341,7 +345,7 @@ async fn handle_kv_request(ctx: &mut RequestContext<'_>, key: &str) -> worker::R
             ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(key).await?;
 
             ctx.metrics
-                .kv_request_time_seconds_observe("delete", "success", start.elapsed());
+                .kv_request_time_seconds_observe("delete", "success", elapsed(&start));
 
             Response::empty()
         }
@@ -401,11 +405,11 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
             obj.get_stub()
         }?;
 
-        let start = std::time::Instant::now();
+        let start = worker::Date::now();
 
         match stub.fetch_with_request(do_req.clone()?).await {
             Ok(ok) => {
-                let elapsed = start.elapsed();
+                let elapsed = elapsed(&start);
 
                 ctx.metrics
                     .durable_request_time_seconds_observe(uri, "success", elapsed);
@@ -418,7 +422,7 @@ async fn handle_do_request(ctx: &mut RequestContext<'_>, uri: &str) -> worker::R
                 return Ok(ok);
             }
             Err(error) => {
-                let elapsed = start.elapsed();
+                let elapsed = elapsed(&start);
 
                 ctx.metrics
                     .durable_request_time_seconds_observe(uri, "error", elapsed);
