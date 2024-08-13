@@ -64,6 +64,7 @@ harness = false
 [[bench]]
 name = "aggregation"
 harness = false
+required-features = ["test-utils"]
 
 [[bench]]
 name = "pine"
