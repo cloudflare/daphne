@@ -18,7 +18,9 @@
 
 pub mod load_testing;
 
-use crate::{deduce_dap_version_from_url, test_durations::TestDurations, HttpClientExt};
+use crate::{
+    deduce_dap_version_from_url, response_to_anyhow, test_durations::TestDurations, HttpClientExt,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use daphne::{
@@ -616,9 +618,8 @@ impl Test {
                 resp.text().await?
             ));
         } else if !resp.status().is_success() {
-            return Err(anyhow!(
-                "unexpected response while running an AggregateInitReq: {resp:?}"
-            ));
+            return Err(response_to_anyhow(resp).await)
+                .context("while running an AggregateInitReq");
         }
 
         // Handle AggregationJobResp..
@@ -701,9 +702,8 @@ impl Test {
                 resp.text().await?
             ));
         } else if !resp.status().is_success() {
-            return Err(anyhow!(
-                "unexpected response while running an AggregateInitReq: {resp:?}"
-            ));
+            return Err(response_to_anyhow(resp).await)
+                .context("while running an AggregateInitReq");
         }
         Ok(duration)
     }
