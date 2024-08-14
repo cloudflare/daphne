@@ -10,13 +10,9 @@ use prio::{
 };
 
 fn pine(c: &mut Criterion) {
-    for (dimension, chunk_len_sq_norm_equal) in [
-        // dimension, sqrt(dimension) * some multiplier
-        (1_000, 32 * 8),
-        (10_000, 100 * 2),
-        (100_000, 320 * 6),
-    ] {
-        let pine = Pine::new_64(1 << 15, dimension, 15, 150, chunk_len_sq_norm_equal).unwrap();
+    for (dimension, chunk_len, chunk_len_sq_norm_equal) in [(200_000, 150 * 2, 447 * 8)] {
+        let pine =
+            Pine::new_64(1 << 15, dimension, 15, chunk_len, chunk_len_sq_norm_equal).unwrap();
         let measurement = vec![0.0; dimension];
         let wr_joint_rand_seed = Seed::generate().unwrap();
         let nonce = [0; 16];
