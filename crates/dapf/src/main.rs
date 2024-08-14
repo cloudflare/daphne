@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
-    deduce_dap_version_from_url, HttpClientExt,
+    deduce_dap_version_from_url, response_to_anyhow, HttpClientExt,
 };
 use daphne::{
     constants::DapMediaType,
@@ -455,7 +455,7 @@ async fn main() -> Result<()> {
                     .with_context(|| "unexpected response")?;
                 return Err(anyhow!(serde_json::to_string(&problem_details)?));
             } else if resp.status() != 200 {
-                return Err(anyhow!("unexpected response: {:?}", resp));
+                return Err(response_to_anyhow(resp).await);
             }
 
             Ok(())
@@ -508,7 +508,7 @@ async fn main() -> Result<()> {
                     .with_context(|| "unexpected response")?;
                 return Err(anyhow!(serde_json::to_string(&problem_details)?));
             } else if resp.status() != 303 {
-                return Err(anyhow!("unexpected response: {:?}", resp));
+                return Err(response_to_anyhow(resp).await);
             }
 
             let uri_str = resp
@@ -541,7 +541,7 @@ async fn main() -> Result<()> {
             if resp.status() == 202 {
                 return Err(anyhow!("aggregate result not ready"));
             } else if resp.status() != 200 {
-                return Err(anyhow!("unexpected response: {:?}", resp));
+                return Err(response_to_anyhow(resp).await);
             }
             let receiver = hpke_receiver.as_ref().ok_or_else(|| {
                 anyhow!("received response, but cannot decrypt without HPKE receiver config")

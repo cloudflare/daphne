@@ -41,7 +41,7 @@ impl HttpClientExt for Client {
             .await
             .with_context(|| "request failed")?;
         if !resp.status().is_success() {
-            return Err(anyhow!("unexpected response: {:?}", resp));
+            return Err(response_to_anyhow(resp).await);
         }
         let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
         let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
@@ -77,4 +77,20 @@ pub fn deduce_dap_version_from_url(url: &Url) -> anyhow::Result<DapVersion> {
         .unwrap() // when path_segments returns Some it's guaranteed to contain at least one segment
         .parse()
         .context("failed to parse version parameter from url")
+}
+
+pub async fn response_to_anyhow(resp: reqwest::Response) -> anyhow::Error {
+    anyhow!(
+        "unexpected response: {}\n{}",
+        format!("{resp:?}"),
+        match resp
+            .text()
+            .await
+            .context("reading body while processing error")
+            .map_err(|e| e.to_string())
+        {
+            Ok(body) => format!("body: {body}"),
+            Err(error) => format!("{error:?}"),
+        }
+    )
 }
