@@ -43,7 +43,7 @@ use daphne::{
 use daphne_service_utils::http_headers;
 use futures::{future::OptionFuture, StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
-use prometheus::{Encoder, HistogramVec, IntCounterVec, TextEncoder};
+use prometheus::{Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder};
 use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reqwest::{Client, Identity};
@@ -140,7 +140,7 @@ impl LoadControl {
 }
 
 struct TestMetrics {
-    aggregated: IntCounterVec,
+    test_success: IntGaugeVec,
     test_durations: HistogramVec,
     report_counter: IntCounterVec,
 }
@@ -276,8 +276,8 @@ impl Test {
         // Register Prometheus metrics.
 
         let metrics = TestMetrics {
-            aggregated: prometheus::register_int_counter_vec!(
-                "daphne_server_acceptance_aggregated",
+            test_success: prometheus::register_int_gauge_vec!(
+                "daphne_server_acceptance_test",
                 "Counts the number of times tests ran",
                 &["using_mtls", "using_bearer_token", "success"],
             )?,
@@ -713,7 +713,7 @@ impl Test {
         let success = res.is_ok();
         let c = |b: bool| ["F", "T"][b as usize];
         self.metrics
-            .aggregated
+            .test_success
             .with_label_values(&[
                 c(self.using_mtls),
                 c(self.bearer_token.is_some()),
