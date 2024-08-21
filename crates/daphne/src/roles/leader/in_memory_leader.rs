@@ -132,7 +132,7 @@ impl InMemoryLeaderState {
                 task_id.to_base64url(),
                 coll_job_id.to_base64url(),
             ))
-            .map_err(|e| fatal_error!(err = ?e))?;
+            .map_err(|e| fatal_error!(err = ?e, "failed to calculate coll_job_uri"))?;
 
         // Store the collection job in the pending state.
         if per_task.coll_jobs.contains_key(coll_job_id) {

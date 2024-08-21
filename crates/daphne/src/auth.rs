@@ -99,7 +99,7 @@ pub trait BearerTokenProvider {
                 .get_leader_bearer_token_for(task_id, task_config)
                 .await?
                 .ok_or_else(|| {
-                    fatal_error!(err = "attempted to authorize request with unknown task ID")
+                    fatal_error!(err = "attempted to authorize request with unknown task ID",)
                 })?;
             return Ok(token);
         }

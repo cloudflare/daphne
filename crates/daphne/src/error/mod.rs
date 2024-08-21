@@ -107,7 +107,7 @@ impl Debug for FatalDapError {
 /// # use daphne::fatal_error;
 /// let some_id = 1;
 ///
-/// fatal_error!(err = "the error", id = %some_id);
+/// fatal_error!(err = "the error", id = %some_id, "something bad happened");
 /// ```
 /// ```
 /// # use daphne::fatal_error;
@@ -121,17 +121,31 @@ impl Debug for FatalDapError {
 /// # Note
 /// If you have an error that caused the fatal error, it should be passed in the `err` field of the
 /// macro, pass a string only when there is no error value you can use.
+///
+/// # Note
+/// A handwriten message must always be present, this requirement can be fulfilled in one of three
+/// ways:
+///
+/// ```
+/// # use daphne::fatal_error;
+/// # let field1 = 1; let field2 = 2;
+/// use std::io::{Error, ErrorKind};
+///
+/// fatal_error!(err = "a string literal in the err field");
+/// fatal_error!(err = format!("a formatted string literal {field1} {}", field2));
+///
+/// let error = Error::new(ErrorKind::Other, "the error");
+/// fatal_error!(err = ?error, "some trailing text after the other attributes");
+/// ```
 #[macro_export]
 macro_rules! fatal_error {
-    (err = ?$e:expr) => {
-        $crate::__fatal_error_impl!(@@ err = ?$e)
+    (err = $e:literal) => {
+        $crate::__fatal_error_impl!(@@ err = $e, $e)
     };
-    (err = %$e:expr) => {
-        $crate::__fatal_error_impl!(@@ err = %$e)
-    };
-    (err = $e:expr) => {
-        $crate::__fatal_error_impl!(@@ err = $e)
-    };
+    (err = format!($($arg:tt)*)) => {{
+        let err = ::std::format!($($arg)*);
+        $crate::__fatal_error_impl!(@@ err = err, err)
+    }};
     (err = ?$e:expr, $($rest:tt)*) => {
         $crate::__fatal_error_impl!(@@ err = ?$e, $($rest)*)
     };
@@ -141,7 +155,6 @@ macro_rules! fatal_error {
     (err = $e:expr, $($rest:tt)*) => {
         $crate::__fatal_error_impl!(@@ err = $e, $($rest)*)
     };
-
 }
 
 #[macro_export]

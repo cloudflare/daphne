@@ -24,7 +24,9 @@ pub(crate) fn prio2_shard(
     measurement: DapMeasurement,
     nonce: &[u8; 16],
 ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     let (public_share, input_shares) = match measurement {
         DapMeasurement::U32Vec(ref data) => vdaf.shard(data, nonce)?,
         _ => {
@@ -64,7 +66,9 @@ pub(crate) fn prio2_prep_init(
         )));
     };
 
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
@@ -82,7 +86,9 @@ pub(crate) fn prio2_prep_finish_from_shares(
     host_share: VdafPrepMessage,
     peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     let (out_share, outbound) = match (host_state, host_share) {
         (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
             let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
@@ -112,7 +118,9 @@ pub(crate) fn prio2_prep_finish(
     host_state: VdafPrepState,
     peer_message_data: &[u8],
 ) -> Result<VdafAggregateShare, VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     <()>::get_decoded(peer_message_data)?;
     let out_share = match host_state {
         VdafPrepState::Prio2(state) => match vdaf.prepare_next(state, ())? {
@@ -139,7 +147,9 @@ pub(crate) fn prio2_decode_prep_state(
     agg_id: usize,
     bytes: &mut Cursor<&[u8]>,
 ) -> Result<VdafPrepState, VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     Ok(VdafPrepState::Prio2(Prio2PrepareState::decode_with_param(
         &(&vdaf, agg_id),
         bytes,
@@ -152,7 +162,9 @@ pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
     num_measurements: usize,
     encoded_agg_shares: M,
 ) -> Result<DapAggregateResult, VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
     let mut agg_shares = Vec::with_capacity(vdaf.num_aggregators());
     for encoded in encoded_agg_shares {
         let agg_share = AggregateShare::get_decoded_with_param(&(&vdaf, &()), encoded.as_ref())?;

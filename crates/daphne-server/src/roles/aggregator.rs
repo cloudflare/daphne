@@ -61,7 +61,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                     })
                     .send::<AggregateStoreMergeResp>()
                     .await
-                    .map_err(|e| fatal_error!(err = ?e));
+                    .map_err(|e| fatal_error!(err = ?e, "failed to merge aggregate share"));
                 let result = match result {
                     Ok(AggregateStoreMergeResp::Ok) => Ok(()),
                     Ok(AggregateStoreMergeResp::AlreadyCollected) => {
@@ -104,7 +104,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         }
         let responses: Vec<DapAggregateShare> = try_join_all(requests)
             .await
-            .map_err(|e| fatal_error!(err = ?e))?;
+            .map_err(|e| fatal_error!(err = ?e, "failed to get agg shares from durable objects"))?;
         let mut agg_share = DapAggregateShare::default();
         for agg_share_delta in responses {
             agg_share.merge(agg_share_delta)?;
@@ -139,7 +139,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
         try_join_all(requests)
             .await
-            .map_err(|e| fatal_error!(err = ?e))?;
+            .map_err(|e| fatal_error!(err = ?e, "failed to mark agg shares as collected"))?;
         Ok(())
     }
 
@@ -212,7 +212,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                 &opt,
             )
             .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|e| fatal_error!(err = ?e, "failed to get global override for the default_num_agg_span_shards"))?
         {
             global_config.default_num_agg_span_shards = default_num_agg_span_shards;
         }
@@ -244,7 +244,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
             .kv()
             .get_cloned::<kv::prefix::TaskprovOptInParam>(task_id, &KvGetOptions::default())
             .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|e| fatal_error!(err = ?e, "failed to get TaskprovOptInParam from kv"))?
         {
             Ok(task_config.into_opted_in(&param))
         } else {
@@ -288,7 +288,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                     expiration_time,
                 )
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to put the a task config in kv"))?;
         } else {
             self.kv()
                 .only_cache_put::<kv::prefix::TaskConfig>(task_id, task_config)
@@ -304,7 +304,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
         self.kv()
             .get_cloned::<kv::prefix::TaskConfig>(task_id, &KvGetOptions::default())
             .await
-            .map_err(|e| fatal_error!(err = ?e))
+            .map_err(|e| fatal_error!(err = ?e, "failed to get a task config from kv: {task_id}"))
     }
 
     fn get_current_time(&self) -> Time {
@@ -341,7 +341,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
                 .buffer_unordered(usize::MAX)
                 .try_any(ready)
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?,
+                .map_err(
+                    |e| fatal_error!(err = ?e, "failed to check if agg shares are collected"),
+                )?,
         )
     }
 
@@ -367,7 +369,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
                         )
                         .send::<DapAggregateShare>()
                         .await
-                        .map_err(|e| fatal_error!(err = ?e))?
+                        .map_err(|e| fatal_error!(err = ?e, "failed to get an agg share"))?
                         .empty(),
                 )
             })
@@ -456,15 +458,14 @@ impl HpkeProvider for crate::App {
                 },
             )
             .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|e| fatal_error!(err = ?e, "failed to get the hpke config"))?
             .ok_or_else(|| fatal_error!(err = "there are no hpke configs in kv!!", %version))
     }
 
     async fn can_hpke_decrypt(&self, task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
         let version = self
             .get_task_config_for(task_id)
-            .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .await?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?
             .version;
 
@@ -476,7 +477,7 @@ impl HpkeProvider for crate::App {
                 |config_list| config_list.iter().any(|r| r.config.id == config_id),
             )
             .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|e| fatal_error!(err = ?e, "failed to get at the hpke config"))?
             .unwrap_or(false))
     }
 }
@@ -508,7 +509,7 @@ impl HpkeDecrypter for crate::App {
                 },
             )
             .await
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|e| fatal_error!(err = ?e, "failed to get the hpke config"))?
             .flatten()
             .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
     }
@@ -538,7 +539,7 @@ impl BearerTokenProvider for crate::App {
         self.kv()
             .get_cloned::<kv::prefix::LeaderBearerToken>(task_id, &KvGetOptions::default())
             .await
-            .map_err(|e| fatal_error!(err = ?e))
+            .map_err(|e| fatal_error!(err = ?e, "failed to get the leader bearer token"))
             .map(|r| r.map(Cow::Owned))
     }
 
@@ -562,7 +563,7 @@ impl BearerTokenProvider for crate::App {
         self.kv()
             .get_cloned::<kv::prefix::CollectorBearerToken>(task_id, &KvGetOptions::default())
             .await
-            .map_err(|e| fatal_error!(err = ?e))
+            .map_err(|e| fatal_error!(err = ?e, "failed to get the collector bearer token"))
             .map(|r| r.map(Cow::Owned))
     }
 }

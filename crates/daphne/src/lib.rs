@@ -984,19 +984,24 @@ impl DapAggregateShare {
                 self.data = Some(data);
             }
             (Some(VdafAggregateShare::Field64(left)), Some(VdafAggregateShare::Field64(right))) => {
-                left.merge(&right).map_err(|e| fatal_error!(err = ?e))?;
+                left.merge(&right).map_err(
+                    |e| fatal_error!(err = ?e, "failed to merge 64bit wide vdaf shares"),
+                )?;
             }
             (
                 Some(VdafAggregateShare::Field128(left)),
                 Some(VdafAggregateShare::Field128(right)),
             ) => {
-                left.merge(&right).map_err(|e| fatal_error!(err = ?e))?;
+                left.merge(&right).map_err(
+                    |e| fatal_error!(err = ?e, "failed to merge 128bit wide vdaf shares"),
+                )?;
             }
             (
                 Some(VdafAggregateShare::FieldPrio2(left)),
                 Some(VdafAggregateShare::FieldPrio2(right)),
             ) => {
-                left.merge(&right).map_err(|e| fatal_error!(err = ?e))?;
+                left.merge(&right)
+                    .map_err(|e| fatal_error!(err = ?e, "failed to merge prio2 vdaf shares"))?;
             }
 
             _ => return Err(fatal_error!(err = "invalid aggregate share merge")),
