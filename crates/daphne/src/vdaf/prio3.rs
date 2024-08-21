@@ -42,10 +42,14 @@ fn new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
         2,
         num_proofs,
         VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
-        SumVec::new(bits, length, chunk_length)
-            .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?,
+        SumVec::new(bits, length, chunk_length).map_err(|e| {
+            VdafError::Dap(fatal_error!(
+                err = ?e,
+                "failed to create sum vec from bits({bits}), length({length}), chunk_length({chunk_length})"
+            ))
+        })?,
     )
-    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))
+    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3")))
 }
 
 /// Split the given measurement into a sequence of encoded input shares.
@@ -56,7 +60,11 @@ pub(crate) fn prio3_shard(
 ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
     match (config, measurement) {
         (Prio3Config::Count, DapMeasurement::U64(measurement)) => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
+                )
+            })?;
             // TODO(cjpatton) Make this constant time.
             let measurement = match measurement {
                 0 => false,
@@ -77,13 +85,13 @@ pub(crate) fn prio3_shard(
             DapMeasurement::U64(measurement),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 Histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             let m: usize = measurement.try_into().unwrap();
             shard_then_encode(&vdaf, &m, nonce)
         }
         (Prio3Config::Sum { bits }, DapMeasurement::U64(measurement)) => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             shard_then_encode(&vdaf, &u128::from(measurement), nonce)
         }
         (
@@ -95,7 +103,7 @@ pub(crate) fn prio3_shard(
             DapMeasurement::U128Vec(measurement),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             shard_then_encode(&vdaf, &measurement, nonce)
         }
         (
@@ -132,7 +140,11 @@ pub(crate) fn prio3_prep_init(
 ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
     return match (&config, verify_key) {
         (Prio3Config::Count, VdafVerifyKey::L16(verify_key)) => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 from num_aggregators(2)"),
+                )
+            })?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -154,7 +166,7 @@ pub(crate) fn prio3_prep_init(
             VdafVerifyKey::L16(verify_key),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -170,7 +182,7 @@ pub(crate) fn prio3_prep_init(
         }
         (Prio3Config::Sum { bits }, VdafVerifyKey::L16(verify_key)) => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -193,7 +205,7 @@ pub(crate) fn prio3_prep_init(
             VdafVerifyKey::L16(verify_key),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             let (state, share) = prep_init(
                 vdaf,
                 verify_key,
@@ -285,7 +297,11 @@ pub(crate) fn prio3_prep_finish_from_shares(
             VdafPrepState::Prio3Field64(state),
             VdafPrepMessage::Prio3ShareField64(share),
         ) => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 count num_aggregators(2)"),
+                )
+            })?;
             let (out_share, outbound) =
                 prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
@@ -300,7 +316,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             let (out_share, outbound) =
                 prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
@@ -312,7 +328,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             let (out_share, outbound) =
                 prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
@@ -328,7 +344,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
             VdafPrepMessage::Prio3ShareField128(share),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             let (out_share, outbound) =
                 prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
             let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
@@ -373,7 +389,11 @@ pub(crate) fn prio3_prep_finish(
 ) -> Result<VdafAggregateShare, VdafError> {
     let agg_share = match (&config, host_state) {
         (Prio3Config::Count, VdafPrepState::Prio3Field64(state)) => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
+                )
+            })?;
             let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?)
         }
@@ -385,13 +405,13 @@ pub(crate) fn prio3_prep_finish(
             VdafPrepState::Prio3Field128(state),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
         (Prio3Config::Sum { bits }, VdafPrepState::Prio3Field128(state)) => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -404,7 +424,7 @@ pub(crate) fn prio3_prep_finish(
             VdafPrepState::Prio3Field128(state),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             let out_share = prep_finish(&vdaf, state, peer_message_data)?;
             VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?)
         }
@@ -445,7 +465,11 @@ pub(crate) fn prio3_decode_prep_state(
 ) -> Result<VdafPrepState, VdafError> {
     match config {
         Prio3Config::Count => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
+                )
+            })?;
             Ok(VdafPrepState::Prio3Field64(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -455,14 +479,14 @@ pub(crate) fn prio3_decode_prep_state(
             chunk_length,
         } => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
         Prio3Config::Sum { bits } => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -473,7 +497,7 @@ pub(crate) fn prio3_decode_prep_state(
             chunk_length,
         } => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             Ok(VdafPrepState::Prio3Field128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
@@ -505,7 +529,11 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
 ) -> Result<DapAggregateResult, VdafError> {
     match config {
         Prio3Config::Count => {
-            let vdaf = Prio3::new_count(2).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+            let vdaf = Prio3::new_count(2).map_err(|e| {
+                VdafError::Dap(
+                    fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
+                )
+            })?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U64(agg_res))
         }
@@ -514,13 +542,13 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             chunk_length,
         } => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }
         Prio3Config::Sum { bits } => {
             let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128(agg_res))
         }
@@ -530,7 +558,7 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
             chunk_length,
         } => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
             let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
             Ok(DapAggregateResult::U128Vec(agg_res))
         }

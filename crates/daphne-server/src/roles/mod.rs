@@ -64,9 +64,11 @@ mod test_utils {
                 .bearer_auth(&self.storage_proxy_config.auth_token)
                 .send()
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(
+                    |e| fatal_error!(err = ?e, "failed to send delete request to storage proxy"),
+                )?
                 .error_for_status()
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to clear storage proxy"))?;
 
             Ok(())
         }
@@ -78,9 +80,9 @@ mod test_utils {
                 .bearer_auth(&self.storage_proxy_config.auth_token)
                 .send()
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to send ready check request to storage proxy"))?
                 .error_for_status()
-                .map_err(|e| fatal_error!(err  = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "storage proxy is not ready"))?;
             Ok(())
         }
 
@@ -115,19 +117,19 @@ mod test_utils {
             ) {
                 ("Prio3Count", None, None, None) => VdafConfig::Prio3(Prio3Config::Count),
                 ("Prio3Sum", Some(bits), None, None) => VdafConfig::Prio3(Prio3Config::Sum {
-                    bits: bits.parse().map_err(|e| fatal_error!(err = ?e))?,
+                    bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::Sum"))?,
                 }),
                 ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)) => {
                     VdafConfig::Prio3(Prio3Config::SumVec {
-                        bits: bits.parse().map_err(|e| fatal_error!(err = ?e))?,
-                        length: length.parse().map_err(|e| fatal_error!(err = ?e))?,
-                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e))?,
+                        bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits fro Prio3Config::SumVec"))?,
+                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length fro Prio3Config::SumVec"))?,
+                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length fro Prio3Config::SumVec"))?,
                     })
                 }
                 ("Prio3Histogram", None, Some(length), Some(chunk_length)) => {
                     VdafConfig::Prio3(Prio3Config::Histogram {
-                        length: length.parse().map_err(|e| fatal_error!(err = ?e))?,
-                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e))?,
+                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length fro Prio3Config::Histogram"))?,
+                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length fro Prio3Config::Histogram"))?,
                     })
                 }
                 _ => return Err(fatal_error!(err = "command failed: unrecognized VDAF")),
@@ -140,7 +142,7 @@ mod test_utils {
                 })?;
             let vdaf_verify_key = vdaf
                 .get_decoded_verify_key(&vdaf_verify_key_data)
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to decode verify key"))?;
 
             // Collector HPKE config.
             let collector_hpke_config_data =
@@ -148,7 +150,7 @@ mod test_utils {
                     fatal_error!(err = "HPKE collector config is not valid URL-safe base64")
                 })?;
             let collector_hpke_config = HpkeConfig::get_decoded(&collector_hpke_config_data)
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to decode hpke config"))?;
 
             // Leader authentication token.
             let token = BearerToken::from(cmd.leader_authentication_token);
@@ -156,7 +158,7 @@ mod test_utils {
                 .kv()
                 .put_if_not_exists::<kv::prefix::LeaderBearerToken>(&cmd.task_id, token)
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to fetch leader bearer token"))?
                 .is_some()
             {
                 return Err(fatal_error!(
@@ -173,7 +175,9 @@ mod test_utils {
                         .kv()
                         .put_if_not_exists::<kv::prefix::CollectorBearerToken>(&cmd.task_id, token)
                         .await
-                        .map_err(|e| fatal_error!(err = ?e))?
+                        .map_err(
+                            |e| fatal_error!(err = ?e, "failed to put collector bearer token"),
+                        )?
                         .is_some()
                     {
                         return Err(fatal_error!(err = format!(
@@ -233,7 +237,7 @@ mod test_utils {
                     cmd.task_expiration,
                 )
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to put task config in kv"))?
                 .is_some()
             {
                 Err(fatal_error!(
@@ -256,7 +260,7 @@ mod test_utils {
                 .kv()
                 .get_cloned::<kv::prefix::HpkeReceiverConfigSet>(&version, &Default::default())
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to get hpke config"))?
                 .unwrap_or_default();
 
             if config_list
@@ -276,7 +280,7 @@ mod test_utils {
             self.kv()
                 .put::<kv::prefix::HpkeReceiverConfigSet>(&version, config_list)
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|e| fatal_error!(err = ?e, "failed to put hpke config"))?;
             Ok(())
         }
     }

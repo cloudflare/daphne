@@ -199,12 +199,9 @@ impl crate::App {
         let reqwest_resp = req_builder
             .send()
             .await
-            .map_err(|e| fatal_error!(err = ?e))?;
+            .map_err(|e| fatal_error!(err = ?e, "failed to send request to the helper"))?;
         info!("request to {} completed in {:?}", url, start.elapsed());
         let status = reqwest_resp.status();
-
-        const INT_ERR_PEER_ABORT: &str = "request aborted by peer";
-        const INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE: &str = "peer response is missing media type";
 
         if status.is_success() {
             // Translate the reqwest response into a Worker response.
@@ -214,12 +211,12 @@ impl crate::App {
                 .into_iter()
                 .filter_map(|h| h.to_str().ok())
                 .find_map(|h| DapMediaType::from_str_for_version(req.version, h))
-                .ok_or_else(|| fatal_error!(err = INT_ERR_PEER_RESP_MISSING_MEDIA_TYPE))?;
+                .ok_or_else(|| fatal_error!(err = "peer response is missing media type"))?;
 
             let payload = reqwest_resp
                 .bytes()
                 .await
-                .map_err(|e| fatal_error!(err = ?e))?
+                .map_err(|e| fatal_error!(err = ?e, "failed to read body of helper response"))?
                 .to_vec();
 
             Ok(DapResponse {
@@ -236,15 +233,14 @@ impl crate::App {
                     if content_type == "application/problem+json" {
                         error!(
                             "Problem details: {}",
-                            reqwest_resp
-                                .text()
-                                .await
-                                .map_err(|e| fatal_error!(err = ?e))?
+                            reqwest_resp.text().await.map_err(
+                                |e| fatal_error!(err = ?e, "failed to read body of helper error response")
+                            )?
                         );
                     }
                 }
             }
-            Err(fatal_error!(err = INT_ERR_PEER_ABORT))
+            Err(fatal_error!(err = "request aborted by peer"))
         }
     }
 }

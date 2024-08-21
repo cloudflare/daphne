@@ -49,7 +49,7 @@ fn check_suite<T: HpkeCrypto>(
         u16::from(kdf_id),
         u16::from(aead_id)
     );
-    let maperr = |_| fatal_error!(err = s);
+    let maperr = |_| fatal_error!(err = s, "invalid hpke suite");
     let kem = KemAlgorithm::try_from(u16::from(kem_id)).map_err(maperr)?;
     let kdf = KdfAlgorithm::try_from(u16::from(kdf_id)).map_err(maperr)?;
     let aead = AeadAlgorithm::try_from(u16::from(aead_id)).map_err(maperr)?;
@@ -59,7 +59,10 @@ fn check_suite<T: HpkeCrypto>(
             KdfAlgorithm::HkdfSha256,
             AeadAlgorithm::Aes128Gcm,
         ) => Ok(Hpke::new(Mode::Base, kem, kdf, aead)),
-        _ => Err(fatal_error!(err = s)),
+        _ => Err(fatal_error!(
+            err = s,
+            "unsuported suite: {kem} + {kdf} + {aead}"
+        )),
     }
 }
 

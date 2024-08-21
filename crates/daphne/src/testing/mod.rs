@@ -873,7 +873,10 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
-        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        let mut agg_store = self
+            .agg_store
+            .lock()
+            .map_err(|_| fatal_error!(err = "agg_store poisoned"))?;
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             if agg_store.for_bucket(task_id, &bucket).collected {
@@ -891,7 +894,10 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
             .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
 
         let aggregated = {
-            let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+            let mut agg_store = self
+                .agg_store
+                .lock()
+                .map_err(|_| fatal_error!(err = "agg_store poisoned"))?;
             let mut aggregated = false;
             for bucket in task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
                 batch_id: *batch_id,
@@ -908,7 +914,7 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
             let leader_state = self
                 .leader_state_store
                 .lock()
-                .map_err(|e| fatal_error!(err = ?e))?;
+                .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?;
             self.is_leader() && leader_state.contains_queued_task_of_batch(task_id, batch_id)
         };
 
@@ -965,7 +971,10 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
             .await
             .unwrap()
             .expect("tasks: unrecognized task");
-        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        let mut agg_store = self
+            .agg_store
+            .lock()
+            .map_err(|_| fatal_error!(err = "agg_store poisoned"))?;
 
         // Fetch aggregate shares.
         let mut agg_share = DapAggregateShare::default();
@@ -986,7 +995,10 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
         let task_config = self.unchecked_get_task_config(task_id).await;
-        let mut agg_store = self.agg_store.lock().map_err(|e| fatal_error!(err = ?e))?;
+        let mut agg_store = self
+            .agg_store
+            .lock()
+            .map_err(|_| fatal_error!(err = "agg_store poisoned"))?;
 
         for bucket in task_config.batch_span_for_sel(batch_sel)? {
             agg_store.for_bucket(task_id, &bucket).collected = true;
@@ -1017,7 +1029,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
 
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .put_report(task_id, &task_config, report.clone())
     }
 
@@ -1029,14 +1041,14 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
 
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .current_batch(task_id, &task_config)
     }
 
     async fn dequeue_work(&self, num_items: usize) -> Result<Vec<WorkItem>, DapError> {
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .dequeue_work(num_items)
     }
 
@@ -1044,7 +1056,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
         let mut leader_state = self
             .leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?;
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?;
 
         for work_item in work_items {
             leader_state.work_queue_mut().push_back(work_item);
@@ -1067,7 +1079,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
 
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .init_collect_job(task_id, &task_config, coll_job_id, batch_sel, agg_param)
     }
 
@@ -1078,7 +1090,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
     ) -> Result<DapCollectionJob, DapError> {
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .poll_collect_job(task_id, coll_job_id)
     }
 
@@ -1090,7 +1102,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
     ) -> Result<(), DapError> {
         self.leader_state_store
             .lock()
-            .map_err(|e| fatal_error!(err = ?e))?
+            .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .finish_collect_job(task_id, coll_job_id, collection)
     }
 

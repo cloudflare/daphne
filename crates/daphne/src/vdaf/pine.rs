@@ -86,7 +86,9 @@ impl PineConfig {
                     *chunk_len,
                     *chunk_len_sq_norm_equal,
                 )
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "failed to create pine field"))
+                })?;
                 shard_then_encode(&vdaf, gradient, nonce)
             }
         }
@@ -118,7 +120,9 @@ impl PineConfig {
                     *chunk_len,
                     *chunk_len_sq_norm_equal,
                 )
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(
+                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
+                )?;
                 let (state, share) = prep_init(
                     vdaf,
                     verify_key,
@@ -167,7 +171,9 @@ impl PineConfig {
                     *chunk_len,
                     *chunk_len_sq_norm_equal,
                 )
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(
+                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})")),
+                )?;
                 let (out_share, outbound) =
                     prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field128(prio::vdaf::AggregateShare::from(
@@ -204,7 +210,9 @@ impl PineConfig {
                     *chunk_len,
                     *chunk_len_sq_norm_equal,
                 )
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(
+                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
+                )?;
                 let out_share = prep_finish(&vdaf, state, peer_message_data)?;
                 let agg_share = VdafAggregateShare::Field128(prio::vdaf::AggregateShare::from(
                     prio::vdaf::OutputShare::from(out_share.0),
@@ -240,7 +248,9 @@ impl PineConfig {
                     *chunk_len,
                     *chunk_len_sq_norm_equal,
                 )
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e)))?;
+                .map_err(
+                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
+                )?;
                 let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }

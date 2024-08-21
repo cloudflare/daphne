@@ -64,7 +64,7 @@ async fn leader_send_http_request<S: Sync>(
     let url = task_config
         .helper_url
         .join(path)
-        .map_err(|e| fatal_error!(err = ?e))?;
+        .map_err(|e| fatal_error!(err = ?e, "failed to helper url {:?} with {path:?}", task_config.helper_url))?;
 
     let req = DapRequest {
         version: task_config.version,
@@ -473,7 +473,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
         batch_sel: batch_sel.clone(),
         agg_param: agg_param
             .get_encoded()
-            .map_err(|e| fatal_error!(err = ?e))?,
+            .map_err(|e| fatal_error!(err = ?e, "failed to decode agg param"))?,
         report_count: leader_agg_share.report_count,
         checksum: leader_agg_share.checksum,
     };
