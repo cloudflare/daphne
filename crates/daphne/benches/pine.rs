@@ -6,10 +6,15 @@ use daphne::pine::Pine;
 use prio::{
     field::random_vector,
     flp::Type,
-    vdaf::{xof::Seed, Aggregator, Client},
+    vdaf::{
+        xof::{Seed, XofTurboShake128},
+        Aggregator, Client,
+    },
 };
 
 fn pine(c: &mut Criterion) {
+    // NOTE We ignore this clippy warning because we may want to benchmark more parameters later.
+    #[allow(clippy::single_element_loop)]
     for (dimension, chunk_len, chunk_len_sq_norm_equal) in [(200_000, 150 * 2, 447 * 18)] {
         let pine =
             Pine::new_64(1 << 15, dimension, 15, chunk_len, chunk_len_sq_norm_equal).unwrap();
@@ -24,7 +29,10 @@ fn pine(c: &mut Criterion) {
             |b, &_d| {
                 b.iter(|| {
                     pine.flp
-                        .encode_with_wr_joint_rand(measurement.iter().copied(), &wr_joint_rand_seed)
+                        .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                            measurement.iter().copied(),
+                            &wr_joint_rand_seed,
+                        )
                         .unwrap()
                 });
             },
@@ -33,7 +41,10 @@ fn pine(c: &mut Criterion) {
         {
             let (mut input, wr_test_results) = pine
                 .flp
-                .encode_with_wr_joint_rand(measurement.iter().copied(), &wr_joint_rand_seed)
+                .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                    measurement.iter().copied(),
+                    &wr_joint_rand_seed,
+                )
                 .unwrap();
             input.extend_from_slice(&wr_test_results);
             let prove_rand = random_vector(pine.flp_sq_norm_equal.prove_rand_len()).unwrap();

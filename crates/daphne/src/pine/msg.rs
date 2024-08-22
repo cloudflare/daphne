@@ -16,12 +16,12 @@ use super::{vdaf::PinePrepState, Pine};
 
 /// The public share sent by the Client to each Aggregator.
 #[derive(Clone, Debug)]
-pub struct PublicShare {
-    pub(crate) wr_joint_rand_parts: [Seed<16>; 2],
-    pub(crate) vf_joint_rand_parts: [Seed<16>; 2],
+pub struct PublicShare<const SEED_SIZE: usize> {
+    pub(crate) wr_joint_rand_parts: [Seed<SEED_SIZE>; 2],
+    pub(crate) vf_joint_rand_parts: [Seed<SEED_SIZE>; 2],
 }
 
-impl std::fmt::Display for PublicShare {
+impl<const SEED_SIZE: usize> std::fmt::Display for PublicShare<SEED_SIZE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = self
             .get_encoded()
@@ -31,7 +31,7 @@ impl std::fmt::Display for PublicShare {
     }
 }
 
-impl Encode for PublicShare {
+impl<const SEED_SIZE: usize> Encode for PublicShare<SEED_SIZE> {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         self.wr_joint_rand_parts[0].encode(bytes)?;
         self.wr_joint_rand_parts[1].encode(bytes)?;
@@ -41,13 +41,15 @@ impl Encode for PublicShare {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(16 * 4)
+        Some(SEED_SIZE * 4)
     }
 }
 
-impl<F> ParameterizedDecode<Pine<F>> for PublicShare {
+impl<F, X, const SEED_SIZE: usize> ParameterizedDecode<Pine<F, X, SEED_SIZE>>
+    for PublicShare<SEED_SIZE>
+{
     fn decode_with_param(
-        _pine: &Pine<F>,
+        _pine: &Pine<F, X, SEED_SIZE>,
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
@@ -59,26 +61,28 @@ impl<F> ParameterizedDecode<Pine<F>> for PublicShare {
 
 /// An input share sent by the Client to the Leader.
 #[derive(Clone, Debug)]
-pub struct InputShare<F>(pub(crate) InputShareFor<F>);
+pub struct InputShare<F, const SEED_SIZE: usize>(pub(crate) InputShareFor<F, SEED_SIZE>);
 
 #[derive(Clone, Debug)]
-pub(crate) enum InputShareFor<F> {
+pub(crate) enum InputShareFor<F, const SEED_SIZE: usize> {
     Leader {
         meas_share: Vec<F>,
         proofs_share: Vec<F>,
-        wr_blind: Seed<16>,
-        vf_blind: Seed<16>,
+        wr_blind: Seed<SEED_SIZE>,
+        vf_blind: Seed<SEED_SIZE>,
     },
 
     Helper {
-        meas_share: Seed<16>,
-        proofs_share: Seed<16>,
-        wr_blind: Seed<16>,
-        vf_blind: Seed<16>,
+        meas_share: Seed<SEED_SIZE>,
+        proofs_share: Seed<SEED_SIZE>,
+        wr_blind: Seed<SEED_SIZE>,
+        vf_blind: Seed<SEED_SIZE>,
     },
 }
 
-impl<F: FftFriendlyFieldElement> std::fmt::Display for InputShare<F> {
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> std::fmt::Display
+    for InputShare<F, SEED_SIZE>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = self
             .get_encoded()
@@ -91,7 +95,7 @@ impl<F: FftFriendlyFieldElement> std::fmt::Display for InputShare<F> {
     }
 }
 
-impl<F: FftFriendlyFieldElement> Encode for InputShare<F> {
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> Encode for InputShare<F, SEED_SIZE> {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match &self.0 {
             InputShareFor::Leader {
@@ -131,16 +135,20 @@ impl<F: FftFriendlyFieldElement> Encode for InputShare<F> {
                 proofs_share,
                 ..
             } => Some(
-                meas_share.len() * F::ENCODED_SIZE + proofs_share.len() * F::ENCODED_SIZE + 16 * 2,
+                meas_share.len() * F::ENCODED_SIZE
+                    + proofs_share.len() * F::ENCODED_SIZE
+                    + SEED_SIZE * 2,
             ),
-            InputShareFor::Helper { .. } => Some(16 * 4),
+            InputShareFor::Helper { .. } => Some(SEED_SIZE * 4),
         }
     }
 }
 
-impl<F: FftFriendlyFieldElement> ParameterizedDecode<(&Pine<F>, usize)> for InputShare<F> {
+impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize>
+    ParameterizedDecode<(&Pine<F, X, SEED_SIZE>, usize)> for InputShare<F, SEED_SIZE>
+{
     fn decode_with_param(
-        (pine, agg_id): &(&Pine<F>, usize),
+        (pine, agg_id): &(&Pine<F, X, SEED_SIZE>, usize),
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match agg_id {
@@ -174,13 +182,15 @@ impl<F: FftFriendlyFieldElement> ParameterizedDecode<(&Pine<F>, usize)> for Inpu
 
 /// A prep share broadcast by one of the Aggregators.
 #[derive(Clone, Debug)]
-pub struct PrepShare<F> {
+pub struct PrepShare<F, const SEED_SIZE: usize> {
     pub(crate) verifiers_share: Vec<F>,
-    pub(crate) wr_joint_rand_part: Seed<16>,
-    pub(crate) vf_joint_rand_part: Seed<16>,
+    pub(crate) wr_joint_rand_part: Seed<SEED_SIZE>,
+    pub(crate) vf_joint_rand_part: Seed<SEED_SIZE>,
 }
 
-impl<F: FftFriendlyFieldElement> std::fmt::Display for PrepShare<F> {
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> std::fmt::Display
+    for PrepShare<F, SEED_SIZE>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = self
             .get_encoded()
@@ -190,7 +200,7 @@ impl<F: FftFriendlyFieldElement> std::fmt::Display for PrepShare<F> {
     }
 }
 
-impl<F: FftFriendlyFieldElement> Encode for PrepShare<F> {
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> Encode for PrepShare<F, SEED_SIZE> {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         for v in &self.verifiers_share {
             v.encode(bytes)?;
@@ -201,13 +211,15 @@ impl<F: FftFriendlyFieldElement> Encode for PrepShare<F> {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(self.verifiers_share.len() * F::ENCODED_SIZE + 16 * 2)
+        Some(self.verifiers_share.len() * F::ENCODED_SIZE + SEED_SIZE * 2)
     }
 }
 
-impl<F: FftFriendlyFieldElement> ParameterizedDecode<PinePrepState<F>> for PrepShare<F> {
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize>
+    ParameterizedDecode<PinePrepState<F, SEED_SIZE>> for PrepShare<F, SEED_SIZE>
+{
     fn decode_with_param(
-        state: &PinePrepState<F>,
+        state: &PinePrepState<F, SEED_SIZE>,
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
@@ -222,12 +234,12 @@ impl<F: FftFriendlyFieldElement> ParameterizedDecode<PinePrepState<F>> for PrepS
 
 /// The prep message combined from the prep shares.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Prep {
-    pub(crate) wr_joint_rand_seed: Seed<16>,
-    pub(crate) vf_joint_rand_seed: Seed<16>,
+pub struct Prep<const SEED_SIZE: usize> {
+    pub(crate) wr_joint_rand_seed: Seed<SEED_SIZE>,
+    pub(crate) vf_joint_rand_seed: Seed<SEED_SIZE>,
 }
 
-impl std::fmt::Display for Prep {
+impl<const SEED_SIZE: usize> std::fmt::Display for Prep<SEED_SIZE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = self
             .get_encoded()
@@ -237,7 +249,7 @@ impl std::fmt::Display for Prep {
     }
 }
 
-impl Encode for Prep {
+impl<const SEED_SIZE: usize> Encode for Prep<SEED_SIZE> {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         self.wr_joint_rand_seed.encode(bytes)?;
         self.vf_joint_rand_seed.encode(bytes)?;
@@ -245,13 +257,15 @@ impl Encode for Prep {
     }
 
     fn encoded_len(&self) -> Option<usize> {
-        Some(16 * 2)
+        Some(SEED_SIZE * 2)
     }
 }
 
-impl<F> ParameterizedDecode<PinePrepState<F>> for Prep {
+impl<F, const SEED_SIZE: usize> ParameterizedDecode<PinePrepState<F, SEED_SIZE>>
+    for Prep<SEED_SIZE>
+{
     fn decode_with_param(
-        _state: &PinePrepState<F>,
+        _state: &PinePrepState<F, SEED_SIZE>,
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {

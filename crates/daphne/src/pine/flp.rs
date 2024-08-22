@@ -38,7 +38,7 @@ use prio::{
         FlpError, Gadget, Type,
     },
     vdaf::{
-        xof::{Seed, Xof, XofTurboShake128},
+        xof::{Seed, Xof},
         VdafError,
     },
 };
@@ -67,14 +67,15 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     ///
     /// Return the encoded measurement `meas` and wraparound test results `wr_test_results`. The
     /// input to the FLP circuit is `meas || wr_test_results`.
-    pub fn encode_with_wr_joint_rand(
+    pub fn encode_with_wr_joint_rand<X: Xof<SEED_SIZE>, const SEED_SIZE: usize>(
         &self,
         gradient: impl Iterator<Item = f64>,
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<SEED_SIZE>,
     ) -> Result<(Vec<F>, [F; NUM_WR_TESTS]), VdafError> {
         let mut meas = Vec::with_capacity(self.input_len());
         self.append_encoded_gradient(&mut meas, gradient)?;
-        let wr_test_results = self.append_wr_test_results(&mut meas, wr_joint_rand_seed)?;
+        let wr_test_results =
+            self.append_wr_test_results::<X, SEED_SIZE>(&mut meas, wr_joint_rand_seed)?;
         Ok((meas, wr_test_results))
     }
 
@@ -129,12 +130,13 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     /// `wr_test_results` on its own.
     ///
     /// In case of error, the buffer may have been modified and must be cleared before re-use.
-    pub(crate) fn append_wr_test_results(
+    pub(crate) fn append_wr_test_results<X: Xof<SEED_SIZE>, const SEED_SIZE: usize>(
         &self,
         meas: &mut Vec<F>,
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<SEED_SIZE>,
     ) -> Result<[F; NUM_WR_TESTS], VdafError> {
-        let wr_test_results = self.run_wr_tests(&meas[..self.cfg.dimension], wr_joint_rand_seed);
+        let wr_test_results =
+            self.run_wr_tests::<X, SEED_SIZE>(&meas[..self.cfg.dimension], wr_joint_rand_seed);
 
         let mut wr_success_count = 0;
         for wr_test_result in wr_test_results {
@@ -169,17 +171,13 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
 
     /// Run the wraparound tests. For each test, compute the dot product of the gradient and a
     /// random `{-1, 0, 1}`-vector derived from the provided seed.
-    pub(crate) fn run_wr_tests(
+    pub(crate) fn run_wr_tests<X: Xof<SEED_SIZE>, const SEED_SIZE: usize>(
         &self,
         gradient: &[F],
-        wr_joint_rand_seed: &Seed<16>,
+        wr_joint_rand_seed: &Seed<SEED_SIZE>,
     ) -> [F; NUM_WR_TESTS] {
         debug_assert_eq!(gradient.len(), self.cfg.dimension);
-        let mut xof = XofTurboShake128::seed_stream(
-            wr_joint_rand_seed,
-            &self.cfg.dst(USAGE_WR_JOINT_RAND),
-            &[],
-        );
+        let mut xof = X::seed_stream(wr_joint_rand_seed, &self.cfg.dst(USAGE_WR_JOINT_RAND), &[]);
         let rand_len_per_test = chunk_count(4, self.cfg.dimension);
         let mut rand = vec![0_u8; rand_len_per_test * NUM_WR_TESTS];
         xof.fill(&mut rand[..]);
@@ -599,6 +597,7 @@ mod tests {
     use prio::{
         field::{Field128, FieldElement, FieldElementWithInteger},
         flp::{test_utils::FlpTest, Type},
+        vdaf::xof::XofTurboShake128,
     };
     use rand::prelude::*;
     use std::iter;
@@ -659,7 +658,7 @@ mod tests {
 
         let (input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand(gradient, &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(gradient, &Seed::generate().unwrap())
             .unwrap();
         let (_encoded_gradient, rest) = input.split_at(pine.flp.cfg.dimension);
         let (bit_checked, rest) = rest.split_at(pine.flp.cfg.bit_checked_len);
@@ -685,11 +684,14 @@ mod tests {
         }
     }
 
-    impl<F: FftFriendlyFieldElement> Pine<F> {
+    impl<F: FftFriendlyFieldElement> Pine<F, XofTurboShake128, 16> {
         fn run_valid_test_case(&self, gradient: impl Iterator<Item = f64>) {
             let (mut input, wr_test_results) = self
                 .flp
-                .encode_with_wr_joint_rand(gradient, &Seed::generate().unwrap())
+                .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                    gradient,
+                    &Seed::generate().unwrap(),
+                )
                 .unwrap();
             input.extend_from_slice(&wr_test_results);
 
@@ -738,7 +740,10 @@ mod tests {
         let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                [0.0; DIM].into_iter(),
+                &Seed::generate().unwrap(),
+            )
             .unwrap();
         input.extend_from_slice(&wr_test_results);
 
@@ -758,7 +763,10 @@ mod tests {
         let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                [0.0; DIM].into_iter(),
+                &Seed::generate().unwrap(),
+            )
             .unwrap();
         input.extend_from_slice(&wr_test_results);
 
@@ -779,7 +787,10 @@ mod tests {
         let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                [0.0; DIM].into_iter(),
+                &Seed::generate().unwrap(),
+            )
             .unwrap();
         input.extend_from_slice(&wr_test_results);
 
@@ -801,7 +812,10 @@ mod tests {
         let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand([0.0; DIM].into_iter(), &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                [0.0; DIM].into_iter(),
+                &Seed::generate().unwrap(),
+            )
             .unwrap();
         input.extend_from_slice(&wr_test_results);
 
@@ -824,7 +838,10 @@ mod tests {
         let pine = Pine::new_128(norm_bound, DIM, 15, 4, 5).unwrap();
         let (mut input, wr_test_results) = pine
             .flp
-            .encode_with_wr_joint_rand([0.1; DIM].into_iter(), &Seed::generate().unwrap())
+            .encode_with_wr_joint_rand::<XofTurboShake128, 16>(
+                [0.1; DIM].into_iter(),
+                &Seed::generate().unwrap(),
+            )
             .unwrap();
         let i = input.len();
         input.extend_from_slice(&wr_test_results);
