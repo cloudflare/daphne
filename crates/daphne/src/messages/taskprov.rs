@@ -20,6 +20,8 @@ use super::{decode_u16_prefixed, encode_u16_prefixed};
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
 pub(crate) const VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128: u32 = 0xFFFF_1003;
+#[cfg(feature = "experimental")]
+pub(crate) const VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128: u32 = 0xffff_1005;
 
 // Differential privacy mechanism types.
 const DP_MECHANISM_NONE: u8 = 0x01;
