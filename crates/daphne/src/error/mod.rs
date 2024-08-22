@@ -42,7 +42,7 @@ impl DapError {
             title: "Internal server error".into(),
             agg_job_id: None,
             task_id: None,
-            instance: None,
+            instance: "/problem-details/internal-server-error".into(),
             detail: None,
         }
     }
