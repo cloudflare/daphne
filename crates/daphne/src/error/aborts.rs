@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{AggregationJobId, TaskId, TransitionFailure},
+    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;
@@ -65,7 +65,7 @@ pub enum DapAbort {
     /// Report too late. Sent in response to an upload request for a task that is known to have
     /// expired.
     #[error("reportTooLate")]
-    ReportTooLate,
+    ReportTooLate { report_id: ReportId },
 
     /// Round mismatch. The aggregators disagree on the current round of the VDAF preparation protocol.
     /// This abort occurs during the aggregation sub-protocol.
@@ -134,9 +134,13 @@ impl DapAbort {
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id),
             ),
+            Self::ReportTooLate { report_id } => (
+                None,
+                Some("one of the reports' timestamp was too late".into()),
+                None,
+            ),
             Self::UnrecognizedTask { task_id } => (Some(task_id), None, None),
             Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
-            Self::ReportTooLate => (None, None, None),
         };
 
         ProblemDetails {
@@ -255,7 +259,7 @@ impl DapAbort {
                 Some(self.to_string()),
             ),
             Self::ReportRejected { .. } => ("Report rejected", Some(self.to_string())),
-            Self::ReportTooLate => (
+            Self::ReportTooLate { .. } => (
                 "The requested task expires after report timestamp",
                 Some(self.to_string()),
             ),

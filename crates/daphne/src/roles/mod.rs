@@ -1092,11 +1092,13 @@ mod test {
             ..Default::default()
         };
 
-        assert_matches!(
+        assert_eq!(
             leader::handle_upload_req(&*t.leader, &req)
                 .await
                 .unwrap_err(),
-            DapError::Abort(DapAbort::ReportTooLate)
+            DapError::Abort(DapAbort::ReportTooLate {
+                report_id: report.report_metadata.id
+            })
         );
     }
 

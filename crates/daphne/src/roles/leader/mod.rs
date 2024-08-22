@@ -230,7 +230,10 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
 
     // Check that the task has not expired.
     if report.report_metadata.time >= task_config.as_ref().not_after {
-        return Err(DapAbort::ReportTooLate.into());
+        return Err(DapAbort::ReportTooLate {
+            report_id: report.report_metadata.id,
+        }
+        .into());
     }
     if report.report_metadata.time
         < task_config.as_ref().not_before - task_config.as_ref().time_precision
