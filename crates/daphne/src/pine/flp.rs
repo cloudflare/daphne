@@ -44,10 +44,7 @@ use prio::{
 };
 use rand::Rng;
 
-use super::{
-    chunk_count, f64_to_field, field_to_f64, PineConfig, NUM_WR_SUCCESSES, NUM_WR_TESTS,
-    USAGE_WR_JOINT_RAND,
-};
+use super::{chunk_count, f64_to_field, field_to_f64, PineConfig, USAGE_WR_JOINT_RAND};
 
 /// The main FLP used to check each measurement's validity.
 ///
@@ -71,7 +68,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         &self,
         gradient: impl Iterator<Item = f64>,
         wr_joint_rand_seed: &Seed<SEED_SIZE>,
-    ) -> Result<(Vec<F>, [F; NUM_WR_TESTS]), VdafError> {
+    ) -> Result<(Vec<F>, Vec<F>), VdafError> {
         let mut meas = Vec::with_capacity(self.input_len());
         self.append_encoded_gradient(&mut meas, gradient)?;
         let wr_test_results =
@@ -88,7 +85,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         meas: &mut Vec<F>,
         gradient: impl Iterator<Item = f64>,
     ) -> Result<(), VdafError> {
-        let two_to_frac_bits = f64::from(1 << self.cfg.frac_bits);
+        let two_to_frac_bits = f64::from(1 << self.cfg.param.frac_bits);
 
         // Encode the gradient and compute the squared norm.
         let mut sq_norm = F::zero();
@@ -100,7 +97,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             gradient_len += 1;
         }
 
-        if gradient_len != self.cfg.dimension {
+        if gradient_len != self.cfg.param.dimension {
             return Err(VdafError::Uncategorized(
                 "gradient encoding failed: gradient has unexpected dimension".into(),
             ));
@@ -134,15 +131,15 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         &self,
         meas: &mut Vec<F>,
         wr_joint_rand_seed: &Seed<SEED_SIZE>,
-    ) -> Result<[F; NUM_WR_TESTS], VdafError> {
-        let wr_test_results =
-            self.run_wr_tests::<X, SEED_SIZE>(&meas[..self.cfg.dimension], wr_joint_rand_seed);
+    ) -> Result<Vec<F>, VdafError> {
+        let wr_test_results = self
+            .run_wr_tests::<X, SEED_SIZE>(&meas[..self.cfg.param.dimension], wr_joint_rand_seed);
 
         let mut wr_success_count = 0;
-        for wr_test_result in wr_test_results {
+        for wr_test_result in &wr_test_results {
             // Append the range-checked test result.
             let (in_range, v, _u) = range_checked(
-                wr_test_result,
+                *wr_test_result,
                 -self.cfg.wr_test_bound + F::one(),
                 self.cfg.wr_test_bound,
             );
@@ -152,7 +149,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             }
 
             // Append the success bit.
-            if in_range && wr_success_count < NUM_WR_SUCCESSES {
+            if in_range && wr_success_count < self.cfg.param.num_wr_successes {
                 wr_success_count += 1;
                 meas.push(F::one());
             } else {
@@ -160,7 +157,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             }
         }
 
-        if wr_success_count != NUM_WR_SUCCESSES {
+        if wr_success_count != self.cfg.param.num_wr_successes {
             return Err(VdafError::Uncategorized(
                 "append wraparound tests failed: insufficient number of successes".into(),
             ));
@@ -175,14 +172,14 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         &self,
         gradient: &[F],
         wr_joint_rand_seed: &Seed<SEED_SIZE>,
-    ) -> [F; NUM_WR_TESTS] {
-        debug_assert_eq!(gradient.len(), self.cfg.dimension);
+    ) -> Vec<F> {
+        debug_assert_eq!(gradient.len(), self.cfg.param.dimension);
         let mut xof = X::seed_stream(wr_joint_rand_seed, &self.cfg.dst(USAGE_WR_JOINT_RAND), &[]);
-        let rand_len_per_test = chunk_count(4, self.cfg.dimension);
-        let mut rand = vec![0_u8; rand_len_per_test * NUM_WR_TESTS];
+        let rand_len_per_test = chunk_count(4, self.cfg.param.dimension);
+        let mut rand = vec![0_u8; rand_len_per_test * self.cfg.param.num_wr_tests];
         xof.fill(&mut rand[..]);
 
-        let mut wr_test_results = [F::zero(); NUM_WR_TESTS];
+        let mut wr_test_results = vec![F::zero(); self.cfg.param.num_wr_tests];
         for (wr_test_result, rand_per_test) in wr_test_results
             .iter_mut()
             .zip(rand.chunks(rand_len_per_test))
@@ -225,7 +222,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         shares_inv: F,
     ) -> Result<F, FlpError> {
         debug_assert_eq!(bit_checked.len(), self.cfg.bit_checked_len);
-        debug_assert_eq!(buf.capacity(), self.cfg.chunk_len * 2);
+        debug_assert_eq!(buf.capacity(), self.cfg.param.chunk_len * 2);
         buf.clear();
 
         // Construct a polynomial from the bits and evaluate it at `r_bit_check`. The
@@ -243,7 +240,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
         // the reference implementation.
         let mut r_power = F::one();
         bit_checked
-            .chunks(self.cfg.chunk_len)
+            .chunks(self.cfg.param.chunk_len)
             .map(|chunk| {
                 for x in chunk {
                     buf.push(r_power * *x);
@@ -289,10 +286,10 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
     ) -> Result<(F, F), FlpError> {
         debug_assert_eq!(
             wr_test_bits.len(),
-            NUM_WR_TESTS * (self.cfg.wr_test_bits + 1)
+            self.cfg.param.num_wr_tests * (self.cfg.wr_test_bits + 1)
         );
-        debug_assert_eq!(wr_test_results.len(), NUM_WR_TESTS,);
-        debug_assert_eq!(buf.capacity(), self.cfg.chunk_len * 2);
+        debug_assert_eq!(wr_test_results.len(), self.cfg.param.num_wr_tests);
+        debug_assert_eq!(buf.capacity(), self.cfg.param.chunk_len * 2);
         buf.clear();
 
         // For each test, add up the success bits (i.e., each `wr_test_g`).
@@ -320,14 +317,14 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             wr_success_count += wr_test_g;
             r_power *= r_wr_test;
 
-            if buf.len() == self.cfg.chunk_len * 2 {
+            if buf.len() == self.cfg.param.chunk_len * 2 {
                 wr_tests_result += gadget[0].call(buf)?;
                 buf.clear();
             }
         }
 
-        if buf.len() % self.cfg.chunk_len * 2 != 0 {
-            for _ in buf.len()..self.cfg.chunk_len * 2 {
+        if buf.len() % self.cfg.param.chunk_len * 2 != 0 {
+            for _ in buf.len()..self.cfg.param.chunk_len * 2 {
                 buf.push(F::zero());
             }
             wr_tests_result += gadget[0].call(buf)?;
@@ -337,7 +334,11 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             wr_tests_result,
             // The success count is equal to the expected value.
             wr_success_count
-                - F::from(F::Integer::try_from(NUM_WR_SUCCESSES).unwrap()) * shares_inv,
+                - F::from(
+                    F::Integer::try_from(self.cfg.param.num_wr_successes).map_err(|_| {
+                        FlpError::Valid("num_wr_successes is too large for field".to_string())
+                    })?,
+                ) * shares_inv,
         ))
     }
 
@@ -373,7 +374,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     }
 
     fn decode_result(&self, data: &[F], _num_measurements: usize) -> Result<Vec<f64>, FlpError> {
-        let two_to_frac_bits = f64::from(1 << self.cfg.frac_bits);
+        let two_to_frac_bits = f64::from(1 << self.cfg.param.frac_bits);
 
         data.iter()
             .map(|encoded| field_to_f64(*encoded, two_to_frac_bits))
@@ -384,7 +385,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     fn gadget(&self) -> Vec<Box<dyn Gadget<F>>> {
         vec![Box::new(ParallelSum::new(
             Mul::new(self.cfg.gadget_calls),
-            self.cfg.chunk_len,
+            self.cfg.param.chunk_len,
         ))]
     }
 
@@ -395,7 +396,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
         joint_rand: &[F],
         num_shares: usize,
     ) -> Result<F, FlpError> {
-        let mut buf = Vec::with_capacity(self.cfg.chunk_len * 2);
+        let mut buf = Vec::with_capacity(self.cfg.param.chunk_len * 2);
         let shares_inv = F::from(F::Integer::try_from(num_shares).unwrap()).inv();
 
         // Unpack the encoded measurement. It is composed of the following components:
@@ -411,15 +412,16 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
         //   whether the test succeeded (i.e., the result is in the specified range).
         //
         // * For each wraparound test, the result `wr_test_result`.
-        let (_encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
+        let (_encoded_gradient, rest) = meas.split_at(self.cfg.param.dimension);
         let (bit_checked, rest) = rest.split_at(self.cfg.bit_checked_len);
-        let (wr_test_results, rest) = rest.split_at(NUM_WR_TESTS);
+        let (wr_test_results, rest) = rest.split_at(self.cfg.param.num_wr_tests);
         assert!(rest.is_empty());
 
         // Unpack the bit checked values.
         let (sq_norm_v_bits, rest) = bit_checked.split_at(self.cfg.sq_norm_bits);
         let (sq_norm_u_bits, rest) = rest.split_at(self.cfg.sq_norm_bits);
-        let (wr_test_bits, rest) = rest.split_at(NUM_WR_TESTS * (self.cfg.wr_test_bits + 1));
+        let (wr_test_bits, rest) =
+            rest.split_at(self.cfg.param.num_wr_tests * (self.cfg.wr_test_bits + 1));
         assert!(rest.is_empty());
 
         // Unpack the joint randomness.
@@ -452,7 +454,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     }
 
     fn truncate(&self, mut input: Vec<F>) -> Result<Vec<F>, FlpError> {
-        input.truncate(self.cfg.dimension);
+        input.truncate(self.cfg.param.dimension);
         Ok(input)
     }
 
@@ -461,15 +463,15 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     }
 
     fn proof_len(&self) -> usize {
-        2 * self.cfg.chunk_len + 2 * ((1 + self.cfg.gadget_calls).next_power_of_two() - 1) + 1
+        2 * self.cfg.param.chunk_len + 2 * ((1 + self.cfg.gadget_calls).next_power_of_two() - 1) + 1
     }
 
     fn verifier_len(&self) -> usize {
-        2 * self.cfg.chunk_len + 2
+        2 * self.cfg.param.chunk_len + 2
     }
 
     fn output_len(&self) -> usize {
-        self.cfg.dimension
+        self.cfg.param.dimension
     }
 
     fn joint_rand_len(&self) -> usize {
@@ -477,7 +479,7 @@ impl<F: FftFriendlyFieldElement> Type for PineType<F> {
     }
 
     fn prove_rand_len(&self) -> usize {
-        self.cfg.chunk_len * 2
+        self.cfg.param.chunk_len * 2
     }
 
     fn query_rand_len(&self) -> usize {
@@ -521,7 +523,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
                 vec![F::zero(), F::zero(), F::one()],
                 self.cfg.gadget_calls_sq_norm_equal,
             ),
-            self.cfg.chunk_len_sq_norm_equal,
+            self.cfg.param.chunk_len_sq_norm_equal,
         ))]
     }
 
@@ -532,8 +534,8 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
         _joint_rand: &[F],
         _num_shares: usize,
     ) -> Result<F, FlpError> {
-        let mut buf = Vec::with_capacity(self.cfg.chunk_len_sq_norm_equal);
-        let (encoded_gradient, rest) = meas.split_at(self.cfg.dimension);
+        let mut buf = Vec::with_capacity(self.cfg.param.chunk_len_sq_norm_equal);
+        let (encoded_gradient, rest) = meas.split_at(self.cfg.param.dimension);
         let (sq_norm_v_bits, _rest) = rest.split_at(self.cfg.sq_norm_bits);
 
         // Compute the squared norm of the gradient.
@@ -541,7 +543,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
         // This corresponds to the third call to `parallel_sum()` in the validity circuit of the
         // reference implementation.
         let sq_norm = encoded_gradient
-            .chunks(self.cfg.chunk_len_sq_norm_equal)
+            .chunks(self.cfg.param.chunk_len_sq_norm_equal)
             .map(|chunk| {
                 buf.extend(chunk);
                 for _ in buf.len()..buf.capacity() {
@@ -563,13 +565,13 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
     }
 
     fn proof_len(&self) -> usize {
-        self.cfg.chunk_len_sq_norm_equal
+        self.cfg.param.chunk_len_sq_norm_equal
             + 2 * ((1 + self.cfg.gadget_calls_sq_norm_equal).next_power_of_two() - 1)
             + 1
     }
 
     fn verifier_len(&self) -> usize {
-        self.cfg.chunk_len_sq_norm_equal + 2
+        self.cfg.param.chunk_len_sq_norm_equal + 2
     }
 
     fn joint_rand_len(&self) -> usize {
@@ -577,7 +579,7 @@ impl<F: FftFriendlyFieldElement> Type for PineTypeSquaredNormEqual<F> {
     }
 
     fn prove_rand_len(&self) -> usize {
-        self.cfg.chunk_len_sq_norm_equal
+        self.cfg.param.chunk_len_sq_norm_equal
     }
 
     fn query_rand_len(&self) -> usize {
@@ -621,7 +623,7 @@ mod tests {
         pine.flp
             .append_encoded_gradient(&mut meas, gradient.clone())
             .unwrap();
-        let (encoded_gradient, rest) = meas.split_at(pine.flp.cfg.dimension);
+        let (encoded_gradient, rest) = meas.split_at(pine.flp.cfg.param.dimension);
         let (sq_norm_v_bits, rest) = rest.split_at(pine.flp.cfg.sq_norm_bits);
         let (sq_norm_u_bits, rest) = rest.split_at(pine.flp.cfg.sq_norm_bits);
         assert!(rest.is_empty());
@@ -660,7 +662,7 @@ mod tests {
             .flp
             .encode_with_wr_joint_rand::<XofTurboShake128, 16>(gradient, &Seed::generate().unwrap())
             .unwrap();
-        let (_encoded_gradient, rest) = input.split_at(pine.flp.cfg.dimension);
+        let (_encoded_gradient, rest) = input.split_at(pine.flp.cfg.param.dimension);
         let (bit_checked, rest) = rest.split_at(pine.flp.cfg.bit_checked_len);
         assert!(rest.is_empty());
 
@@ -795,7 +797,7 @@ mod tests {
         input.extend_from_slice(&wr_test_results);
 
         // Flip the first bit of the first wraparound result.
-        let i = pine.flp.cfg.dimension + (2 * pine.flp.cfg.sq_norm_bits);
+        let i = pine.flp.cfg.param.dimension + (2 * pine.flp.cfg.sq_norm_bits);
         input[i] = if input[i] == Field128::one() {
             Field128::zero()
         } else {
@@ -820,8 +822,9 @@ mod tests {
         input.extend_from_slice(&wr_test_results);
 
         // Flip the first wraparound result success bit.
-        let i =
-            pine.flp.cfg.dimension + (2 * pine.flp.cfg.sq_norm_bits) + pine.flp.cfg.wr_test_bits;
+        let i = pine.flp.cfg.param.dimension
+            + (2 * pine.flp.cfg.sq_norm_bits)
+            + pine.flp.cfg.wr_test_bits;
         input[i] = if input[i] == Field128::one() {
             Field128::zero()
         } else {

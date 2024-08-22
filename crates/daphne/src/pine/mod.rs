@@ -23,8 +23,6 @@ use prio::{
 use flp::{PineType, PineTypeSquaredNormEqual};
 
 const ALPHA: f64 = 8.7;
-const NUM_WR_TESTS: usize = 100;
-const NUM_WR_SUCCESSES: usize = 100;
 
 const DST_SIZE: usize = 7;
 
@@ -59,12 +57,16 @@ impl Pine128 {
         chunk_len_sq_norm_equal: usize,
     ) -> Result<Self, VdafError> {
         Self::new(
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            1,
+            &PineParam {
+                norm_bound,
+                dimension,
+                frac_bits,
+                chunk_len,
+                chunk_len_sq_norm_equal,
+                num_proofs: 1,
+                num_wr_tests: 100,
+                num_wr_successes: 100,
+            },
             0xffff_ffff,
         )
     }
@@ -82,38 +84,54 @@ impl Pine64 {
         chunk_len_sq_norm_equal: usize,
     ) -> Result<Self, VdafError> {
         Self::new(
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            2,
+            &PineParam {
+                norm_bound,
+                dimension,
+                frac_bits,
+                chunk_len,
+                chunk_len_sq_norm_equal,
+                num_proofs: 2,
+                num_wr_tests: 100,
+                num_wr_successes: 100,
+            },
             0xffff_ffff,
         )
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub struct PineParam {
+    pub(crate) norm_bound: u64,
+    pub(crate) dimension: usize,
+    pub(crate) frac_bits: usize,
+    pub(crate) chunk_len: usize,
+    pub(crate) chunk_len_sq_norm_equal: usize,
+    pub(crate) num_proofs: u8,
+    pub(crate) num_wr_tests: usize,
+    pub(crate) num_wr_successes: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PineConfig<F> {
     // PINE parameters
-    dimension: usize,
-    frac_bits: usize,
+    param: PineParam,
     sq_norm_bound: F,
     sq_norm_bits: usize,
     wr_test_bound: F,
     wr_test_bits: usize,
-    num_proofs: u8,
     algorithm_id: u32,
 
-    // FLP parameters for the main circuit
-    chunk_len: usize,
+    // Additional parameters for the main circuit
     bit_checked_len: usize,
     encoded_gradient_len: usize,
     encoded_input_len: usize,
     gadget_calls: usize,
 
-    // FLP parameters for the squared-norm equality check
-    chunk_len_sq_norm_equal: usize,
+    // Additional parameters for the squared-norm equality check
     gadget_calls_sq_norm_equal: usize,
 }
 
@@ -127,7 +145,7 @@ impl<F> PineConfig<F> {
     }
 
     pub(crate) fn input_len(&self) -> usize {
-        self.encoded_input_len + NUM_WR_TESTS
+        self.encoded_input_len + self.param.num_wr_tests
     }
 }
 
@@ -152,17 +170,15 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
     /// * `num_proofs`: The number of FLP proofs to generate.
     ///
     /// * `algorithm_id`: The VDAF algorithm ID.
-    pub(crate) fn new(
-        norm_bound: u64,
-        dimension: usize,
-        frac_bits: usize,
-        chunk_len: usize,
-        chunk_len_sq_norm_equal: usize,
-        num_proofs: u8,
-        algorithm_id: u32,
-    ) -> Result<Self, VdafError> {
-        if norm_bound == 0
-            || F::Integer::try_from(usize::try_from(norm_bound).map_err(|e| {
+    pub(crate) fn new(param: &PineParam, algorithm_id: u32) -> Result<Self, VdafError> {
+        if param.num_wr_tests < param.num_wr_successes {
+            return Err(VdafError::Uncategorized(
+                "init failed: num_wr_successes is larger than num_wr_tests".to_string(),
+            ));
+        }
+
+        if param.norm_bound == 0
+            || F::Integer::try_from(usize::try_from(param.norm_bound).map_err(|e| {
                 VdafError::Uncategorized(format!(
                     "init failed: error while converting norm bound to usize: {e}"
                 ))
@@ -179,25 +195,25 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
         }
 
         // 24 is the largest number of fractional bits that we know we can support.
-        if frac_bits > 24 {
+        if param.frac_bits > 24 {
             return Err(VdafError::Uncategorized(
                 "init failed: too many fractional bits".into(),
             ));
         }
 
-        if dimension == 0 {
+        if param.dimension == 0 {
             return Err(VdafError::Uncategorized(
                 "init failed: 0-dimension inputs are invalid".into(),
             ));
         }
 
-        if frac_bits > 128 {
+        if param.frac_bits > 128 {
             return Err(VdafError::Uncategorized(
                 "init failed: number of fractional bits must not exceed 128".into(),
             ));
         }
 
-        let Some(sq_norm_bound_int) = norm_bound.checked_mul(norm_bound) else {
+        let Some(sq_norm_bound_int) = param.norm_bound.checked_mul(param.norm_bound) else {
             return Err(VdafError::Uncategorized(
                 "init failed: squared norm is too large for u64".into(),
             ));
@@ -223,7 +239,7 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
             #[allow(clippy::cast_possible_truncation)]
             #[allow(clippy::cast_sign_loss)]
             let wr_test_bound_int =
-                (((norm_bound as f64) * ALPHA).ceil() as u64 + 1).next_power_of_two();
+                (((param.norm_bound as f64) * ALPHA).ceil() as u64 + 1).next_power_of_two();
             let wr_test_bits = bits(2 * wr_test_bound_int - 1);
             let wr_test_bound = usize::try_from(wr_test_bound_int).map_err(|e| {
                 VdafError::Uncategorized(format!(
@@ -243,36 +259,33 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
         //
         // Length of the FLP input prefix that is used to derive the wraparound
         // joint randomness.
-        let encoded_gradient_len = dimension + 2 * sq_norm_bits;
+        let encoded_gradient_len = param.dimension + 2 * sq_norm_bits;
 
         // Length of the FLP input prefx that includes everything but the wraparound
         // check results.
-        let encoded_input_len = encoded_gradient_len + (1 + wr_test_bits) * NUM_WR_TESTS;
+        let encoded_input_len = encoded_gradient_len + (1 + wr_test_bits) * param.num_wr_tests;
 
         // Length of the bit-checked portion of the encoded measurement.
-        let bit_checked_len = 2 * sq_norm_bits + (1 + wr_test_bits) * NUM_WR_TESTS;
+        let bit_checked_len = 2 * sq_norm_bits + (1 + wr_test_bits) * param.num_wr_tests;
 
         // Number of gadget calls. The gadget is used for the bit checks, wraparound tests, and
         // squared norm computation.
-        let gadget_calls =
-            chunk_count(chunk_len, bit_checked_len) + chunk_count(chunk_len, NUM_WR_TESTS);
-        let gadget_calls_sq_norm_equal = chunk_count(chunk_len_sq_norm_equal, dimension);
+        let gadget_calls = chunk_count(param.chunk_len, bit_checked_len)
+            + chunk_count(param.chunk_len, param.num_wr_tests);
+        let gadget_calls_sq_norm_equal =
+            chunk_count(param.chunk_len_sq_norm_equal, param.dimension);
 
         let cfg = PineConfig {
-            dimension,
-            frac_bits,
+            param: *param,
             sq_norm_bound,
             sq_norm_bits,
             wr_test_bound,
             wr_test_bits,
-            num_proofs,
             algorithm_id,
-            chunk_len,
             bit_checked_len,
             encoded_gradient_len,
             encoded_input_len,
             gadget_calls,
-            chunk_len_sq_norm_equal,
             gadget_calls_sq_norm_equal,
         };
 
