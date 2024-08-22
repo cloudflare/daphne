@@ -72,9 +72,11 @@ use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::encode_base64url;
 #[cfg(feature = "experimental")]
+use prio::codec::Decode;
+#[cfg(feature = "experimental")]
 use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
-    codec::{CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode},
+    codec::{CodecError, Encode, ParameterizedDecode, ParameterizedEncode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 pub use protocol::aggregator::ReplayProtection;
@@ -953,33 +955,6 @@ impl Encode for DapAggregationJobState {
 }
 
 impl DapAggregationJobState {
-    /// Decode the Helper state from a byte string.
-    //
-    // TODO draft02 cleanup: Remove this.
-    pub fn get_decoded(vdaf_config: &VdafConfig, data: &[u8]) -> Result<Self, DapError> {
-        let mut r = std::io::Cursor::new(data);
-        let part_batch_sel = PartialBatchSelector::decode(&mut r)
-            .map_err(|e| DapAbort::from_codec_error(e, None))?;
-        let mut seq = vec![];
-        while (usize::try_from(r.position()).unwrap()) < data.len() {
-            let prep_state = VdafPrepState::decode_with_param(&(vdaf_config, false), &mut r)
-                .map_err(|e| DapAbort::from_codec_error(e, None))?;
-            let time = Time::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
-            let report_id =
-                ReportId::decode(&mut r).map_err(|e| DapAbort::from_codec_error(e, None))?;
-            seq.push(AggregationJobReportState {
-                prep_state,
-                time,
-                report_id,
-            });
-        }
-
-        Ok(Self {
-            part_batch_sel,
-            seq,
-        })
-    }
-
     /// Count the number of reports that can still be aggregated.
     pub fn report_count(&self) -> usize {
         self.seq.len()

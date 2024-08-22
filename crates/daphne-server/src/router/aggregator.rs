@@ -34,10 +34,7 @@ where
 
 #[derive(Deserialize)]
 struct QueryTaskId {
-    #[serde(
-        default,
-        deserialize_with = "daphne::messages::base64url::deserialize_opt"
-    )]
+    #[serde(default, with = "daphne::messages::base64url_option")]
     task_id: Option<TaskId>,
 }
 

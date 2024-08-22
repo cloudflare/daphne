@@ -121,9 +121,17 @@ id_struct!(TaskId, 32, "Task ID");
 
 /// serde module for base64url-encoded serialization of ids
 pub mod base64url {
-    use serde::{de, Deserialize, Deserializer};
+    use serde::{de, ser};
 
     use super::Base64Encode;
+
+    pub fn serialize<I, S>(id: &I, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        I: Base64Encode,
+        S: ser::Serializer,
+    {
+        serializer.serialize_str(&id.to_base64url())
+    }
 
     pub fn deserialize<'de, I, D>(deserializer: D) -> Result<I, D::Error>
     where
@@ -156,8 +164,25 @@ pub mod base64url {
         }
         deserializer.deserialize_str(Visitor::<I>(std::marker::PhantomData))
     }
+}
 
-    pub fn deserialize_opt<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+pub mod base64url_option {
+    use serde::{de, ser, Deserialize, Deserializer};
+
+    use super::Base64Encode;
+
+    pub fn serialize<I, S>(id: &Option<I>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        I: Base64Encode,
+        S: ser::Serializer,
+    {
+        match id {
+            Some(id) => super::base64url::serialize(id, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
     where
         T: Base64Encode,
         D: Deserializer<'de>,
