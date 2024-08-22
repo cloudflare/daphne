@@ -551,7 +551,7 @@ impl DapTaskConfig {
                             "report ID {} appears twice in the same aggregation job",
                             prep_init.report_share.report_metadata.id.to_base64url()
                         ),
-                        task_id: Some(*task_id),
+                        task_id: *task_id,
                     }
                     .into());
                 }
@@ -713,7 +713,7 @@ impl DapTaskConfig {
                     agg_job_resp.transitions.len(),
                     state.seq.len(),
                 ),
-                task_id: Some(*task_id),
+                task_id: *task_id,
             }
             .into());
         }
@@ -726,7 +726,7 @@ impl DapTaskConfig {
                         "report ID {} appears out of order in aggregation job response",
                         helper.report_id.to_base64url()
                     ),
-                    task_id: Some(*task_id),
+                    task_id: *task_id,
                 }
                 .into());
             }
@@ -743,7 +743,7 @@ impl DapTaskConfig {
                         // inevitable.
                         return Err(DapAbort::InvalidMessage {
                             detail: "The Helper's AggregationJobResp is invalid, but it may have already committed its state change. A batch mismatch is inevitable.".to_string(),
-                            task_id: Some(*task_id),
+                            task_id: *task_id,
                         }.into());
                     };
 

@@ -90,10 +90,7 @@ pub enum DapAbort {
 
     /// Invalid message. Sent in response to a malformed or unexpected message.
     #[error("invalidMessage")]
-    InvalidMessage {
-        detail: String,
-        task_id: Option<TaskId>,
-    },
+    InvalidMessage { detail: String, task_id: TaskId },
 
     /// Unrecognized DAP task. Sent in response to a request indicating an unrecognized task ID.
     #[error("unrecognizedTask")]
@@ -112,7 +109,8 @@ impl DapAbort {
             | Self::BatchOverlap { detail, task_id }
             | Self::InvalidBatchSize { detail, task_id }
             | Self::QueryMismatch { detail, task_id }
-            | Self::UnauthorizedRequest { detail, task_id } => (Some(task_id), Some(detail), None),
+            | Self::UnauthorizedRequest { detail, task_id }
+            | Self::InvalidMessage { detail, task_id } => (Some(task_id), Some(detail), None),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
@@ -140,7 +138,6 @@ impl DapAbort {
                 None,
             ),
             Self::UnrecognizedTask { task_id } => (Some(task_id), None, None),
-            Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
         };
 
         ProblemDetails {
@@ -285,17 +282,17 @@ impl DapAbort {
 }
 
 impl DapAbort {
-    pub fn from_codec_error<Id: Into<Option<TaskId>>>(e: CodecError, task_id: Id) -> Self {
+    pub fn from_codec_error(e: CodecError, task_id: TaskId) -> Self {
         Self::InvalidMessage {
             detail: format!("codec error: {e}"),
-            task_id: task_id.into(),
+            task_id,
         }
     }
 
     pub fn from_hex_error(e: FromHexError, task_id: TaskId) -> Self {
         Self::InvalidMessage {
             detail: format!("invalid hexadecimal string {e:?}"),
-            task_id: Some(task_id),
+            task_id,
         }
     }
 }
