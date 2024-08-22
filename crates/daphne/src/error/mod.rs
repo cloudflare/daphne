@@ -53,16 +53,7 @@ impl DapError {
             "encountered fatal error during encoding: {e}"
         )))
     }
-}
 
-impl FatalDapError {
-    #[doc(hidden)]
-    pub fn __use_the_macro(s: String) -> Self {
-        FatalDapError(s)
-    }
-}
-
-impl DapError {
     pub(crate) fn from_vdaf(e: VdafError) -> Self {
         match e {
             VdafError::Codec(..) | VdafError::Vdaf(..) => {
@@ -88,6 +79,13 @@ impl Display for FatalDapError {
 impl Debug for FatalDapError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
+    }
+}
+
+impl FatalDapError {
+    #[doc(hidden)]
+    pub fn __use_the_macro(s: String) -> Self {
+        FatalDapError(s)
     }
 }
 
