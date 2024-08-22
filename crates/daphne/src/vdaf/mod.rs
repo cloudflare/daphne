@@ -14,7 +14,6 @@ pub(crate) mod prio3;
 #[cfg(feature = "experimental")]
 use crate::pine::vdaf::PinePrepState;
 use crate::{
-    error::DapAbort,
     fatal_error,
     vdaf::{prio2::prio2_decode_prep_state, prio3::prio3_decode_prep_state},
     DapError,
@@ -389,23 +388,19 @@ impl VdafConfig {
     }
 
     /// Parse a verification key from raw bytes.
-    pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, DapError> {
+    pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
         match self {
             Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. } => {
-                Ok(VdafVerifyKey::L32(<[u8; 32]>::try_from(bytes).map_err(
-                    |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
-                )?))
-            }
-            Self::Prio3(..) => Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
-                |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
-            )?)),
+            | Self::Prio2 { .. } => Ok(VdafVerifyKey::L32(
+                <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
+            Self::Prio3(..) => Ok(VdafVerifyKey::L16(
+                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } | Self::Pine(..) => {
-                Ok(VdafVerifyKey::L16(<[u8; 16]>::try_from(bytes).map_err(
-                    |e| DapAbort::from_codec_error(CodecError::Other(Box::new(e)), None),
-                )?))
-            }
+            Self::Mastic { .. } | Self::Pine(..) => Ok(VdafVerifyKey::L16(
+                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
         }
     }
 

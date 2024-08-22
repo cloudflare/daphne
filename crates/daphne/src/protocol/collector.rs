@@ -92,6 +92,6 @@ impl VdafConfig {
             #[cfg(feature = "experimental")]
             Self::Pine(pine) => pine.unshard(num_measurements, agg_shares),
         }
-        .map_err(DapError::from_vdaf)
+        .map_err(|e| fatal_error!(err = ?e, "failed to unshard agg_shares"))
     }
 }

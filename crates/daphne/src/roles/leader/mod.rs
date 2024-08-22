@@ -212,7 +212,7 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
                 "expected exactly two encrypted input shares; got {}",
                 report.encrypted_input_shares.len()
             ),
-            task_id: Some(*task_id),
+            task_id: *task_id,
         }
         .into());
     }

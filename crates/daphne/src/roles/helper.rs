@@ -269,7 +269,7 @@ fn check_part_batch(
         // TODO spec: Define this behavior.
         return Err(DapAbort::InvalidMessage {
             detail: "invalid aggregation parameter".into(),
-            task_id: Some(*task_id),
+            task_id: *task_id,
         });
     }
 
