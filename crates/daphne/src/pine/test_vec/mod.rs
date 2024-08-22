@@ -9,7 +9,7 @@ use prio::{
 };
 use serde::Deserialize;
 
-use crate::pine::{Pine, ALPHA, NUM_WR_SUCCESSES, NUM_WR_TESTS};
+use crate::pine::{Pine, ALPHA};
 
 #[derive(Deserialize)]
 struct Encoded(#[serde(with = "hex")] Vec<u8>);
@@ -63,10 +63,10 @@ impl<F: FftFriendlyFieldElement> Pine<F, XofTurboShake128, 16> {
         {
             assert_eq!(test_vec.alpha, ALPHA);
         }
-        assert_eq!(test_vec.num_wr_checks, NUM_WR_TESTS);
-        assert_eq!(test_vec.num_wr_successes, NUM_WR_SUCCESSES);
+        assert_eq!(test_vec.num_wr_checks, 100);
+        assert_eq!(test_vec.num_wr_successes, 100);
         assert_eq!(test_vec.shares, 2);
-        assert_eq!(test_vec.proofs, usize::from(self.flp.cfg.num_proofs));
+        assert_eq!(test_vec.proofs, usize::from(self.flp.cfg.param.num_proofs));
 
         let mut out_shares_0 = Vec::new();
         let mut out_shares_1 = Vec::new();

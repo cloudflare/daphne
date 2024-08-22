@@ -4,7 +4,7 @@
 use crate::{
     fatal_error,
     messages::taskprov::VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-    pine::{msg, vdaf::PinePrepState, Pine},
+    pine::{msg, vdaf::PinePrepState, Pine, PineParam},
     vdaf::{prep_finish, prep_finish_from_shares, unshard},
     DapAggregateResult, DapMeasurement,
 };
@@ -22,46 +22,20 @@ use serde::{Deserialize, Serialize};
 
 type Pine64HmacSha256Aes128 = Pine<Field64, XofHmacSha256Aes128, 32>;
 
-/// [Pine](crate::pine::Pine) parameters.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct PineConfig {
-    pub norm_bound: u64,
-    pub dimension: usize,
-    pub frac_bits: usize,
-    pub chunk_len: usize,
-    pub chunk_len_sq_norm_equal: usize,
-    pub var: PineVariant,
-}
-
 impl std::fmt::Display for PineConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
-        let var_suffix = match var {
-            PineVariant::Field64HmacSha256Aes128 => "Field64HmacSha256Aes128",
+        let (param, name) = match self {
+            Self::Field64HmacSha256Aes128 { param } => (param, "Field64HmacSha256Aes128"),
         };
-
-        write!(
-            f,
-            "Pine{var_suffix}({norm_bound},{dimension},{frac_bits},{chunk_len},{chunk_len_sq_norm_equal})"
-        )
+        write!(f, "Pine{name}({param:?})")
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum PineVariant {
-    Field64HmacSha256Aes128,
+pub enum PineConfig {
+    Field64HmacSha256Aes128 { param: PineParam },
 }
 
 impl PineConfig {
@@ -70,35 +44,19 @@ impl PineConfig {
         measurement: DapMeasurement,
         nonce: &[u8; 16],
     ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
         let DapMeasurement::F64Vec(gradient) = &measurement else {
             return Err(VdafError::Dap(fatal_error!(
                 err = "unexpected measurement type"
             )));
         };
 
-        match var {
-            PineVariant::Field64HmacSha256Aes128 => {
-                let vdaf = Pine64HmacSha256Aes128::new(
-                    *norm_bound,
-                    *dimension,
-                    *frac_bits,
-                    *chunk_len,
-                    *chunk_len_sq_norm_equal,
-                    2,
-                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-                )
-                .map_err(|e| {
-                    VdafError::Dap(fatal_error!(err = ?e, "failed to create pine field"))
-                })?;
+        match self {
+            PineConfig::Field64HmacSha256Aes128 { param } => {
+                let vdaf =
+                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+                        .map_err(|e| {
+                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
+                    })?;
                 shard_then_encode(&vdaf, gradient, nonce)
             }
         }
@@ -112,29 +70,13 @@ impl PineConfig {
         public_share_data: &[u8],
         input_share_data: &[u8],
     ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
-        match (var, verify_key) {
-            (PineVariant::Field64HmacSha256Aes128, VdafVerifyKey::L32(verify_key)) => {
-                let vdaf = Pine64HmacSha256Aes128::new(
-                    *norm_bound,
-                    *dimension,
-                    *frac_bits,
-                    *chunk_len,
-                    *chunk_len_sq_norm_equal,
-                    2,
-                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-                )
-                .map_err(
-                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
-                )?;
+        match (self, verify_key) {
+            (PineConfig::Field64HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
+                let vdaf =
+                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+                        .map_err(|e| {
+                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
+                    })?;
                 let (state, share) = prep_init(
                     vdaf,
                     verify_key,
@@ -161,33 +103,17 @@ impl PineConfig {
         host_share: VdafPrepMessage,
         peer_share_data: &[u8],
     ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
-        match (var, host_state, host_share) {
+        match (self, host_state, host_share) {
             (
-                PineVariant::Field64HmacSha256Aes128,
+                PineConfig::Field64HmacSha256Aes128 { param },
                 VdafPrepState::Pine64HmacSha256Aes128(state),
                 VdafPrepMessage::Pine64HmacSha256Aes128(share),
             ) => {
-                let vdaf = Pine64HmacSha256Aes128::new(
-                    *norm_bound,
-                    *dimension,
-                    *frac_bits,
-                    *chunk_len,
-                    *chunk_len_sq_norm_equal,
-                    2,
-                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-                )
-                .map_err(
-                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})")),
-                )?;
+                let vdaf =
+                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+                        .map_err(|e| {
+                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
+                    })?;
                 let (out_share, outbound) =
                     prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
@@ -206,32 +132,16 @@ impl PineConfig {
         host_state: VdafPrepState,
         peer_message_data: &[u8],
     ) -> Result<VdafAggregateShare, VdafError> {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
-        match (var, host_state) {
+        match (self, host_state) {
             (
-                PineVariant::Field64HmacSha256Aes128,
+                PineConfig::Field64HmacSha256Aes128 { param },
                 VdafPrepState::Pine64HmacSha256Aes128(state),
             ) => {
-                let vdaf = Pine64HmacSha256Aes128::new(
-                    *norm_bound,
-                    *dimension,
-                    *frac_bits,
-                    *chunk_len,
-                    *chunk_len_sq_norm_equal,
-                    2,
-                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-                )
-                .map_err(
-                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
-                )?;
+                let vdaf =
+                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+                        .map_err(|e| {
+                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
+                    })?;
                 let out_share = prep_finish(&vdaf, state, peer_message_data)?;
                 let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
                     prio::vdaf::OutputShare::from(out_share.0),
@@ -249,29 +159,13 @@ impl PineConfig {
         num_measurements: usize,
         agg_shares: M,
     ) -> Result<DapAggregateResult, VdafError> {
-        let PineConfig {
-            norm_bound,
-            dimension,
-            frac_bits,
-            chunk_len,
-            chunk_len_sq_norm_equal,
-            var,
-        } = self;
-
-        match var {
-            PineVariant::Field64HmacSha256Aes128 => {
-                let vdaf = Pine64HmacSha256Aes128::new(
-                    *norm_bound,
-                    *dimension,
-                    *frac_bits,
-                    *chunk_len,
-                    *chunk_len_sq_norm_equal,
-                    2,
-                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
-                )
-                .map_err(
-                    |e| VdafError::Dap(fatal_error!(err = ?e, "failed to create pine from norm_bound({norm_bound}), dimension{dimension}, frac_bits({frac_bits}), chunk_len({chunk_len})"))
-                )?;
+        match self {
+            PineConfig::Field64HmacSha256Aes128 { param } => {
+                let vdaf =
+                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+                        .map_err(|e| {
+                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
+                    })?;
                 let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }
@@ -300,21 +194,25 @@ fn prep_init<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usi
 #[cfg(test)]
 mod test {
     use crate::{
-        async_test_versions, hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig,
-        DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
+        async_test_versions, hpke::HpkeKemId, pine::PineParam, testing::AggregationJobTest,
+        vdaf::VdafConfig, DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
-    use super::{PineConfig, PineVariant};
+    use super::PineConfig;
 
     async fn roundtrip_field64_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Pine(PineConfig {
-                norm_bound: 32_000,
-                dimension: 1_000,
-                frac_bits: 20,
-                chunk_len: 10,
-                chunk_len_sq_norm_equal: 50,
-                var: PineVariant::Field64HmacSha256Aes128,
+            &VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 32_000,
+                    dimension: 1_000,
+                    frac_bits: 20,
+                    chunk_len: 10,
+                    chunk_len_sq_norm_equal: 50,
+                    num_proofs: 2,
+                    num_wr_tests: 100,
+                    num_wr_successes: 100,
+                },
             }),
             HpkeKemId::X25519HkdfSha256,
             version,
