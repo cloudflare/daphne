@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{Base64Encode, TaskId, TransitionFailure},
+    messages::{AggregationJobId, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;
@@ -73,8 +73,7 @@ pub enum DapAbort {
     RoundMismatch {
         detail: String,
         task_id: TaskId,
-        // TODO draft02 cleanup: Use `AggregationJobId`
-        agg_job_id_base64url: String,
+        agg_job_id: AggregationJobId,
     },
 
     /// Unauthorized HTTP request.
@@ -86,8 +85,7 @@ pub enum DapAbort {
     #[error("unrecognizedAggregationJob")]
     UnrecognizedAggregationJob {
         task_id: TaskId,
-        // TODO draft02 cleanup: Use `AggregationJobId`
-        agg_job_id_base64url: String,
+        agg_job_id: AggregationJobId,
     },
 
     /// Invalid message. Sent in response to a malformed or unexpected message.
@@ -107,7 +105,7 @@ impl DapAbort {
     /// request was targeted and `task_id` is the associated `TaskID`.
     pub fn into_problem_details(self) -> ProblemDetails {
         let (title, typ) = self.title_and_type();
-        let (task_id, detail, agg_job_id_base64url) = match self {
+        let (task_id, detail, agg_job_id) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id }
@@ -126,15 +124,15 @@ impl DapAbort {
             Self::RoundMismatch {
                 detail,
                 task_id,
-                agg_job_id_base64url,
-            } => (Some(task_id), Some(detail), Some(agg_job_id_base64url)),
+                agg_job_id,
+            } => (Some(task_id), Some(detail), Some(agg_job_id)),
             Self::UnrecognizedAggregationJob {
                 task_id,
-                agg_job_id_base64url,
+                agg_job_id,
             } => (
                 Some(task_id),
                 Some("The request indicates an aggregation job that does not exist.".into()),
-                Some(agg_job_id_base64url),
+                Some(agg_job_id),
             ),
             Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
             Self::ReportTooLate | Self::UnrecognizedTask => (None, None, None),
@@ -143,8 +141,8 @@ impl DapAbort {
         ProblemDetails {
             typ,
             title: title.to_string(),
-            task_id: task_id.map(|id| id.to_base64url()),
-            agg_job_id: agg_job_id_base64url,
+            task_id,
+            agg_job_id,
             instance: None, // TODO interop: Implement as specified.
             detail,
         }
@@ -307,12 +305,18 @@ pub struct ProblemDetails {
     pub typ: Option<String>,
 
     #[serde(rename = "taskid")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) task_id: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "crate::messages::base64url_option"
+    )]
+    pub(crate) task_id: Option<TaskId>,
 
     #[serde(rename = "aggregationjobid")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) agg_job_id: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "crate::messages::base64url_option"
+    )]
+    pub(crate) agg_job_id: Option<AggregationJobId>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instance: Option<String>,

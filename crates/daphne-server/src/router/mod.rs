@@ -227,20 +227,11 @@ where
         #[serde(deny_unknown_fields)]
         struct PathParams {
             version: DapVersion,
-            #[serde(
-                default,
-                deserialize_with = "daphne::messages::base64url::deserialize_opt"
-            )]
+            #[serde(default, with = "daphne::messages::base64url_option")]
             task_id: Option<TaskId>,
-            #[serde(
-                default,
-                deserialize_with = "daphne::messages::base64url::deserialize_opt"
-            )]
+            #[serde(default, with = "daphne::messages::base64url_option")]
             agg_job_id: Option<AggregationJobId>,
-            #[serde(
-                default,
-                deserialize_with = "daphne::messages::base64url::deserialize_opt"
-            )]
+            #[serde(default, with = "daphne::messages::base64url_option")]
             collect_job_id: Option<CollectionJobId>,
         }
 
