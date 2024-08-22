@@ -1069,7 +1069,7 @@ mod test {
         assert_eq!(
             leader::handle_upload_req(&*t.leader, &req).await,
             Err(DapError::Abort(DapAbort::UnrecognizedTask {
-                task_id: *task_id
+                task_id: TaskId([0; 32])
             }))
         );
     }
