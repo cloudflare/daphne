@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
+    messages::{AggregationJobId, Base64Encode, ReportId, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;
@@ -102,7 +102,13 @@ impl DapAbort {
     /// request was targeted and `task_id` is the associated `TaskID`.
     pub fn into_problem_details(self) -> ProblemDetails {
         let (title, typ) = self.title_and_type();
-        let (task_id, detail, agg_job_id) = match self {
+        let to_instance = |params| {
+            format!(
+                "/problem-details/{}?{params}",
+                typ.as_deref().unwrap_or("badrequest"),
+            )
+        };
+        let (task_id, detail, agg_job_id, instance) = match self {
             Self::BatchInvalid { detail, task_id }
             | Self::InvalidTask { detail, task_id }
             | Self::BatchMismatch { detail, task_id }
@@ -110,20 +116,37 @@ impl DapAbort {
             | Self::InvalidBatchSize { detail, task_id }
             | Self::QueryMismatch { detail, task_id }
             | Self::UnauthorizedRequest { detail, task_id }
-            | Self::InvalidMessage { detail, task_id } => (Some(task_id), Some(detail), None),
+            | Self::InvalidMessage { detail, task_id } => (
+                Some(task_id),
+                Some(detail),
+                None,
+                to_instance(format_args!("task_id={task_id}")),
+            ),
             Self::MissingTaskId => (
                 None,
                 Some("A task ID must be specified in the query parameter of the request.".into()),
                 None,
+                to_instance(format_args!("task_id=none")),
             ),
             Self::BadRequest(detail) | Self::ReportRejected { detail } => {
-                (None, Some(detail), None)
+                (
+                    None,
+                    Some(detail),
+                    None,
+                    // TODO: make it possible to pass the rejected report id here.
+                    to_instance(format_args!("report_id=not-implemented")),
+                )
             }
             Self::RoundMismatch {
                 detail,
                 task_id,
                 agg_job_id,
-            } => (Some(task_id), Some(detail), Some(agg_job_id)),
+            } => (
+                Some(task_id),
+                Some(detail),
+                Some(agg_job_id),
+                to_instance(format_args!("task_id={task_id}&agg_job_id={agg_job_id}")),
+            ),
             Self::UnrecognizedAggregationJob {
                 task_id,
                 agg_job_id,
@@ -131,13 +154,20 @@ impl DapAbort {
                 Some(task_id),
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id),
+                to_instance(format_args!("agg_job_id={agg_job_id}")),
             ),
             Self::ReportTooLate { report_id } => (
                 None,
                 Some("one of the reports' timestamp was too late".into()),
                 None,
+                to_instance(format_args!("report_id={report_id}")),
             ),
-            Self::UnrecognizedTask { task_id } => (Some(task_id), None, None),
+            Self::UnrecognizedTask { task_id } => (
+                Some(task_id),
+                None,
+                None,
+                to_instance(format_args!("task_id={task_id}")),
+            ),
         };
 
         ProblemDetails {
@@ -145,7 +175,7 @@ impl DapAbort {
             title: title.to_string(),
             task_id,
             agg_job_id,
-            instance: None, // TODO interop: Implement as specified.
+            instance,
             detail,
         }
     }
@@ -320,8 +350,7 @@ pub struct ProblemDetails {
     )]
     pub(crate) agg_job_id: Option<AggregationJobId>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) instance: Option<String>,
+    pub(crate) instance: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
