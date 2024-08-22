@@ -88,7 +88,9 @@ impl InMemoryLeaderState {
         }
 
         let Some(per_task) = self.per_task.get(task_id) else {
-            return Err(DapError::Abort(DapAbort::UnrecognizedTask));
+            return Err(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }));
         };
 
         per_task
@@ -193,7 +195,9 @@ impl InMemoryLeaderState {
                 .cloned()
                 .unwrap_or(DapCollectionJob::Unknown))
         } else {
-            Err(DapError::Abort(DapAbort::UnrecognizedTask))
+            Err(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))
         }
     }
 

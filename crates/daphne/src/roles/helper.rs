@@ -48,7 +48,7 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
     let wrapped_task_config = aggregator
         .get_task_config_for(task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask)?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
@@ -153,7 +153,7 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
     let wrapped_task_config = aggregator
         .get_task_config_for(req.task_id()?)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask)?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {

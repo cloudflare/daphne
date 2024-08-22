@@ -749,9 +749,11 @@ mod test {
             ..Default::default()
         };
 
-        assert_matches!(
-            aggregator::handle_hpke_config_req(&*t.leader, &req, Some(task_id)).await,
-            Err(DapError::Abort(DapAbort::UnrecognizedTask))
+        assert_eq!(
+            aggregator::handle_hpke_config_req(&*t.leader, &req, Some(task_id))
+                .await
+                .unwrap_err(),
+            DapError::Abort(DapAbort::UnrecognizedTask { task_id })
         );
     }
 
@@ -1064,9 +1066,11 @@ mod test {
         };
 
         // Expect failure due to invalid task ID in report.
-        assert_matches!(
+        assert_eq!(
             leader::handle_upload_req(&*t.leader, &req).await,
-            Err(DapError::Abort(DapAbort::UnrecognizedTask))
+            Err(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id
+            }))
         );
     }
 

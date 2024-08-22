@@ -18,7 +18,7 @@ use super::FatalDapError;
 // The display implementation of this error is used for metrics, as such, it can't be changed to
 // include field values
 /// DAP aborts.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DapAbort {
     /// Bad request. Sent in response to an HTTP request that couldn't be handled preoprly.
     #[error("bad request")]
@@ -97,7 +97,7 @@ pub enum DapAbort {
 
     /// Unrecognized DAP task. Sent in response to a request indicating an unrecognized task ID.
     #[error("unrecognizedTask")]
-    UnrecognizedTask,
+    UnrecognizedTask { task_id: TaskId },
 }
 
 impl DapAbort {
@@ -134,8 +134,9 @@ impl DapAbort {
                 Some("The request indicates an aggregation job that does not exist.".into()),
                 Some(agg_job_id),
             ),
+            Self::UnrecognizedTask { task_id } => (Some(task_id), None, None),
             Self::InvalidMessage { detail, task_id } => (task_id, Some(detail), None),
-            Self::ReportTooLate | Self::UnrecognizedTask => (None, None, None),
+            Self::ReportTooLate => (None, None, None),
         };
 
         ProblemDetails {
@@ -265,7 +266,7 @@ impl DapAbort {
                 ("Unrecognized aggregation job", Some(self.to_string()))
             }
             Self::InvalidMessage { .. } => ("Malformed or invalid message", Some(self.to_string())),
-            Self::UnrecognizedTask => (
+            Self::UnrecognizedTask { .. } => (
                 "Task indicated by request is not recognized",
                 Some(self.to_string()),
             ),
