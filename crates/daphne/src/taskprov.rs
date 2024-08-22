@@ -139,7 +139,7 @@ fn get_taskprov_task_config<S>(
 
     if compute_task_id(taskprov_data.as_ref()) != *task_id {
         // Return unrecognizedTask following section 5.1 of the taskprov draft.
-        return Err(DapAbort::UnrecognizedTask);
+        return Err(DapAbort::UnrecognizedTask { task_id: *task_id });
     }
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.

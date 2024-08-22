@@ -183,7 +183,7 @@ where
         let task_config = aggregator
             .get_task_config_for(&task_id)
             .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
+            .ok_or(DapAbort::UnrecognizedTask { task_id })?;
 
         // Check whether the DAP version in the request matches the task config.
         if task_config.as_ref().version != req.version {

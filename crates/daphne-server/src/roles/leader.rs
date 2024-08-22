@@ -49,7 +49,7 @@ impl DapLeader<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
+            .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
 
         self.test_leader_state
             .lock()
@@ -61,7 +61,9 @@ impl DapLeader<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
 
         self.test_leader_state
             .lock()
@@ -79,7 +81,7 @@ impl DapLeader<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapAbort::UnrecognizedTask)?;
+            .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
 
         self.test_leader_state.lock().await.init_collect_job(
             task_id,

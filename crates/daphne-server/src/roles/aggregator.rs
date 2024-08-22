@@ -88,7 +88,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
 
         let durable = self.durable();
         let mut requests = Vec::new();
@@ -122,7 +124,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
 
         let durable = self.durable();
         let mut requests = Vec::new();
@@ -322,7 +326,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
 
         // Check whether the request overlaps with previous requests. This is done by
         // checking the AggregateStore and seeing whether it requests for aggregate
@@ -351,7 +357,9 @@ impl DapAggregator<DaphneAuth> for crate::App {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
         let version = task_config.as_ref().version;
 
         let agg_span = task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
@@ -466,7 +474,9 @@ impl HpkeProvider for crate::App {
         let version = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?
             .version;
 
         Ok(self
@@ -495,7 +505,7 @@ impl HpkeDecrypter for crate::App {
             .get_task_config_for(task_id)
             .await?
             .as_ref()
-            .ok_or(DapAbort::UnrecognizedTask)?
+            .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?
             .version;
         self.kv()
             .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(

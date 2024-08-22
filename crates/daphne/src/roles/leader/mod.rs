@@ -199,7 +199,7 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
     let task_config = aggregator
         .get_task_config_for(task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask)?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.as_ref().version != req.version {
@@ -268,10 +268,11 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
         resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
 
+    let task_id = req.task_id()?;
     let wrapped_task_config = aggregator
-        .get_task_config_for(req.task_id()?)
+        .get_task_config_for(task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask)?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
@@ -568,7 +569,7 @@ pub async fn process<S: Sync, A: DapLeader<S>>(
                     let task_config = aggregator
                         .get_task_config_for(&task_id)
                         .await?
-                        .ok_or(DapAbort::UnrecognizedTask)?;
+                        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
 
                     if reports.is_empty() {
                         return Ok(0);
@@ -609,7 +610,7 @@ pub async fn process<S: Sync, A: DapLeader<S>>(
                 let task_config = aggregator
                     .get_task_config_for(&task_id)
                     .await?
-                    .ok_or(DapAbort::UnrecognizedTask)?;
+                    .ok_or(DapAbort::UnrecognizedTask { task_id })?;
 
                 tracing::debug!("RUNNING run_collect_job FOR TID {task_id} AND {coll_job_id} AND {batch_sel:?} AND {agg_param:?} AND {host}");
                 let collected = run_coll_job(

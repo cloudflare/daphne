@@ -872,7 +872,9 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
         let mut agg_store = self
             .agg_store
             .lock()
@@ -891,7 +893,9 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask))?;
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
 
         let aggregated = {
             let mut agg_store = self
