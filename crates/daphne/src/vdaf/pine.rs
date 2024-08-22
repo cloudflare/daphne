@@ -11,7 +11,11 @@ use crate::{
 use super::{
     shard_then_encode, VdafAggregateShare, VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
 };
-use prio::{codec::ParameterizedDecode, field::FftFriendlyFieldElement, vdaf::Aggregator};
+use prio::{
+    codec::ParameterizedDecode,
+    field::FftFriendlyFieldElement,
+    vdaf::{xof::Xof, Aggregator},
+};
 use serde::{Deserialize, Serialize};
 
 /// [Pine](crate::pine::Pine) parameters.
@@ -258,14 +262,14 @@ impl PineConfig {
     }
 }
 
-fn prep_init<F: FftFriendlyFieldElement>(
-    vdaf: Pine<F>,
-    verify_key: &[u8; 16],
+fn prep_init<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>(
+    vdaf: Pine<F, X, SEED_SIZE>,
+    verify_key: &[u8; SEED_SIZE],
     agg_id: usize,
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
-) -> Result<(PinePrepState<F>, msg::PrepShare<F>), VdafError> {
+) -> Result<(PinePrepState<F, SEED_SIZE>, msg::PrepShare<F, SEED_SIZE>), VdafError> {
     // Parse the public share.
     let public_share = msg::PublicShare::get_decoded_with_param(&vdaf, public_share_data)?;
 

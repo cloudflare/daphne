@@ -207,7 +207,7 @@ pub enum VdafPrepState {
         out_share: Vec<Field64>,
     },
     #[cfg(feature = "experimental")]
-    Pine128(PinePrepState<Field128>),
+    Pine128(PinePrepState<Field128, 16>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -277,7 +277,7 @@ pub enum VdafPrepMessage {
     #[cfg(feature = "experimental")]
     MasticShare(Field64),
     #[cfg(feature = "experimental")]
-    Pine128Share(crate::pine::msg::PrepShare<Field128>),
+    Pine128Share(crate::pine::msg::PrepShare<Field128, 16>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]

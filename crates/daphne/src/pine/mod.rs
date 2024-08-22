@@ -13,9 +13,11 @@
 //!
 //! PINE is based on the scheme from [Rothblum et al. 2023](https://arxiv.org/abs/2311.10237).
 
+use std::marker::PhantomData;
+
 use prio::{
     field::{FftFriendlyFieldElement, Field128, Field64},
-    vdaf::VdafError,
+    vdaf::{xof::XofTurboShake128, VdafError},
 };
 
 use flp::{PineType, PineTypeSquaredNormEqual};
@@ -39,12 +41,13 @@ const USAGE_WR_JOINT_RAND_PART: u16 = 10;
 
 /// The PINE VDAF.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Pine<F> {
+pub struct Pine<F, X, const SEED_SIZE: usize> {
     pub flp: PineType<F>,
     pub flp_sq_norm_equal: PineTypeSquaredNormEqual<F>,
+    phantom_data: PhantomData<X>,
 }
 
-pub type Pine128 = Pine<Field128>;
+pub type Pine128 = Pine<Field128, XofTurboShake128, 16>;
 
 impl Pine128 {
     /// Construct an instance of [`Pine128`] with the provided parameters.
@@ -67,7 +70,7 @@ impl Pine128 {
     }
 }
 
-pub type Pine64 = Pine<Field64>;
+pub type Pine64 = Pine<Field64, XofTurboShake128, 16>;
 
 impl Pine64 {
     /// Construct an instance of [`Pine64`] with the provided parameters.
@@ -128,7 +131,7 @@ impl<F> PineConfig<F> {
     }
 }
 
-impl<F: FftFriendlyFieldElement> Pine<F> {
+impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE> {
     /// Construct an instance of the Pine VDAF.
     ///
     /// # Parameters
@@ -276,6 +279,7 @@ impl<F: FftFriendlyFieldElement> Pine<F> {
         Ok(Self {
             flp: PineType { cfg: cfg.clone() },
             flp_sq_norm_equal: PineTypeSquaredNormEqual { cfg },
+            phantom_data: PhantomData,
         })
     }
 }

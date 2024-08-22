@@ -5,7 +5,7 @@
 use prio::{
     codec::Encode,
     field::FftFriendlyFieldElement,
-    vdaf::{Aggregator, Collector, PrepareTransition},
+    vdaf::{xof::XofTurboShake128, Aggregator, Collector, PrepareTransition},
 };
 use serde::Deserialize;
 
@@ -54,7 +54,7 @@ struct TestVec {
     agg_result: Vec<f64>,
 }
 
-impl<F: FftFriendlyFieldElement> Pine<F> {
+impl<F: FftFriendlyFieldElement> Pine<F, XofTurboShake128, 16> {
     fn run_test_vec(&self, test_vec: &TestVec) {
         // Check that the test vector parameters have the values we expect.
         //
