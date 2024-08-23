@@ -257,6 +257,7 @@ impl EarlyReportState for EarlyReportStateConsumed {
 }
 
 /// Report state during aggregation initialization after the VDAF preparation step.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateInitialized {
