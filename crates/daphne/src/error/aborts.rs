@@ -5,7 +5,7 @@
 
 use crate::{
     fatal_error,
-    messages::{AggregationJobId, Base64Encode, ReportId, TaskId, TransitionFailure},
+    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
     DapError, DapMediaType, DapRequest, DapVersion,
 };
 use hex::FromHexError;
@@ -354,4 +354,75 @@ pub struct ProblemDetails {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::messages::{AggregationJobId, ReportId, TaskId};
+
+    use super::{DapAbort, ProblemDetails};
+
+    #[test]
+    fn assert_that_instance_fields_are_url_safe() {
+        let detail = String::from("detail");
+        let task_id = TaskId(std::array::from_fn(|i| i.try_into().unwrap()));
+        let report_id = ReportId(std::array::from_fn(|i| i.try_into().unwrap()));
+        let agg_job_id = AggregationJobId(std::array::from_fn(|i| i.try_into().unwrap()));
+        let errors = [
+            DapAbort::BatchInvalid {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::BatchMismatch {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::BatchOverlap {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::InvalidBatchSize {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::InvalidTask {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::MissingTaskId,
+            DapAbort::QueryMismatch {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::ReportRejected {
+                detail: detail.clone(),
+            },
+            DapAbort::ReportTooLate { report_id },
+            DapAbort::RoundMismatch {
+                detail: detail.clone(),
+                task_id,
+                agg_job_id,
+            },
+            DapAbort::UnauthorizedRequest {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::UnrecognizedAggregationJob {
+                task_id,
+                agg_job_id,
+            },
+            DapAbort::InvalidMessage {
+                detail: detail.clone(),
+                task_id,
+            },
+            DapAbort::UnrecognizedTask { task_id },
+            DapAbort::BadRequest("bad-request".into()),
+        ];
+
+        for e in errors {
+            let ProblemDetails { instance, .. } = e.into_problem_details();
+            let instance_url = url::Url::parse(&format!("https://some-host.com{instance}"));
+            assert!(instance_url.is_ok(), "{instance:?} is not url safe");
+        }
+    }
 }
