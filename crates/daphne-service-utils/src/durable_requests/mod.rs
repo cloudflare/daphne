@@ -284,6 +284,15 @@ where
     }
 }
 
+impl<P> DurableRequest<P>
+where
+    P: Default + AsRef<[u8]>,
+{
+    pub fn take_body(&mut self) -> P {
+        std::mem::take(&mut self.body)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use daphne::{DapBatchBucket, DapVersion};

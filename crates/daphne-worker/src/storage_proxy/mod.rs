@@ -94,7 +94,9 @@ use prometheus::Registry;
 use tower_service::Service;
 use tracing::warn;
 use url::Url;
-use worker::{js_sys::Uint8Array, Delay, Env, HttpRequest, HttpResponse, Request, RequestInit};
+use worker::{
+    js_sys::Uint8Array, Date, Delay, Env, HttpRequest, HttpResponse, Request, RequestInit,
+};
 
 const KV_BINDING_DAP_CONFIG: &str = "DAP_CONFIG";
 
@@ -162,10 +164,7 @@ pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> 
         );
 
     let mut router = router
-        .layer(from_fn_with_state(
-            ctx.clone(),
-            middleware::unauthorized_reason,
-        ))
+        .layer(from_fn_with_state(ctx.clone(), middleware::bearer_auth))
         .with_state(ctx);
     router.call(req).await.unwrap()
 }
@@ -234,6 +233,22 @@ impl Header for ExpirationHeader {
     }
 }
 
+impl ExpirationHeader {
+    fn at_least_60s_from_now(self) -> Self {
+        // KV wont let you request an expiration that isn't at least 60 seconds into the
+        // future. If you try to do so, it will return a 400. The problem is, the only error
+        // the worker API returns is a JsValue that might contain a string that might
+        // explain that.
+        //
+        // In order to avoid parsing the error message we opt to just "hardcode" the
+        // expiration to be, at least 65 seconds from now. Effectively expiring the value as soon
+        // as possible. The extra 5 seconds are just in case we take a really long time from here to
+        // the request.
+        let now_plus_65_seconds = (Date::now().as_millis() / 1000) + 65;
+        Self(u64::max(self.0, now_plus_65_seconds))
+    }
+}
+
 #[tracing::instrument(skip(ctx))]
 #[worker::send]
 async fn kv_get(
@@ -257,12 +272,12 @@ async fn kv_put(
     Path(key): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-    let expiration_unix_timestamp = expiration.map(|TypedHeader(header)| header.0);
+    let expiration = expiration.map(|TypedHeader(header)| header);
 
     match ctx.env.kv(KV_BINDING_DAP_CONFIG)?.put_bytes(&key, &body) {
         Ok(mut put) => {
-            if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
-                put = put.expiration(expiration_unix_timestamp);
+            if let Some(expiration_unix_timestamp) = expiration {
+                put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
             }
             if let Err(error) = put.execute().await {
                 tracing::warn!(
@@ -290,7 +305,7 @@ async fn kv_put_if_not_exists(
     Path(key): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-    let expiration_unix_timestamp = expiration.map(|TypedHeader(header)| header.0);
+    let expiration = expiration.map(|TypedHeader(header)| header);
 
     let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
     if kv
@@ -306,8 +321,8 @@ async fn kv_put_if_not_exists(
     } else {
         match kv.put_bytes(&key, &body) {
             Ok(mut put) => {
-                if let Some(expiration_unix_timestamp) = expiration_unix_timestamp {
-                    put = put.expiration(expiration_unix_timestamp);
+                if let Some(expiration_unix_timestamp) = expiration {
+                    put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
                 }
                 if let Err(error) = put.execute().await {
                     tracing::warn!(
