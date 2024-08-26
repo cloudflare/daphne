@@ -21,8 +21,8 @@ use tower_service::Service;
 
 use super::RequestContext;
 
-/// Check if the request's authorization. If unauthorized, return the reason why.
-pub async fn unauthorized_reason(
+/// Performs bearer token auth of a request.
+pub async fn bearer_auth(
     ctx: State<Arc<RequestContext>>,
     bearer: TypedHeader<Authorization<Bearer>>,
     request: axum::extract::Request,
@@ -48,7 +48,10 @@ pub async fn unauthorized_reason(
         return (StatusCode::UNAUTHORIZED, "Incorrect authorization token").into_response();
     }
 
-    next.call(request.map(axum::body::Body::new)).await.unwrap()
+    match next.call(request.map(axum::body::Body::new)).await {
+        Ok(r) => r,
+        Err(infalible) => match infalible {},
+    }
 }
 
 #[worker::send]
