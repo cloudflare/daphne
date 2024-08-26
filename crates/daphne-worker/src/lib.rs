@@ -13,6 +13,10 @@ use tracing::error;
 use worker::Error;
 
 pub use crate::tracing_utils::initialize_tracing;
+pub use axum::{
+    body::Body,
+    response::{IntoResponse, Response},
+};
 pub use daphne::DapRequest;
 
 pub(crate) fn int_err<S: ToString>(s: S) -> Error {

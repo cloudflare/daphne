@@ -13,12 +13,12 @@ repository.workspace = true
 description = "Workers backend for Daphne"
 
 [dependencies]
-axum.workspace = true
+axum = "0.6.0"
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 futures.workspace = true
 hex.workspace = true
-http.workspace = true
+http = "0.2"
 hyper.workspace = true
 mappable-rc = "0.1.1"
 p256.workspace = true
