@@ -16,13 +16,21 @@ description = "Workers backend for Daphne"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+axum.workspace = true
+axum-extra = { workspace = true, features = ["typed-header"] }
+axum-macros = "0.4.1"
 # TODO(mendess): delete
 bincode.workspace = true
+bytes.workspace = true
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
+constcat = "0.5.0"
 daphne = { path = "../daphne", features = ["prometheus"] }
 futures = { workspace = true, optional = true }
 getrandom = { workspace = true, features = ["js"] }
+headers.workspace = true
 hex.workspace = true
+http-body-util.workspace = true
+http.workspace = true
 prio.workspace = true
 prometheus.workspace = true
 rand.workspace = true
@@ -36,6 +44,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "json"]}
 tracing.workspace = true
 url.workspace = true
 worker.workspace = true
+tower-service.workspace = true
 
 [dependencies.daphne-service-utils]
 path = "../daphne-service-utils"
