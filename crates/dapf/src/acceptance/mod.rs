@@ -279,7 +279,7 @@ impl Test {
             test_success: prometheus::register_int_gauge_vec!(
                 "daphne_server_acceptance_test",
                 "Counts the number of times tests ran",
-                &["using_mtls", "using_bearer_token", "success"],
+                &["using_mtls", "using_bearer_token"],
             )?,
             test_durations: prometheus::register_histogram_vec!(
                 "daphne_server_acceptance_test_durations",
@@ -710,16 +710,16 @@ impl Test {
 
     pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
         let res = self.test_helper_impl(opt).await;
-        let success = res.is_ok();
         let c = |b: bool| ["F", "T"][b as usize];
-        self.metrics
+        let metric = self
+            .metrics
             .test_success
-            .with_label_values(&[
-                c(self.using_mtls),
-                c(self.bearer_token.is_some()),
-                c(success),
-            ])
-            .inc();
+            .with_label_values(&[c(self.using_mtls), c(self.bearer_token.is_some())]);
+        if res.is_ok() {
+            metric.inc()
+        } else {
+            metric.set(0)
+        }
         if let Ok(TestDurations {
             hpke_config_fetch,
             aggregate_init_req,
