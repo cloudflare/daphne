@@ -72,7 +72,7 @@
 mod metrics;
 mod middleware;
 
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 pub use self::metrics::Metrics;
 use axum::{
@@ -249,15 +249,43 @@ impl ExpirationHeader {
     }
 }
 
+async fn retry<F, T, E, Fut>(mut f: F) -> Result<T, E>
+where
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    const RETRY_DELAYS: &[Duration] = &[
+        Duration::from_millis(100),
+        Duration::from_millis(500),
+        Duration::from_millis(1_000),
+        Duration::from_millis(3_000),
+    ];
+    let attempts = RETRY_DELAYS.len() + 1;
+    let mut attempt = 1;
+    loop {
+        match f(attempt).await {
+            Ok(ok) => return Ok(ok),
+            Err(error) => {
+                if attempt < attempts {
+                    Delay::from(RETRY_DELAYS[attempt - 1]).await;
+                    attempt += 1;
+                } else {
+                    return Err(error);
+                }
+            }
+        }
+    }
+}
+
 #[tracing::instrument(skip(ctx))]
 #[worker::send]
 async fn kv_get(
     ctx: State<Arc<RequestContext>>,
     Path(key): Path<String>,
 ) -> Result<impl IntoResponse, Error> {
-    let bytes = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(&key).bytes().await?;
+    let get = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(&key);
 
-    if let Some(bytes) = bytes {
+    if let Some(bytes) = retry(|_| get.clone().bytes()).await? {
         Ok((StatusCode::OK, bytes).into_response())
     } else {
         Ok((StatusCode::NOT_FOUND, "value not found").into_response())
@@ -278,8 +306,8 @@ async fn kv_put(
         Ok(mut put) => {
             if let Some(expiration_unix_timestamp) = expiration {
                 put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
-            }
-            if let Err(error) = put.execute().await {
+            };
+            if let Err(error) = retry(|_| put.clone().execute()).await {
                 tracing::warn!(
                     ?error,
                     "Swallowed error from KV POST, this will hopefully retry later"
@@ -308,10 +336,8 @@ async fn kv_put_if_not_exists(
     let expiration = expiration.map(|TypedHeader(header)| header);
 
     let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
-    if kv
-        .list()
-        .prefix(key.clone())
-        .execute()
+    let listing = kv.list().prefix(key.clone());
+    if retry(|_| listing.clone().execute())
         .await?
         .keys
         .into_iter()
@@ -324,7 +350,7 @@ async fn kv_put_if_not_exists(
                 if let Some(expiration_unix_timestamp) = expiration {
                     put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
                 }
-                if let Err(error) = put.execute().await {
+                if let Err(error) = retry(|_| put.clone().execute()).await {
                     tracing::warn!(
                         ?error,
                         "Swallowed error from KV PUT, this will hopefully retry later"
@@ -349,7 +375,8 @@ async fn kv_delete(
     ctx: State<Arc<RequestContext>>,
     Path(key): Path<String>,
 ) -> Result<impl IntoResponse, Error> {
-    ctx.env.kv(KV_BINDING_DAP_CONFIG)?.delete(&key).await?;
+    let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
+    retry(|_| kv.delete(&key)).await?;
 
     Ok(StatusCode::OK.into_response())
 }
@@ -363,13 +390,6 @@ async fn handle_do_request(
     Path(uri): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-    const RETRY_DELAYS: &[Duration] = &[
-        Duration::from_millis(100),
-        Duration::from_millis(500),
-        Duration::from_millis(1_000),
-        Duration::from_millis(3_000),
-    ];
-
     let durable_request = DurableRequest::try_from(body.as_ref())
         .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
@@ -400,47 +420,44 @@ async fn handle_do_request(
         ObjectIdFrom::Name(name) => binding.id_from_name(name.as_str())?,
         ObjectIdFrom::Hex(hex) => binding.id_from_string(hex.as_str())?,
     };
-    let attempts = if durable_request.retry {
-        RETRY_DELAYS.len() + 1
-    } else {
-        1
-    };
-    let mut attempt = 1;
-    loop {
-        tracing::warn!(id = obj.to_string(), "Getting DO stub");
+    retry(|attempt| {
+        let ctx = &ctx;
+        let obj = &obj;
+        let binding = &durable_request.binding;
+        let uri = &uri;
+        let http_request = http_request.clone();
+        async move {
+            tracing::warn!(id = obj.to_string(), "Getting DO stub");
 
-        let stub = if let Some(loc) = option_env!("DAPHNE_DO_REGION") {
-            obj.get_stub_with_location_hint(loc)
-        } else {
-            obj.get_stub()
-        }?;
+            let stub = if let Some(loc) = option_env!("DAPHNE_DO_REGION") {
+                obj.get_stub_with_location_hint(loc)
+            } else {
+                obj.get_stub()
+            }?;
 
-        match stub.fetch_with_request(http_request.clone()?).await {
-            Ok(ok) => {
-                ctx.metrics.durable_request_retry_count_inc(
-                    (attempt - 1).try_into().unwrap(),
-                    &durable_request.binding,
-                    &uri,
-                );
-                return Ok(HttpResponse::try_from(ok).unwrap());
-            }
-            Err(error) => {
-                if attempt < attempts {
+            match stub.fetch_with_request(http_request?).await {
+                Ok(ok) => {
+                    ctx.metrics.durable_request_retry_count_inc(
+                        (attempt - 1).try_into().unwrap(),
+                        binding,
+                        uri,
+                    );
+                    Ok(HttpResponse::try_from(ok).unwrap())
+                }
+                Err(error) => {
                     warn!(
-                        binding = durable_request.binding,
+                        binding = &binding,
                         path = uri,
                         attempt,
                         error = ?error,
                         "DO request failed"
                     );
-                    Delay::from(RETRY_DELAYS[attempt - 1]).await;
-                    attempt += 1;
-                } else {
                     ctx.metrics
-                        .durable_request_retry_count_inc(-1, &durable_request.binding, &uri);
-                    return Err(error.into());
+                        .durable_request_retry_count_inc(-1, binding, uri);
+                    Err(error.into())
                 }
             }
         }
-    }
+    })
+    .await
 }
