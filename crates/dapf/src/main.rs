@@ -237,14 +237,23 @@ enum HpkeAction {
         #[arg(short, long, env)]
         certificate_file: Option<PathBuf>,
     },
-    /// Generate an hpke receiver config.
-    GenerateReceiverConfig { kem_alg: KemAlg },
-    /// Rotate the HPKE config advertised by the Aggregator.
-    RotateConfig {
+    /// Get the Aggregator's HPKE receiver config, including the private key.
+    GetReceiverConfig {
         #[arg(short = 'c', long)]
         wrangler_config: String,
         #[arg(short = 'e', long)]
-        wrangler_env: String,
+        wrangler_env: Option<String>,
+        #[arg(default_value_t, long)]
+        dap_version: DapVersion,
+    },
+    /// Generate an hpke receiver config.
+    GenerateReceiverConfig { kem_alg: KemAlg },
+    /// Rotate the HPKE config advertised by the Aggregator.
+    RotateReceiverConfig {
+        #[arg(short = 'c', long)]
+        wrangler_config: String,
+        #[arg(short = 'e', long)]
+        wrangler_env: Option<String>,
         #[arg(default_value_t, long)]
         dap_version: DapVersion,
         kem_alg: KemAlg,
@@ -673,6 +682,48 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
 
 async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> anyhow::Result<()> {
     let mut rng = thread_rng();
+    fn kv_key_of(dap_version: DapVersion) -> String {
+        format!("hpke_receiver_config_set/{dap_version}")
+    }
+    async fn get_receiver_config(
+        wrangler_config: &str,
+        wrangler_env: Option<&str>,
+        dap_version: DapVersion,
+    ) -> anyhow::Result<Vec<HpkeReceiverConfig>> {
+        let hpke_receiver_config_list_key = kv_key_of(dap_version);
+        let current_hpke_receiver_config_list_value = {
+            let mut get_hpke_config_process = Command::new("wrangler");
+            get_hpke_config_process.args([
+                "kv:key",
+                "get",
+                &hpke_receiver_config_list_key,
+                "-c",
+                wrangler_config,
+                "--binding",
+                "DAP_CONFIG",
+            ]);
+            if let Some(env) = wrangler_env {
+                get_hpke_config_process.args(["-e", env]);
+            }
+            let get_hpke_config_process_output = get_hpke_config_process
+                .output()
+                .with_context(|| "wrangler kv:key get failed")?;
+            if !get_hpke_config_process_output.status.success() {
+                println!(
+                    "{}",
+                    String::from_utf8_lossy(&get_hpke_config_process_output.stderr)
+                );
+                return Err(anyhow!(
+                    "Failed to get current HPKE receiver config list (return status {})",
+                    get_hpke_config_process_output.status
+                ));
+            }
+            get_hpke_config_process_output.stdout
+        };
+
+        serde_json::from_slice::<Vec<HpkeReceiverConfig>>(&current_hpke_receiver_config_list_value)
+            .with_context(|| "failed to parse the current HPKE receiver config list")
+    }
     match hpke {
         HpkeAction::Get {
             aggregator_url,
@@ -690,6 +741,16 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> 
 
             Ok(())
         }
+        HpkeAction::GetReceiverConfig {
+            wrangler_config,
+            wrangler_env,
+            dap_version,
+        } => {
+            let config =
+                get_receiver_config(&wrangler_config, wrangler_env.as_deref(), dap_version).await?;
+            println!("{}", serde_json::to_string_pretty(&config)?);
+            Ok(())
+        }
         HpkeAction::GenerateReceiverConfig { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
@@ -700,51 +761,16 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> 
             );
             Ok(())
         }
-        HpkeAction::RotateConfig {
+        HpkeAction::RotateReceiverConfig {
             wrangler_config,
             wrangler_env,
             dap_version,
             kem_alg,
         } => {
-            let hpke_receiver_config_list_key = format!("hpke_receiver_config_set/{dap_version}");
-            let current_hpke_receiver_config_list_value = {
-                let get_current_hpke_receiver_config_list_result = Command::new("wrangler")
-                    .args([
-                        "kv:key",
-                        "get",
-                        &hpke_receiver_config_list_key,
-                        "-c",
-                        &wrangler_config,
-                        "-e",
-                        &wrangler_env,
-                        "--binding",
-                        "DAP_CONFIG",
-                    ])
-                    .output()
-                    .with_context(|| "wrangler kv:key get failed")?;
-                if !get_current_hpke_receiver_config_list_result
-                    .status
-                    .success()
-                {
-                    println!(
-                        "{}",
-                        String::from_utf8_lossy(
-                            &get_current_hpke_receiver_config_list_result.stderr
-                        )
-                    );
-                    return Err(anyhow!(
-                        "Failed to get current HPKE receiver config list (return status {})",
-                        get_current_hpke_receiver_config_list_result.status
-                    ));
-                }
-                get_current_hpke_receiver_config_list_result.stdout
-            };
-
-            let mut hpke_receiver_config_list = serde_json::from_slice::<Vec<HpkeReceiverConfig>>(
-                &current_hpke_receiver_config_list_value,
-            )
-            .with_context(|| "failed to parse the current HPKE receiver config list")?;
-
+            eprintln!("Getting current config...");
+            let mut hpke_receiver_config_list =
+                get_receiver_config(&wrangler_config, wrangler_env.as_deref(), dap_version).await?;
+            eprint!("Choosing a new id: ");
             // Choose a fresh config ID.
             let hpke_config_id = loop {
                 let id = rng.gen::<u8>();
@@ -755,7 +781,9 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> 
                     break id;
                 }
             };
+            eprintln!("{hpke_config_id}");
 
+            eprintln!("Generating new key pair of {kem_alg:?}");
             let new_hpke_receiver_config = HpkeReceiverConfig::gen(hpke_config_id, kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
 
@@ -767,36 +795,36 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> 
                 serde_json::to_string(&hpke_receiver_config_list)
                     .with_context(|| "failed to encode the updated HPKE receiver config list")?;
 
-            let put_updated_hpke_receiver_config_list_result = Command::new("wrangler")
-                .args([
-                    "kv:key",
-                    "put",
-                    &hpke_receiver_config_list_key,
-                    &updated_hpke_receiver_config_list_value,
-                    "-c",
-                    &wrangler_config,
-                    "-e",
-                    &wrangler_env,
-                    "--binding",
-                    "DAP_CONFIG",
-                ])
+            eprintln!("Updating list of configs....");
+            let mut put_updated_hpke_process = Command::new("wrangler");
+            put_updated_hpke_process.args([
+                "kv:key",
+                "put",
+                &kv_key_of(dap_version),
+                &updated_hpke_receiver_config_list_value,
+                "-c",
+                &wrangler_config,
+                "--binding",
+                "DAP_CONFIG",
+            ]);
+            if let Some(env) = wrangler_env {
+                put_updated_hpke_process.args(["-e", &env]);
+            }
+            let put_updated_hpke_process_output = put_updated_hpke_process
                 .output()
                 .with_context(|| "wrangler kv:key get failed")?;
-            if !put_updated_hpke_receiver_config_list_result
-                .status
-                .success()
-            {
-                println!(
+            if !put_updated_hpke_process_output.status.success() {
+                eprintln!(
                     "{}",
-                    String::from_utf8_lossy(&put_updated_hpke_receiver_config_list_result.stderr)
+                    String::from_utf8_lossy(&put_updated_hpke_process_output.stderr)
                 );
                 return Err(anyhow!(
                     "Failed to put updatedt HPKE receiver config list (return status {})",
-                    put_updated_hpke_receiver_config_list_result.status
+                    put_updated_hpke_process_output.status
                 ));
             }
 
-            println!("ID of the new HPKE config: {hpke_config_id}");
+            eprintln!("Done");
             Ok(())
         }
     }
