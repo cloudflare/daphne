@@ -7,6 +7,7 @@ use crate::messages::{
     decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
     QUERY_TYPE_TIME_INTERVAL,
 };
+use crate::pine::PineParam;
 use crate::DapVersion;
 use prio::codec::{
     decode_u8_items, encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode,
@@ -40,10 +41,73 @@ pub enum VdafTypeVar {
         chunk_length: u32,
         num_proofs: u8,
     },
+    Pine32HmacSha256Aes128 {
+        param: PineParam,
+    },
+    Pine64HmacSha256Aes128 {
+        param: PineParam,
+    },
     NotImplemented {
         typ: u32,
         param: Vec<u8>,
     },
+}
+
+impl Encode for PineParam {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        self.norm_bound.encode(bytes)?; // l2_norm_bound
+        u32::try_from(self.frac_bits)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?; // num_frac_bits
+        u32::try_from(self.dimension)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?; // length
+        u32::try_from(self.chunk_len)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?; // chunk_length
+        u32::try_from(self.chunk_len_sq_norm_equal)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?; // chunk_length_norm_equality
+        self.num_proofs.encode(bytes)?;
+        u16::try_from(self.num_wr_tests)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?; // num_wr_checks
+        u16::try_from(self.num_wr_successes)
+            .map_err(|_| CodecError::UnexpectedValue)?
+            .encode(bytes)?;
+        Ok(())
+    }
+}
+
+impl Decode for PineParam {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        let l2_norm_bound = u64::decode(bytes)?;
+        let num_frac_bits = u32::decode(bytes)?;
+        let length = u32::decode(bytes)?;
+        let chunk_length = u32::decode(bytes)?;
+        let chunk_length_norm_equality = u32::decode(bytes)?;
+        let num_proofs = u8::decode(bytes)?;
+        let num_wr_checks = u16::decode(bytes)?;
+        let num_wr_successes = u16::decode(bytes)?;
+        Ok(Self {
+            norm_bound: l2_norm_bound,
+            dimension: length
+                .try_into()
+                .map_err(|_| CodecError::Other("length is too large for usize".into()))?,
+            frac_bits: num_frac_bits
+                .try_into()
+                .map_err(|_| CodecError::Other("num_frac_bits is too large for usize".into()))?,
+            chunk_len: chunk_length
+                .try_into()
+                .map_err(|_| CodecError::Other("chunk_length is too large for usize".into()))?,
+            chunk_len_sq_norm_equal: chunk_length_norm_equality.try_into().map_err(|_| {
+                CodecError::Other("chunk_length_norm_equality is too large for usize".into())
+            })?,
+            num_proofs,
+            num_wr_tests: num_wr_checks.into(),
+            num_wr_successes: num_wr_successes.into(),
+        })
+    }
 }
 
 impl ParameterizedEncode<DapVersion> for VdafTypeVar {
@@ -68,6 +132,14 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
                 bits.encode(bytes)?;
                 chunk_length.encode(bytes)?;
                 num_proofs.encode(bytes)?;
+            }
+            Self::Pine32HmacSha256Aes128 { param } => {
+                VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128.encode(bytes)?;
+                param.encode(bytes)?;
+            }
+            Self::Pine64HmacSha256Aes128 { param } => {
+                VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128.encode(bytes)?;
+                param.encode(bytes)?;
             }
             Self::NotImplemented { typ, param } => {
                 typ.encode(bytes)?;
@@ -96,6 +168,12 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafTypeVar {
                     num_proofs: u8::decode(bytes)?,
                 })
             }
+            (.., VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128) => Ok(Self::Pine32HmacSha256Aes128 {
+                param: PineParam::decode(bytes)?,
+            }),
+            (.., VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128) => Ok(Self::Pine64HmacSha256Aes128 {
+                param: PineParam::decode(bytes)?,
+            }),
             (Some(bytes_left), ..) => {
                 let mut param = vec![0; bytes_left - 4];
                 bytes.read_exact(&mut param)?;
@@ -545,6 +623,58 @@ mod tests {
     }
 
     test_versions! { roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
+
+    fn roundtrip_vdaf_config_pine32_hmac_sha256_aes128(version: DapVersion) {
+        let vdaf_config = VdafConfig {
+            dp_config: DpConfig::None,
+            var: VdafTypeVar::Pine32HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 1337,
+                    dimension: 1_000_000,
+                    frac_bits: 15,
+                    chunk_len: 999,
+                    chunk_len_sq_norm_equal: 1400,
+                    num_proofs: 15,
+                    num_wr_tests: 50,
+                    num_wr_successes: 17,
+                },
+            },
+        };
+        let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
+
+        assert_eq!(
+            VdafConfig::get_decoded_with_param(&(version, Some(encoded.len())), &encoded).unwrap(),
+            vdaf_config
+        );
+    }
+
+    test_versions! { roundtrip_vdaf_config_pine32_hmac_sha256_aes128 }
+
+    fn roundtrip_vdaf_config_pine64_hmac_sha256_aes128(version: DapVersion) {
+        let vdaf_config = VdafConfig {
+            dp_config: DpConfig::None,
+            var: VdafTypeVar::Pine64HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 1337,
+                    dimension: 1_000_000,
+                    frac_bits: 15,
+                    chunk_len: 999,
+                    chunk_len_sq_norm_equal: 1400,
+                    num_proofs: 15,
+                    num_wr_tests: 50,
+                    num_wr_successes: 17,
+                },
+            },
+        };
+        let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
+
+        assert_eq!(
+            VdafConfig::get_decoded_with_param(&(version, Some(encoded.len())), &encoded).unwrap(),
+            vdaf_config
+        );
+    }
+
+    test_versions! { roundtrip_vdaf_config_pine64_hmac_sha256_aes128 }
 
     fn roundtrip_vdaf_config_not_implemented(version: DapVersion) {
         let vdaf_config = VdafConfig {

@@ -150,7 +150,7 @@ mod test {
     #[cfg(feature = "experimental")]
     use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
     use crate::{
-        assert_metrics_include, async_test_version, async_test_versions,
+        assert_metrics_include, async_test_versions,
         auth::BearerToken,
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
@@ -1717,8 +1717,57 @@ mod test {
         .await;
     }
 
-    async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Draft09 }
-    async_test_version! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Latest }
+    async_test_versions! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
+
+    #[cfg(feature = "experimental")]
+    async fn e2e_taskprov_pine32_hmac_sha256_aes128(version: DapVersion) {
+        use crate::{pine::PineParam, vdaf::PineConfig};
+        e2e_taskprov(
+            version,
+            VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 16,
+                    dimension: 10,
+                    frac_bits: 4,
+                    chunk_len: 10,
+                    chunk_len_sq_norm_equal: 10,
+                    num_proofs: 5,
+                    num_wr_tests: 100,
+                    num_wr_successes: 100,
+                },
+            }),
+            DapMeasurement::F64Vec(vec![0.0; 10]),
+        )
+        .await;
+    }
+
+    #[cfg(feature = "experimental")]
+    async_test_versions! { e2e_taskprov_pine32_hmac_sha256_aes128 }
+
+    #[cfg(feature = "experimental")]
+    async fn e2e_taskprov_pine64_hmac_sha256_aes128(version: DapVersion) {
+        use crate::{pine::PineParam, vdaf::PineConfig};
+        e2e_taskprov(
+            version,
+            VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 16,
+                    dimension: 10,
+                    frac_bits: 4,
+                    chunk_len: 10,
+                    chunk_len_sq_norm_equal: 10,
+                    num_proofs: 2,
+                    num_wr_tests: 100,
+                    num_wr_successes: 100,
+                },
+            }),
+            DapMeasurement::F64Vec(vec![0.0; 10]),
+        )
+        .await;
+    }
+
+    #[cfg(feature = "experimental")]
+    async_test_versions! { e2e_taskprov_pine64_hmac_sha256_aes128 }
 
     // Test multiple tasks in flight at once.
     async fn multi_task(version: DapVersion) {
