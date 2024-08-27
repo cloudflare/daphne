@@ -7,6 +7,8 @@
 
 use std::num::NonZeroUsize;
 
+#[cfg(feature = "experimental")]
+use crate::vdaf::pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig};
 use crate::{
     fatal_error,
     hpke::HpkeConfig,
@@ -226,6 +228,32 @@ impl VdafConfig {
                     },
                 ))
             }
+            #[cfg(feature = "experimental")]
+            (_, VdafTypeVar::Pine32HmacSha256Aes128 { param }) => {
+                if let Err(e) = pine32_hmac_sha256_aes128(&param) {
+                    Err(DapAbort::InvalidTask {
+                        detail: format!("invalid parameters for Pine32: {e}"),
+                        task_id: *task_id,
+                    })
+                } else {
+                    Ok(VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
+                        param,
+                    }))
+                }
+            }
+            #[cfg(feature = "experimental")]
+            (_, VdafTypeVar::Pine64HmacSha256Aes128 { param }) => {
+                if let Err(e) = pine64_hmac_sha256_aes128(&param) {
+                    Err(DapAbort::InvalidTask {
+                        detail: format!("invalid parameters for Pine64: {e}"),
+                        task_id: *task_id,
+                    })
+                } else {
+                    Ok(VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
+                        param,
+                    }))
+                }
+            }
             (_, VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
                 task_id: *task_id,
@@ -371,9 +399,17 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
             #[cfg(feature = "experimental")]
-            VdafConfig::Mastic { .. } | VdafConfig::Pine(..) => Err(fatal_error!(
+            VdafConfig::Mastic { .. } => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
+            #[cfg(feature = "experimental")]
+            VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 { param }) => {
+                Ok(Self::Pine32HmacSha256Aes128 { param: *param })
+            }
+            #[cfg(feature = "experimental")]
+            VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 { param }) => {
+                Ok(Self::Pine64HmacSha256Aes128 { param: *param })
+            }
         }
     }
 }

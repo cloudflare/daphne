@@ -24,14 +24,14 @@ use prio::{
 };
 use serde::{Deserialize, Serialize};
 
-fn pine32_hmac_sha256_aes128(
+pub(crate) fn pine32_hmac_sha256_aes128(
     param: &PineParam,
 ) -> Result<Pine<FieldPrio2, XofHmacSha256Aes128, 32>, VdafError> {
     Pine::new(param, VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128)
         .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters")))
 }
 
-fn pine64_hmac_sha256_aes128(
+pub(crate) fn pine64_hmac_sha256_aes128(
     param: &PineParam,
 ) -> Result<Pine<Field64, XofHmacSha256Aes128, 32>, VdafError> {
     Pine::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
