@@ -68,9 +68,11 @@ rand = "0.8.5"
 rayon = "1.10.0"
 rcgen = "0.12.1"
 regex = "1.10.5"
-reqwest = { version = "0.11.27", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12.5", default-features = false, features = ["rustls-tls-native-roots"] }
 reqwest-wasm = "0.11.16"
 ring = "0.17.8"
+rustls = "0.23.10"
+rustls-native-certs = "0.7"
 serde = { version = "1.0.203", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 serde_json = "1.0.118"

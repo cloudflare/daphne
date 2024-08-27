@@ -166,6 +166,19 @@ pub enum HttpClient {
 
 impl HttpClient {
     fn reused(leader_tls_identity: Option<Identity>) -> Self {
+        let mut tls = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::aws_lc_rs::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates({
+            let mut store = rustls::RootCertStore::empty();
+            store.add_parsable_certificates(rustls_native_certs::load_native_certs().unwrap());
+            store
+        })
+        .with_no_client_auth();
+        tls.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
+
         // Build the HTTP client.
         let mut http_client_builder = reqwest::Client::builder()
             // it takes too long to generate reports for larger dimensions, causing the worker
@@ -175,7 +188,7 @@ impl HttpClient {
             .redirect(reqwest::redirect::Policy::none())
             // We might as well use rustls because we already need the feature for
             // `Identity::from_pem()`.
-            .use_rustls_tls();
+            .use_preconfigured_tls(tls);
         if let Some(identity) = leader_tls_identity {
             // Configure TLS certificate, if available.
             http_client_builder = http_client_builder.identity(identity);
