@@ -35,16 +35,16 @@ is persisted across runs.
 
 **Leader:**
 ```
-cargo run -q --bin dapf -- add-hpke-config http://localhost:8787/v09/ --kem-alg x25519_hkdf_sha256
+cargo run --bin dapf -- test-routes add-hpke-config http://localhost:8787/v09/ --kem-alg x25519_hkdf_sha256
 ```
 
 **Helper:**
 ```
-cargo run -q --bin dapf -- add-hpke-config http://localhost:8788/v09/ --kem-alg x25519_hkdf_sha256
+cargo run --bin dapf -- test-routes add-hpke-config http://localhost:8788/v09/ --kem-alg x25519_hkdf_sha256
 ```
 
 ### Clearing all of storage without restaring docker
 
 ```
-cargo run -q --bin dapf -- clear-storage --help
+cargo run --bin dapf -- test-routes clear-storage --help
 ```

@@ -124,35 +124,7 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-enum TestAction {
-    /// Add an hpke config to a test-utils enabled `daphne-server`.
-    AddHpkeConfig {
-        aggregator_url: Url,
-        #[arg(short, long, default_value = "x25519_hkdf_sha256")]
-        kem_alg: KemAlg,
-    },
-    /// Clear all storage of an aggregator.
-    ClearStorage {
-        aggregator_url: Url,
-        /// If a new hpke config should be inserted after clearing all storage, use this flag to
-        /// specify the key algorithm to use for the new hpke config
-        #[arg(short, long)]
-        set_hpke_key: Option<KemAlg>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum Action {
-    #[command(flatten)]
-    Test(TestAction),
-    /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
-    GetHpkeConfig {
-        #[clap(short = 'u', long, env)]
-        aggregator_url: Url,
-        /// Path to the certificate file to use to verify the signature of the hpke config
-        #[arg(short, long, env)]
-        certificate_file: Option<PathBuf>,
-    },
+enum LeaderAction {
     /// Upload a report to a DAP Leader using the JSON-formatted measurement provided on stdin.
     Upload {
         /// Base URL of the Leader
@@ -204,16 +176,9 @@ enum Action {
         #[clap(short, long, env, value_parser = parse_id)]
         task_id: TaskId,
     },
-    GenerateHpkeReceiverConfig {
-        kem_alg: KemAlg,
-    },
-    /// Rotate the HPKE config advertised by the Aggregator.
-    DaphneWorkerRotateHpkeConfig {
-        wrangler_config: String,
-        wrangler_env: String,
-        dap_version: DapVersion,
-        kem_alg: KemAlg,
-    },
+}
+#[derive(Debug, Subcommand)]
+enum HelperAction {
     /// Perform one full aggregation job against a helper using taskprov to provide the task.
     ///
     /// This command requires `VDAF_VERIFY_INIT` to be exported to the environment containing the
@@ -260,6 +225,64 @@ enum Action {
         #[command(subcommand)]
         params: LoadTestParameters,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum HpkeAction {
+    /// Get the Aggregator's HPKE config and write the JSON-formatted output to stdout.
+    Get {
+        #[clap(short = 'u', long, env)]
+        aggregator_url: Url,
+        /// Path to the certificate file to use to verify the signature of the hpke config
+        #[arg(short, long, env)]
+        certificate_file: Option<PathBuf>,
+    },
+    /// Generate an hpke receiver config.
+    GenerateReceiverConfig { kem_alg: KemAlg },
+    /// Rotate the HPKE config advertised by the Aggregator.
+    RotateConfig {
+        #[arg(short = 'c', long)]
+        wrangler_config: String,
+        #[arg(short = 'e', long)]
+        wrangler_env: String,
+        #[arg(default_value_t, long)]
+        dap_version: DapVersion,
+        kem_alg: KemAlg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TestAction {
+    /// Add an hpke config to a test-utils enabled `daphne-server`.
+    AddHpkeConfig {
+        aggregator_url: Url,
+        #[arg(short, long, default_value = "x25519_hkdf_sha256")]
+        kem_alg: KemAlg,
+    },
+    /// Clear all storage of an aggregator.
+    ClearStorage {
+        aggregator_url: Url,
+        /// If a new hpke config should be inserted after clearing all storage, use this flag to
+        /// specify the key algorithm to use for the new hpke config
+        #[arg(short, long)]
+        set_hpke_key: Option<KemAlg>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum Action {
+    /// Perform actions on the leader.
+    #[command(subcommand)]
+    Leader(LeaderAction),
+    /// Perform actions on the helper.
+    #[command(subcommand)]
+    Helper(HelperAction),
+    /// Perform actions on the hpke configuration of a storage proxy
+    #[command(subcommand)]
+    Hpke(HpkeAction),
+    /// Interact with test routes behind `test-utils` feature flags.
+    #[command(subcommand)]
+    TestRoutes(TestAction),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -359,11 +382,6 @@ async fn main() -> Result<()> {
                 .from_env_lossy(),
         )
         .init();
-    let mut rng = thread_rng();
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs();
-
     // HTTP client should not handle redirects automatically.
     let http_client = ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
@@ -374,23 +392,37 @@ async fn main() -> Result<()> {
         daphne::testing::report_generator::replay_reports(true);
     }
     match cli.action {
-        Action::GetHpkeConfig {
+        Action::Leader(leader) => handle_leader_actions(leader, http_client).await,
+        Action::Hpke(hpke) => handle_hpke_actions(hpke, http_client).await,
+        Action::Helper(helper) => handle_helper_actions(helper).await,
+        Action::TestRoutes(TestAction::AddHpkeConfig {
             aggregator_url,
-            certificate_file,
-        } => {
-            let hpke_config = http_client
-                .get_hpke_config(&aggregator_url, certificate_file.as_deref())
-                .await
-                .with_context(|| "failed to fetch the HPKE config")?;
-            println!(
-                "{}",
-                serde_json::to_string(&hpke_config.hpke_configs)
-                    .with_context(|| "failed to encode HPKE config")?
-            );
-
-            Ok(())
+            kem_alg,
+        }) => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
+        Action::TestRoutes(TestAction::ClearStorage {
+            aggregator_url,
+            set_hpke_key,
+        }) => {
+            dapf::test_routes::delete_all_storage(
+                &http_client,
+                &aggregator_url,
+                set_hpke_key.map(|k| k.0),
+            )
+            .await
         }
-        Action::Upload {
+    }
+}
+
+async fn handle_leader_actions(
+    leader: LeaderAction,
+    http_client: reqwest::Client,
+) -> anyhow::Result<()> {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs();
+
+    match leader {
+        LeaderAction::Upload {
             leader_url,
             helper_url,
             vdaf_config,
@@ -460,7 +492,7 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
-        Action::Collect {
+        LeaderAction::Collect {
             leader_url,
             task_id: _,
         } => {
@@ -522,7 +554,7 @@ async fn main() -> Result<()> {
             println!("{uri}");
             Ok(())
         }
-        Action::CollectPoll {
+        LeaderAction::CollectPoll {
             uri,
             vdaf_config,
             hpke_receiver,
@@ -564,7 +596,101 @@ async fn main() -> Result<()> {
             print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())
         }
-        Action::GenerateHpkeReceiverConfig { kem_alg } => {
+    }
+}
+
+async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
+    match helper {
+        HelperAction::Aggregate {
+            helper_url,
+            vdaf_config,
+            hpke_signing_certificate_path,
+            reports_per_batch,
+            reports_per_agg_job,
+            load_control,
+        } => {
+            tracing::info!("using vdaf: {:?}", vdaf_config);
+            let load_control = load_control.into_params(reports_per_agg_job, reports_per_batch);
+            tracing::info!("using load params: {load_control:?}");
+
+            let t = dapf::acceptance::Test::from_env(
+                helper_url,
+                vdaf_config.into_vdaf(),
+                hpke_signing_certificate_path,
+                true,
+                load_control,
+            )?;
+
+            let res = t
+                .test_helper(&TestOptions {
+                    reports_per_agg_job,
+                    reports_per_batch,
+                    ..Default::default()
+                })
+                .await
+                .map(|_| ());
+            println!("{}", t.encode_metrics());
+            res
+        }
+        HelperAction::LoadTest {
+            helper_url,
+            no_reuse_http_client,
+            load_control,
+            params: LoadTestParameters::Multiple,
+        } => {
+            load_testing::execute_multiple_combinations(
+                helper_url,
+                !no_reuse_http_client,
+                load_control.into_params(usize::MAX, 1),
+            )
+            .await;
+            Ok(())
+        }
+        HelperAction::LoadTest {
+            helper_url,
+            no_reuse_http_client,
+            load_control,
+            params:
+                LoadTestParameters::Single {
+                    reports_per_batch,
+                    reports_per_agg_job,
+                    vdaf_config,
+                },
+        } => {
+            load_testing::execute_single_combination_from_env(
+                helper_url,
+                vdaf_config.into_vdaf(),
+                reports_per_batch,
+                reports_per_agg_job,
+                !no_reuse_http_client,
+                load_control.into_params(reports_per_agg_job, reports_per_batch),
+            )
+            .await;
+            Ok(())
+        }
+    }
+}
+
+async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> anyhow::Result<()> {
+    let mut rng = thread_rng();
+    match hpke {
+        HpkeAction::Get {
+            aggregator_url,
+            certificate_file,
+        } => {
+            let hpke_config = http_client
+                .get_hpke_config(&aggregator_url, certificate_file.as_deref())
+                .await
+                .with_context(|| "failed to fetch the HPKE config")?;
+            println!(
+                "{}",
+                serde_json::to_string(&hpke_config.hpke_configs)
+                    .with_context(|| "failed to encode HPKE config")?
+            );
+
+            Ok(())
+        }
+        HpkeAction::GenerateReceiverConfig { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
             println!(
@@ -574,7 +700,7 @@ async fn main() -> Result<()> {
             );
             Ok(())
         }
-        Action::DaphneWorkerRotateHpkeConfig {
+        HpkeAction::RotateConfig {
             wrangler_config,
             wrangler_env,
             dap_version,
@@ -672,88 +798,6 @@ async fn main() -> Result<()> {
 
             println!("ID of the new HPKE config: {hpke_config_id}");
             Ok(())
-        }
-        Action::Aggregate {
-            helper_url,
-            vdaf_config,
-            hpke_signing_certificate_path,
-            reports_per_batch,
-            reports_per_agg_job,
-            load_control,
-        } => {
-            tracing::info!("using vdaf: {:?}", vdaf_config);
-            let load_control = load_control.into_params(reports_per_agg_job, reports_per_batch);
-            tracing::info!("using load params: {load_control:?}");
-
-            let t = dapf::acceptance::Test::from_env(
-                helper_url,
-                vdaf_config.into_vdaf(),
-                hpke_signing_certificate_path,
-                true,
-                load_control,
-            )?;
-
-            let res = t
-                .test_helper(&TestOptions {
-                    reports_per_agg_job,
-                    reports_per_batch,
-                    ..Default::default()
-                })
-                .await
-                .map(|_| ());
-            println!("{}", t.encode_metrics());
-            res
-        }
-        Action::LoadTest {
-            helper_url,
-            no_reuse_http_client,
-            load_control,
-            params: LoadTestParameters::Multiple,
-        } => {
-            load_testing::execute_multiple_combinations(
-                helper_url,
-                !no_reuse_http_client,
-                load_control.into_params(usize::MAX, 1),
-            )
-            .await;
-            Ok(())
-        }
-        Action::LoadTest {
-            helper_url,
-            no_reuse_http_client,
-            load_control,
-            params:
-                LoadTestParameters::Single {
-                    reports_per_batch,
-                    reports_per_agg_job,
-                    vdaf_config,
-                },
-        } => {
-            load_testing::execute_single_combination_from_env(
-                helper_url,
-                vdaf_config.into_vdaf(),
-                reports_per_batch,
-                reports_per_agg_job,
-                !no_reuse_http_client,
-                load_control.into_params(reports_per_agg_job, reports_per_batch),
-            )
-            .await;
-            Ok(())
-        }
-        Action::Test(TestAction::AddHpkeConfig {
-            aggregator_url,
-            kem_alg,
-        }) => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
-        Action::Test(TestAction::ClearStorage {
-            aggregator_url,
-            set_hpke_key,
-        }) => {
-            dapf::test_routes::delete_all_storage(
-                &http_client,
-                &aggregator_url,
-                set_hpke_key.map(|k| k.0),
-            )
-            .await
         }
     }
 }

@@ -33,5 +33,5 @@ run_interop:
 	openssl req -key /tmp/private-key -new -x509 -days 1 -out /tmp/certificate -subj '/C=US/L=Palo Alto/O=Cloudflare Lda/CN=dap.cloudflare.com'
 
 reset-storage:
-	-cargo run --bin dapf -- clear-storage -s p256_hkdf_sha256 http://localhost:8787/v09/
-	-cargo run --bin dapf -- clear-storage -s p256_hkdf_sha256 http://localhost:8788/v09/
+	-cargo run --bin dapf -- test-routes clear-storage -s p256_hkdf_sha256 http://localhost:8787/v09/
+	-cargo run --bin dapf -- test-routes clear-storage -s p256_hkdf_sha256 http://localhost:8788/v09/
