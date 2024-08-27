@@ -323,7 +323,7 @@ impl<F: FftFriendlyFieldElement> PineType<F> {
             }
         }
 
-        if buf.len() % self.cfg.param.chunk_len * 2 != 0 {
+        if !buf.is_empty() {
             for _ in buf.len()..self.cfg.param.chunk_len * 2 {
                 buf.push(F::zero());
             }
