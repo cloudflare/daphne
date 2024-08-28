@@ -108,7 +108,7 @@ pub(crate) fn prio2_prep_finish_from_shares(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
 }
 
@@ -137,7 +137,7 @@ pub(crate) fn prio2_prep_finish(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::FieldPrio2(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
 }
 
