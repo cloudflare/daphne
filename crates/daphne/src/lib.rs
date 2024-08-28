@@ -996,10 +996,7 @@ impl DapAggregateShare {
                     |e| fatal_error!(err = ?e, "failed to merge 128bit wide vdaf shares"),
                 )?;
             }
-            (
-                Some(VdafAggregateShare::FieldPrio2(left)),
-                Some(VdafAggregateShare::FieldPrio2(right)),
-            ) => {
+            (Some(VdafAggregateShare::Field32(left)), Some(VdafAggregateShare::Field32(right))) => {
                 left.merge(&right)
                     .map_err(|e| fatal_error!(err = ?e, "failed to merge prio2 vdaf shares"))?;
             }

@@ -126,7 +126,7 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                     Some(VdafAggregateShare::Field128(field)) => {
                         encode(field, |len| data.init_field128(len));
                     }
-                    Some(VdafAggregateShare::FieldPrio2(field)) => {
+                    Some(VdafAggregateShare::Field32(field)) => {
                         encode(field, |len| data.init_field_prio2(len));
                     }
                     None => data.set_none(()),
@@ -174,7 +174,7 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                         Some(VdafAggregateShare::Field128(decode(field?)?))
                     }
                     dap_aggregate_share::data::Which::FieldPrio2(field) => {
-                        Some(VdafAggregateShare::FieldPrio2(decode(field?)?))
+                        Some(VdafAggregateShare::Field32(decode(field?)?))
                     }
                     dap_aggregate_share::data::Which::None(()) => None,
                 }
@@ -259,7 +259,7 @@ mod test {
                         })
                         .collect::<Vec<_>>(),
                 )),
-                VdafAggregateShare::FieldPrio2(AggregateShare::from(
+                VdafAggregateShare::Field32(AggregateShare::from(
                     (0..len)
                         .map(|_| {
                             // idk how to consistently generate a valid FieldPrio2 value, so I just

@@ -66,9 +66,9 @@ const COLLECTED_KEY: &str = "collected";
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum VdafKind {
+    Field32,
     Field64,
     Field128,
-    FieldPrio2,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,9 +88,9 @@ impl DapAggregateShareMetadata {
             max_time: share.max_time,
             checksum: share.checksum,
             kind: share.data.as_ref().map(|data| match data {
+                daphne::vdaf::VdafAggregateShare::Field32(_) => VdafKind::Field32,
                 daphne::vdaf::VdafAggregateShare::Field64(_) => VdafKind::Field64,
                 daphne::vdaf::VdafAggregateShare::Field128(_) => VdafKind::Field128,
-                daphne::vdaf::VdafAggregateShare::FieldPrio2(_) => VdafKind::FieldPrio2,
             }),
         }
     }
@@ -299,11 +299,9 @@ impl AggregateStore {
                     }
 
                     let data = match kind {
+                        VdafKind::Field32 => VdafAggregateShare::Field32(from_slices(chunks)?),
                         VdafKind::Field64 => VdafAggregateShare::Field64(from_slices(chunks)?),
                         VdafKind::Field128 => VdafAggregateShare::Field128(from_slices(chunks)?),
-                        VdafKind::FieldPrio2 => {
-                            VdafAggregateShare::FieldPrio2(from_slices(chunks)?)
-                        }
                     };
 
                     meta.into_agg_share_with_data(data)

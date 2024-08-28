@@ -2396,9 +2396,9 @@ dependencies = [
 
 [[package]]
 name = "prio"
-version = "0.16.6"
+version = "0.16.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f86ecfd264aa77241b69044a91e7627b7cfdf88fb771835a7663eeec4543f75"
+checksum = "2e139374dfbada620828b9736ecef3959c8fea97caa8d9ba39d3e84966380978"
 dependencies = [
  "aes",
  "bitvec",

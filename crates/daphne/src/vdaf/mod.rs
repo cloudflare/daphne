@@ -208,6 +208,8 @@ pub enum VdafPrepState {
     },
     #[cfg(feature = "experimental")]
     Pine64HmacSha256Aes128(PinePrepState<Field64, 32>),
+    #[cfg(feature = "experimental")]
+    Pine32HmacSha256Aes128(PinePrepState<FieldPrio2, 32>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -223,7 +225,9 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             | Self::Prio3Field64HmacSha256Aes128(_)
             | Self::Prio3Field128(_) => 0,
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } | Self::Pine64HmacSha256Aes128(_) => 0,
+            Self::Mastic { .. }
+            | Self::Pine64HmacSha256Aes128(_)
+            | Self::Pine32HmacSha256Aes128(_) => 0,
         }
     }
 }
@@ -236,7 +240,9 @@ impl Encode for VdafPrepState {
             Self::Prio3Field128(state) => state.encode(bytes),
             Self::Prio2(state) => state.encode(bytes),
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } | Self::Pine64HmacSha256Aes128(_) => {
+            Self::Mastic { .. }
+            | Self::Pine64HmacSha256Aes128(_)
+            | Self::Pine32HmacSha256Aes128(_) => {
                 unreachable!("encoding of prep state is not implemented")
             }
         }
@@ -278,6 +284,8 @@ pub enum VdafPrepMessage {
     MasticShare(Field64),
     #[cfg(feature = "experimental")]
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64, 32>),
+    #[cfg(feature = "experimental")]
+    Pine32HmacSha256Aes128(crate::pine::msg::PrepShare<FieldPrio2, 32>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -295,7 +303,9 @@ impl deepsize::DeepSizeOf for VdafPrepMessage {
             | Self::Prio3ShareField64HmacSha256Aes128(..)
             | Self::Prio3ShareField128(..) => 0,
             #[cfg(feature = "experimental")]
-            Self::MasticShare(..) | Self::Pine64HmacSha256Aes128(_) => 0,
+            Self::MasticShare(..)
+            | Self::Pine64HmacSha256Aes128(_)
+            | Self::Pine32HmacSha256Aes128(_) => 0,
         }
     }
 }
@@ -311,6 +321,8 @@ impl Encode for VdafPrepMessage {
             Self::MasticShare(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
             Self::Pine64HmacSha256Aes128(share) => share.encode(bytes),
+            #[cfg(feature = "experimental")]
+            Self::Pine32HmacSha256Aes128(share) => share.encode(bytes),
         }
     }
 }
@@ -345,6 +357,12 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
                     crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
                 ))
             }
+            #[cfg(feature = "experimental")]
+            VdafPrepState::Pine32HmacSha256Aes128(state) => {
+                Ok(VdafPrepMessage::Pine32HmacSha256Aes128(
+                    crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
+                ))
+            }
         }
     }
 }
@@ -352,18 +370,18 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VdafAggregateShare {
+    Field32(prio::vdaf::AggregateShare<FieldPrio2>),
     Field64(prio::vdaf::AggregateShare<Field64>),
     Field128(prio::vdaf::AggregateShare<Field128>),
-    FieldPrio2(prio::vdaf::AggregateShare<FieldPrio2>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
 impl deepsize::DeepSizeOf for VdafAggregateShare {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
         match self {
+            VdafAggregateShare::Field32(s) => std::mem::size_of_val(s.as_ref()),
             VdafAggregateShare::Field64(s) => std::mem::size_of_val(s.as_ref()),
             VdafAggregateShare::Field128(s) => std::mem::size_of_val(s.as_ref()),
-            VdafAggregateShare::FieldPrio2(s) => std::mem::size_of_val(s.as_ref()),
         }
     }
 }
@@ -371,9 +389,9 @@ impl deepsize::DeepSizeOf for VdafAggregateShare {
 impl Encode for VdafAggregateShare {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
+            VdafAggregateShare::Field32(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
-            VdafAggregateShare::FieldPrio2(agg_share) => agg_share.encode(bytes),
         }
     }
 }
