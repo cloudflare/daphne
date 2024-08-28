@@ -7,8 +7,6 @@
 
 use std::num::NonZeroUsize;
 
-#[cfg(feature = "experimental")]
-use crate::vdaf::pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig};
 use crate::{
     fatal_error,
     hpke::HpkeConfig,
@@ -20,6 +18,11 @@ use crate::{
     vdaf::VdafVerifyKey,
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
     Prio3Config, VdafConfig,
+};
+#[cfg(feature = "experimental")]
+use crate::{
+    pine::PineParam,
+    vdaf::pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig},
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -184,12 +187,42 @@ impl DapQueryConfig {
     }
 }
 
+#[cfg(feature = "experimental")]
+impl PineParam {
+    fn opt_out_reason(&self, min_proofs: u8) -> Option<String> {
+        const MAX_DIM: usize = 300_000;
+        const MAX_PROOFS: u8 = 8;
+        const MIN_WR_SUCCESSES: usize = 30;
+        const MAX_WR_TESTS: usize = 165;
+
+        if self.dimension > MAX_DIM {
+            Some(format!("dimension must not exceed {MAX_DIM}"))
+        } else if self.num_wr_successes < MIN_WR_SUCCESSES {
+            Some(format!(
+                "number of wraparound test successes must be at least {MIN_WR_SUCCESSES}"
+            ))
+        } else if self.num_wr_tests > MAX_WR_TESTS {
+            Some(format!(
+                "number of wraparound tests must not exceed {MAX_WR_TESTS}"
+            ))
+        } else if !(min_proofs..=MAX_PROOFS).contains(&self.num_proofs) {
+            Some(format!(
+                "number of proofs must be in range {min_proofs}..{MAX_PROOFS} inclusive"
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 impl VdafConfig {
     fn try_from_taskprov(
         task_id: &TaskId,
         version: DapVersion,
         var: VdafTypeVar,
     ) -> Result<Self, DapAbort> {
+        const PRIO3_MAX_PROOFS: u8 = 3;
+
         match (version, var) {
             (_, VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
                 dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
@@ -206,9 +239,13 @@ impl VdafConfig {
                     num_proofs,
                 },
             ) => {
-                const MAX_PROOFS: u8 = 3;
-                if num_proofs == 0 || num_proofs > MAX_PROOFS {
-                    return Err(DapAbort::InvalidTask { detail: format!("invalid number of proofs for Prio3SumVecField64MultiproofHmacSha256Aes128: got {num_proofs}; expected a value in range [0, {MAX_PROOFS}]"), task_id: *task_id });
+                if !(1..=PRIO3_MAX_PROOFS).contains(&num_proofs) {
+                    return Err(DapAbort::InvalidTask {
+                        detail: format!(
+                            "number of proofs must be in range 1..{PRIO3_MAX_PROOFS} inclusive"
+                        ),
+                        task_id: *task_id,
+                    });
                 }
                 Ok(VdafConfig::Prio3(
                     Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
@@ -235,6 +272,11 @@ impl VdafConfig {
                         detail: format!("invalid parameters for Pine32: {e}"),
                         task_id: *task_id,
                     })
+                } else if let Some(reason) = param.opt_out_reason(5) {
+                    Err(DapAbort::InvalidTask {
+                        detail: format!("unsupported parameters for Pine32: {reason}"),
+                        task_id: *task_id,
+                    })
                 } else {
                     Ok(VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
                         param,
@@ -246,6 +288,11 @@ impl VdafConfig {
                 if let Err(e) = pine64_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
                         detail: format!("invalid parameters for Pine64: {e}"),
+                        task_id: *task_id,
+                    })
+                } else if let Some(reason) = param.opt_out_reason(2) {
+                    Err(DapAbort::InvalidTask {
+                        detail: format!("unsupported parameters for Pine64: {reason}"),
                         task_id: *task_id,
                     })
                 } else {
