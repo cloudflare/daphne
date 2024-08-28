@@ -3,7 +3,9 @@
 
 use crate::{
     fatal_error,
-    messages::taskprov::VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
+    messages::taskprov::{
+        VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
+    },
     pine::{msg, vdaf::PinePrepState, Pine, PineParam},
     vdaf::{prep_finish, prep_finish_from_shares, unshard},
     DapAggregateResult, DapMeasurement,
@@ -14,18 +16,33 @@ use super::{
 };
 use prio::{
     codec::ParameterizedDecode,
-    field::{FftFriendlyFieldElement, Field64},
-    vdaf::xof::XofHmacSha256Aes128,
-    vdaf::{xof::Xof, Aggregator},
+    field::{FftFriendlyFieldElement, Field64, FieldPrio2},
+    vdaf::{
+        xof::{Xof, XofHmacSha256Aes128},
+        Aggregator,
+    },
 };
 use serde::{Deserialize, Serialize};
 
-type Pine64HmacSha256Aes128 = Pine<Field64, XofHmacSha256Aes128, 32>;
+fn pine32_hmac_sha256_aes128(
+    param: &PineParam,
+) -> Result<Pine<FieldPrio2, XofHmacSha256Aes128, 32>, VdafError> {
+    Pine::new(param, VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128)
+        .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters")))
+}
+
+fn pine64_hmac_sha256_aes128(
+    param: &PineParam,
+) -> Result<Pine<Field64, XofHmacSha256Aes128, 32>, VdafError> {
+    Pine::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
+        .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters")))
+}
 
 impl std::fmt::Display for PineConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (param, name) = match self {
-            Self::Field64HmacSha256Aes128 { param } => (param, "Field64HmacSha256Aes128"),
+            Self::Field32HmacSha256Aes128 { param } => (param, "32HmacSha256Aes128"),
+            Self::Field64HmacSha256Aes128 { param } => (param, "64HmacSha256Aes128"),
         };
         write!(f, "Pine{name}({param:?})")
     }
@@ -35,6 +52,7 @@ impl std::fmt::Display for PineConfig {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum PineConfig {
+    Field32HmacSha256Aes128 { param: PineParam },
     Field64HmacSha256Aes128 { param: PineParam },
 }
 
@@ -51,12 +69,12 @@ impl PineConfig {
         };
 
         match self {
+            PineConfig::Field32HmacSha256Aes128 { param } => {
+                let vdaf = pine32_hmac_sha256_aes128(param)?;
+                shard_then_encode(&vdaf, gradient, nonce)
+            }
             PineConfig::Field64HmacSha256Aes128 { param } => {
-                let vdaf =
-                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
-                        .map_err(|e| {
-                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
-                    })?;
+                let vdaf = pine64_hmac_sha256_aes128(param)?;
                 shard_then_encode(&vdaf, gradient, nonce)
             }
         }
@@ -71,12 +89,23 @@ impl PineConfig {
         input_share_data: &[u8],
     ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
         match (self, verify_key) {
+            (PineConfig::Field32HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
+                let vdaf = pine32_hmac_sha256_aes128(param)?;
+                let (state, share) = prep_init(
+                    vdaf,
+                    verify_key,
+                    agg_id,
+                    nonce,
+                    public_share_data,
+                    input_share_data,
+                )?;
+                Ok((
+                    VdafPrepState::Pine32HmacSha256Aes128(state),
+                    VdafPrepMessage::Pine32HmacSha256Aes128(share),
+                ))
+            }
             (PineConfig::Field64HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
-                let vdaf =
-                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
-                        .map_err(|e| {
-                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
-                    })?;
+                let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (state, share) = prep_init(
                     vdaf,
                     verify_key,
@@ -105,15 +134,24 @@ impl PineConfig {
     ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
         match (self, host_state, host_share) {
             (
+                PineConfig::Field32HmacSha256Aes128 { param },
+                VdafPrepState::Pine32HmacSha256Aes128(state),
+                VdafPrepMessage::Pine32HmacSha256Aes128(share),
+            ) => {
+                let vdaf = pine32_hmac_sha256_aes128(param)?;
+                let (out_share, outbound) =
+                    prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
+                let agg_share = VdafAggregateShare::Field32(prio::vdaf::AggregateShare::from(
+                    prio::vdaf::OutputShare::from(out_share.0),
+                ));
+                Ok((agg_share, outbound))
+            }
+            (
                 PineConfig::Field64HmacSha256Aes128 { param },
                 VdafPrepState::Pine64HmacSha256Aes128(state),
                 VdafPrepMessage::Pine64HmacSha256Aes128(share),
             ) => {
-                let vdaf =
-                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
-                        .map_err(|e| {
-                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
-                    })?;
+                let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
                     prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
@@ -134,14 +172,21 @@ impl PineConfig {
     ) -> Result<VdafAggregateShare, VdafError> {
         match (self, host_state) {
             (
+                PineConfig::Field32HmacSha256Aes128 { param },
+                VdafPrepState::Pine32HmacSha256Aes128(state),
+            ) => {
+                let vdaf = pine32_hmac_sha256_aes128(param)?;
+                let out_share = prep_finish(&vdaf, state, peer_message_data)?;
+                let agg_share = VdafAggregateShare::Field32(prio::vdaf::AggregateShare::from(
+                    prio::vdaf::OutputShare::from(out_share.0),
+                ));
+                Ok(agg_share)
+            }
+            (
                 PineConfig::Field64HmacSha256Aes128 { param },
                 VdafPrepState::Pine64HmacSha256Aes128(state),
             ) => {
-                let vdaf =
-                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
-                        .map_err(|e| {
-                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
-                    })?;
+                let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let out_share = prep_finish(&vdaf, state, peer_message_data)?;
                 let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
                     prio::vdaf::OutputShare::from(out_share.0),
@@ -160,12 +205,13 @@ impl PineConfig {
         agg_shares: M,
     ) -> Result<DapAggregateResult, VdafError> {
         match self {
+            PineConfig::Field32HmacSha256Aes128 { param } => {
+                let vdaf = pine32_hmac_sha256_aes128(param)?;
+                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                Ok(DapAggregateResult::F64Vec(agg_res))
+            }
             PineConfig::Field64HmacSha256Aes128 { param } => {
-                let vdaf =
-                    Pine64HmacSha256Aes128::new(param, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128)
-                        .map_err(|e| {
-                        VdafError::Dap(fatal_error!(err = ?e, "invalid pine parameters"))
-                    })?;
+                let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }
@@ -200,7 +246,47 @@ mod test {
 
     use super::PineConfig;
 
-    async fn roundtrip_field64_hmac_sha256_aes128(version: DapVersion) {
+    async fn roundtrip_pine32_hmac_sha256_aes128(version: DapVersion) {
+        let mut t = AggregationJobTest::new(
+            &VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
+                param: PineParam {
+                    norm_bound: 32_000,
+                    dimension: 1_000,
+                    frac_bits: 20,
+                    chunk_len: 10,
+                    chunk_len_sq_norm_equal: 50,
+                    num_proofs: 2,
+                    num_wr_tests: 100,
+                    num_wr_successes: 100,
+                },
+            }),
+            HpkeKemId::X25519HkdfSha256,
+            version,
+        );
+        let DapAggregateResult::F64Vec(got) = t
+            .roundtrip(
+                DapAggregationParam::Empty,
+                vec![
+                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                ],
+            )
+            .await
+        else {
+            panic!("unexpected result type");
+        };
+        for x in &got {
+            assert!(
+                (x - 0.0003).abs() > f64::EPSILON,
+                "unexpected result value: {got:?}"
+            );
+        }
+    }
+
+    async_test_versions! { roundtrip_pine32_hmac_sha256_aes128 }
+
+    async fn roundtrip_pine64_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
                 param: PineParam {
@@ -238,5 +324,5 @@ mod test {
         }
     }
 
-    async_test_versions! { roundtrip_field64_hmac_sha256_aes128 }
+    async_test_versions! { roundtrip_pine64_hmac_sha256_aes128 }
 }
