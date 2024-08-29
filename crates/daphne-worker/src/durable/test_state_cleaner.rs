@@ -3,15 +3,15 @@
 
 use std::{cmp::min, ops::ControlFlow};
 
-use crate::{durable::create_span_from_request, initialize_tracing, int_err};
+use crate::{durable::create_span_from_request, int_err};
 use daphne::messages::TaskId;
 use daphne_service_utils::durable_requests::bindings::{self, DurableMethod};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use tracing::{error, trace, Instrument};
+use tracing::Instrument;
 use worker::{
-    async_trait, durable_object, wasm_bindgen, wasm_bindgen_futures, Date, Env, ListOptions,
-    Method, Request, Response, Result, State, Stub,
+    async_trait, console_debug, console_error, durable_object, wasm_bindgen, wasm_bindgen_futures,
+    Date, Env, ListOptions, Method, Request, Response, Result, State, Stub,
 };
 
 use super::GcDurableObject;
@@ -27,7 +27,6 @@ pub struct TestStateCleaner {
 #[durable_object]
 impl DurableObject for TestStateCleaner {
     fn new(state: State, env: Env) -> Self {
-        initialize_tracing(&env);
         Self { state, env }
     }
 
@@ -49,17 +48,17 @@ impl TestStateCleaner {
                     bindings::AggregateStore::BINDING => (),
                     s => {
                         let message = format!("GarbageCollector: unrecognized binding: {s}");
-                        error!("{}", message);
+                        console_error!("{}", message);
                         return Err(int_err(message));
                     }
                 };
 
                 let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
                 queued.put(&self.state).await?;
-                trace!(
+                console_debug!(
+                    "registered DO instance for deletion. binding: {binding}, instance: {instance}",
                     binding = queued.as_ref().binding,
                     instance = queued.as_ref().id_hex,
-                    "registered DO instance for deletion",
                 );
                 Response::from_json(&())
             }
@@ -87,10 +86,10 @@ impl TestStateCleaner {
                             &(),
                         )
                         .await?;
-                    trace!(
+                    console_debug!(
+                        "deleted instance. binding: {binding}. instance: {instance}",
                         binding = durable_ref.binding,
                         instance = durable_ref.id_hex,
-                        "deleted instance",
                     );
                 }
 
@@ -104,7 +103,7 @@ impl TestStateCleaner {
                     req.method(),
                     req.path()
                 );
-                error!("{}", message);
+                console_error!("{}", message);
                 Err(int_err(message))
             }
         }
