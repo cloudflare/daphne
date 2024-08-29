@@ -122,6 +122,8 @@ struct Cli {
     sentry_dsn: Option<sentry::types::Dsn>,
     #[arg(long, env)]
     no_reuse_http_client: bool,
+    #[arg(long)]
+    enable_ssl_key_log_file: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -392,9 +394,9 @@ async fn main() -> Result<()> {
         .init();
 
     let http_client = if cli.no_reuse_http_client {
-        HttpClient::new()?
+        HttpClient::new(cli.enable_ssl_key_log_file)?
     } else {
-        HttpClient::new_no_reuse()?
+        HttpClient::new_no_reuse(cli.enable_ssl_key_log_file)?
     };
 
     if std::env::var("REPLAY_REPORTS").unwrap_or_default() == "1" {
