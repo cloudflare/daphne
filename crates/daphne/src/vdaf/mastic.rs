@@ -12,7 +12,7 @@ use std::array;
 use crate::{fatal_error, DapAggregateResult, DapAggregationParam, DapMeasurement};
 
 use super::{
-    decode_field_vec, VdafAggregateShare, VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+    decode_field_vec, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
 
 use prio::{
@@ -74,7 +74,7 @@ pub(crate) fn mastic_prep_init(
     agg_param: &DapAggregationParam,
     public_share_bytes: &[u8],
     input_share_bytes: &[u8],
-) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
+) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
     let VdafVerifyKey::L16(_verify_key) = verify_key else {
         return Err(VdafError::Dap(fatal_error!(
             err = "mastic: unexpected verify key type"
@@ -124,7 +124,7 @@ pub(crate) fn mastic_prep_init(
 
             Ok((
                 VdafPrepState::Mastic { out_share },
-                VdafPrepMessage::MasticShare(weight),
+                VdafPrepShare::Mastic(weight),
             ))
         }
         _ => Err(VdafError::Dap(fatal_error!(
@@ -136,14 +136,14 @@ pub(crate) fn mastic_prep_init(
 pub(crate) fn mastic_prep_finish_from_shares(
     weight_config: MasticWeightConfig,
     host_state: VdafPrepState,
-    host_share: VdafPrepMessage,
+    host_share: VdafPrepShare,
     peer_share_bytes: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     match (weight_config, host_state, host_share) {
         (
             MasticWeightConfig::Count,
             VdafPrepState::Mastic { out_share },
-            VdafPrepMessage::MasticShare(host_weight),
+            VdafPrepShare::Mastic(host_weight),
         ) => {
             // Simulate Mastic. Check that both Aggregators got the same weight, and the weight is
             // valid. This is not secure because the weight is revealed to the caller.

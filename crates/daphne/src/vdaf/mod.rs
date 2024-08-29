@@ -13,11 +13,7 @@ pub(crate) mod prio3;
 
 #[cfg(feature = "experimental")]
 use crate::pine::vdaf::PinePrepState;
-use crate::{
-    fatal_error,
-    vdaf::{prio2::prio2_decode_prep_state, prio3::prio3_decode_prep_state},
-    DapError,
-};
+use crate::{fatal_error, DapError};
 #[cfg(any(test, feature = "test-utils", feature = "experimental"))]
 use prio::field::FieldElement;
 use prio::{
@@ -232,56 +228,16 @@ impl deepsize::DeepSizeOf for VdafPrepState {
     }
 }
 
-impl Encode for VdafPrepState {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match self {
-            Self::Prio3Field64(state) => state.encode(bytes),
-            Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
-            Self::Prio3Field128(state) => state.encode(bytes),
-            Self::Prio2(state) => state.encode(bytes),
-            #[cfg(feature = "experimental")]
-            Self::Mastic { .. }
-            | Self::Pine64HmacSha256Aes128(_)
-            | Self::Pine32HmacSha256Aes128(_) => {
-                unreachable!("encoding of prep state is not implemented")
-            }
-        }
-    }
-}
-
-impl<'a> ParameterizedDecode<(&'a VdafConfig, bool /* is_leader */)> for VdafPrepState {
-    fn decode_with_param(
-        (vdaf_config, is_leader): &(&VdafConfig, bool),
-        bytes: &mut std::io::Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let agg_id = usize::from(!is_leader);
-        match vdaf_config {
-            VdafConfig::Prio3(ref prio3_config) => {
-                Ok(prio3_decode_prep_state(prio3_config, agg_id, bytes)
-                    .map_err(|e| CodecError::Other(Box::new(e)))?)
-            }
-            VdafConfig::Prio2 { dimension } => {
-                Ok(prio2_decode_prep_state(*dimension, agg_id, bytes)
-                    .map_err(|e| CodecError::Other(Box::new(e)))?)
-            }
-            #[cfg(feature = "experimental")]
-            VdafConfig::Mastic { .. } | VdafConfig::Pine(..) => {
-                unreachable!("decoding of prep state is not implemented")
-            }
-        }
-    }
-}
-
 /// VDAF preparation message.
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
-pub enum VdafPrepMessage {
-    Prio2Share(Prio2PrepareShare),
-    Prio3ShareField64(Prio3PrepareShare<Field64, 16>),
-    Prio3ShareField64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
-    Prio3ShareField128(Prio3PrepareShare<Field128, 16>),
+pub enum VdafPrepShare {
+    Prio2(Prio2PrepareShare),
+    Prio3Field64(Prio3PrepareShare<Field64, 16>),
+    Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
+    Prio3Field128(Prio3PrepareShare<Field128, 16>),
     #[cfg(feature = "experimental")]
-    MasticShare(Field64),
+    Mastic(Field64),
     #[cfg(feature = "experimental")]
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64, 32>),
     #[cfg(feature = "experimental")]
@@ -289,36 +245,36 @@ pub enum VdafPrepMessage {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl deepsize::DeepSizeOf for VdafPrepMessage {
+impl deepsize::DeepSizeOf for VdafPrepShare {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
         match self {
             // The Prio2 prep share consists of three field elements.
-            Self::Prio2Share(_msg) => 3 * FieldPrio2::ENCODED_SIZE,
+            Self::Prio2(_msg) => 3 * FieldPrio2::ENCODED_SIZE,
             // The Prio3 prep share consists of an optional XOF seed for the Aggregator's joint
             // randomness part and a sequence of field elements for the Aggregator's verifier
             // share. The length of the verifier share depends on the Prio3 type, which we don't
             // know at this point. Likewise, whether the XOF seed is present depends on the Prio3
             // type.
-            Self::Prio3ShareField64(..)
-            | Self::Prio3ShareField64HmacSha256Aes128(..)
-            | Self::Prio3ShareField128(..) => 0,
+            Self::Prio3Field64(..)
+            | Self::Prio3Field64HmacSha256Aes128(..)
+            | Self::Prio3Field128(..) => 0,
             #[cfg(feature = "experimental")]
-            Self::MasticShare(..)
+            Self::Mastic(..)
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
         }
     }
 }
 
-impl Encode for VdafPrepMessage {
+impl Encode for VdafPrepShare {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
-            Self::Prio3ShareField64(share) => share.encode(bytes),
-            Self::Prio3ShareField64HmacSha256Aes128(share) => share.encode(bytes),
-            Self::Prio3ShareField128(share) => share.encode(bytes),
-            Self::Prio2Share(share) => share.encode(bytes),
+            Self::Prio3Field64(share) => share.encode(bytes),
+            Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
+            Self::Prio3Field128(share) => share.encode(bytes),
+            Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
-            Self::MasticShare(share) => share.encode(bytes),
+            Self::Mastic(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
             Self::Pine64HmacSha256Aes128(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
@@ -327,24 +283,24 @@ impl Encode for VdafPrepMessage {
     }
 }
 
-impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
+impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
     fn decode_with_param(
         state: &VdafPrepState,
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match state {
-            VdafPrepState::Prio3Field64(state) => Ok(VdafPrepMessage::Prio3ShareField64(
+            VdafPrepState::Prio3Field64(state) => Ok(VdafPrepShare::Prio3Field64(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
             VdafPrepState::Prio3Field64HmacSha256Aes128(state) => {
-                Ok(VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(
+                Ok(VdafPrepShare::Prio3Field64HmacSha256Aes128(
                     Prio3PrepareShare::decode_with_param(state, bytes)?,
                 ))
             }
-            VdafPrepState::Prio3Field128(state) => Ok(VdafPrepMessage::Prio3ShareField128(
+            VdafPrepState::Prio3Field128(state) => Ok(VdafPrepShare::Prio3Field128(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
-            VdafPrepState::Prio2(state) => Ok(VdafPrepMessage::Prio2Share(
+            VdafPrepState::Prio2(state) => Ok(VdafPrepShare::Prio2(
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
             )),
             #[cfg(feature = "experimental")]
@@ -353,13 +309,13 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepMessage {
             }
             #[cfg(feature = "experimental")]
             VdafPrepState::Pine64HmacSha256Aes128(state) => {
-                Ok(VdafPrepMessage::Pine64HmacSha256Aes128(
+                Ok(VdafPrepShare::Pine64HmacSha256Aes128(
                     crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
                 ))
             }
             #[cfg(feature = "experimental")]
             VdafPrepState::Pine32HmacSha256Aes128(state) => {
-                Ok(VdafPrepMessage::Pine32HmacSha256Aes128(
+                Ok(VdafPrepShare::Pine32HmacSha256Aes128(
                     crate::pine::msg::PrepShare::decode_with_param(state, bytes)?,
                 ))
             }

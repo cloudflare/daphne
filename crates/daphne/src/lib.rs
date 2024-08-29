@@ -63,7 +63,7 @@ use crate::{
         PartialBatchSelector, ReportId, TaskId, Time,
     },
     vdaf::{
-        Prio3Config, VdafAggregateShare, VdafConfig, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+        Prio3Config, VdafAggregateShare, VdafConfig, VdafPrepShare, VdafPrepState, VdafVerifyKey,
     },
 };
 use constants::DapMediaType;
@@ -939,19 +939,6 @@ pub(crate) struct AggregationJobReportState {
 pub struct DapAggregationJobState {
     pub(crate) seq: Vec<AggregationJobReportState>,
     part_batch_sel: PartialBatchSelector,
-}
-
-// TODO draft02 cleanup: Remove this.
-impl Encode for DapAggregationJobState {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        self.part_batch_sel.encode(bytes)?;
-        for report_state in &self.seq {
-            report_state.prep_state.encode(bytes)?;
-            report_state.time.encode(bytes)?;
-            report_state.report_id.encode(bytes)?;
-        }
-        Ok(())
-    }
 }
 
 impl DapAggregationJobState {

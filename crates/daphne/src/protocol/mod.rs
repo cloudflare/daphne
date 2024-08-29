@@ -31,7 +31,7 @@ mod test {
         testing::AggregationJobTest,
         vdaf::{Prio3Config, VdafConfig},
         DapAggregateResult, DapAggregateShare, DapAggregationParam, DapError, DapMeasurement,
-        DapVersion, VdafAggregateShare, VdafPrepMessage, VdafPrepState,
+        DapVersion, VdafAggregateShare, VdafPrepShare, VdafPrepState,
     };
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;
@@ -134,8 +134,8 @@ mod test {
             (
                 VdafPrepState::Prio3Field64(leader_step),
                 VdafPrepState::Prio3Field64(helper_step),
-                VdafPrepMessage::Prio3ShareField64(leader_share),
-                VdafPrepMessage::Prio3ShareField64(helper_share),
+                VdafPrepShare::Prio3Field64(leader_share),
+                VdafPrepShare::Prio3Field64(helper_share),
             ) => {
                 let vdaf = Prio3::new_count(2).unwrap();
                 let message = vdaf
