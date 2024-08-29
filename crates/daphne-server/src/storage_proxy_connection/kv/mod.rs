@@ -14,7 +14,7 @@ use tracing::{info_span, Instrument};
 
 use crate::StorageProxyConfig;
 
-use super::{status_http_1_0_to_reqwest_0_11, Error};
+use super::Error;
 pub(crate) use cache::Cache;
 use daphne::messages::Time;
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
@@ -236,7 +236,7 @@ impl<'h> Kv<'h> {
                 .bearer_auth(&self.config.auth_token)
                 .send()
                 .await?;
-            if resp.status() == status_http_1_0_to_reqwest_0_11(StatusCode::NOT_FOUND) {
+            if resp.status() == StatusCode::NOT_FOUND {
                 if opt.cache_not_found {
                     self.cache.write().await.put::<P>(key, None);
                 }
@@ -340,12 +340,15 @@ impl<'h> Kv<'h> {
             .body(serde_json::to_vec(&value).unwrap());
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+            request = request.header(
+                STORAGE_PROXY_PUT_KV_EXPIRATION,
+                HeaderValue::from(expiration),
+            );
         }
 
         let response = request.send().await?;
 
-        if response.status() == status_http_1_0_to_reqwest_0_11(StatusCode::CONFLICT) {
+        if response.status() == StatusCode::CONFLICT {
             Ok(Some(value))
         } else {
             response.error_for_status()?;
