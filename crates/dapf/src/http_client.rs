@@ -19,10 +19,14 @@ pub struct HttpClient {
     inner: HttpClientInner,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum HttpClientInner {
     /// Never reuse the same reqwest client for two different http requests. Usefull for specific
     /// debugging or load testing scenarios.
-    NoReuse(Option<Identity>),
+    NoReuse {
+        identity: Option<Identity>,
+        ssl_key_log_file_enabled_tls: Option<rustls::ClientConfig>,
+    },
     /// Always use the same reqwest client when making requests, this is faster and probably what
     /// you want.
     Reuse(Client),
@@ -48,7 +52,8 @@ fn load_identity() -> anyhow::Result<Option<Identity>> {
     }
 }
 
-fn init_reqwest_client(identity: Option<Identity>) -> reqwest::Client {
+fn ssl_key_log_file_tls_configuration() -> rustls::ClientConfig {
+    tracing::warn!("enabling SSLKEYLOGFILE");
     let mut tls = rustls::ClientConfig::builder_with_provider(
         rustls::crypto::aws_lc_rs::default_provider().into(),
     )
@@ -61,49 +66,74 @@ fn init_reqwest_client(identity: Option<Identity>) -> reqwest::Client {
     })
     .with_no_client_auth();
     tls.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
+    tls
+}
 
+fn init_reqwest_client(
+    identity: Option<Identity>,
+    ssl_key_log_file_enabled_tls: Option<rustls::ClientConfig>,
+) -> reqwest::Client {
     // Build the HTTP client.
     let mut http_client_builder = reqwest::Client::builder()
         // it takes too long to generate reports for larger dimensions, causing the worker
         // to drop idle connections
         .pool_max_idle_per_host(0)
         // Don't handle redirects automatically so that we can control the client behavior.
-        .redirect(reqwest::redirect::Policy::none())
-        // We might as well use rustls because we already need the feature for
-        // `Identity::from_pem()`.
-        .use_preconfigured_tls(tls);
+        .redirect(reqwest::redirect::Policy::none());
+
+    // We might as well use rustls because we already need the feature for
+    // `Identity::from_pem()`.
+    http_client_builder = if let Some(tls) = ssl_key_log_file_enabled_tls {
+        http_client_builder.use_preconfigured_tls(tls)
+    } else {
+        http_client_builder.use_rustls_tls()
+    };
 
     if let Some(identity) = identity {
         // Configure TLS certificate, if available.
         http_client_builder = http_client_builder.identity(identity);
     }
+
     http_client_builder
         .build()
         .expect("failed to build http client")
 }
 
 impl HttpClient {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(enable_ssl_key_log_file: bool) -> anyhow::Result<Self> {
         let identity = load_identity()?;
         Ok(Self {
             using_mtls: identity.is_some(),
-            inner: HttpClientInner::Reuse(init_reqwest_client(identity)),
+            inner: HttpClientInner::Reuse(init_reqwest_client(
+                identity,
+                enable_ssl_key_log_file.then(ssl_key_log_file_tls_configuration),
+            )),
         })
     }
 
     /// Create an http client that never reuses the same client for two requests.
-    pub fn new_no_reuse() -> anyhow::Result<Self> {
+    pub fn new_no_reuse(enable_ssl_key_log_file: bool) -> anyhow::Result<Self> {
         let identity = load_identity()?;
         Ok(Self {
             using_mtls: identity.is_some(),
-            inner: HttpClientInner::NoReuse(identity),
+            inner: HttpClientInner::NoReuse {
+                identity,
+                ssl_key_log_file_enabled_tls: enable_ssl_key_log_file
+                    .then(ssl_key_log_file_tls_configuration),
+            },
         })
     }
 
     fn client(&self) -> Cow<'_, Client> {
         match &self.inner {
             HttpClientInner::Reuse(c) => Cow::Borrowed(c),
-            HttpClientInner::NoReuse(identity) => Cow::Owned(init_reqwest_client(identity.clone())),
+            HttpClientInner::NoReuse {
+                identity,
+                ssl_key_log_file_enabled_tls,
+            } => Cow::Owned(init_reqwest_client(
+                identity.clone(),
+                ssl_key_log_file_enabled_tls.clone(),
+            )),
         }
     }
 
