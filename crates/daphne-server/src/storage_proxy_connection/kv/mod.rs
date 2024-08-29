@@ -279,7 +279,7 @@ impl<'h> Kv<'h> {
             .body(serde_json::to_vec(&value).unwrap());
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.to_string());
+            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration);
         }
 
         request.send().await?.error_for_status()?;
@@ -340,10 +340,7 @@ impl<'h> Kv<'h> {
             .body(serde_json::to_vec(&value).unwrap());
 
         if let Some(expiration) = expiration {
-            request = request.header(
-                STORAGE_PROXY_PUT_KV_EXPIRATION,
-                HeaderValue::from(expiration),
-            );
+            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration);
         }
 
         let response = request.send().await?;
