@@ -7,13 +7,12 @@ use daphne::{
     messages::HpkeConfigList,
 };
 use rand::{thread_rng, Rng};
-use reqwest::Client;
 use url::Url;
 
-use crate::HttpClientExt;
+use crate::HttpClient;
 
 pub async fn add_hpke_config(
-    http_client: &Client,
+    http_client: &HttpClient,
     aggregator_url: &Url,
     kem_alg: HpkeKemId,
 ) -> anyhow::Result<()> {
@@ -53,7 +52,7 @@ pub async fn add_hpke_config(
 }
 
 pub async fn delete_all_storage(
-    http_client: &Client,
+    http_client: &HttpClient,
     aggregator_url: &Url,
     kem_alg: Option<HpkeKemId>,
 ) -> anyhow::Result<()> {

@@ -19,7 +19,7 @@
 pub mod load_testing;
 
 use crate::{
-    deduce_dap_version_from_url, response_to_anyhow, test_durations::TestDurations, HttpClientExt,
+    deduce_dap_version_from_url, response_to_anyhow, test_durations::TestDurations, HttpClient,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
@@ -46,7 +46,6 @@ use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder};
 use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reqwest::{Client, Identity};
 use std::{
     convert::TryFrom,
     env,
@@ -159,65 +158,9 @@ impl DaphneMetrics for TestMetrics {
     fn agg_job_put_span_retry_inc(&self) {}
 }
 
-pub enum HttpClient {
-    NoReuse(Option<Identity>),
-    Reuse(Client),
-}
-
-impl HttpClient {
-    fn reused(leader_tls_identity: Option<Identity>) -> Self {
-        let mut tls = rustls::ClientConfig::builder_with_provider(
-            rustls::crypto::aws_lc_rs::default_provider().into(),
-        )
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates({
-            let mut store = rustls::RootCertStore::empty();
-            store.add_parsable_certificates(rustls_native_certs::load_native_certs().unwrap());
-            store
-        })
-        .with_no_client_auth();
-        tls.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
-
-        // Build the HTTP client.
-        let mut http_client_builder = reqwest::Client::builder()
-            // it takes too long to generate reports for larger dimensions, causing the worker
-            // to drop idle connections
-            .pool_max_idle_per_host(0)
-            // Don't handle redirects automatically so that we can control the client behavior.
-            .redirect(reqwest::redirect::Policy::none())
-            // We might as well use rustls because we already need the feature for
-            // `Identity::from_pem()`.
-            .use_preconfigured_tls(tls);
-        if let Some(identity) = leader_tls_identity {
-            // Configure TLS certificate, if available.
-            http_client_builder = http_client_builder.identity(identity);
-        }
-        let http_client = http_client_builder
-            .build()
-            .expect("failed to build http client");
-        Self::Reuse(http_client)
-    }
-
-    fn no_reuse(leader_tls_identity: Option<Identity>) -> Self {
-        Self::NoReuse(leader_tls_identity)
-    }
-
-    pub fn client(&self) -> Client {
-        match self {
-            Self::Reuse(c) => c.clone(),
-            Self::NoReuse(identity) => match Self::reused(identity.clone()) {
-                Self::Reuse(client) => client,
-                Self::NoReuse(_) => unreachable!(),
-            },
-        }
-    }
-}
-
 pub struct Test {
     pub helper_url: Url,
     bearer_token: Option<BearerToken>,
-    using_mtls: bool,
     vdaf_verify_init: [u8; 32],
     http_client: HttpClient,
     metrics: TestMetrics,
@@ -269,7 +212,6 @@ struct TestTaskConfig {
 impl Test {
     pub fn new(
         http_client: HttpClient,
-        using_mtls: bool,
         helper_url: Url,
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
@@ -308,7 +250,6 @@ impl Test {
         };
 
         Ok(Self {
-            using_mtls,
             helper_url,
             bearer_token: None,
             vdaf_verify_init,
@@ -324,46 +265,19 @@ impl Test {
         helper_url: Url,
         vdaf_config: VdafConfig,
         hpke_signing_certificate_path: Option<PathBuf>,
-        re_use_http_client: bool,
+        http_client: HttpClient,
         load_control: LoadControlParams,
     ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
-        const LEADER_TLS_CLIENT_CERT_VAR: &str = "LEADER_TLS_CLIENT_CERT";
-        const LEADER_TLS_CLIENT_KEY_VAR: &str = "LEADER_TLS_CLIENT_KEY";
         const VDAF_VERIFY_INIT_VAR: &str = "VDAF_VERIFY_INIT";
 
         let leader_bearer_token = env::var(LEADER_BEARER_TOKEN_VAR).ok();
-        let leader_tls_client_cert = env::var(LEADER_TLS_CLIENT_CERT_VAR).ok();
-        let leader_tls_client_key = env::var(LEADER_TLS_CLIENT_KEY_VAR).ok();
-        if leader_bearer_token.is_none()
-            && (leader_tls_client_cert.is_none() || leader_tls_client_key.is_none())
-        {
-            println!("leader client authorization not configured");
-        }
 
         let vdaf_verify_init = env::var(VDAF_VERIFY_INIT_VAR)
             .with_context(|| format!("failed to load {VDAF_VERIFY_INIT_VAR}"))?;
 
-        let leader_tls_identity = match (leader_tls_client_cert, leader_tls_client_key) {
-            (Some(cert), Some(key)) => Some(
-                reqwest::tls::Identity::from_pem((cert + "\n" + &key).as_bytes())
-                    .with_context(|| "failed to parse Leader TLS client certificate")?,
-            ),
-            (None, None) => None,
-            (Some(_), None) => bail!("{LEADER_TLS_CLIENT_KEY_VAR} is not set"),
-            (None, Some(_)) => bail!("{LEADER_TLS_CLIENT_CERT_VAR} is not set"),
-        };
-
-        let using_mtls = leader_tls_identity.is_some();
-        let http_client = if re_use_http_client {
-            HttpClient::reused(leader_tls_identity)
-        } else {
-            HttpClient::no_reuse(leader_tls_identity)
-        };
-
         let mut test = Test::new(
             http_client,
-            using_mtls,
             helper_url,
             &vdaf_verify_init,
             vdaf_config,
@@ -412,7 +326,6 @@ impl Test {
     pub async fn get_hpke_config(&self, aggregator: &Url) -> anyhow::Result<HpkeConfig> {
         Ok(self
             .http_client
-            .client()
             .get_hpke_config(aggregator, self.hpke_signing_certificate_path.as_deref())
             .await?
             .hpke_configs
@@ -444,7 +357,6 @@ impl Test {
             let start = Instant::now();
             let helper_hpke_config = self
                 .http_client
-                .client()
                 .get_hpke_config(
                     &self.helper_url,
                     self.hpke_signing_certificate_path.as_deref(),
@@ -605,7 +517,6 @@ impl Test {
         let start = Instant::now();
         let resp = send(
             self.http_client
-                .client()
                 .put(url)
                 .body(
                     agg_job_init_req
@@ -692,7 +603,6 @@ impl Test {
         ))?;
         let resp = send(
             self.http_client
-                .client()
                 .post(url)
                 .body(agg_share_req.get_encoded_with_param(&version).unwrap())
                 .headers(headers),
@@ -724,10 +634,10 @@ impl Test {
     pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
         let res = self.test_helper_impl(opt).await;
         let c = |b: bool| ["F", "T"][b as usize];
-        let metric = self
-            .metrics
-            .test_success
-            .with_label_values(&[c(self.using_mtls), c(self.bearer_token.is_some())]);
+        let metric = self.metrics.test_success.with_label_values(&[
+            c(self.http_client.using_mtls()),
+            c(self.bearer_token.is_some()),
+        ]);
         if res.is_ok() {
             metric.inc()
         } else {
