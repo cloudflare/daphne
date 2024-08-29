@@ -1,15 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#![allow(unused_variables)]
-#![allow(clippy::unused_async)]
-#![allow(dead_code)]
-
 pub(crate) mod kv;
 
 use std::fmt::Debug;
 
-use axum::http::{Method, StatusCode};
+use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::{
     bindings::{DurableMethod, DurableRequestPayload, DurableRequestPayloadExt},
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
@@ -46,6 +42,7 @@ impl<'h> Do<'h> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_retry(self) -> Self {
         Self {
             retry: true,
@@ -90,7 +87,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
             Ok(resp.json().await?)
         } else {
             Err(Error::Http {
-                status: status_reqwest_0_11_to_http_1_0(resp.status()),
+                status: resp.status(),
                 body: resp.text().await?,
             })
         }
@@ -129,6 +126,7 @@ impl<'w> Do<'w> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn request_with_id<B: DurableMethod + Copy>(
         &self,
         path: B,
@@ -145,39 +143,4 @@ impl<'w> Do<'w> {
             },
         }
     }
-}
-
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn method_http_1_0_to_reqwest_0_11(method: Method) -> reqwest::Method {
-    match method {
-        Method::GET => reqwest::Method::GET,
-        Method::POST => reqwest::Method::POST,
-        Method::PUT => reqwest::Method::PUT,
-        Method::PATCH => reqwest::Method::PATCH,
-        Method::HEAD => reqwest::Method::HEAD,
-        Method::TRACE => reqwest::Method::TRACE,
-        Method::OPTIONS => reqwest::Method::OPTIONS,
-        Method::CONNECT => reqwest::Method::CONNECT,
-        Method::DELETE => reqwest::Method::DELETE,
-        _ => unreachable!(),
-    }
-}
-
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn status_http_1_0_to_reqwest_0_11(status: StatusCode) -> reqwest::StatusCode {
-    reqwest::StatusCode::from_u16(status.as_u16()).unwrap()
-}
-
-/// this is needed while [reqwest#2039](https://github.com/seanmonstar/reqwest/issues/2039) isn't
-/// completed.
-///
-/// This is because axum is using http 1.0 and reqwest is still in http 0.2
-pub fn status_reqwest_0_11_to_http_1_0(status: reqwest::StatusCode) -> StatusCode {
-    StatusCode::from_u16(status.as_u16()).unwrap()
 }

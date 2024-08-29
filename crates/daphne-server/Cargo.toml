@@ -13,18 +13,17 @@ repository.workspace = true
 description = "Workers backend for Daphne"
 
 [dependencies]
-axum = "0.6.0"
+axum = "0.6.0" # held back to use http 0.2
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 futures.workspace = true
 hex.workspace = true
-http = "0.2"
+http = "0.2" # held back to use http 0.2
 hyper.workspace = true
-mappable-rc = "0.1.1"
+mappable-rc.workspace = true
 p256.workspace = true
 prio.workspace = true
 rayon.workspace = true
-reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -32,6 +31,11 @@ tokio.workspace = true
 tower.workspace = true
 tracing.workspace = true
 url.workspace = true
+
+[dependencies.reqwest]
+version = "0.11" # held back to use http 0.2
+default-features = false
+features = ["rustls-tls-native-roots", "json"]
 
 [dev-dependencies]
 anyhow.workspace = true

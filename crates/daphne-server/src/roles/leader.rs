@@ -19,8 +19,6 @@ use daphne_service_utils::{auth::DaphneAuth, http_headers};
 use tracing::{error, info};
 use url::Url;
 
-use crate::storage_proxy_connection::method_http_1_0_to_reqwest_0_11;
-
 #[async_trait]
 impl DapAuthorizedSender<DaphneAuth> for crate::App {
     async fn authorize(
@@ -148,8 +146,6 @@ impl crate::App {
         url: Url,
     ) -> Result<DapResponse, DapError> {
         use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
-
-        let method = method_http_1_0_to_reqwest_0_11(method);
 
         let content_type = req
             .media_type
