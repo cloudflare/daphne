@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    shard_then_encode, VdafAggregateShare, VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+    shard_then_encode, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
 use prio::{
     codec::ParameterizedDecode,
@@ -87,7 +87,7 @@ impl PineConfig {
         nonce: &[u8; 16],
         public_share_data: &[u8],
         input_share_data: &[u8],
-    ) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
+    ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
         match (self, verify_key) {
             (PineConfig::Field32HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
@@ -101,7 +101,7 @@ impl PineConfig {
                 )?;
                 Ok((
                     VdafPrepState::Pine32HmacSha256Aes128(state),
-                    VdafPrepMessage::Pine32HmacSha256Aes128(share),
+                    VdafPrepShare::Pine32HmacSha256Aes128(share),
                 ))
             }
             (PineConfig::Field64HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
@@ -116,7 +116,7 @@ impl PineConfig {
                 )?;
                 Ok((
                     VdafPrepState::Pine64HmacSha256Aes128(state),
-                    VdafPrepMessage::Pine64HmacSha256Aes128(share),
+                    VdafPrepShare::Pine64HmacSha256Aes128(share),
                 ))
             }
             _ => Err(VdafError::Dap(fatal_error!(
@@ -129,14 +129,14 @@ impl PineConfig {
         &self,
         agg_id: usize,
         host_state: VdafPrepState,
-        host_share: VdafPrepMessage,
+        host_share: VdafPrepShare,
         peer_share_data: &[u8],
     ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
         match (self, host_state, host_share) {
             (
                 PineConfig::Field32HmacSha256Aes128 { param },
                 VdafPrepState::Pine32HmacSha256Aes128(state),
-                VdafPrepMessage::Pine32HmacSha256Aes128(share),
+                VdafPrepShare::Pine32HmacSha256Aes128(share),
             ) => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
@@ -149,7 +149,7 @@ impl PineConfig {
             (
                 PineConfig::Field64HmacSha256Aes128 { param },
                 VdafPrepState::Pine64HmacSha256Aes128(state),
-                VdafPrepMessage::Pine64HmacSha256Aes128(share),
+                VdafPrepShare::Pine64HmacSha256Aes128(share),
             ) => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =

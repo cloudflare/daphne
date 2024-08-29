@@ -6,17 +6,16 @@
 
 use crate::{
     fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
-    VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+    VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{
-        prio2::{Prio2, Prio2PrepareShare, Prio2PrepareState},
+        prio2::{Prio2, Prio2PrepareShare},
         AggregateShare, Aggregator, Client, Collector, PrepareTransition, Share, Vdaf,
     },
 };
-use std::io::Cursor;
 
 /// Split the given measurement into a sequence of encoded input shares.
 pub(crate) fn prio2_shard(
@@ -59,7 +58,7 @@ pub(crate) fn prio2_prep_init(
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
-) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
+) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
     let VdafVerifyKey::L32(verify_key) = verify_key else {
         return Err(VdafError::Dap(fatal_error!(
             err = "unhandled verify key type"
@@ -73,24 +72,21 @@ pub(crate) fn prio2_prep_init(
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
     let (state, share) = vdaf.prepare_init(verify_key, agg_id, &(), nonce, &(), &input_share)?;
-    Ok((
-        VdafPrepState::Prio2(state),
-        VdafPrepMessage::Prio2Share(share),
-    ))
+    Ok((VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)))
 }
 
 /// Consume the prep shares and return our output share.
 pub(crate) fn prio2_prep_finish_from_shares(
     dimension: usize,
     host_state: VdafPrepState,
-    host_share: VdafPrepMessage,
+    host_share: VdafPrepShare,
     peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     let vdaf = Prio2::new(dimension).map_err(|e| {
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
     let (out_share, outbound) = match (host_state, host_share) {
-        (VdafPrepState::Prio2(state), VdafPrepMessage::Prio2Share(share)) => {
+        (VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)) => {
             let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
             vdaf.prepare_shares_to_prepare_message(&(), [share, peer_share])?;
             match vdaf.prepare_next(state, ())? {
@@ -139,21 +135,6 @@ pub(crate) fn prio2_prep_finish(
     };
     let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
-}
-
-/// Parse our prep state.
-pub(crate) fn prio2_decode_prep_state(
-    dimension: usize,
-    agg_id: usize,
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<VdafPrepState, VdafError> {
-    let vdaf = Prio2::new(dimension).map_err(|e| {
-        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
-    })?;
-    Ok(VdafPrepState::Prio2(Prio2PrepareState::decode_with_param(
-        &(&vdaf, agg_id),
-        bytes,
-    )?))
 }
 
 /// Interpret `encoded_agg_shares` as a sequence of encoded aggregate shares and unshard them.

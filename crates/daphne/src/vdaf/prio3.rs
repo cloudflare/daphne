@@ -7,7 +7,7 @@ use crate::{
     fatal_error,
     messages::taskprov::VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
     vdaf::{VdafError, VdafVerifyKey},
-    DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepMessage,
+    DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepShare,
     VdafPrepState,
 };
 use prio::{
@@ -23,7 +23,6 @@ use prio::{
         Aggregator,
     },
 };
-use std::io::Cursor;
 
 use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
 
@@ -137,7 +136,7 @@ pub(crate) fn prio3_prep_init(
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
-) -> Result<(VdafPrepState, VdafPrepMessage), VdafError> {
+) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
     return match (&config, verify_key) {
         (Prio3Config::Count, VdafVerifyKey::L16(verify_key)) => {
             let vdaf = Prio3::new_count(2).map_err(|e| {
@@ -155,7 +154,7 @@ pub(crate) fn prio3_prep_init(
             )?;
             Ok((
                 VdafPrepState::Prio3Field64(state),
-                VdafPrepMessage::Prio3ShareField64(share),
+                VdafPrepShare::Prio3Field64(share),
             ))
         }
         (
@@ -177,7 +176,7 @@ pub(crate) fn prio3_prep_init(
             )?;
             Ok((
                 VdafPrepState::Prio3Field128(state),
-                VdafPrepMessage::Prio3ShareField128(share),
+                VdafPrepShare::Prio3Field128(share),
             ))
         }
         (Prio3Config::Sum { bits }, VdafVerifyKey::L16(verify_key)) => {
@@ -193,7 +192,7 @@ pub(crate) fn prio3_prep_init(
             )?;
             Ok((
                 VdafPrepState::Prio3Field128(state),
-                VdafPrepMessage::Prio3ShareField128(share),
+                VdafPrepShare::Prio3Field128(share),
             ))
         }
         (
@@ -216,7 +215,7 @@ pub(crate) fn prio3_prep_init(
             )?;
             Ok((
                 VdafPrepState::Prio3Field128(state),
-                VdafPrepMessage::Prio3ShareField128(share),
+                VdafPrepShare::Prio3Field128(share),
             ))
         }
         (
@@ -244,7 +243,7 @@ pub(crate) fn prio3_prep_init(
             )?;
             Ok((
                 VdafPrepState::Prio3Field64HmacSha256Aes128(state),
-                VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(share),
+                VdafPrepShare::Prio3Field64HmacSha256Aes128(share),
             ))
         }
         _ => {
@@ -288,14 +287,14 @@ pub(crate) fn prio3_prep_finish_from_shares(
     config: &Prio3Config,
     agg_id: usize,
     host_state: VdafPrepState,
-    host_share: VdafPrepMessage,
+    host_share: VdafPrepShare,
     peer_share_data: &[u8],
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     let (agg_share, outbound) = match (&config, host_state, host_share) {
         (
             Prio3Config::Count,
             VdafPrepState::Prio3Field64(state),
-            VdafPrepMessage::Prio3ShareField64(share),
+            VdafPrepShare::Prio3Field64(share),
         ) => {
             let vdaf = Prio3::new_count(2).map_err(|e| {
                 VdafError::Dap(
@@ -313,7 +312,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
                 chunk_length,
             },
             VdafPrepState::Prio3Field128(state),
-            VdafPrepMessage::Prio3ShareField128(share),
+            VdafPrepShare::Prio3Field128(share),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
@@ -325,7 +324,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
         (
             Prio3Config::Sum { bits },
             VdafPrepState::Prio3Field128(state),
-            VdafPrepMessage::Prio3ShareField128(share),
+            VdafPrepShare::Prio3Field128(share),
         ) => {
             let vdaf =
                 Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
@@ -341,7 +340,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
                 chunk_length,
             },
             VdafPrepState::Prio3Field128(state),
-            VdafPrepMessage::Prio3ShareField128(share),
+            VdafPrepShare::Prio3Field128(share),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
@@ -358,7 +357,7 @@ pub(crate) fn prio3_prep_finish_from_shares(
                 num_proofs,
             },
             VdafPrepState::Prio3Field64HmacSha256Aes128(state),
-            VdafPrepMessage::Prio3ShareField64HmacSha256Aes128(share),
+            VdafPrepShare::Prio3Field64HmacSha256Aes128(share),
         ) => {
             let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                 *bits,
@@ -455,70 +454,6 @@ pub(crate) fn prio3_prep_finish(
     };
 
     Ok(agg_share)
-}
-
-/// Parse our prep state.
-pub(crate) fn prio3_decode_prep_state(
-    config: &Prio3Config,
-    agg_id: usize,
-    bytes: &mut Cursor<&[u8]>,
-) -> Result<VdafPrepState, VdafError> {
-    match config {
-        Prio3Config::Count => {
-            let vdaf = Prio3::new_count(2).map_err(|e| {
-                VdafError::Dap(
-                    fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
-                )
-            })?;
-            Ok(VdafPrepState::Prio3Field64(
-                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
-            ))
-        }
-        Prio3Config::Histogram {
-            length,
-            chunk_length,
-        } => {
-            let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
-            Ok(VdafPrepState::Prio3Field128(
-                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
-            ))
-        }
-        Prio3Config::Sum { bits } => {
-            let vdaf =
-                Prio3::new_sum(2, *bits).map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum from num_aggregators(2), bits({bits})")))?;
-            Ok(VdafPrepState::Prio3Field128(
-                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
-            ))
-        }
-        Prio3Config::SumVec {
-            bits,
-            length,
-            chunk_length,
-        } => {
-            let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
-                .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
-            Ok(VdafPrepState::Prio3Field128(
-                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
-            ))
-        }
-        Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-            bits,
-            length,
-            chunk_length,
-            num_proofs,
-        } => {
-            let vdaf = new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
-                *bits,
-                *length,
-                *chunk_length,
-                *num_proofs,
-            )?;
-            Ok(VdafPrepState::Prio3Field64HmacSha256Aes128(
-                Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
-            ))
-        }
-    }
 }
 
 /// Interpret `agg_shares` as a sequence of encoded aggregate shares and unshard them.

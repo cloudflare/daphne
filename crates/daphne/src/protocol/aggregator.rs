@@ -18,7 +18,7 @@ use crate::{
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
         prio3::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init},
-        VdafError, VdafPrepMessage, VdafPrepState, VdafVerifyKey,
+        VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
@@ -266,7 +266,7 @@ pub enum EarlyReportStateInitialized {
         public_share: Vec<u8>,
         // Set by the Helper.
         peer_prep_share: Option<Vec<u8>>,
-        prep_share: VdafPrepMessage,
+        prep_share: VdafPrepShare,
         prep_state: VdafPrepState,
     },
     Rejected {
