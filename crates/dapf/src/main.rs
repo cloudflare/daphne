@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
-    deduce_dap_version_from_url, response_to_anyhow, HttpClientExt,
+    deduce_dap_version_from_url, response_to_anyhow, HttpClient,
 };
 use daphne::{
     constants::DapMediaType,
@@ -18,7 +18,6 @@ use daphne::{
 use daphne_service_utils::http_headers;
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
-use reqwest::ClientBuilder;
 use std::{
     io::{stdin, Read},
     path::PathBuf,
@@ -121,6 +120,8 @@ struct Cli {
     action: Action,
     #[arg(env, long)]
     sentry_dsn: Option<sentry::types::Dsn>,
+    #[arg(long, env)]
+    no_reuse_http_client: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -218,8 +219,6 @@ enum HelperAction {
     LoadTest {
         #[arg(env)]
         helper_url: Url,
-        #[arg(long, env)]
-        no_reuse_http_client: bool,
         #[command(flatten)]
         load_control: LoadControlParamsCli,
         #[command(subcommand)]
@@ -391,19 +390,21 @@ async fn main() -> Result<()> {
                 .from_env_lossy(),
         )
         .init();
-    // HTTP client should not handle redirects automatically.
-    let http_client = ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .with_context(|| "failed to create HTTP client")?;
+
+    let http_client = if cli.no_reuse_http_client {
+        HttpClient::new()?
+    } else {
+        HttpClient::new_no_reuse()?
+    };
 
     if std::env::var("REPLAY_REPORTS").unwrap_or_default() == "1" {
         daphne::testing::report_generator::replay_reports(true);
     }
+
     match cli.action {
         Action::Leader(leader) => handle_leader_actions(leader, http_client).await,
         Action::Hpke(hpke) => handle_hpke_actions(hpke, http_client).await,
-        Action::Helper(helper) => handle_helper_actions(helper).await,
+        Action::Helper(helper) => handle_helper_actions(helper, http_client).await,
         Action::TestRoutes(TestAction::AddHpkeConfig {
             aggregator_url,
             kem_alg,
@@ -424,7 +425,7 @@ async fn main() -> Result<()> {
 
 async fn handle_leader_actions(
     leader: LeaderAction,
-    http_client: reqwest::Client,
+    http_client: HttpClient,
 ) -> anyhow::Result<()> {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
@@ -608,7 +609,10 @@ async fn handle_leader_actions(
     }
 }
 
-async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
+async fn handle_helper_actions(
+    helper: HelperAction,
+    http_client: HttpClient,
+) -> anyhow::Result<()> {
     match helper {
         HelperAction::Aggregate {
             helper_url,
@@ -626,7 +630,7 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
                 helper_url,
                 vdaf_config.into_vdaf(),
                 hpke_signing_certificate_path,
-                true,
+                http_client,
                 load_control,
             )?;
 
@@ -643,13 +647,12 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
         }
         HelperAction::LoadTest {
             helper_url,
-            no_reuse_http_client,
             load_control,
             params: LoadTestParameters::Multiple,
         } => {
             load_testing::execute_multiple_combinations(
                 helper_url,
-                !no_reuse_http_client,
+                http_client,
                 load_control.into_params(usize::MAX, 1),
             )
             .await;
@@ -657,7 +660,6 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
         }
         HelperAction::LoadTest {
             helper_url,
-            no_reuse_http_client,
             load_control,
             params:
                 LoadTestParameters::Single {
@@ -671,7 +673,7 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
                 vdaf_config.into_vdaf(),
                 reports_per_batch,
                 reports_per_agg_job,
-                !no_reuse_http_client,
+                http_client,
                 load_control.into_params(reports_per_agg_job, reports_per_batch),
             )
             .await;
@@ -680,7 +682,7 @@ async fn handle_helper_actions(helper: HelperAction) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_hpke_actions(hpke: HpkeAction, http_client: reqwest::Client) -> anyhow::Result<()> {
+async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyhow::Result<()> {
     let mut rng = thread_rng();
     fn kv_key_of(dap_version: DapVersion) -> String {
         format!("hpke_receiver_config_set/{dap_version}")

@@ -10,6 +10,7 @@ use std::{
 use crate::{
     acceptance::{now, Test, TestOptions},
     test_durations::TestDurations,
+    HttpClient,
 };
 use anyhow::Context;
 use chrono::{DateTime, Utc};
@@ -335,7 +336,7 @@ async fn execute(t: &Test, test_config: &TestOptions) -> TestResults {
 
 pub async fn execute_multiple_combinations(
     helper_url: Url,
-    re_use_http_client: bool,
+    http_client: HttpClient,
     load_control: LoadControlParams,
 ) {
     // This vdaf config is later replaced on each of the runs
@@ -343,7 +344,7 @@ pub async fn execute_multiple_combinations(
         helper_url,
         VdafConfig::Prio2 { dimension: 44 },
         None,
-        re_use_http_client,
+        http_client,
         load_control,
     )
     .expect("env to be present");
@@ -400,19 +401,13 @@ pub async fn execute_single_combination_from_env(
     vdaf_config: VdafConfig,
     reports_per_batch: usize,
     reports_per_agg_job: usize,
-    re_use_http_client: bool,
+    http_client: HttpClient,
     load_control: LoadControlParams,
 ) {
     const VERSION: daphne::DapVersion = daphne::DapVersion::Latest;
 
-    let t = Test::from_env(
-        helper_url,
-        vdaf_config,
-        None,
-        re_use_http_client,
-        load_control,
-    )
-    .expect("env to be present");
+    let t = Test::from_env(helper_url, vdaf_config, None, http_client, load_control)
+        .expect("env to be present");
 
     let system_now = now();
 
