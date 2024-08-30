@@ -90,9 +90,11 @@ use daphne_service_utils::durable_requests::{
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
 use headers::Header;
 use http::{HeaderMap, StatusCode};
+use opentelemetry_http::HeaderExtractor;
 use prometheus::Registry;
 use tower_service::Service;
-use tracing::warn;
+use tracing::{info_span, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 use worker::{
     js_sys::Uint8Array, Date, Delay, Env, HttpRequest, HttpResponse, Request, RequestInit,
@@ -127,6 +129,15 @@ impl IntoResponse for Error {
 
 /// Handle a proxy request. This is the entry point of the Worker.
 pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> Response {
+    let span = info_span!("handle_request", path = req.uri().path(), method = ?req.method());
+    {
+        let extractor = HeaderExtractor(req.headers());
+        let remote_context = opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.extract(&extractor)
+        });
+        span.set_parent(remote_context);
+    }
+
     let ctx = Arc::new(RequestContext {
         metrics: Metrics::new(registry),
         env,
@@ -186,10 +197,12 @@ async fn storage_purge(ctx: State<Arc<RequestContext>>) -> impl IntoResponse + '
     };
 
     let do_delete = async {
-        let req = Request::new_with_init(
+        let mut req = Request::new_with_init(
             &format!("https://fake-host{}", TestStateCleaner::DeleteAll.to_uri()),
             RequestInit::new().with_method(worker::Method::Post),
         )?;
+
+        crate::tracing_utils::add_tracing_headers(&mut req);
 
         ctx.env
             .durable_object(TestStateCleaner::BINDING)?
@@ -393,7 +406,7 @@ async fn handle_do_request(
     let durable_request = DurableRequest::try_from(body.as_ref())
         .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
-    let http_request = {
+    let mut http_request = {
         let mut do_req = RequestInit::new();
         do_req.with_method(worker::Method::Post);
         do_req.with_headers(headers.into());
@@ -414,6 +427,7 @@ async fn handle_do_request(
             .unwrap();
         Request::new_with_init(url.as_str(), &do_req)?
     };
+    crate::tracing_utils::add_tracing_headers(&mut http_request);
 
     let binding = ctx.env.durable_object(&durable_request.binding)?;
     let obj = match &durable_request.id {

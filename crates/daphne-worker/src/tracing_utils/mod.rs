@@ -6,8 +6,9 @@ mod workers_json_layer;
 
 use chrono::{SecondsFormat, Utc};
 use std::{collections::HashMap, fmt::Result as FmtResult, io, path::PathBuf, str, sync::Once};
-use tracing::field::Visit;
+use tracing::{field::Visit, Span};
 use tracing_core::Field;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{
     fmt,
     fmt::{format::Writer, time::FormatTime},
@@ -229,6 +230,49 @@ pub fn initialize_tracing(env: &Env) {
                 EnvFilter::new(filter).boxed(),
             );
         x.init();
+    });
+}
+
+/// Helper for extracting headers from HTTP Requests. This is used for OpenTelemetry context
+/// propagation over HTTP.
+/// See [this](https://github.com/open-telemetry/opentelemetry-rust/blob/main/examples/tracing-http-propagator/README.md)
+/// for example usage.
+pub struct HeaderExtractor(HashMap<String, String>);
+
+impl HeaderExtractor {
+    pub fn new(req: &worker::Request) -> Self {
+        Self(req.headers().into_iter().collect())
+    }
+}
+
+impl opentelemetry::propagation::Extractor for HeaderExtractor {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(|s| s.as_str())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect::<Vec<_>>()
+    }
+}
+
+pub struct HeaderInjector<'a>(pub &'a mut worker::Headers);
+
+impl<'a> opentelemetry::propagation::Injector for HeaderInjector<'a> {
+    fn set(&mut self, key: &str, value: String) {
+        self.0.set(key, &value).expect("header name is invalid");
+    }
+}
+
+pub fn add_tracing_headers(req: &mut worker::Request) {
+    let ctx = Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(
+            &ctx,
+            &mut HeaderInjector(
+                req.headers_mut()
+                    .expect("this request was received and can't be sent"),
+            ),
+        );
     });
 }
 

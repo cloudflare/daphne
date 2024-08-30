@@ -10,9 +10,12 @@ use daphne_service_utils::durable_requests::{
     bindings::{DurableMethod, DurableRequestPayload, DurableRequestPayloadExt},
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX,
 };
+use opentelemetry_http::HeaderInjector;
 use serde::de::DeserializeOwned;
 
 pub(crate) use kv::Kv;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::StorageProxyConfig;
 
@@ -74,14 +77,17 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
             .url
             .join(&format!("{DO_PATH_PREFIX}{}", self.path.to_uri()))
             .unwrap();
-        let resp = self
+        let mut req = self
             .durable
             .http
             .post(url)
             .body(self.request.into_bytes())
             .bearer_auth(&self.durable.config.auth_token)
-            .send()
-            .await?;
+            .build()?;
+
+        add_tracing_headers(&mut req);
+
+        let resp = self.durable.http.execute(req).await?;
 
         if resp.status().is_success() {
             Ok(resp.json().await?)
@@ -143,4 +149,11 @@ impl<'w> Do<'w> {
             },
         }
     }
+}
+
+pub fn add_tracing_headers(req: &mut reqwest::Request) {
+    let ctx = Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&ctx, &mut HeaderInjector(req.headers_mut()));
+    });
 }

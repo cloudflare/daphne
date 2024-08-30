@@ -230,12 +230,16 @@ impl<'h> Kv<'h> {
             prefix = std::any::type_name::<P>()
         );
         async {
-            let resp = self
+            let mut req = self
                 .http
                 .get(self.config.url.join(&key).unwrap())
                 .bearer_auth(&self.config.auth_token)
-                .send()
-                .await?;
+                .build()?;
+
+            super::add_tracing_headers(&mut req);
+
+            let resp = self.http.execute(req).await?;
+
             if resp.status() == StatusCode::NOT_FOUND {
                 if opt.cache_not_found {
                     self.cache.write().await.put::<P>(key, None);
@@ -276,13 +280,18 @@ impl<'h> Kv<'h> {
             .http
             .post(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap());
+            .body(serde_json::to_vec(&value).unwrap())
+            .build()?;
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration);
+            request
+                .headers_mut()
+                .insert(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.into());
         }
 
-        request.send().await?.error_for_status()?;
+        super::add_tracing_headers(&mut request);
+
+        self.http.execute(request).await?.error_for_status()?;
 
         self.cache.write().await.put::<P>(key, Some(value.into()));
         Ok(())
@@ -337,13 +346,18 @@ impl<'h> Kv<'h> {
             .http
             .put(self.config.url.join(&key).unwrap())
             .bearer_auth(&self.config.auth_token)
-            .body(serde_json::to_vec(&value).unwrap());
+            .body(serde_json::to_vec(&value).unwrap())
+            .build()?;
 
         if let Some(expiration) = expiration {
-            request = request.header(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration);
+            request
+                .headers_mut()
+                .insert(STORAGE_PROXY_PUT_KV_EXPIRATION, expiration.into());
         }
 
-        let response = request.send().await?;
+        super::add_tracing_headers(&mut request);
+
+        let response = self.http.execute(request).await?;
 
         if response.status() == StatusCode::CONFLICT {
             Ok(Some(value))
