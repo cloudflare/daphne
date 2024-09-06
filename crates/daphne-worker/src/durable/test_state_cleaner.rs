@@ -79,7 +79,7 @@ impl TestStateCleaner {
                     DurableOrdered::get_all(&self.state, "object").await?;
                 for durable_ref in queued.iter().map(|queued| queued.as_ref()) {
                     durable
-                        .post_by_id_hex(
+                        .post_by_id_hex::<_, ()>(
                             &durable_ref.binding,
                             bindings::TestStateCleaner::DeleteAll.to_uri(),
                             durable_ref.id_hex.clone(),
@@ -272,7 +272,7 @@ pub(super) async fn setup_and_handle_test_cleaner_requests<T: GcDurableObject>(
                 .unwrap_or(false);
         if !delete_all_is_setup {
             DurableConnector::new(env)
-                .post(
+                .post::<_, ()>(
                     bindings::TestStateCleaner::BINDING,
                     bindings::TestStateCleaner::Put.to_uri(),
                     bindings::TestStateCleaner::name(()).unwrap_from_name(),
