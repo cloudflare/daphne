@@ -146,7 +146,7 @@ async fn resolve_taskprov<S: Sync>(
 
 #[cfg(test)]
 mod test {
-    use super::{aggregator, helper, leader, DapAggregator, DapAuthorizedSender, DapLeader};
+    use super::{aggregator, helper, leader, DapAuthorizedSender, DapLeader};
     #[cfg(feature = "experimental")]
     use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
     use crate::{
@@ -160,7 +160,7 @@ mod test {
             Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
             TransitionFailure, TransitionVar,
         },
-        roles::leader::WorkItem,
+        roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
         vdaf::{Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
@@ -1625,8 +1625,8 @@ mod test {
         .to_config_with_taskprov(
             b"cool task".to_vec(),
             t.now,
-            &t.leader.taskprov_vdaf_verify_key_init,
-            &t.leader.collector_hpke_config,
+            t.leader.taskprov_vdaf_verify_key_init().unwrap(),
+            t.leader.taskprov_collector_hpke_config().unwrap(),
         )
         .unwrap();
 

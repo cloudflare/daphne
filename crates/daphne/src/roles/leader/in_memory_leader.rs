@@ -22,6 +22,7 @@ use crate::{
 };
 
 #[derive(Default)]
+#[cfg_attr(feature = "test-utils", derive(deepsize::DeepSizeOf))]
 pub struct InMemoryLeaderState {
     work_queue: VecDeque<WorkItem>,
     per_task: HashMap<TaskId, MockLeaderMemoryPerTask>,
@@ -232,6 +233,7 @@ impl InMemoryLeaderState {
 }
 
 #[derive(Default)]
+#[cfg_attr(feature = "test-utils", derive(deepsize::DeepSizeOf))]
 struct MockLeaderMemoryPerTask {
     pending_reports: HashMap<DapBatchBucket, VecDeque<Report>>,
     coll_jobs: HashMap<CollectionJobId, DapCollectionJob>,

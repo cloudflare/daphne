@@ -574,48 +574,61 @@ impl InMemoryAggregateStore {
 /// An implementation of a DAP Aggregator without long-term storage. This is intended to be used
 /// for testing purposes only.
 pub struct InMemoryAggregator {
-    pub global_config: DapGlobalConfig,
-    pub(crate) tasks: Arc<Mutex<HashMap<TaskId, DapTaskConfig>>>,
-    pub hpke_receiver_config_list: Vec<HpkeReceiverConfig>,
-    pub leader_token: BearerToken,
-    pub collector_token: Option<BearerToken>, // Not set by Helper
-    pub(crate) leader_state_store: Arc<Mutex<InMemoryLeaderState>>,
-    helper_state_store: Arc<Mutex<HashMap<HelperStateInfo, DapAggregationJobState>>>,
+    pub(crate) global_config: DapGlobalConfig,
+    tasks: Mutex<HashMap<TaskId, DapTaskConfig>>,
+    pub hpke_receiver_config_list: Box<[HpkeReceiverConfig]>,
+    leader_token: BearerToken,
+    collector_token: Option<BearerToken>, // Not set by Helper
+    collector_hpke_config: HpkeConfig,
+
+    // aggregation state
+    leader_state_store: Arc<Mutex<InMemoryLeaderState>>,
     pub(crate) agg_store: Arc<Mutex<InMemoryAggregateStore>>,
-    pub collector_hpke_config: HpkeConfig,
-    pub metrics: DaphnePromMetrics,
-    pub(crate) audit_log: MockAuditLog,
+
+    // telemetry
+    metrics: DaphnePromMetrics,
+    pub audit_log: MockAuditLog,
 
     // taskprov
-    pub taskprov_vdaf_verify_key_init: [u8; 32],
-    pub taskprov_leader_token: BearerToken,
-    pub taskprov_collector_token: Option<BearerToken>, // Not set by Helper
+    taskprov_vdaf_verify_key_init: [u8; 32],
+    taskprov_leader_token: BearerToken,
+    taskprov_collector_token: Option<BearerToken>, // Not set by Helper
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `InMemoryAggregator`. Not set by the Helper.
-    pub peer: Option<Arc<InMemoryAggregator>>,
+    peer: Option<Arc<InMemoryAggregator>>,
 }
 
 impl DeepSizeOf for InMemoryAggregator {
     fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
-        self.global_config.deep_size_of_children(context)
-                + self.tasks.deep_size_of_children(context)
-                + self
-                    .hpke_receiver_config_list
-                    .deep_size_of_children(context)
-                + self.leader_token.deep_size_of_children(context)
-                + self.collector_token.deep_size_of_children(context)
-                + self.helper_state_store.deep_size_of_children(context)
-                + self.agg_store.deep_size_of_children(context)
-                + self.collector_hpke_config.deep_size_of_children(context)
-                // + self.metrics.deep_size_of_children(context)
-                // + self.audit_log.deep_size_of_children(context)
-                + self
-                    .taskprov_vdaf_verify_key_init
-                    .deep_size_of_children(context)
-                + self.taskprov_leader_token.deep_size_of_children(context)
-                + self.taskprov_collector_token.deep_size_of_children(context)
-                + self.peer.deep_size_of_children(context)
+        let Self {
+            global_config,
+            tasks,
+            hpke_receiver_config_list,
+            leader_token,
+            collector_token,
+            leader_state_store,
+            agg_store,
+            collector_hpke_config,
+            metrics: _,
+            audit_log: _,
+            taskprov_vdaf_verify_key_init,
+            taskprov_leader_token,
+            taskprov_collector_token,
+            peer,
+        } = self;
+        global_config.deep_size_of_children(context)
+            + tasks.deep_size_of_children(context)
+            + hpke_receiver_config_list.deep_size_of_children(context)
+            + leader_token.deep_size_of_children(context)
+            + collector_token.deep_size_of_children(context)
+            + leader_state_store.deep_size_of_children(context)
+            + agg_store.deep_size_of_children(context)
+            + collector_hpke_config.deep_size_of_children(context)
+            + taskprov_vdaf_verify_key_init.deep_size_of_children(context)
+            + taskprov_leader_token.deep_size_of_children(context)
+            + taskprov_collector_token.deep_size_of_children(context)
+            + peer.deep_size_of_children(context)
     }
 }
 
@@ -633,12 +646,11 @@ impl InMemoryAggregator {
     ) -> Self {
         Self {
             global_config,
-            tasks: Arc::new(Mutex::new(tasks.into_iter().collect())),
+            tasks: Mutex::new(tasks.into_iter().collect()),
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
             leader_token,
             collector_token: None,
             leader_state_store: Default::default(),
-            helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
             metrics: DaphnePromMetrics::register(registry).unwrap(),
@@ -662,16 +674,15 @@ impl InMemoryAggregator {
         taskprov_vdaf_verify_key_init: [u8; 32],
         taskprov_leader_token: BearerToken,
         taskprov_collector_token: impl Into<Option<BearerToken>>,
-        peer: impl Into<Option<Arc<Self>>>,
+        peer: Arc<Self>,
     ) -> Self {
         Self {
             global_config,
-            tasks: Arc::new(Mutex::new(tasks.into_iter().collect())),
+            tasks: Mutex::new(tasks.into_iter().collect()),
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
             leader_token,
             collector_token: collector_token.into(),
             leader_state_store: Default::default(),
-            helper_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
             metrics: DaphnePromMetrics::register(registry).unwrap(),
@@ -702,7 +713,6 @@ impl InMemoryAggregator {
 
     pub fn clear_storage(&self) {
         self.leader_state_store.lock().unwrap().delete_all();
-        self.helper_state_store.lock().unwrap().clear();
         self.agg_store.lock().unwrap().clear();
     }
 }
