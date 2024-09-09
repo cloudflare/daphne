@@ -137,9 +137,13 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
 
     fn helper_proof_share(&self, seed: &[u8; SEED_SIZE]) -> Vec<F> {
         let mut xof = X::init(seed, &dst(self.algorithm_id, USAGE_PROOF_SHARE));
-        xof.update(&[self.num_proofs, 1]); // num_proofs, agg_id
+        xof.update(&[
+            self.num_proofs_sq_norm_equal,
+            self.num_proofs,
+            1, // agg_id
+        ]);
         xof.into_seed_stream().into_field_vec(
-            self.flp_sq_norm_equal.proof_len()
+            self.flp_sq_norm_equal.proof_len() * usize::from(self.num_proofs_sq_norm_equal)
                 + self.flp.proof_len() * usize::from(self.num_proofs),
         )
     }
@@ -268,23 +272,28 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
                 .into_field_vec(self.flp.joint_rand_len() * usize::from(self.num_proofs))
             };
 
+            let num_proofs_sq_norm_equal = usize::from(self.num_proofs_sq_norm_equal);
+            let num_proofs = usize::from(self.num_proofs);
+
             let prove_rands = {
                 let mut xof = X::init(&prove_seed, &dst(self.algorithm_id, USAGE_PROVE_RAND));
-                xof.update(&[self.num_proofs]);
+                xof.update(&[self.num_proofs_sq_norm_equal, self.num_proofs]);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp_sq_norm_equal.prove_rand_len()
-                        + self.flp.prove_rand_len() * usize::from(self.num_proofs),
+                    self.flp_sq_norm_equal.prove_rand_len() * num_proofs_sq_norm_equal
+                        + self.flp.prove_rand_len() * num_proofs,
                 )
             };
-            let (pr_sq_norm_equal, pr) =
-                prove_rands.split_at(self.flp_sq_norm_equal.prove_rand_len());
+            let (pr_sq_norm_equal, pr) = prove_rands
+                .split_at(self.flp_sq_norm_equal.prove_rand_len() * num_proofs_sq_norm_equal);
 
             let mut proofs = Vec::with_capacity(
-                self.flp_sq_norm_equal.proof_len()
-                    + self.flp.proof_len() * usize::from(self.num_proofs),
+                self.flp_sq_norm_equal.proof_len() * num_proofs_sq_norm_equal
+                    + self.flp.proof_len() * num_proofs,
             );
 
-            proofs.append(&mut self.flp_sq_norm_equal.prove(&meas, pr_sq_norm_equal, &[])?);
+            for prove_rand in pr_sq_norm_equal.chunks(self.flp_sq_norm_equal.prove_rand_len()) {
+                proofs.append(&mut self.flp_sq_norm_equal.prove(&meas, prove_rand, &[])?);
+            }
 
             for (prove_rand, vf_joint_rand) in pr
                 .chunks(self.flp.prove_rand_len())
@@ -365,6 +374,9 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             vf_joint_rand_parts,
         } = public_share;
 
+        let num_proofs_sq_norm_equal = usize::from(self.num_proofs_sq_norm_equal);
+        let num_proofs = usize::from(self.num_proofs);
+
         let (mut meas_share, proofs_share, wr_blind, vf_blind) = match (agg_id, input_share) {
             (
                 0,
@@ -405,7 +417,8 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
                 )))
             }
         };
-        let (ps_sq_norm_equal, ps) = proofs_share.split_at(self.flp_sq_norm_equal.proof_len());
+        let (ps_sq_norm_equal, ps) =
+            proofs_share.split_at(self.flp_sq_norm_equal.proof_len() * num_proofs_sq_norm_equal);
 
         let wr_joint_rand_part = self.joint_rand_part(
             agg_id.try_into().unwrap(),
@@ -458,28 +471,35 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
 
             let query_rands = {
                 let mut xof = X::init(verify_key, &dst(self.algorithm_id, USAGE_QUERY_RAND));
-                xof.update(&[self.num_proofs]);
+                xof.update(&[self.num_proofs_sq_norm_equal, self.num_proofs]);
                 xof.update(nonce);
                 xof.into_seed_stream().into_field_vec(
-                    self.flp_sq_norm_equal.query_rand_len()
-                        + self.flp.query_rand_len() * usize::from(self.num_proofs),
+                    self.flp_sq_norm_equal.query_rand_len() * num_proofs_sq_norm_equal
+                        + self.flp.query_rand_len() * num_proofs,
                 )
             };
-            let (qr_sq_norm_equal, qr) =
-                query_rands.split_at(self.flp_sq_norm_equal.query_rand_len());
+            let (qr_sq_norm_equal, qr) = query_rands
+                .split_at(self.flp_sq_norm_equal.query_rand_len() * num_proofs_sq_norm_equal);
 
             let mut verifiers_share = Vec::with_capacity(
                 self.flp_sq_norm_equal.verifier_len()
-                    + self.flp.verifier_len() * usize::from(self.num_proofs),
+                    + num_proofs_sq_norm_equal
+                    + self.flp.verifier_len() * num_proofs,
             );
 
-            verifiers_share.append(&mut self.flp_sq_norm_equal.query(
-                &meas_share,
-                ps_sq_norm_equal,
-                qr_sq_norm_equal,
-                &[],
-                2,
-            )?);
+            for (proof_share, query_rand) in ps_sq_norm_equal
+                .chunks(self.flp_sq_norm_equal.proof_len())
+                .zip(qr_sq_norm_equal.chunks(self.flp_sq_norm_equal.query_rand_len()))
+            {
+                verifiers_share.append(&mut self.flp_sq_norm_equal.query(
+                    &meas_share,
+                    proof_share,
+                    query_rand,
+                    &[],
+                    2,
+                )?);
+            }
+
             for (proof_share, (vf_joint_rand, query_rand)) in ps.chunks(self.flp.proof_len()).zip(
                 corrected_vf_joint_rands
                     .chunks(self.flp.joint_rand_len())
@@ -541,12 +561,16 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             for (v, s1) in verifiers.iter_mut().zip(verifiers_share_1.into_iter()) {
                 *v += s1;
             }
+            let (v_sq_norm_equal, v) = verifiers.split_at(
+                self.flp_sq_norm_equal.verifier_len() * usize::from(self.num_proofs_sq_norm_equal),
+            );
 
-            let (v_sq_norm_equal, v) = verifiers.split_at(self.flp_sq_norm_equal.verifier_len());
-            if !self.flp_sq_norm_equal.decide(v_sq_norm_equal)? {
-                return Err(VdafError::Uncategorized(
-                    "squared norm equality proof check failed".into(),
-                ));
+            for verifier in v_sq_norm_equal.chunks(self.flp_sq_norm_equal.verifier_len()) {
+                if !self.flp_sq_norm_equal.decide(verifier)? {
+                    return Err(VdafError::Uncategorized(
+                        "squared norm equality proof check failed".into(),
+                    ));
+                }
             }
 
             for verifier in v.chunks(self.flp.verifier_len()) {
@@ -642,15 +666,15 @@ mod tests {
 
     use prio::{
         codec::Decode,
-        field::Field128,
+        field::{Field128, Field64},
         vdaf::{
             test_utils::{run_vdaf, run_vdaf_prepare},
-            xof::Seed,
+            xof::{Seed, XofTurboShake128},
             Aggregator, Client, Collector,
         },
     };
 
-    use crate::pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine};
+    use crate::pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine, PineParam};
 
     use assert_matches::assert_matches;
 
@@ -679,6 +703,40 @@ mod tests {
         let dimension = 100;
         let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
         let pine = Pine::new_64(norm_bound, dimension, 15, 4, 100).unwrap();
+        let result = run_vdaf(
+            &pine,
+            &(),
+            [
+                vec![1.0; dimension],
+                vec![1.0; dimension],
+                vec![1.0; dimension],
+                vec![1.0; dimension],
+                vec![1.0; dimension],
+            ],
+        )
+        .unwrap();
+        assert_eq!(result, vec![5.0; dimension]);
+    }
+
+    #[test]
+    fn multiple_sq_norm_equal_proofs() {
+        let dimension = 100;
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::<Field64, XofTurboShake128, 16>::new(
+            &PineParam {
+                norm_bound,
+                dimension,
+                frac_bits: 15,
+                chunk_len: 10,
+                chunk_len_sq_norm_equal: 11,
+                num_proofs: 2,
+                num_proofs_sq_norm_equal: 3,
+                num_wr_tests: 128,
+                num_wr_successes: 100,
+            },
+            0xffff_ffff,
+        )
+        .unwrap();
         let result = run_vdaf(
             &pine,
             &(),

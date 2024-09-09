@@ -160,6 +160,7 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize>
                 proofs_share: iter::repeat_with(|| F::decode(bytes))
                     .take(
                         pine.flp_sq_norm_equal.proof_len()
+                            * usize::from(pine.num_proofs_sq_norm_equal)
                             + pine.flp.proof_len() * usize::from(pine.num_proofs),
                     )
                     .collect::<Result<Vec<_>, _>>()?,

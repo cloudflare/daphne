@@ -64,6 +64,7 @@ impl Encode for PineParam {
             chunk_len,
             chunk_len_sq_norm_equal,
             num_proofs,
+            num_proofs_sq_norm_equal,
             num_wr_tests,
             num_wr_successes,
         } = *self;
@@ -82,6 +83,7 @@ impl Encode for PineParam {
             .map_err(|_| CodecError::UnexpectedValue)?
             .encode(bytes)?; // chunk_length_norm_equality
         num_proofs.encode(bytes)?;
+        num_proofs_sq_norm_equal.encode(bytes)?;
         u16::try_from(num_wr_tests)
             .map_err(|_| CodecError::UnexpectedValue)?
             .encode(bytes)?; // num_wr_checks
@@ -100,6 +102,7 @@ impl Decode for PineParam {
         let chunk_length = u32::decode(bytes)?;
         let chunk_length_norm_equality = u32::decode(bytes)?;
         let num_proofs = u8::decode(bytes)?;
+        let num_proofs_sq_norm_equal = u8::decode(bytes)?;
         let num_wr_checks = u16::decode(bytes)?;
         let num_wr_successes = u16::decode(bytes)?;
         Ok(Self {
@@ -117,6 +120,7 @@ impl Decode for PineParam {
                 CodecError::Other("chunk_length_norm_equality is too large for usize".into())
             })?,
             num_proofs,
+            num_proofs_sq_norm_equal,
             num_wr_tests: num_wr_checks.into(),
             num_wr_successes: num_wr_successes.into(),
         })
@@ -653,6 +657,7 @@ mod tests {
                     chunk_len: 999,
                     chunk_len_sq_norm_equal: 1400,
                     num_proofs: 15,
+                    num_proofs_sq_norm_equal: 1,
                     num_wr_tests: 50,
                     num_wr_successes: 17,
                 },
@@ -681,6 +686,7 @@ mod tests {
                     chunk_len: 999,
                     chunk_len_sq_norm_equal: 1400,
                     num_proofs: 15,
+                    num_proofs_sq_norm_equal: 17,
                     num_wr_tests: 50,
                     num_wr_successes: 17,
                 },

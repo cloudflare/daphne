@@ -45,6 +45,7 @@ pub struct Pine<F, X, const SEED_SIZE: usize> {
 
     // PINE parameters
     num_proofs: u8,
+    num_proofs_sq_norm_equal: u8,
     encoded_gradient_len: usize,
     encoded_input_len: usize,
 
@@ -71,6 +72,7 @@ impl Pine128 {
                 chunk_len,
                 chunk_len_sq_norm_equal,
                 num_proofs: 1,
+                num_proofs_sq_norm_equal: 1,
                 num_wr_tests: 100,
                 num_wr_successes: 100,
             },
@@ -98,6 +100,7 @@ impl Pine64 {
                 chunk_len,
                 chunk_len_sq_norm_equal,
                 num_proofs: 2,
+                num_proofs_sq_norm_equal: 1,
                 num_wr_tests: 100,
                 num_wr_successes: 100,
             },
@@ -118,6 +121,7 @@ pub struct PineParam {
     pub(crate) chunk_len: usize,
     pub(crate) chunk_len_sq_norm_equal: usize,
     pub(crate) num_proofs: u8,
+    pub(crate) num_proofs_sq_norm_equal: u8,
     pub(crate) num_wr_tests: usize,
     pub(crate) num_wr_successes: usize,
 }
@@ -276,6 +280,7 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
                 phantom_data: PhantomData,
             },
             num_proofs: param.num_proofs,
+            num_proofs_sq_norm_equal: param.num_proofs_sq_norm_equal,
             encoded_gradient_len,
             encoded_input_len,
             algorithm_id,
@@ -622,6 +627,7 @@ mod tests {
     // Test that parameters are copied consistently across the structs that use them.
     #[test]
     fn parameter_consistency() {
+        // XXX
         let frac_bits = 19;
         let param = PineParam {
             norm_bound: norm_bound_f64_to_u64(1000.0, frac_bits),
@@ -630,6 +636,7 @@ mod tests {
             chunk_len: 1_337,
             chunk_len_sq_norm_equal: 54,
             num_proofs: 3,
+            num_proofs_sq_norm_equal: 2,
             num_wr_tests: 145,
             num_wr_successes: 100,
         };
@@ -656,6 +663,10 @@ mod tests {
 
         // PineParam -> Pine
         assert_eq!(pine.num_proofs, param.num_proofs);
+        assert_eq!(
+            pine.num_proofs_sq_norm_equal,
+            param.num_proofs_sq_norm_equal
+        );
         assert_eq!(pine.algorithm_id, 0xdead_beef);
     }
 }
