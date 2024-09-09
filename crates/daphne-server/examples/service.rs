@@ -89,8 +89,13 @@ struct Args {
     storage_proxy: Option<Url>,
 }
 
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    let _profiler = dhat::Profiler::new_heap();
+
     // Parse the configuration from the command line arguments.
     let config = Config::try_from(Args::parse())?;
     println!("starting service with config:\n{config:#?}");
@@ -112,12 +117,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         .init();
 
     // hand the router to axum for it to run
-    axum::Server::bind(&std::net::SocketAddr::new(
+    let serve = axum::Server::bind(&std::net::SocketAddr::new(
         "0.0.0.0".parse().unwrap(),
         config.port,
     ))
-    .serve(router.into_make_service())
-    .await?;
+    .serve(router.into_make_service());
+
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    tokio::select! {
+        _ = serve => {}
+        _ = ctrl_c => {}
+    }
 
     Ok(())
 }
