@@ -4,7 +4,7 @@
 use std::{
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Mutex, OnceLock,
     },
     task::Context,
@@ -56,14 +56,6 @@ impl Stream for ReportGenerator {
     }
 }
 
-static REPLAY_REPORTS: AtomicBool = AtomicBool::new(false);
-pub fn replay_reports(b: bool) {
-    REPLAY_REPORTS.store(b, Ordering::SeqCst);
-}
-pub fn generator_replaying_reports() -> bool {
-    REPLAY_REPORTS.load(Ordering::SeqCst)
-}
-
 impl ReportGenerator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -75,6 +67,7 @@ impl ReportGenerator {
         version: DapVersion,
         now: Time,
         extensions: Vec<messages::Extension>,
+        replay_reports: bool,
     ) -> Self {
         let (tx, rx) = mpsc::channel(4);
         rayon::spawn({
@@ -98,7 +91,7 @@ impl ReportGenerator {
                     // ----
 
                     static LAST_REPORT: OnceLock<Report> = OnceLock::new();
-                    let report = if REPLAY_REPORTS.load(Ordering::SeqCst) {
+                    let report = if replay_reports {
                         LAST_REPORT
                             .get_or_init(|| {
                                 vdaf.produce_report_with_extensions(

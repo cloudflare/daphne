@@ -399,10 +399,6 @@ async fn main() -> Result<()> {
         HttpClient::new_no_reuse(cli.enable_ssl_key_log_file)?
     };
 
-    if std::env::var("REPLAY_REPORTS").unwrap_or_default() == "1" {
-        daphne::testing::report_generator::replay_reports(true);
-    }
-
     match cli.action {
         Action::Leader(leader) => handle_leader_actions(leader, http_client).await,
         Action::Hpke(hpke) => handle_hpke_actions(hpke, http_client).await,
