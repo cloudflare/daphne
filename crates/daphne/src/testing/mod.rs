@@ -29,7 +29,8 @@ use crate::{
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
-    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion, VdafConfig,
+    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
+    ReplayProtection, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -57,6 +58,8 @@ pub struct AggregationJobTest {
     pub(crate) helper_hpke_receiver_config: HpkeReceiverConfig,
     pub(crate) client_hpke_config_list: [HpkeConfig; 2],
     pub(crate) collector_hpke_receiver_config: HpkeReceiverConfig,
+
+    replay_protection: ReplayProtection,
 
     // the current time
     pub(crate) now: Time,
@@ -194,9 +197,19 @@ impl AggregationJobTest {
                 method: Default::default(),
                 num_agg_span_shards: NonZeroUsize::new(3).unwrap(),
             },
+            replay_protection: ReplayProtection::Enabled,
             leader_registry,
             leader_metrics,
         }
+    }
+
+    pub fn disable_replay_protection(&mut self) {
+        self.replay_protection = ReplayProtection::Disabled;
+    }
+
+    pub fn change_vdaf(&mut self, vdaf: VdafConfig) {
+        self.task_config.vdaf = vdaf;
+        self.task_config.vdaf_verify_key = vdaf.gen_verify_key();
     }
 
     /// For each measurement, generate a report for the given task.
@@ -222,13 +235,31 @@ impl AggregationJobTest {
         reports
     }
 
+    pub fn produce_repeated_reports(
+        &self,
+        measurement: DapMeasurement,
+    ) -> impl Iterator<Item = Report> + Clone {
+        std::iter::repeat(
+            self.task_config
+                .vdaf
+                .produce_report(
+                    &self.client_hpke_config_list,
+                    self.now,
+                    &self.task_id,
+                    measurement,
+                    self.task_config.version,
+                )
+                .unwrap(),
+        )
+    }
+
     /// Leader: Produce `AggregationJobInitReq`.
     ///
     /// Panics if the Leader aborts.
     pub async fn produce_agg_job_req(
         &self,
         agg_param: &DapAggregationParam,
-        reports: Vec<Report>,
+        reports: impl IntoIterator<Item = Report>,
     ) -> (DapAggregationJobState, AggregationJobInitReq) {
         self.task_config
             .produce_agg_job_req(
@@ -262,7 +293,7 @@ impl AggregationJobTest {
                         self,
                         &self.task_id,
                         agg_job_init_req,
-                        Default::default(),
+                        self.replay_protection,
                     )
                     .await
                     .unwrap(),

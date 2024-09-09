@@ -383,7 +383,7 @@ pub(crate) enum ReportProcessedStatus {
     Rejected(TransitionFailure),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum ReplayProtection {
     #[default]
     Enabled,
