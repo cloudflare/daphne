@@ -44,11 +44,13 @@ clap.workspace = true
 config.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus"] }
+dhat.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 rcgen.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 webpki.workspace = true
 x509-parser.workspace = true
