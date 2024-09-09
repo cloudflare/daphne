@@ -449,6 +449,7 @@ pub async fn execute_single_combination_from_env(
                             VERSION,
                             system_now.0,
                             vec![messages::Extension::Taskprov],
+                            t.replay_reports,
                         )
                     },
                 )

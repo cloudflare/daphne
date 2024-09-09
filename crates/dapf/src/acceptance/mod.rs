@@ -38,7 +38,7 @@ use daphne::{
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapMeasurement,
     DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized,
+    EarlyReportStateInitialized, ReplayProtection,
 };
 use daphne_service_utils::http_headers;
 use futures::{future::OptionFuture, StreamExt, TryStreamExt};
@@ -169,6 +169,9 @@ pub struct Test {
     /// signature.
     hpke_signing_certificate_path: Option<PathBuf>,
     load_control: LoadControlParams,
+    /// Replay reports when generating the test aggregation. This improves test speed but requires
+    /// the test target to have replay protection disabled.
+    replay_reports: bool,
 }
 
 pub struct TestOptions {
@@ -216,6 +219,7 @@ impl Test {
         vdaf_verify_init: &str,
         vdaf_config: VdafConfig,
         load_control: LoadControlParams,
+        replay_reports: bool,
     ) -> Result<Self> {
         let vdaf_verify_init = <[u8; 32]>::try_from(
             hex::decode(vdaf_verify_init)
@@ -258,6 +262,7 @@ impl Test {
             vdaf_config,
             hpke_signing_certificate_path: None,
             load_control,
+            replay_reports,
         })
     }
 
@@ -270,6 +275,7 @@ impl Test {
     ) -> Result<Self> {
         const LEADER_BEARER_TOKEN_VAR: &str = "LEADER_BEARER_TOKEN";
         const VDAF_VERIFY_INIT_VAR: &str = "VDAF_VERIFY_INIT";
+        let replay_reports = std::env::var("REPLAY_REPORTS").unwrap_or_default() == "1";
 
         let leader_bearer_token = env::var(LEADER_BEARER_TOKEN_VAR).ok();
 
@@ -282,6 +288,7 @@ impl Test {
             &vdaf_verify_init,
             vdaf_config,
             load_control,
+            replay_reports,
         )?;
         if let Some(token) = leader_bearer_token {
             test = test.with_bearer_token(token);
@@ -485,7 +492,7 @@ impl Test {
         let agg_job_id = AggregationJobId(rngs::OsRng.gen());
         let report_count = reports_for_agg_job.len();
         let (agg_job_state, agg_job_init_req) = task_config
-            .produce_agg_job_req(
+            .produce_agg_job_req_allowing_replayed_reports(
                 fake_leader_hpke_receiver_config,
                 self,
                 task_id,
@@ -493,6 +500,11 @@ impl Test {
                 &DapAggregationParam::Empty,
                 reports_for_agg_job,
                 self.metrics(),
+                if self.replay_reports {
+                    ReplayProtection::Disabled
+                } else {
+                    ReplayProtection::Enabled
+                },
             )
             .await
             .context("producing agg job init request")?;
@@ -713,6 +725,7 @@ impl Test {
                         version,
                         now.0,
                         vec![messages::Extension::Taskprov],
+                        self.replay_reports,
                     )
                 },
             )

@@ -417,28 +417,52 @@ impl DapTaskConfig {
     where
         S: Stream<Item = Report>,
     {
+        self.produce_agg_job_req_impl(
+            decrypter,
+            initializer,
+            task_id,
+            part_batch_sel,
+            agg_param,
+            reports,
+            metrics,
+            ReplayProtection::Enabled,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn produce_agg_job_req_impl<S>(
+        &self,
+        decrypter: &impl HpkeDecrypter,
+        initializer: &impl DapReportInitializer,
+        task_id: &TaskId,
+        part_batch_sel: &PartialBatchSelector,
+        agg_param: &DapAggregationParam,
+        reports: S,
+        metrics: &dyn DaphneMetrics,
+        replay_protection: ReplayProtection,
+    ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
+    where
+        S: Stream<Item = Report>,
+    {
         let (report_count_hint, _upper_bound) = reports.size_hint();
         let mut consumed_reports = Vec::with_capacity(report_count_hint);
         let mut helper_shares = Vec::with_capacity(report_count_hint);
         {
-            let mut processed = HashSet::with_capacity(report_count_hint);
+            let mut processed = replay_protection
+                .enabled()
+                .then(|| HashSet::with_capacity(report_count_hint));
             let mut reports = pin!(reports);
             while let Some(report) = reports.next().await {
-                let enforce_replay_check = {
-                    #[cfg(feature = "report-generator")]
-                    {
-                        !crate::testing::report_generator::generator_replaying_reports()
+                if let Some(processed) = &mut processed {
+                    if processed.contains(&report.report_metadata.id) {
+                        return Err(fatal_error!(
+                            err = "tried to process report sequence with non-unique report IDs",
+                            non_unique_id = %report.report_metadata.id,
+                        ));
                     }
-                    #[cfg(not(feature = "report-generator"))]
-                    true
-                };
-                if enforce_replay_check && processed.contains(&report.report_metadata.id) {
-                    return Err(fatal_error!(
-                        err = "tried to process report sequence with non-unique report IDs",
-                        non_unique_id = %report.report_metadata.id,
-                    ));
+                    processed.insert(report.report_metadata.id);
                 }
-                processed.insert(report.report_metadata.id);
 
                 let [leader_share, helper_share] = report.encrypted_input_shares;
 
@@ -529,6 +553,35 @@ impl DapTaskConfig {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn produce_agg_job_req_allowing_replayed_reports<S>(
+        &self,
+        decrypter: &impl HpkeDecrypter,
+        initializer: &impl DapReportInitializer,
+        task_id: &TaskId,
+        part_batch_sel: &PartialBatchSelector,
+        agg_param: &DapAggregationParam,
+        reports: S,
+        metrics: &dyn DaphneMetrics,
+        replay_protection: ReplayProtection,
+    ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
+    where
+        S: Stream<Item = Report>,
+    {
+        self.produce_agg_job_req_impl(
+            decrypter,
+            initializer,
+            task_id,
+            part_batch_sel,
+            agg_param,
+            reports,
+            metrics,
+            replay_protection,
+        )
+        .await
+    }
+
     /// Helper: Consume the `AggregationJobInitReq` sent by the Leader and return the initialized
     /// reports.
     pub async fn consume_agg_job_req(
@@ -542,21 +595,24 @@ impl DapTaskConfig {
         let num_reports = agg_job_init_req.prep_inits.len();
         let mut consumed_reports = Vec::with_capacity(num_reports);
         async {
-            let mut processed = HashSet::with_capacity(num_reports);
+            let mut processed = replay_protection
+                .enabled()
+                .then(|| HashSet::with_capacity(num_reports));
+
             for prep_init in agg_job_init_req.prep_inits {
-                if replay_protection.enabled()
-                    && processed.contains(&prep_init.report_share.report_metadata.id)
-                {
-                    return Err(DapAbort::InvalidMessage {
-                        detail: format!(
-                            "report ID {} appears twice in the same aggregation job",
-                            prep_init.report_share.report_metadata.id.to_base64url()
-                        ),
-                        task_id: *task_id,
+                if let Some(processed) = &mut processed {
+                    if processed.contains(&prep_init.report_share.report_metadata.id) {
+                        return Err(DapAbort::InvalidMessage {
+                            detail: format!(
+                                "report ID {} appears twice in the same aggregation job",
+                                prep_init.report_share.report_metadata.id.to_base64url()
+                            ),
+                            task_id: *task_id,
+                        }
+                        .into());
                     }
-                    .into());
+                    processed.insert(prep_init.report_share.report_metadata.id);
                 }
-                processed.insert(prep_init.report_share.report_metadata.id);
 
                 consumed_reports.push(
                     EarlyReportStateConsumed::consume(

@@ -146,7 +146,7 @@ async fn resolve_taskprov<S: Sync>(
 
 #[cfg(test)]
 mod test {
-    use super::{aggregator, helper, leader, DapAuthorizedSender, DapLeader};
+    use super::{aggregator, helper, leader, DapAggregator, DapAuthorizedSender, DapLeader};
     #[cfg(feature = "experimental")]
     use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
     use crate::{
@@ -501,7 +501,7 @@ mod test {
                     &part_batch_sel,
                     &agg_param,
                     futures::stream::iter(reports),
-                    &self.leader.metrics,
+                    self.leader.metrics(),
                 )
                 .await
                 .unwrap();

@@ -262,7 +262,7 @@ impl AggregationJobTest {
         reports: impl IntoIterator<Item = Report>,
     ) -> (DapAggregationJobState, AggregationJobInitReq) {
         self.task_config
-            .produce_agg_job_req(
+            .produce_agg_job_req_allowing_replayed_reports(
                 &self.leader_hpke_receiver_config,
                 self,
                 &self.task_id,
@@ -270,6 +270,7 @@ impl AggregationJobTest {
                 agg_param,
                 futures::stream::iter(reports),
                 &self.leader_metrics,
+                self.replay_protection,
             )
             .await
             .unwrap()
