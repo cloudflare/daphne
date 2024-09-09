@@ -150,7 +150,7 @@ impl HttpClient {
     }
 
     pub fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.client().post(url)
+        self.client().put(url)
     }
 
     pub async fn get_hpke_config(
