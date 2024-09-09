@@ -209,6 +209,10 @@ impl PineParam {
             Some(format!(
                 "number of proofs must be in range {min_proofs}..{MAX_PROOFS} inclusive"
             ))
+        } else if !(1..=MAX_PROOFS).contains(&self.num_proofs_sq_norm_equal) {
+            Some(format!(
+                "number of proofs for the squared norm equality check must be in range 1..{MAX_PROOFS} inclusive"
+            ))
         } else {
             None
         }
