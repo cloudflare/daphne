@@ -1,215 +1,130 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#![allow(clippy::cast_possible_truncation)]
+
 use std::{
-    num::NonZeroUsize,
-    time::{Duration, Instant, SystemTime},
+    hint::black_box,
+    iter::repeat,
+    time::{Duration, Instant},
 };
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput};
 use daphne::{
-    auth::BearerToken,
-    hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
-    messages::{BatchId, TaskId},
-    roles::{helper, DapAggregator},
-    testing::{report_generator::ReportGenerator, InMemoryAggregator},
-    vdaf::{VdafConfig, VdafVerifyKey},
-    DapRequest, DapTaskConfig, DapVersion,
+    hpke::HpkeKemId,
+    messages::AggregationJobInitReq,
+    testing::AggregationJobTest,
+    vdaf::{Prio3Config, VdafConfig},
+    DapAggregationParam, DapVersion,
 };
-use hpke_rs::HpkePublicKey;
-use prio::codec::ParameterizedEncode;
-use rand::{thread_rng, Rng};
+use tokio::runtime::Runtime;
 
-const VERSION: DapVersion = DapVersion::Draft09;
-const VERIFY_KEY: [u8; 32] = [0; 32];
+macro_rules! function {
+    () => {{
+        fn f() {}
+        let name = std::any::type_name_of_val(&f);
 
-fn aggregate(c: &mut Criterion) {
-    let bearer_token = BearerToken::from("the-bearer-token");
-    let tasks = make_tasks();
-    let aggregator = make_aggregator(tasks.clone().into_iter(), bearer_token.clone());
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    for (task_id, task) in tasks {
-        aggregator.clear_storage();
-        let req = runtime.block_on(make_request(
-            &aggregator,
-            task_id,
-            &task,
-            bearer_token.clone(),
-        ));
-        let mut g = c.benchmark_group(vdaf_short_name(&task.vdaf));
-        g.throughput(Throughput::Elements(task.min_batch_size));
-        g.bench_with_input(format!("{}", task.min_batch_size), &(), |b, ()| {
-            b.to_async(&runtime).iter_custom(|iters| {
-                let aggregator = &aggregator;
-                let req = &req;
-                async move {
-                    let mut total = Duration::ZERO;
-                    for _ in 0..iters {
-                        let now = Instant::now();
-                        let ret = black_box(
-                            helper::handle_agg_job_req(aggregator, req, Default::default()).await,
-                        );
-                        total += now.elapsed();
-                        aggregator.clear_storage();
-                        drop(ret.unwrap());
-                    }
-                    total
-                }
-            });
-        });
-    }
+        // Find and cut the rest of the path
+        match &name[..name.len() - 3].rfind(':') {
+            Some(pos) => &name[pos + 1..name.len() - 3],
+            None => &name[..name.len() - 3],
+        }
+    }};
 }
 
-fn make_tasks() -> Vec<(TaskId, DapTaskConfig)> {
-    [1, 10, 100, 1000, 10_000]
-        .into_iter()
-        .flat_map(|num_reports| {
-            [100, 1_000, 10_000, 100_000]
-                .into_iter()
-                .map(move |dimension| (num_reports, dimension))
-        })
-        .map(|(num_reports, dimension)| DapTaskConfig {
-            version: daphne::DapVersion::Draft09,
-            leader_url: "http://1.1.1.1".parse().unwrap(),
-            helper_url: "http://1.1.1.1".parse().unwrap(),
-            time_precision: 3600,
-            min_batch_size: num_reports,
-            query: daphne::DapQueryConfig::FixedSize {
-                max_batch_size: Some(num_reports),
-            },
-            vdaf: daphne::vdaf::VdafConfig::Prio3(
-                daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                    bits: 1,
-                    length: dimension,
-                    chunk_length: 320,
-                    num_proofs: 2,
-                },
-            ),
-            not_after: (SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                + Duration::from_secs(5000))
-            .as_secs(),
-            not_before: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            vdaf_verify_key: VdafVerifyKey::L32(VERIFY_KEY),
-            collector_hpke_config: HpkeConfig {
-                id: 1,
-                kem_id: HpkeKemId::P256HkdfSha256,
-                kdf_id: HpkeKdfId::HkdfSha256,
-                aead_id: HpkeAeadId::Aes128Gcm,
-                public_key: HpkePublicKey::new(vec![]),
-            },
-            method: daphne::DapTaskConfigMethod::Unknown,
-            num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
-        })
-        .map(|task| (TaskId(thread_rng().gen()), task))
-        .last()
-        .into_iter()
-        .collect()
-}
-
-fn make_aggregator(
-    tasks: impl Iterator<Item = (TaskId, DapTaskConfig)>,
-    token: BearerToken,
-) -> InMemoryAggregator {
-    let hpke = HpkeReceiverConfig::gen(1, HpkeKemId::P256HkdfSha256).unwrap();
-    let collector_hpke = HpkeReceiverConfig::gen(2, HpkeKemId::P256HkdfSha256)
-        .unwrap()
-        .config;
-    InMemoryAggregator::new_helper(
-        tasks,
-        [hpke],
-        daphne::DapGlobalConfig {
-            max_batch_duration: u64::MAX,
-            min_batch_interval_start: u64::MAX,
-            max_batch_interval_end: u64::MAX,
-            supported_hpke_kems: vec![HpkeKemId::P256HkdfSha256],
-            allow_taskprov: false,
-            default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
-        },
-        token.clone(),
-        collector_hpke,
-        prometheus::default_registry(),
-        VERIFY_KEY,
-        token,
-    )
-}
-
-async fn make_request(
-    aggregator: &InMemoryAggregator,
-    task_id: TaskId,
-    task_config: &DapTaskConfig,
-    bearer_token: BearerToken,
-) -> DapRequest<BearerToken> {
-    let fake_leader_hpke = HpkeReceiverConfig::gen(2, HpkeKemId::P256HkdfSha256).unwrap();
-    let leader = InMemoryAggregator::new_leader(
-        [],
-        [fake_leader_hpke],
-        aggregator.global_config.clone(),
-        aggregator.leader_token.clone(),
-        aggregator.collector_token.clone(),
-        aggregator.collector_hpke_config.clone(),
-        &prometheus::Registry::new(),
-        VERIFY_KEY,
-        "taskprov_leader_token".into(),
-        None,
-        None,
+fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
+    const NUM_REPORTS: u64 = 1000;
+    let vdaf_lengths = [10, 100, 1_000, 10_000, 100_000];
+    let mut test = AggregationJobTest::new(
+        &VdafConfig::Prio2 { dimension: 0 },
+        HpkeKemId::P256HkdfSha256,
+        DapVersion::Latest,
     );
-    let batch_id = BatchId(thread_rng().gen());
+    test.disable_replay_protection();
 
-    let hpke_config_list = [
-        leader.hpke_receiver_config_list[0].config.clone(),
-        aggregator.hpke_receiver_config_list[0].config.clone(),
-    ];
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut g = c.benchmark_group(function!());
+    for vdaf_length in vdaf_lengths {
+        let vdaf = VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            bits: 1,
+            length: vdaf_length,
+            chunk_length: 320,
+            num_proofs: 2,
+        });
+        test.change_vdaf(vdaf);
+        let reports = test
+            .produce_repeated_reports(vdaf.gen_measurement().unwrap())
+            .take(NUM_REPORTS as _);
 
-    let payload = task_config
-        .produce_agg_job_req(
-            &leader,
-            &leader,
-            &task_id,
-            &daphne::messages::PartialBatchSelector::FixedSizeByBatchId { batch_id },
-            &daphne::DapAggregationParam::Empty,
-            ReportGenerator::new(
-                &task_config.vdaf,
-                &hpke_config_list,
-                task_id,
-                task_config.min_batch_size.try_into().unwrap(),
-                &task_config.vdaf.gen_measurement().unwrap(),
-                VERSION,
-                task_config.not_after - 10,
-                vec![],
-            ),
-            aggregator.metrics(),
-        )
-        .await
-        .unwrap()
-        .1;
-    assert_ne!(payload.prep_inits.len(), 0);
-    DapRequest {
-        version: daphne::DapVersion::Draft09,
-        media_type: Some(daphne::constants::DapMediaType::AggregationJobInitReq),
-        task_id: Some(task_id),
-        resource: daphne::DapResource::AggregationJob(daphne::messages::AggregationJobId(
-            thread_rng().gen(),
-        )),
-        payload: payload.get_encoded_with_param(&VERSION).unwrap(),
-        sender_auth: Some(bearer_token),
-        taskprov: None,
+        let (_, init) =
+            runtime.block_on(test.produce_agg_job_req(&DapAggregationParam::Empty, reports));
+
+        g.throughput(Throughput::Bytes(vdaf_length as _));
+        g.bench_with_input(
+            BenchmarkId::new("consume_agg_job_req", vdaf_length),
+            &init,
+            |b, init| bench(b, &test, init, &runtime),
+        );
     }
 }
 
-fn vdaf_short_name(vdaf: &VdafConfig) -> String {
-    match vdaf {
-        VdafConfig::Prio3(daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-            length,
-            ..
-        }) => format!("prio3-sum-vec-multiproof-{length}"),
-        _ => todo!(),
+fn consume_reports_vary_num_reports(c: &mut Criterion) {
+    const VDAF: VdafConfig =
+        VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            bits: 1,
+            length: 1000,
+            chunk_length: 320,
+            num_proofs: 2,
+        });
+
+    let mut test = AggregationJobTest::new(&VDAF, HpkeKemId::P256HkdfSha256, DapVersion::Latest);
+    test.disable_replay_protection();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    let mut g = c.benchmark_group(function!());
+    for report_counts in [10, 100, 1_000, 10_000] {
+        let reports = test
+            .produce_repeated_reports(VDAF.gen_measurement().unwrap())
+            .take(report_counts);
+
+        let (_, init) =
+            runtime.block_on(test.produce_agg_job_req(&DapAggregationParam::Empty, reports));
+
+        g.throughput(Throughput::Elements(report_counts as _));
+        g.bench_with_input(
+            BenchmarkId::new("consume_agg_job_req", report_counts),
+            &init,
+            |b, init| bench(b, &test, init, &runtime),
+        );
     }
 }
 
-criterion_group!(benches, aggregate);
+fn bench(
+    b: &mut Bencher,
+    test: &AggregationJobTest,
+    init: &AggregationJobInitReq,
+    runtime: &Runtime,
+) {
+    b.to_async(runtime).iter_custom(|iters| async move {
+        let mut total = Duration::ZERO;
+        for init in repeat(init).take(iters as _).cloned() {
+            let now = Instant::now();
+            let ret = black_box(test.handle_agg_job_req(init).await);
+            total += now.elapsed();
+            drop(ret);
+        }
+        total
+    });
+}
+
+criterion_group!(
+    benches,
+    consume_reports_vary_num_reports,
+    consume_reports_vary_vdaf_dimension
+);
 criterion_main!(benches);
