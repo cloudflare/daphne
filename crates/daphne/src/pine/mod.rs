@@ -42,6 +42,13 @@ const USAGE_WR_JOINT_RAND_PART: u16 = 10;
 pub struct Pine<F, X, const SEED_SIZE: usize> {
     pub flp: PineType<F>,
     pub flp_sq_norm_equal: PineTypeSquaredNormEqual<F>,
+
+    // PINE parameters
+    num_proofs: u8,
+    encoded_gradient_len: usize,
+    encoded_input_len: usize,
+
+    algorithm_id: u32,
     phantom_data: PhantomData<X>,
 }
 
@@ -113,40 +120,6 @@ pub struct PineParam {
     pub(crate) num_proofs: u8,
     pub(crate) num_wr_tests: usize,
     pub(crate) num_wr_successes: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct PineConfig<F> {
-    // PINE parameters
-    param: PineParam,
-    sq_norm_bound: F,
-    sq_norm_bits: usize,
-    wr_test_bound: F,
-    wr_test_bits: usize,
-    algorithm_id: u32,
-
-    // Additional parameters for the main circuit
-    bit_checked_len: usize,
-    encoded_gradient_len: usize,
-    encoded_input_len: usize,
-    gadget_calls: usize,
-
-    // Additional parameters for the squared-norm equality check
-    gadget_calls_sq_norm_equal: usize,
-}
-
-impl<F> PineConfig<F> {
-    fn dst(&self, usage: u16) -> [u8; DST_SIZE] {
-        let mut dst = [0; DST_SIZE];
-        dst[0] = 1; // VERSION, draft-cheng-cfrg-vdaf-pine-01
-        dst[1..5].copy_from_slice(&self.algorithm_id.to_be_bytes()); // algo
-        dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
-        dst
-    }
-
-    pub(crate) fn input_len(&self) -> usize {
-        self.encoded_input_len + self.param.num_wr_tests
-    }
 }
 
 impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE> {
@@ -265,6 +238,9 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
         // check results.
         let encoded_input_len = encoded_gradient_len + (1 + wr_test_bits) * param.num_wr_tests;
 
+        // The length of the fully encodeed measurement passed to each validity circuit.
+        let input_len = encoded_input_len + param.num_wr_tests;
+
         // Length of the bit-checked portion of the encoded measurement.
         let bit_checked_len = 2 * sq_norm_bits + (1 + wr_test_bits) * param.num_wr_tests;
 
@@ -275,23 +251,34 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
         let gadget_calls_sq_norm_equal =
             chunk_count(param.chunk_len_sq_norm_equal, param.dimension);
 
-        let cfg = PineConfig {
-            param: *param,
-            sq_norm_bound,
-            sq_norm_bits,
-            wr_test_bound,
-            wr_test_bits,
-            algorithm_id,
-            bit_checked_len,
+        Ok(Self {
+            flp: PineType {
+                dimension: param.dimension,
+                frac_bits: param.frac_bits,
+                chunk_len: param.chunk_len,
+                num_wr_tests: param.num_wr_tests,
+                num_wr_successes: param.num_wr_successes,
+                sq_norm_bound,
+                sq_norm_bits,
+                wr_test_bound,
+                wr_test_bits,
+                bit_checked_len,
+                input_len,
+                gadget_calls,
+                algorithm_id,
+            },
+            flp_sq_norm_equal: PineTypeSquaredNormEqual {
+                dimension: param.dimension,
+                chunk_len: param.chunk_len_sq_norm_equal,
+                sq_norm_bits,
+                input_len,
+                gadget_calls: gadget_calls_sq_norm_equal,
+                phantom_data: PhantomData,
+            },
+            num_proofs: param.num_proofs,
             encoded_gradient_len,
             encoded_input_len,
-            gadget_calls,
-            gadget_calls_sq_norm_equal,
-        };
-
-        Ok(Self {
-            flp: PineType { cfg: cfg.clone() },
-            flp_sq_norm_equal: PineTypeSquaredNormEqual { cfg },
+            algorithm_id,
             phantom_data: PhantomData,
         })
     }
@@ -360,6 +347,14 @@ fn bits(x: u64) -> usize {
 
 fn chunk_count(chunk_length: usize, length: usize) -> usize {
     (length + chunk_length - 1) / chunk_length
+}
+
+fn dst(algorithm_id: u32, usage: u16) -> [u8; DST_SIZE] {
+    let mut dst = [0; DST_SIZE];
+    dst[0] = 1; // VERSION, draft-cheng-cfrg-vdaf-pine-01
+    dst[1..5].copy_from_slice(&algorithm_id.to_be_bytes()); // algo
+    dst[5..].copy_from_slice(&usage.to_be_bytes()); // usage
+    dst
 }
 
 #[cfg(test)]
@@ -606,21 +601,61 @@ mod tests {
             .unwrap();
 
             assert_eq!(
-                pine.flp.cfg.sq_norm_bound, t.expected_sq_norm_bound,
+                pine.flp.sq_norm_bound, t.expected_sq_norm_bound,
                 "sq_norm_bound"
             );
             assert_eq!(
-                pine.flp.cfg.sq_norm_bits, t.expected_sq_norm_bits,
+                pine.flp.sq_norm_bits, t.expected_sq_norm_bits,
                 "sq_norm_bits"
             );
             assert_eq!(
-                pine.flp.cfg.wr_test_bound, t.expected_wr_test_bound,
+                pine.flp.wr_test_bound, t.expected_wr_test_bound,
                 "wr_test_bound"
             );
             assert_eq!(
-                pine.flp.cfg.wr_test_bits, t.expected_wr_test_bits,
+                pine.flp.wr_test_bits, t.expected_wr_test_bits,
                 "wr_test_bits"
             );
         }
+    }
+
+    // Test that parameters are copied consistently across the structs that use them.
+    #[test]
+    fn parameter_consistency() {
+        let frac_bits = 19;
+        let param = PineParam {
+            norm_bound: norm_bound_f64_to_u64(1000.0, frac_bits),
+            dimension: 10_000,
+            frac_bits,
+            chunk_len: 1_337,
+            chunk_len_sq_norm_equal: 54,
+            num_proofs: 3,
+            num_wr_tests: 145,
+            num_wr_successes: 100,
+        };
+
+        let pine = Pine::<Field64, XofTurboShake128, 16>::new(&param, 0xdead_beef).unwrap();
+
+        // PineParam -> PineType
+        assert_eq!(pine.flp.dimension, param.dimension);
+        assert_eq!(pine.flp.frac_bits, param.frac_bits);
+        assert_eq!(pine.flp.chunk_len, param.chunk_len);
+        assert_eq!(pine.flp.num_wr_tests, param.num_wr_tests);
+        assert_eq!(pine.flp.num_wr_successes, param.num_wr_successes);
+
+        // PineParam -> PineTypeSquaredNormEqual
+        assert_eq!(pine.flp_sq_norm_equal.dimension, param.dimension);
+        assert_eq!(
+            pine.flp_sq_norm_equal.chunk_len,
+            param.chunk_len_sq_norm_equal
+        );
+
+        // PineParam -> PineType, PineTypeSquaredNormEqual
+        assert_eq!(pine.flp.sq_norm_bits, pine.flp_sq_norm_equal.sq_norm_bits);
+        assert_eq!(pine.flp.input_len, pine.flp_sq_norm_equal.input_len);
+
+        // PineParam -> Pine
+        assert_eq!(pine.num_proofs, param.num_proofs);
+        assert_eq!(pine.algorithm_id, 0xdead_beef);
     }
 }
