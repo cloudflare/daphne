@@ -5,7 +5,7 @@
 
 use std::{borrow::Cow, iter};
 
-use crate::pine::USAGE_QUERY_RAND;
+use crate::pine::{dst, USAGE_QUERY_RAND};
 use prio::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode},
     field::FftFriendlyFieldElement,
@@ -50,7 +50,7 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize>
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         iter::repeat_with(|| F::decode(bytes))
-            .take(pine.flp.cfg.param.dimension)
+            .take(pine.flp.dimension)
             .collect::<Result<Vec<_>, _>>()
             .map(PineVec)
     }
@@ -88,7 +88,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Vdaf
     type AggregateShare = PineVec<F>;
 
     fn algorithm_id(&self) -> u32 {
-        self.flp.cfg.algorithm_id
+        self.algorithm_id
     }
 
     fn num_aggregators(&self) -> usize {
@@ -105,7 +105,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
         meas_share: &[F],
         usage: u16,
     ) -> Seed<SEED_SIZE> {
-        let mut xof = X::init(blind, &self.flp.cfg.dst(usage));
+        let mut xof = X::init(blind, &dst(self.algorithm_id, usage));
         xof.update(&[agg_id]);
         xof.update(nonce);
         let mut buf = Vec::with_capacity(F::ENCODED_SIZE);
@@ -122,25 +122,25 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
         joint_rand_parts: &[Seed<SEED_SIZE>; 2],
         usage: u16,
     ) -> Seed<SEED_SIZE> {
-        let mut xof = X::init(&[0; SEED_SIZE], &self.flp.cfg.dst(usage));
+        let mut xof = X::init(&[0; SEED_SIZE], &dst(self.algorithm_id, usage));
         xof.update(joint_rand_parts[0].as_ref());
         xof.update(joint_rand_parts[1].as_ref());
         xof.into_seed()
     }
 
     fn helper_meas_share(&self, seed: &[u8; SEED_SIZE]) -> Vec<F> {
-        let mut xof = X::init(seed, &self.flp.cfg.dst(USAGE_MEAS_SHARE));
+        let mut xof = X::init(seed, &dst(self.algorithm_id, USAGE_MEAS_SHARE));
         xof.update(&[1]); // agg_id
         xof.into_seed_stream()
-            .into_field_vec(self.flp.cfg.encoded_input_len)
+            .into_field_vec(self.encoded_input_len)
     }
 
     fn helper_proof_share(&self, seed: &[u8; SEED_SIZE]) -> Vec<F> {
-        let mut xof = X::init(seed, &self.flp.cfg.dst(USAGE_PROOF_SHARE));
-        xof.update(&[self.flp.cfg.param.num_proofs, 1]); // num_proofs, agg_id
+        let mut xof = X::init(seed, &dst(self.algorithm_id, USAGE_PROOF_SHARE));
+        xof.update(&[self.num_proofs, 1]); // num_proofs, agg_id
         xof.into_seed_stream().into_field_vec(
             self.flp_sq_norm_equal.proof_len()
-                + self.flp.proof_len() * usize::from(self.flp.cfg.param.num_proofs),
+                + self.flp.proof_len() * usize::from(self.num_proofs),
         )
     }
 }
@@ -193,13 +193,13 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
         // Begin encoding the Leader's measurement share (up to the wraparound tests). Complete the
         // Helper's measurement share.
         let meas_share_1 = self.helper_meas_share(&meas_share_seed_1);
-        let mut meas_share_0 = Vec::with_capacity(self.flp.cfg.encoded_input_len);
+        let mut meas_share_0 = Vec::with_capacity(self.encoded_input_len);
         for (m, s1) in meas.iter().zip(meas_share_1.iter().take(meas.len())) {
             meas_share_0.push(*m - *s1);
         }
-        debug_assert_eq!(meas.len(), self.flp.cfg.encoded_gradient_len);
-        debug_assert_eq!(meas_share_0.len(), self.flp.cfg.encoded_gradient_len);
-        debug_assert_eq!(meas_share_1.len(), self.flp.cfg.encoded_input_len);
+        debug_assert_eq!(meas.len(), self.encoded_gradient_len);
+        debug_assert_eq!(meas_share_0.len(), self.encoded_gradient_len);
+        debug_assert_eq!(meas_share_1.len(), self.encoded_input_len);
 
         let wr_joint_rand_parts = [
             self.joint_rand_part(
@@ -213,7 +213,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
                 1,
                 &wr_blind_1,
                 nonce,
-                &meas_share_1[..self.flp.cfg.encoded_gradient_len],
+                &meas_share_1[..self.encoded_gradient_len],
                 USAGE_WR_JOINT_RAND_PART,
             ),
         ];
@@ -235,7 +235,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
             meas.extend_from_slice(&wr_test_results);
         }
         debug_assert_eq!(meas.len(), self.flp.input_len());
-        debug_assert_eq!(meas_share_0.len(), self.flp.cfg.encoded_input_len);
+        debug_assert_eq!(meas_share_0.len(), self.encoded_input_len);
 
         let vf_joint_rand_parts = [
             self.joint_rand_part(
@@ -262,20 +262,18 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
 
                 X::seed_stream(
                     &vf_joint_rand_seed,
-                    &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
-                    &[self.flp.cfg.param.num_proofs],
+                    &dst(self.algorithm_id, USAGE_VF_JOINT_RAND),
+                    &[self.num_proofs],
                 )
-                .into_field_vec(
-                    self.flp.joint_rand_len() * usize::from(self.flp.cfg.param.num_proofs),
-                )
+                .into_field_vec(self.flp.joint_rand_len() * usize::from(self.num_proofs))
             };
 
             let prove_rands = {
-                let mut xof = X::init(&prove_seed, &self.flp.cfg.dst(USAGE_PROVE_RAND));
-                xof.update(&[self.flp.cfg.param.num_proofs]);
+                let mut xof = X::init(&prove_seed, &dst(self.algorithm_id, USAGE_PROVE_RAND));
+                xof.update(&[self.num_proofs]);
                 xof.into_seed_stream().into_field_vec(
                     self.flp_sq_norm_equal.prove_rand_len()
-                        + self.flp.prove_rand_len() * usize::from(self.flp.cfg.param.num_proofs),
+                        + self.flp.prove_rand_len() * usize::from(self.num_proofs),
                 )
             };
             let (pr_sq_norm_equal, pr) =
@@ -283,7 +281,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
 
             let mut proofs = Vec::with_capacity(
                 self.flp_sq_norm_equal.proof_len()
-                    + self.flp.proof_len() * usize::from(self.flp.cfg.param.num_proofs),
+                    + self.flp.proof_len() * usize::from(self.num_proofs),
             );
 
             proofs.append(&mut self.flp_sq_norm_equal.prove(&meas, pr_sq_norm_equal, &[])?);
@@ -413,7 +411,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             agg_id.try_into().unwrap(),
             wr_blind.as_ref(),
             nonce,
-            &meas_share[..self.flp.cfg.encoded_gradient_len],
+            &meas_share[..self.encoded_gradient_len],
             USAGE_WR_JOINT_RAND_PART,
         );
 
@@ -426,7 +424,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
         // Run the wraparound tests.
         {
             let wr_test_results = self.flp.run_wr_tests::<X, SEED_SIZE>(
-                &meas_share[..self.flp.cfg.param.dimension],
+                &meas_share[..self.flp.dimension],
                 &corrected_wr_joint_rand_seed,
             );
 
@@ -437,7 +435,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             agg_id.try_into().unwrap(),
             vf_blind.as_ref(),
             nonce,
-            &meas_share[..self.flp.cfg.encoded_input_len],
+            &meas_share[..self.encoded_input_len],
             USAGE_VF_JOINT_RAND_PART,
         );
 
@@ -452,21 +450,19 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             let corrected_vf_joint_rands = {
                 X::seed_stream(
                     &corrected_vf_joint_rand_seed,
-                    &self.flp.cfg.dst(USAGE_VF_JOINT_RAND),
-                    &[self.flp.cfg.param.num_proofs],
+                    &dst(self.algorithm_id, USAGE_VF_JOINT_RAND),
+                    &[self.num_proofs],
                 )
-                .into_field_vec(
-                    self.flp.joint_rand_len() * usize::from(self.flp.cfg.param.num_proofs),
-                )
+                .into_field_vec(self.flp.joint_rand_len() * usize::from(self.num_proofs))
             };
 
             let query_rands = {
-                let mut xof = X::init(verify_key, &self.flp.cfg.dst(USAGE_QUERY_RAND));
-                xof.update(&[self.flp.cfg.param.num_proofs]);
+                let mut xof = X::init(verify_key, &dst(self.algorithm_id, USAGE_QUERY_RAND));
+                xof.update(&[self.num_proofs]);
                 xof.update(nonce);
                 xof.into_seed_stream().into_field_vec(
                     self.flp_sq_norm_equal.query_rand_len()
-                        + self.flp.query_rand_len() * usize::from(self.flp.cfg.param.num_proofs),
+                        + self.flp.query_rand_len() * usize::from(self.num_proofs),
                 )
             };
             let (qr_sq_norm_equal, qr) =
@@ -474,7 +470,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
 
             let mut verifiers_share = Vec::with_capacity(
                 self.flp_sq_norm_equal.verifier_len()
-                    + self.flp.verifier_len() * usize::from(self.flp.cfg.param.num_proofs),
+                    + self.flp.verifier_len() * usize::from(self.num_proofs),
             );
 
             verifiers_share.append(&mut self.flp_sq_norm_equal.query(
@@ -602,7 +598,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
         _agg_param: &(),
         out_shares: M,
     ) -> Result<PineVec<F>, VdafError> {
-        let mut agg_share = PineVec(vec![F::zero(); self.flp.cfg.param.dimension]);
+        let mut agg_share = PineVec(vec![F::zero(); self.flp.dimension]);
         for out_share in out_shares {
             agg_share.accumulate(&out_share)?;
         }
@@ -621,7 +617,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Coll
         agg_shares: M,
         _num_measurements: usize,
     ) -> Result<Vec<f64>, VdafError> {
-        let two_to_frac_bits = f64::from(1 << self.flp.cfg.param.frac_bits);
+        let two_to_frac_bits = f64::from(1 << self.flp.frac_bits);
         let [mut agg_result, agg_share_1] =
             agg_shares
                 .into_iter()

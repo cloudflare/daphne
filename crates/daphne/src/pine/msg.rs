@@ -155,12 +155,12 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize>
             // Expect to decode the Leader's input share.
             0 => Ok(Self(InputShareFor::Leader {
                 meas_share: iter::repeat_with(|| F::decode(bytes))
-                    .take(pine.flp.cfg.encoded_input_len)
+                    .take(pine.encoded_input_len)
                     .collect::<Result<Vec<_>, _>>()?,
                 proofs_share: iter::repeat_with(|| F::decode(bytes))
                     .take(
                         pine.flp_sq_norm_equal.proof_len()
-                            + pine.flp.proof_len() * usize::from(pine.flp.cfg.param.num_proofs),
+                            + pine.flp.proof_len() * usize::from(pine.num_proofs),
                     )
                     .collect::<Result<Vec<_>, _>>()?,
                 wr_blind: Seed::decode(bytes)?,
