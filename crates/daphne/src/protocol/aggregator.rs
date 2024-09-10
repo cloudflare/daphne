@@ -387,7 +387,7 @@ pub(crate) enum ReportProcessedStatus {
 pub enum ReplayProtection {
     #[default]
     Enabled,
-    Disabled,
+    InsecureDisabled,
 }
 
 impl ReplayProtection {
@@ -396,7 +396,7 @@ impl ReplayProtection {
     }
 
     pub const fn disabled(&self) -> bool {
-        matches!(self, ReplayProtection::Disabled)
+        matches!(self, ReplayProtection::InsecureDisabled)
     }
 }
 
@@ -555,7 +555,7 @@ impl DapTaskConfig {
 
     #[allow(clippy::too_many_arguments)]
     #[cfg(any(test, feature = "test-utils"))]
-    pub async fn produce_agg_job_req_allowing_replayed_reports<S>(
+    pub async fn test_produce_agg_job_req<S>(
         &self,
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,

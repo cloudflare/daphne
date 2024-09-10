@@ -492,7 +492,7 @@ impl Test {
         let agg_job_id = AggregationJobId(rngs::OsRng.gen());
         let report_count = reports_for_agg_job.len();
         let (agg_job_state, agg_job_init_req) = task_config
-            .produce_agg_job_req_allowing_replayed_reports(
+            .test_produce_agg_job_req(
                 fake_leader_hpke_receiver_config,
                 self,
                 task_id,
@@ -501,7 +501,7 @@ impl Test {
                 reports_for_agg_job,
                 self.metrics(),
                 if self.replay_reports {
-                    ReplayProtection::Disabled
+                    ReplayProtection::InsecureDisabled
                 } else {
                     ReplayProtection::Enabled
                 },

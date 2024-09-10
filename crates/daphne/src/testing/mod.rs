@@ -204,7 +204,7 @@ impl AggregationJobTest {
     }
 
     pub fn disable_replay_protection(&mut self) {
-        self.replay_protection = ReplayProtection::Disabled;
+        self.replay_protection = ReplayProtection::InsecureDisabled;
     }
 
     pub fn change_vdaf(&mut self, vdaf: VdafConfig) {
@@ -262,7 +262,7 @@ impl AggregationJobTest {
         reports: impl IntoIterator<Item = Report>,
     ) -> (DapAggregationJobState, AggregationJobInitReq) {
         self.task_config
-            .produce_agg_job_req_allowing_replayed_reports(
+            .test_produce_agg_job_req(
                 &self.leader_hpke_receiver_config,
                 self,
                 &self.task_id,
