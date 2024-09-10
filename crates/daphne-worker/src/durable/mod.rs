@@ -211,19 +211,8 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 async fn req_parse<T>(req: &mut Request) -> Result<T>
 where
     T: DurableRequestPayload,
-    // TODO(mendess): delete
-    T: serde::de::DeserializeOwned,
 {
-    let bytes = req.bytes().await?;
-    T::decode_from_bytes(&bytes)
-        .map_err(|e| Error::RustError(e.to_string()))
-        .or_else(|cap_error| {
-            bincode::deserialize(&bytes).map_err(|e| {
-                Error::RustError(format!(
-                    "failed to deserialize capnproto ({cap_error:?}) and bincode ({e:?})"
-                ))
-            })
-        })
+    T::decode_from_bytes(&req.bytes().await?).map_err(|e| Error::RustError(e.to_string()))
 }
 
 fn create_span_from_request(req: &Request) -> tracing::Span {

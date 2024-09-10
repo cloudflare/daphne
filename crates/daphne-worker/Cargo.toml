@@ -18,8 +18,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 axum.workspace = true
 axum-extra = { workspace = true, features = ["typed-header"] }
-# TODO(mendess): delete
-bincode.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
 constcat.workspace = true

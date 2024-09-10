@@ -42,9 +42,6 @@ fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-// TODO(mendess): delete. Only here to suport deserialization with bincode for backwards
-// compatibility.
-#[derive(serde::Deserialize)]
 pub struct AggregateStoreMergeReq {
     pub contained_reports: Vec<ReportId>,
     pub agg_share_delta: DapAggregateShare,
@@ -52,9 +49,6 @@ pub struct AggregateStoreMergeReq {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-// TODO(mendess): delete. Only here to suport deserialization with bincode for backwards
-// compatibility.
-#[derive(serde::Deserialize)]
 pub struct AggregateStoreMergeOptions {
     /// Note:
     /// - privacy is degraded when this is enabled.
