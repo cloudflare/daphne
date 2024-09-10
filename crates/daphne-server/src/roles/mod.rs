@@ -26,7 +26,7 @@ pub async fn fetch_replay_protection_override(kv: Kv<'_>) -> ReplayProtection {
         .unwrap_or_default(); // treat missing as false
     if skip_replay_protection {
         tracing::debug!("replay protection is disabled");
-        ReplayProtection::Disabled
+        ReplayProtection::InsecureDisabled
     } else {
         ReplayProtection::Enabled
     }
