@@ -201,8 +201,8 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
         for (m, s1) in meas.iter().zip(meas_share_1.iter().take(meas.len())) {
             meas_share_0.push(*m - *s1);
         }
-        debug_assert_eq!(meas.len(), self.encoded_gradient_len);
-        debug_assert_eq!(meas_share_0.len(), self.encoded_gradient_len);
+        debug_assert_eq!(meas.len(), self.encoded_gradient_and_sq_norm_len);
+        debug_assert_eq!(meas_share_0.len(), self.encoded_gradient_and_sq_norm_len);
         debug_assert_eq!(meas_share_1.len(), self.encoded_input_len);
 
         let wr_joint_rand_parts = [
@@ -217,7 +217,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
                 1,
                 &wr_blind_1,
                 nonce,
-                &meas_share_1[..self.encoded_gradient_len],
+                &meas_share_1[..self.encoded_gradient_and_sq_norm_len],
                 USAGE_WR_JOINT_RAND_PART,
             ),
         ];
@@ -425,7 +425,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             agg_id.try_into().unwrap(),
             wr_blind.as_ref(),
             nonce,
-            &meas_share[..self.encoded_gradient_len],
+            &meas_share[..self.encoded_gradient_and_sq_norm_len],
             USAGE_WR_JOINT_RAND_PART,
         );
 

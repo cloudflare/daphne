@@ -46,7 +46,7 @@ pub struct Pine<F, X, const SEED_SIZE: usize> {
     // PINE parameters
     num_proofs: u8,
     num_proofs_sq_norm_equal: u8,
-    encoded_gradient_len: usize,
+    encoded_gradient_and_sq_norm_len: usize,
     encoded_input_len: usize,
 
     algorithm_id: u32,
@@ -171,20 +171,13 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
             ));
         }
 
-        // 24 is the largest number of fractional bits that we know we can support.
-        if param.frac_bits > 24 {
-            return Err(VdafError::Uncategorized(
-                "init failed: too many fractional bits".into(),
-            ));
-        }
-
         if param.dimension == 0 {
             return Err(VdafError::Uncategorized(
                 "init failed: 0-dimension inputs are invalid".into(),
             ));
         }
 
-        if param.frac_bits > 128 {
+        if param.frac_bits >= 128 {
             return Err(VdafError::Uncategorized(
                 "init failed: number of fractional bits must not exceed 128".into(),
             ));
@@ -208,6 +201,11 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
                     "init failed: failed to convert squared norm bound to field integer: {e}"
                 ))
             })?;
+            if sq_norm_bound >= F::modulus() {
+                return Err(VdafError::Uncategorized(
+                    "init failed: squared norm bound is too large for field".into(),
+                ));
+            }
             let sq_norm_bound = F::from(sq_norm_bound);
             (sq_norm_bound, sq_norm_bits)
         };
@@ -228,25 +226,35 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
                     "init failed: failed to convert wraparound test bound to field integer: {e}"
                 ))
             })?;
+            if wr_test_bound >= F::modulus() {
+                return Err(VdafError::Uncategorized(
+                    "init failed: wraparound test bound is too large for field".into(),
+                ));
+            }
             let wr_test_bound = F::from(wr_test_bound);
             (wr_test_bound, wr_test_bits)
         };
 
-        // FLP parameters
+        // FlP encoded measurement length parameters. The components of the input are:
         //
-        // Length of the FLP input prefix that is used to derive the wraparound
-        // joint randomness.
-        let encoded_gradient_len = param.dimension + 2 * sq_norm_bits;
+        // * gradient (length `dimension`)
+        // * reported squared norm (`2 * sq_norm_bits`)
+        // * reported wraparound test results (`1 + wr_test_bits * num_wr_tests`)
+        // * wraparound test results (`num_wr_tests`)
+        //
+        // Length of the gradient and reported squared norm.
+        let encoded_gradient_and_sq_norm_len = param.dimension + 2 * sq_norm_bits;
 
-        // Length of the FLP input prefx that includes everything but the wraparound
-        // check results.
-        let encoded_input_len = encoded_gradient_len + (1 + wr_test_bits) * param.num_wr_tests;
+        // Length of the gradient, reported squared norm, and reported test results.
+        let encoded_input_len =
+            encoded_gradient_and_sq_norm_len + (1 + wr_test_bits) * param.num_wr_tests;
 
-        // The length of the fully encodeed measurement passed to each validity circuit.
-        let input_len = encoded_input_len + param.num_wr_tests;
-
-        // Length of the bit-checked portion of the encoded measurement.
+        // Length of the bit-checked portion of the encoded measurement: the reported squared norm
+        // and the reported wraparound test results.
         let bit_checked_len = 2 * sq_norm_bits + (1 + wr_test_bits) * param.num_wr_tests;
+
+        // The length of the fully encoded measurement passed to each validity circuit.
+        let input_len = encoded_input_len + param.num_wr_tests;
 
         // Number of gadget calls. The gadget is used for the bit checks, wraparound tests, and
         // squared norm computation.
@@ -281,7 +289,7 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
             },
             num_proofs: param.num_proofs,
             num_proofs_sq_norm_equal: param.num_proofs_sq_norm_equal,
-            encoded_gradient_len,
+            encoded_gradient_and_sq_norm_len,
             encoded_input_len,
             algorithm_id,
             phantom_data: PhantomData,
