@@ -627,7 +627,6 @@ mod tests {
     // Test that parameters are copied consistently across the structs that use them.
     #[test]
     fn parameter_consistency() {
-        // XXX
         let frac_bits = 19;
         let param = PineParam {
             norm_bound: norm_bound_f64_to_u64(1000.0, frac_bits),

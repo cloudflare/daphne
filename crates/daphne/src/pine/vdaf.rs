@@ -291,13 +291,14 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Pine
                     + self.flp.proof_len() * num_proofs,
             );
 
-            for prove_rand in pr_sq_norm_equal.chunks(self.flp_sq_norm_equal.prove_rand_len()) {
+            for prove_rand in pr_sq_norm_equal.chunks_exact(self.flp_sq_norm_equal.prove_rand_len())
+            {
                 proofs.append(&mut self.flp_sq_norm_equal.prove(&meas, prove_rand, &[])?);
             }
 
             for (prove_rand, vf_joint_rand) in pr
-                .chunks(self.flp.prove_rand_len())
-                .zip(vf_joint_rands.chunks(self.flp.joint_rand_len()))
+                .chunks_exact(self.flp.prove_rand_len())
+                .zip(vf_joint_rands.chunks_exact(self.flp.joint_rand_len()))
             {
                 proofs.append(&mut self.flp.prove(&meas, prove_rand, vf_joint_rand)?);
             }
@@ -488,8 +489,8 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
             );
 
             for (proof_share, query_rand) in ps_sq_norm_equal
-                .chunks(self.flp_sq_norm_equal.proof_len())
-                .zip(qr_sq_norm_equal.chunks(self.flp_sq_norm_equal.query_rand_len()))
+                .chunks_exact(self.flp_sq_norm_equal.proof_len())
+                .zip(qr_sq_norm_equal.chunks_exact(self.flp_sq_norm_equal.query_rand_len()))
             {
                 verifiers_share.append(&mut self.flp_sq_norm_equal.query(
                     &meas_share,
@@ -500,11 +501,13 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
                 )?);
             }
 
-            for (proof_share, (vf_joint_rand, query_rand)) in ps.chunks(self.flp.proof_len()).zip(
-                corrected_vf_joint_rands
-                    .chunks(self.flp.joint_rand_len())
-                    .zip(qr.chunks(self.flp.query_rand_len())),
-            ) {
+            for (proof_share, (vf_joint_rand, query_rand)) in
+                ps.chunks_exact(self.flp.proof_len()).zip(
+                    corrected_vf_joint_rands
+                        .chunks_exact(self.flp.joint_rand_len())
+                        .zip(qr.chunks_exact(self.flp.query_rand_len())),
+                )
+            {
                 verifiers_share.append(&mut self.flp.query(
                     &meas_share,
                     proof_share,
@@ -565,7 +568,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
                 self.flp_sq_norm_equal.verifier_len() * usize::from(self.num_proofs_sq_norm_equal),
             );
 
-            for verifier in v_sq_norm_equal.chunks(self.flp_sq_norm_equal.verifier_len()) {
+            for verifier in v_sq_norm_equal.chunks_exact(self.flp_sq_norm_equal.verifier_len()) {
                 if !self.flp_sq_norm_equal.decide(verifier)? {
                     return Err(VdafError::Uncategorized(
                         "squared norm equality proof check failed".into(),
@@ -573,7 +576,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
                 }
             }
 
-            for verifier in v.chunks(self.flp.verifier_len()) {
+            for verifier in v.chunks_exact(self.flp.verifier_len()) {
                 if !self.flp.decide(verifier)? {
                     return Err(VdafError::Uncategorized("main proof check failed".into()));
                 }
