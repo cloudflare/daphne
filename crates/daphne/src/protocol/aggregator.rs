@@ -332,7 +332,6 @@ impl EarlyReportStateInitialized {
                 &public_share,
                 input_share.as_ref(),
             ),
-            #[cfg(feature = "experimental")]
             VdafConfig::Pine(pine) => pine.prep_init(
                 vdaf_verify_key,
                 agg_id,
@@ -692,7 +691,6 @@ impl DapTaskConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
-                            #[cfg(feature = "experimental")]
                             VdafConfig::Pine(pine) => pine.prep_finish_from_shares(
                                 1,
                                 helper_prep_state.clone(),
@@ -823,7 +821,6 @@ impl DapTaskConfig {
                 }
                 #[cfg(feature = "experimental")]
                 VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),
-                #[cfg(feature = "experimental")]
                 VdafConfig::Pine(pine) => pine.prep_finish(leader.prep_state, prep_msg),
             };
 

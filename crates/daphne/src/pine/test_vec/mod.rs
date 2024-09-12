@@ -2,7 +2,6 @@
 
 //! Tools for evaluating PINE test vectors.
 
-#[cfg(feature = "experimental")]
 use crate::messages::taskprov::{
     VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
 };
@@ -15,7 +14,6 @@ use prio::{
         Aggregator, Collector, PrepareTransition,
     },
 };
-#[cfg(feature = "experimental")]
 use prio::{field::FieldPrio2, vdaf::xof::XofHmacSha256Aes128};
 use serde::Deserialize;
 
@@ -252,112 +250,96 @@ fn pine128_3() {
         .run::<Field128, XofTurboShake128, 16>(PINE_TEST);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_0() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_0.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_1() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_1.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_2() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_2.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_3() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_3.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_4() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_4.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_5() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_5.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_6() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_6.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine32_hmac_sha256_aes128_7() {
     TestVec::from_str(include_str!("01/Pine32HmacSha256Aes128_7.json"))
         .run::<FieldPrio2, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_0() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_0.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_1() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_1.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_2() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_2.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_3() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_3.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_4() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_4.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_5() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_5.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_6() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_6.json"))
         .run::<Field64, XofHmacSha256Aes128, 32>(VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128);
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn pine64_hmac_sha256_aes128_7() {
     TestVec::from_str(include_str!("01/Pine64HmacSha256Aes128_7.json"))

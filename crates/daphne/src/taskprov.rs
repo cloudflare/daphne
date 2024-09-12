@@ -19,7 +19,6 @@ use crate::{
     DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
     Prio3Config, VdafConfig,
 };
-#[cfg(feature = "experimental")]
 use crate::{
     pine::PineParam,
     vdaf::pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig},
@@ -187,7 +186,6 @@ impl DapQueryConfig {
     }
 }
 
-#[cfg(feature = "experimental")]
 impl PineParam {
     fn opt_out_reason(&self, min_proofs: u8) -> Option<String> {
         const MAX_DIM: usize = 300_000;
@@ -269,7 +267,6 @@ impl VdafConfig {
                     },
                 ))
             }
-            #[cfg(feature = "experimental")]
             (_, VdafTypeVar::Pine32HmacSha256Aes128 { param }) => {
                 if let Err(e) = pine32_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
@@ -287,7 +284,6 @@ impl VdafConfig {
                     }))
                 }
             }
-            #[cfg(feature = "experimental")]
             (_, VdafTypeVar::Pine64HmacSha256Aes128 { param }) => {
                 if let Err(e) = pine64_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
@@ -453,11 +449,9 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
             VdafConfig::Mastic { .. } => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
-            #[cfg(feature = "experimental")]
             VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 { param }) => {
                 Ok(Self::Pine32HmacSha256Aes128 { param: *param })
             }
-            #[cfg(feature = "experimental")]
             VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 { param }) => {
                 Ok(Self::Pine64HmacSha256Aes128 { param: *param })
             }
