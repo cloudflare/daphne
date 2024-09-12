@@ -1719,9 +1719,8 @@ mod test {
 
     async_test_versions! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
-    #[cfg(feature = "experimental")]
     async fn e2e_taskprov_pine32_hmac_sha256_aes128(version: DapVersion) {
-        use crate::{pine::PineParam, vdaf::PineConfig};
+        use crate::{pine::PineParam, vdaf::pine::PineConfig};
         e2e_taskprov(
             version,
             VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
@@ -1742,12 +1741,10 @@ mod test {
         .await;
     }
 
-    #[cfg(feature = "experimental")]
     async_test_versions! { e2e_taskprov_pine32_hmac_sha256_aes128 }
 
-    #[cfg(feature = "experimental")]
     async fn e2e_taskprov_pine64_hmac_sha256_aes128(version: DapVersion) {
-        use crate::{pine::PineParam, vdaf::PineConfig};
+        use crate::{pine::PineParam, vdaf::pine::PineConfig};
         e2e_taskprov(
             version,
             VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
@@ -1768,7 +1765,6 @@ mod test {
         .await;
     }
 
-    #[cfg(feature = "experimental")]
     async_test_versions! { e2e_taskprov_pine64_hmac_sha256_aes128 }
 
     // Test multiple tasks in flight at once.

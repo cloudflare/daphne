@@ -864,7 +864,6 @@ pub enum DapMeasurement {
         input: Vec<u8>,
         weight: MasticWeight,
     },
-    #[cfg(feature = "experimental")]
     F64Vec(Vec<f64>),
 }
 
@@ -921,7 +920,6 @@ pub enum DapAggregateResult {
     U64Vec(Vec<u64>),
     U128(u128),
     U128Vec(Vec<u128>),
-    #[cfg(feature = "experimental")]
     F64Vec(Vec<f64>),
 }
 

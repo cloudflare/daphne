@@ -21,9 +21,7 @@ use super::{decode_u16_prefixed, encode_u16_prefixed};
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
 pub(crate) const VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128: u32 = 0xFFFF_1003;
-#[cfg(feature = "experimental")]
 pub(crate) const VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128: u32 = 0xffff_1004;
-#[cfg(feature = "experimental")]
 pub(crate) const VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128: u32 = 0xffff_1005;
 
 // Differential privacy mechanism types.
@@ -41,11 +39,9 @@ pub enum VdafTypeVar {
         chunk_length: u32,
         num_proofs: u8,
     },
-    #[cfg(feature = "experimental")]
     Pine32HmacSha256Aes128 {
         param: PineParam,
     },
-    #[cfg(feature = "experimental")]
     Pine64HmacSha256Aes128 {
         param: PineParam,
     },
@@ -150,12 +146,10 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
                 chunk_length.encode(bytes)?;
                 num_proofs.encode(bytes)?;
             }
-            #[cfg(feature = "experimental")]
             Self::Pine32HmacSha256Aes128 { param } => {
                 VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128.encode(bytes)?;
                 param.encode(bytes)?;
             }
-            #[cfg(feature = "experimental")]
             Self::Pine64HmacSha256Aes128 { param } => {
                 VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128.encode(bytes)?;
                 param.encode(bytes)?;
@@ -187,11 +181,9 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafTypeVar {
                     num_proofs: u8::decode(bytes)?,
                 })
             }
-            #[cfg(feature = "experimental")]
             (.., VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128) => Ok(Self::Pine32HmacSha256Aes128 {
                 param: PineParam::decode(bytes)?,
             }),
-            #[cfg(feature = "experimental")]
             (.., VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128) => Ok(Self::Pine64HmacSha256Aes128 {
                 param: PineParam::decode(bytes)?,
             }),
@@ -645,7 +637,6 @@ mod tests {
 
     test_versions! { roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
-    #[cfg(feature = "experimental")]
     fn roundtrip_vdaf_config_pine32_hmac_sha256_aes128(version: DapVersion) {
         let vdaf_config = VdafConfig {
             dp_config: DpConfig::None,
@@ -671,10 +662,8 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "experimental")]
     test_versions! { roundtrip_vdaf_config_pine32_hmac_sha256_aes128 }
 
-    #[cfg(feature = "experimental")]
     fn roundtrip_vdaf_config_pine64_hmac_sha256_aes128(version: DapVersion) {
         let vdaf_config = VdafConfig {
             dp_config: DpConfig::None,
@@ -700,7 +689,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "experimental")]
     test_versions! { roundtrip_vdaf_config_pine64_hmac_sha256_aes128 }
 
     fn roundtrip_vdaf_config_not_implemented(version: DapVersion) {
