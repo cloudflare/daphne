@@ -645,16 +645,8 @@ impl Test {
 
     pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
         let res = self.test_helper_impl(opt).await;
-        let c = |b: bool| ["F", "T"][b as usize];
-        let metric = self.metrics.test_success.with_label_values(&[
-            c(self.http_client.using_mtls()),
-            c(self.bearer_token.is_some()),
-        ]);
-        if res.is_ok() {
-            metric.inc()
-        } else {
-            metric.set(0)
-        }
+        self.set_sucess_metric_to(res.is_ok());
+
         if let Ok(TestDurations {
             hpke_config_fetch,
             aggregate_init_req,
@@ -743,6 +735,25 @@ impl Test {
             )
             .await?;
         Ok(durations)
+    }
+
+    pub fn mock_success(&self) {
+        self.set_sucess_metric_to(true);
+    }
+
+    pub fn mock_failure(&self) {
+        self.set_sucess_metric_to(false);
+    }
+
+    fn set_sucess_metric_to(&self, success: bool) {
+        let c = |b: bool| ["F", "T"][usize::from(b)];
+        self.metrics
+            .test_success
+            .with_label_values(&[
+                c(self.http_client.using_mtls()),
+                c(self.bearer_token.is_some()),
+            ])
+            .set(i64::from(success));
     }
 }
 
