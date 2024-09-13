@@ -333,26 +333,28 @@ pub struct ProblemDetails {
     pub title: String,
 
     #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub typ: Option<String>,
 
     #[serde(rename = "taskid")]
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::messages::base64url_option"
+        with = "crate::messages::base64url_option",
+        default
     )]
     pub(crate) task_id: Option<TaskId>,
 
     #[serde(rename = "aggregationjobid")]
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::messages::base64url_option"
+        with = "crate::messages::base64url_option",
+        default
     )]
     pub(crate) agg_job_id: Option<AggregationJobId>,
 
     pub(crate) instance: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub detail: Option<String>,
 }
 
