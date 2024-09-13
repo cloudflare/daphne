@@ -36,6 +36,8 @@ jobs:
         run: cargo build --all-targets
       - name: Linting
         run: cargo hack clippy --locked --each-feature -- -D warnings
+      - name: Linting Tests
+        run: cargo hack clippy --tests --locked --each-feature -- -D warnings
       - name: Testing
         run: cargo test
       - name: Doc Testing
