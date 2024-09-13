@@ -7,7 +7,9 @@ use anyhow::{anyhow, bail, Context};
 use daphne::messages::{decode_base64url_vec, HpkeConfigList};
 use daphne_service_utils::http_headers;
 use prio::codec::Decode;
-use reqwest::{Client, Identity, IntoUrl, RequestBuilder};
+use reqwest::{Client, IntoUrl, RequestBuilder};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls_pemfile::Item;
 use url::Url;
 use webpki::{EndEntityCert, ECDSA_P256_SHA256};
 use x509_parser::pem::Pem;
@@ -23,16 +25,13 @@ pub struct HttpClient {
 enum HttpClientInner {
     /// Never reuse the same reqwest client for two different http requests. Usefull for specific
     /// debugging or load testing scenarios.
-    NoReuse {
-        identity: Option<Identity>,
-        ssl_key_log_file_enabled_tls: Option<rustls::ClientConfig>,
-    },
+    NoReuse { tls: rustls::ClientConfig },
     /// Always use the same reqwest client when making requests, this is faster and probably what
     /// you want.
     Reuse(Client),
 }
 
-fn load_identity() -> anyhow::Result<Option<Identity>> {
+fn load_identity() -> anyhow::Result<Option<(CertificateDer<'static>, PrivateKeyDer<'static>)>> {
     // LEADER_ variables left here for backwards compatibility
     const TLS_CLIENT_CERT_VAR: [&str; 2] = ["TLS_CLIENT_CERT", "LEADER_TLS_CLIENT_CERT"];
     const TLS_CLIENT_KEY_VAR: [&str; 2] = ["TLS_CLIENT_KEY", "LEADER_TLS_CLIENT_KEY"];
@@ -42,19 +41,39 @@ fn load_identity() -> anyhow::Result<Option<Identity>> {
         .find_map(|key| env::var(key).ok());
     let leader_tls_client_key = TLS_CLIENT_KEY_VAR.iter().find_map(|key| env::var(key).ok());
     match (leader_tls_client_cert, leader_tls_client_key) {
-        (Some(cert), Some(key)) => Ok(Some(
-            Identity::from_pem((cert + "\n" + &key).as_bytes())
-                .with_context(|| "failed to parse Leader TLS client certificate")?,
-        )),
+        (Some(mut cert), Some(mut key)) => {
+            for pem in [&mut cert, &mut key] {
+                if !pem.ends_with('\n') {
+                    pem.push('\n');
+                }
+            }
+            let Some((Item::X509Certificate(cert), _)) =
+                rustls_pemfile::read_one_from_slice(cert.as_bytes())
+                    .map_err(|e| anyhow!("failed to read cert: {e:?}. Cert was {cert:?}"))?
+            else {
+                panic!("invalid certificate in TLS_CLIENT_CERT")
+            };
+            let key = match rustls_pemfile::read_one_from_slice(key.as_bytes())
+                .map_err(|e| anyhow!("failed to read key: {e:?}"))?
+            {
+                Some((Item::Pkcs1Key(key), _)) => PrivateKeyDer::from(key),
+                Some((Item::Pkcs8Key(key), _)) => PrivateKeyDer::from(key),
+                Some((Item::Sec1Key(key), _)) => PrivateKeyDer::from(key),
+                _ => panic!("invalid private key in TLS_CLIENT_KEY"),
+            };
+            Ok(Some((cert, key)))
+        }
         (None, None) => Ok(None),
         (Some(_), None) => bail!("{TLS_CLIENT_KEY_VAR:?} is not set"),
         (None, Some(_)) => bail!("{TLS_CLIENT_CERT_VAR:?} is not set"),
     }
 }
 
-fn ssl_key_log_file_tls_configuration() -> rustls::ClientConfig {
+type UsingMtls = bool;
+
+fn setup_tls(enable_ssl_key_log_file: bool) -> anyhow::Result<(rustls::ClientConfig, UsingMtls)> {
     tracing::warn!("enabling SSLKEYLOGFILE");
-    let mut tls = rustls::ClientConfig::builder_with_provider(
+    let tls = rustls::ClientConfig::builder_with_provider(
         rustls::crypto::aws_lc_rs::default_provider().into(),
     )
     .with_safe_default_protocol_versions()
@@ -63,77 +82,57 @@ fn ssl_key_log_file_tls_configuration() -> rustls::ClientConfig {
         let mut store = rustls::RootCertStore::empty();
         store.add_parsable_certificates(rustls_native_certs::load_native_certs().unwrap());
         store
-    })
-    .with_no_client_auth();
-    tls.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
-    tls
+    });
+    let identity = load_identity()?;
+    let using_mtls = identity.is_some();
+    let mut tls = match identity {
+        Some((cert, key)) => {
+            tracing::info!("setting up mtls client certificate");
+            tls.with_client_auth_cert(vec![cert], key)?
+        }
+        None => tls.with_no_client_auth(),
+    };
+    if enable_ssl_key_log_file {
+        tls.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
+    }
+    Ok((tls, using_mtls))
 }
 
-fn init_reqwest_client(
-    identity: Option<Identity>,
-    ssl_key_log_file_enabled_tls: Option<rustls::ClientConfig>,
-) -> reqwest::Client {
+fn init_reqwest_client(tls: rustls::ClientConfig) -> reqwest::Client {
     // Build the HTTP client.
-    let mut http_client_builder = reqwest::Client::builder()
+    reqwest::Client::builder()
         // it takes too long to generate reports for larger dimensions, causing the worker
         // to drop idle connections
         .pool_max_idle_per_host(0)
         // Don't handle redirects automatically so that we can control the client behavior.
-        .redirect(reqwest::redirect::Policy::none());
-
-    // We might as well use rustls because we already need the feature for
-    // `Identity::from_pem()`.
-    http_client_builder = if let Some(tls) = ssl_key_log_file_enabled_tls {
-        http_client_builder.use_preconfigured_tls(tls)
-    } else {
-        http_client_builder.use_rustls_tls()
-    };
-
-    if let Some(identity) = identity {
-        // Configure TLS certificate, if available.
-        http_client_builder = http_client_builder.identity(identity);
-    }
-
-    http_client_builder
+        .redirect(reqwest::redirect::Policy::none())
+        .use_preconfigured_tls(tls)
         .build()
         .expect("failed to build http client")
 }
 
 impl HttpClient {
     pub fn new(enable_ssl_key_log_file: bool) -> anyhow::Result<Self> {
-        let identity = load_identity()?;
+        let (tls, using_mtls) = setup_tls(enable_ssl_key_log_file)?;
         Ok(Self {
-            using_mtls: identity.is_some(),
-            inner: HttpClientInner::Reuse(init_reqwest_client(
-                identity,
-                enable_ssl_key_log_file.then(ssl_key_log_file_tls_configuration),
-            )),
+            using_mtls,
+            inner: HttpClientInner::Reuse(init_reqwest_client(tls)),
         })
     }
 
     /// Create an http client that never reuses the same client for two requests.
     pub fn new_no_reuse(enable_ssl_key_log_file: bool) -> anyhow::Result<Self> {
-        let identity = load_identity()?;
+        let (tls, using_mtls) = setup_tls(enable_ssl_key_log_file)?;
         Ok(Self {
-            using_mtls: identity.is_some(),
-            inner: HttpClientInner::NoReuse {
-                identity,
-                ssl_key_log_file_enabled_tls: enable_ssl_key_log_file
-                    .then(ssl_key_log_file_tls_configuration),
-            },
+            using_mtls,
+            inner: HttpClientInner::NoReuse { tls },
         })
     }
 
     fn client(&self) -> Cow<'_, Client> {
         match &self.inner {
             HttpClientInner::Reuse(c) => Cow::Borrowed(c),
-            HttpClientInner::NoReuse {
-                identity,
-                ssl_key_log_file_enabled_tls,
-            } => Cow::Owned(init_reqwest_client(
-                identity.clone(),
-                ssl_key_log_file_enabled_tls.clone(),
-            )),
+            HttpClientInner::NoReuse { tls } => Cow::Owned(init_reqwest_client(tls.clone())),
         }
     }
 
