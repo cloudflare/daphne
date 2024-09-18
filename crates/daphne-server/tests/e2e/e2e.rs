@@ -1087,6 +1087,7 @@ async fn fixed_size() {
 }
 
 async fn leader_collect_taskprov_ok(version: DapVersion) {
+    const DAP_TASKPROV_COLLECTOR_TOKEN: &str = "I-am-the-collector";
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
@@ -1149,7 +1150,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let collect_uri = t
         .leader_post_collect_using_token(
             client,
-            "I-am-the-collector", // DAP_TASKPROV_COLLECTOR_AUTH
+            DAP_TASKPROV_COLLECTOR_TOKEN,
             Some(&taskprov_advertisement),
             Some(&task_id),
             collect_req.get_encoded_with_param(&t.version).unwrap(),
@@ -1159,8 +1160,20 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     println!("collect_uri: {collect_uri}");
 
     // Poll the collect URI before the CollectResp is ready.
-    let resp = t.poll_collection_url(client, &collect_uri).await.unwrap();
-    assert_eq!(resp.status(), 202, "response: {resp:?}");
+    let resp = t
+        .poll_collection_url_using_token(client, &collect_uri, DAP_TASKPROV_COLLECTOR_TOKEN)
+        .await
+        .unwrap();
+    #[allow(clippy::format_in_format_args)]
+    {
+        assert_eq!(
+            resp.status(),
+            202,
+            "response: {} {}",
+            format!("{resp:?}"),
+            resp.text().await.unwrap()
+        );
+    }
 
     // The reports are aggregated in the background.
     let agg_telem = t.internal_process(client).await.unwrap();
@@ -1178,7 +1191,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     );
 
     // Poll the collect URI.
-    let resp = t.poll_collection_url(client, &collect_uri).await.unwrap();
+    let resp = t
+        .poll_collection_url_using_token(client, &collect_uri, DAP_TASKPROV_COLLECTOR_TOKEN)
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 
     let collection =
@@ -1203,7 +1219,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
 
     // Poll the collect URI once more. Expect the response to be the same as the first, per HTTP
     // GET semantics.
-    let resp = t.poll_collection_url(client, &collect_uri).await.unwrap();
+    let resp = t
+        .poll_collection_url_using_token(client, &collect_uri, DAP_TASKPROV_COLLECTOR_TOKEN)
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.bytes().await.unwrap(),

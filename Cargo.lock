@@ -955,6 +955,7 @@ dependencies = [
  "daphne",
  "daphne-service-utils",
  "dhat",
+ "either",
  "futures",
  "hex",
  "hpke-rs",

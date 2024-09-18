@@ -1,9 +1,13 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne::ReplayProtection;
+use daphne::{messages::TaskId, DapSender, ReplayProtection};
+use daphne_service_utils::bearer_token::BearerToken;
 
-use crate::storage_proxy_connection::kv::{self, Kv, KvGetOptions};
+use crate::storage_proxy_connection::{
+    self,
+    kv::{self, Kv, KvGetOptions},
+};
 
 mod aggregator;
 mod helper;
@@ -32,18 +36,85 @@ pub async fn fetch_replay_protection_override(kv: Kv<'_>) -> ReplayProtection {
     }
 }
 
+/// Bearer token for for tasks configured manually or via the [ppm-dap-interop-test][interop] draft.
+///
+/// [interop]: https://divergentdave.github.io/draft-dcook-ppm-dap-interop-test-design/draft-dcook-ppm-dap-interop-test-design.html
+pub(crate) struct BearerTokens<'s> {
+    kv: kv::Kv<'s>,
+}
+
+impl<'s> From<kv::Kv<'s>> for BearerTokens<'s> {
+    fn from(kv: kv::Kv<'s>) -> Self {
+        Self { kv }
+    }
+}
+
+impl BearerTokens<'_> {
+    #[cfg(feature = "test-utils")]
+    pub async fn put_if_not_exists(
+        &self,
+        role: DapSender,
+        task_id: TaskId,
+        token: BearerToken,
+    ) -> Result<Option<BearerToken>, storage_proxy_connection::Error> {
+        self.kv
+            .put_if_not_exists::<kv::prefix::KvBearerToken>(&(role, task_id).into(), token)
+            .await
+    }
+
+    /// Checks if a presented token matches the expected token of a task.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(true)` if the task exists and the token matches
+    /// - `Ok(false)` if the task doesn't exist or the token doesn't match
+    /// - `Err(error)` if any io error occurs while fetching
+    pub async fn matches(
+        &self,
+        role: DapSender,
+        task_id: TaskId,
+        token: &BearerToken,
+    ) -> Result<bool, storage_proxy_connection::Error> {
+        self.kv
+            .peek::<kv::prefix::KvBearerToken, _, _>(
+                &(role, task_id).into(),
+                &kv::KvGetOptions {
+                    cache_not_found: false,
+                },
+                |stored_token| stored_token == token,
+            )
+            .await
+            .map(|s| s.is_some_and(|matches| matches))
+    }
+
+    pub async fn get(
+        &self,
+        role: DapSender,
+        task_id: TaskId,
+    ) -> Result<Option<BearerToken>, storage_proxy_connection::Error> {
+        self.kv
+            .get_cloned::<kv::prefix::KvBearerToken>(
+                &(role, task_id).into(),
+                &kv::KvGetOptions {
+                    cache_not_found: false,
+                },
+            )
+            .await
+    }
+}
+
 #[cfg(feature = "test-utils")]
 mod test_utils {
     use daphne::{
-        auth::BearerToken,
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
         roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
-        DapError, DapQueryConfig, DapTaskConfig, DapVersion,
+        DapError, DapQueryConfig, DapSender, DapTaskConfig, DapVersion,
     };
     use daphne_service_utils::{
+        bearer_token::BearerToken,
         test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
         DapRole,
     };
@@ -61,7 +132,7 @@ mod test_utils {
 
             self.http
                 .delete(self.storage_proxy_config.url.join(PURGE_STORAGE).unwrap())
-                .bearer_auth(&self.storage_proxy_config.auth_token)
+                .bearer_auth(self.storage_proxy_config.auth_token.as_str())
                 .send()
                 .await
                 .map_err(
@@ -77,7 +148,7 @@ mod test_utils {
             use daphne_service_utils::durable_requests::STORAGE_READY;
             self.http
                 .get(self.storage_proxy_config.url.join(STORAGE_READY).unwrap())
-                .bearer_auth(&self.storage_proxy_config.auth_token)
+                .bearer_auth(self.storage_proxy_config.auth_token.as_str())
                 .send()
                 .await
                 .map_err(|e| fatal_error!(err = ?e, "failed to send ready check request to storage proxy"))?
@@ -155,30 +226,26 @@ mod test_utils {
             // Leader authentication token.
             let token = BearerToken::from(cmd.leader_authentication_token);
             if self
-                .kv()
-                .put_if_not_exists::<kv::prefix::LeaderBearerToken>(&cmd.task_id, token)
+                .bearer_tokens()
+                .put_if_not_exists(DapSender::Leader, cmd.task_id, token)
                 .await
-                .map_err(|e| fatal_error!(err = ?e, "failed to fetch leader bearer token"))?
-                .is_some()
+                .is_err()
             {
                 return Err(fatal_error!(
                     err = "command failed: token already exists for the given task and bearer role (leader)",
                     task_id = %cmd.task_id,
                 ));
-            }
+            };
 
             // Collector authentication token.
             match (cmd.role, cmd.collector_authentication_token) {
                 (DapRole::Leader, Some(token_string)) => {
                     let token = BearerToken::from(token_string);
                     if self
-                        .kv()
-                        .put_if_not_exists::<kv::prefix::CollectorBearerToken>(&cmd.task_id, token)
+                        .bearer_tokens()
+                        .put_if_not_exists(DapSender::Collector, cmd.task_id, token)
                         .await
-                        .map_err(
-                            |e| fatal_error!(err = ?e, "failed to put collector bearer token"),
-                        )?
-                        .is_some()
+                        .is_err()
                     {
                         return Err(fatal_error!(err = format!(
                             "command failed: token already exists for the given task ({}) and bearer role (collector)",

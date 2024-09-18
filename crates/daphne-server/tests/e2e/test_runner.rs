@@ -72,6 +72,7 @@ impl TestRunner {
     }
 
     async fn with(version: DapVersion, query_config: &DapQueryConfig) -> Self {
+        println!("\n############ starting test prep ############");
         let mut rng = thread_rng();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -485,6 +486,10 @@ impl TestRunner {
                 .context("no string for version")?
                 .parse()?,
         );
+        headers.insert(
+            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
+            reqwest::header::HeaderValue::from_str(&self.collector_bearer_token)?,
+        );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
@@ -643,8 +648,8 @@ impl TestRunner {
         anyhow::ensure!(
             resp.status() == 200,
             "unexpected response status. Expected {} got {}: Body is {:?}",
-            resp.status(),
             reqwest::StatusCode::OK,
+            resp.status(),
             resp.text().await?,
         );
         Ok(resp.json().await?)
@@ -671,7 +676,9 @@ impl TestRunner {
             .context("request failed")?;
         anyhow::ensure!(
             resp.status() == 200,
-            "request to {url} failed: response: {resp:?}"
+            "request to {url} failed: response: {} {}",
+            format!("{resp:?}"), // text() moves so we have to format here
+            resp.text().await.unwrap_or("<failed to get body>".into()),
         );
         let t = resp.text().await.context("failed to extract text")?;
         // This is needed so we can have tests that call this expecting nothing and have it work
@@ -757,6 +764,16 @@ impl TestRunner {
         client: &reqwest::Client,
         url: &Url,
     ) -> anyhow::Result<reqwest::Response> {
+        self.poll_collection_url_using_token(client, url, &self.collector_bearer_token)
+            .await
+    }
+
+    pub async fn poll_collection_url_using_token(
+        &self,
+        client: &reqwest::Client,
+        url: &Url,
+        token: &str,
+    ) -> anyhow::Result<reqwest::Response> {
         let builder = client.post(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -766,6 +783,10 @@ impl TestRunner {
                     .as_str_for_version(self.version)
                     .context("no string for version")?,
             )?,
+        );
+        headers.insert(
+            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
+            reqwest::header::HeaderValue::from_str(token)?,
         );
         Ok(builder.headers(headers).send().await?)
     }

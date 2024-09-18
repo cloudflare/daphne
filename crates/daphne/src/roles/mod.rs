@@ -16,10 +16,10 @@ use tracing::warn;
 
 pub use aggregator::{DapAggregator, DapReportInitializer};
 pub use helper::DapHelper;
-pub use leader::{DapAuthorizedSender, DapLeader};
+pub use leader::DapLeader;
 
-async fn check_batch<S: Sync>(
-    agg: &impl DapAggregator<S>,
+async fn check_batch(
+    agg: &impl DapAggregator,
     task_config: &DapTaskConfig,
     task_id: &TaskId,
     query: &Query,
@@ -92,10 +92,7 @@ async fn check_batch<S: Sync>(
     Ok(())
 }
 
-fn check_request_content_type<S>(
-    req: &DapRequest<S>,
-    expected: DapMediaType,
-) -> Result<(), DapAbort> {
+fn check_request_content_type(req: &DapRequest, expected: DapMediaType) -> Result<(), DapAbort> {
     if req.media_type != Some(expected) {
         Err(DapAbort::content_type(req, expected))
     } else {
@@ -103,10 +100,10 @@ fn check_request_content_type<S>(
     }
 }
 
-async fn resolve_taskprov<S: Sync>(
-    agg: &impl DapAggregator<S>,
+async fn resolve_taskprov(
+    agg: &impl DapAggregator,
     task_id: &TaskId,
-    req: &DapRequest<S>,
+    req: &DapRequest,
     global_config: &DapGlobalConfig,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
@@ -146,12 +143,11 @@ async fn resolve_taskprov<S: Sync>(
 
 #[cfg(test)]
 mod test {
-    use super::{aggregator, helper, leader, DapAuthorizedSender, DapLeader};
+    use super::{aggregator, helper, leader, DapLeader};
     #[cfg(feature = "experimental")]
     use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
     use crate::{
         assert_metrics_include, async_test_versions,
-        auth::BearerToken,
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
@@ -179,8 +175,6 @@ mod test {
     pub(super) struct TestData {
         pub now: Time,
         global_config: DapGlobalConfig,
-        collector_token: BearerToken,
-        taskprov_collector_token: BearerToken,
         pub time_interval_task_id: TaskId,
         pub fixed_size_task_id: TaskId,
         pub expired_task_id: TaskId,
@@ -188,10 +182,8 @@ mod test {
         pub mastic_task_id: TaskId,
         helper_registry: prometheus::Registry,
         tasks: HashMap<TaskId, DapTaskConfig>,
-        pub leader_token: BearerToken,
         collector_hpke_receiver_config: HpkeReceiverConfig,
         taskprov_vdaf_verify_key_init: [u8; 32],
-        taskprov_leader_token: BearerToken,
         leader_registry: prometheus::Registry,
     }
 
@@ -313,14 +305,8 @@ mod test {
                 );
             }
 
-            // Authorization tokens. These are normally chosen at random.
-            let leader_token = BearerToken::from("leader_token");
-            let collector_token = BearerToken::from("collector_token");
-
             // taskprov
             let taskprov_vdaf_verify_key_init = rng.gen::<[u8; 32]>();
-            let taskprov_leader_token = BearerToken::from("taskprov_leader_token");
-            let taskprov_collector_token = BearerToken::from("taskprov_collector_token");
 
             let helper_registry = prometheus::Registry::new_custom(
                 Option::None,
@@ -342,8 +328,6 @@ mod test {
             Self {
                 now,
                 global_config,
-                collector_token,
-                taskprov_collector_token,
                 time_interval_task_id,
                 fixed_size_task_id,
                 expired_task_id,
@@ -351,8 +335,6 @@ mod test {
                 mastic_task_id,
                 helper_registry,
                 tasks,
-                leader_token,
-                taskprov_leader_token,
                 collector_hpke_receiver_config,
                 taskprov_vdaf_verify_key_init,
                 leader_registry,
@@ -366,11 +348,9 @@ mod test {
                     .gen_hpke_receiver_config_list(thread_rng().gen())
                     .expect("failed to generate HPKE receiver config"),
                 self.global_config.clone(),
-                self.leader_token.clone(),
                 self.collector_hpke_receiver_config.config.clone(),
                 &self.helper_registry,
                 self.taskprov_vdaf_verify_key_init,
-                self.taskprov_leader_token.clone(),
             ))
         }
 
@@ -381,13 +361,9 @@ mod test {
                     .gen_hpke_receiver_config_list(thread_rng().gen())
                     .expect("failed to generate HPKE receiver config"),
                 self.global_config,
-                self.leader_token,
-                self.collector_token.clone(),
                 self.collector_hpke_receiver_config.config.clone(),
                 &self.leader_registry,
                 self.taskprov_vdaf_verify_key_init,
-                self.taskprov_leader_token,
-                self.taskprov_collector_token.clone(),
                 Arc::clone(&helper),
             ));
 
@@ -395,8 +371,6 @@ mod test {
                 now: self.now,
                 leader,
                 helper,
-                collector_token: self.collector_token,
-                taskprov_collector_token: self.taskprov_collector_token,
                 time_interval_task_id: self.time_interval_task_id,
                 fixed_size_task_id: self.fixed_size_task_id,
                 expired_task_id: self.expired_task_id,
@@ -412,8 +386,6 @@ mod test {
         now: Time,
         leader: Arc<InMemoryAggregator>,
         helper: Arc<InMemoryAggregator>,
-        collector_token: BearerToken,
-        taskprov_collector_token: BearerToken,
         time_interval_task_id: TaskId,
         fixed_size_task_id: TaskId,
         expired_task_id: TaskId,
@@ -430,11 +402,7 @@ mod test {
             data.with_leader(helper)
         }
 
-        pub async fn gen_test_upload_req(
-            &self,
-            report: Report,
-            task_id: &TaskId,
-        ) -> DapRequest<BearerToken> {
+        pub async fn gen_test_upload_req(&self, report: Report, task_id: &TaskId) -> DapRequest {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let version = task_config.version;
 
@@ -448,11 +416,7 @@ mod test {
             }
         }
 
-        pub async fn gen_test_coll_job_req(
-            &self,
-            query: Query,
-            task_id: &TaskId,
-        ) -> DapRequest<BearerToken> {
+        pub async fn gen_test_coll_job_req(&self, query: Query, task_id: &TaskId) -> DapRequest {
             self.gen_test_coll_job_req_for_collection(query, DapAggregationParam::Empty, task_id)
                 .await
         }
@@ -462,10 +426,10 @@ mod test {
             query: Query,
             agg_param: DapAggregationParam,
             task_id: &TaskId,
-        ) -> DapRequest<BearerToken> {
+        ) -> DapRequest {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
-            self.collector_authorized_req(
+            Self::collector_req(
                 task_id,
                 &task_config,
                 DapMediaType::CollectReq,
@@ -481,7 +445,7 @@ mod test {
             task_id: &TaskId,
             agg_param: DapAggregationParam,
             reports: Vec<Report>,
-        ) -> (DapAggregationJobState, DapRequest<BearerToken>) {
+        ) -> (DapAggregationJobState, DapRequest) {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
@@ -508,38 +472,14 @@ mod test {
 
             (
                 leader_state,
-                self.leader_authorized_req(
+                Self::leader_req(
                     task_id,
                     &task_config,
                     Some(&agg_job_id),
                     DapMediaType::AggregationJobInitReq,
                     agg_job_init_req,
-                )
-                .await,
+                ),
             )
-        }
-
-        pub async fn gen_test_agg_share_req(
-            &self,
-            report_count: u64,
-            checksum: [u8; 32],
-        ) -> DapRequest<BearerToken> {
-            let task_id = &self.time_interval_task_id;
-            let task_config = self.leader.unchecked_get_task_config(task_id).await;
-
-            self.leader_authorized_req(
-                task_id,
-                &task_config,
-                None,
-                DapMediaType::AggregateShareReq,
-                AggregateShareReq {
-                    batch_sel: BatchSelector::default(),
-                    agg_param: Vec::default(),
-                    report_count,
-                    checksum,
-                },
-            )
-            .await
         }
 
         pub async fn gen_test_report(&self, task_id: &TaskId) -> Report {
@@ -585,21 +525,14 @@ mod test {
                 .unwrap()
         }
 
-        pub async fn leader_authorized_req<M: ParameterizedEncode<DapVersion>>(
-            &self,
+        pub fn leader_req<M: ParameterizedEncode<DapVersion>>(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             agg_job_id: Option<&AggregationJobId>,
             media_type: DapMediaType,
             msg: M,
-        ) -> DapRequest<BearerToken> {
+        ) -> DapRequest {
             let payload = msg.get_encoded_with_param(&task_config.version).unwrap();
-            let sender_auth = Some(
-                self.leader
-                    .authorize(task_id, task_config, &media_type, &payload)
-                    .await
-                    .unwrap(),
-            );
             DapRequest {
                 version: task_config.version,
                 media_type: Some(media_type),
@@ -608,25 +541,18 @@ mod test {
                     DapResource::AggregationJob(*id)
                 }),
                 payload,
-                sender_auth,
                 ..Default::default()
             }
         }
 
-        pub fn collector_authorized_req<M: ParameterizedEncode<DapVersion>>(
-            &self,
+        pub fn collector_req<M: ParameterizedEncode<DapVersion>>(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             media_type: DapMediaType,
             msg: M,
-        ) -> DapRequest<BearerToken> {
+        ) -> DapRequest {
             let mut rng = thread_rng();
             let coll_job_id = CollectionJobId(rng.gen());
-            let sender_auth = if task_config.method_is_taskprov() {
-                Some(self.taskprov_collector_token.clone())
-            } else {
-                Some(self.collector_token.clone())
-            };
 
             DapRequest {
                 version: task_config.version,
@@ -634,7 +560,6 @@ mod test {
                 task_id: Some(*task_id),
                 resource: DapResource::CollectionJob(coll_job_id),
                 payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
-                sender_auth,
                 ..Default::default()
             }
         }
@@ -649,21 +574,19 @@ mod test {
         let agg_job_id = AggregationJobId(rng.gen());
 
         // Helper expects "time_interval" query, but Leader indicates "fixed_size".
-        let req = t
-            .leader_authorized_req(
-                task_id,
-                &task_config,
-                Some(&agg_job_id),
-                DapMediaType::AggregationJobInitReq,
-                AggregationJobInitReq {
-                    agg_param: Vec::default(),
-                    part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
-                        batch_id: BatchId(rng.gen()),
-                    },
-                    prep_inits: Vec::default(),
+        let req = Test::leader_req(
+            task_id,
+            &task_config,
+            Some(&agg_job_id),
+            DapMediaType::AggregationJobInitReq,
+            AggregationJobInitReq {
+                agg_param: Vec::default(),
+                part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+                    batch_id: BatchId(rng.gen()),
                 },
-            )
-            .await;
+                prep_inits: Vec::default(),
+            },
+        );
         assert_matches!(
             helper::handle_agg_job_req(&*t.helper, &req, Default::default())
                 .await
@@ -706,36 +629,6 @@ mod test {
     //
     //    async_test_versions! { handle_agg_job_req_init_expired_task }
 
-    async fn handle_agg_job_init_req_unauthorized_request(version: DapVersion) {
-        let t = Test::new(version);
-        let report = t.gen_test_report(&t.time_interval_task_id).await;
-        let (_, mut req) = t
-            .gen_test_agg_job_init_req(
-                &t.time_interval_task_id,
-                DapAggregationParam::Empty,
-                vec![report],
-            )
-            .await;
-        req.sender_auth = None;
-
-        // Expect failure due to missing bearer token.
-        assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req, Default::default()).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        // Expect failure due to incorrect bearer token.
-        req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-        assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req, Default::default()).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        assert_eq!(t.helper.audit_log.invocations(), 0);
-    }
-
-    async_test_versions! { handle_agg_job_init_req_unauthorized_request }
-
     async fn handle_hpke_config_req_unrecognized_task(version: DapVersion) {
         let t = Test::new(version);
         let mut rng = thread_rng();
@@ -750,7 +643,7 @@ mod test {
         };
 
         assert_eq!(
-            aggregator::handle_hpke_config_req(&*t.leader, &req, Some(task_id))
+            aggregator::handle_hpke_config_req(&*t.leader, req.version, Some(task_id))
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::UnrecognizedTask { task_id })
@@ -774,33 +667,12 @@ mod test {
         // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
         // used for all tasks.
         assert_matches!(
-            aggregator::handle_hpke_config_req(&*t.leader, &req, None).await,
+            aggregator::handle_hpke_config_req(&*t.leader, req.version, None).await,
             Err(DapError::Abort(DapAbort::MissingTaskId))
         );
     }
 
     async_test_versions! { handle_hpke_config_req_missing_task_id }
-
-    async fn handle_agg_share_req_unauthorized_request(version: DapVersion) {
-        let t = Test::new(version);
-        let mut req = t.gen_test_agg_share_req(0, [0; 32]).await;
-        req.sender_auth = None;
-
-        // Expect failure due to missing bearer token.
-        assert_matches!(
-            helper::handle_agg_share_req(&*t.helper, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        // Expect failure due to incorrect bearer token.
-        req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-        assert_matches!(
-            helper::handle_agg_share_req(&*t.helper, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-    }
-
-    async_test_versions! { handle_agg_share_req_unauthorized_request }
 
     // Test that the Helper handles the batch selector sent from the Leader properly.
     async fn handle_agg_share_req_invalid_batch_sel(version: DapVersion) {
@@ -812,22 +684,20 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.time_interval_task_id)
             .await;
-        let req = t
-            .leader_authorized_req(
-                &t.time_interval_task_id,
-                &task_config,
-                None,
-                DapMediaType::AggregateShareReq,
-                AggregateShareReq {
-                    batch_sel: BatchSelector::FixedSizeByBatchId {
-                        batch_id: BatchId(rng.gen()),
-                    },
-                    agg_param: Vec::default(),
-                    report_count: 0,
-                    checksum: [0; 32],
+        let req = Test::leader_req(
+            &t.time_interval_task_id,
+            &task_config,
+            None,
+            DapMediaType::AggregateShareReq,
+            AggregateShareReq {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
+                    batch_id: BatchId(rng.gen()),
                 },
-            )
-            .await;
+                agg_param: Vec::default(),
+                report_count: 0,
+                checksum: [0; 32],
+            },
+        );
         assert_matches!(
             helper::handle_agg_share_req(&*t.helper, &req)
                 .await
@@ -840,22 +710,20 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.fixed_size_task_id)
             .await;
-        let req = t
-            .leader_authorized_req(
-                &t.fixed_size_task_id,
-                &task_config,
-                None,
-                DapMediaType::AggregateShareReq,
-                AggregateShareReq {
-                    batch_sel: BatchSelector::FixedSizeByBatchId {
-                        batch_id: BatchId(rng.gen()), // Unrecognized batch ID
-                    },
-                    agg_param: Vec::default(),
-                    report_count: 0,
-                    checksum: [0; 32],
+        let req = Test::leader_req(
+            &t.fixed_size_task_id,
+            &task_config,
+            None,
+            DapMediaType::AggregateShareReq,
+            AggregateShareReq {
+                batch_sel: BatchSelector::FixedSizeByBatchId {
+                    batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                 },
-            )
-            .await;
+                agg_param: Vec::default(),
+                report_count: 0,
+                checksum: [0; 32],
+            },
+        );
         assert_matches!(
             helper::handle_agg_share_req(&*t.helper, &req)
                 .await
@@ -865,42 +733,6 @@ mod test {
     }
 
     async_test_versions! { handle_agg_share_req_invalid_batch_sel }
-
-    async fn handle_coll_job_req_unauthorized_request(version: DapVersion) {
-        let mut rng = thread_rng();
-        let t = Test::new(version);
-        let task_id = &t.time_interval_task_id;
-        let task_config = t.leader.unchecked_get_task_config(task_id).await;
-        let collect_job_id = CollectionJobId(rng.gen());
-        let mut req = DapRequest {
-            version: task_config.version,
-            media_type: Some(DapMediaType::CollectReq),
-            task_id: Some(*task_id),
-            resource: DapResource::CollectionJob(collect_job_id),
-            payload: CollectionReq {
-                query: Query::default(),
-                agg_param: Vec::default(),
-            }
-            .get_encoded_with_param(&task_config.version)
-            .unwrap(),
-            ..Default::default() // Unauthorized request.
-        };
-
-        // Expect failure due to missing bearer token.
-        assert_matches!(
-            leader::handle_coll_job_req(&*t.leader, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-
-        // Expect failure due to incorrect bearer token.
-        req.sender_auth = Some(BearerToken::from("incorrect auth token!".to_string()));
-        assert_matches!(
-            leader::handle_coll_job_req(&*t.leader, &req).await,
-            Err(DapError::Abort(DapAbort::UnauthorizedRequest { .. }))
-        );
-    }
-
-    async_test_versions! { handle_coll_job_req_unauthorized_request }
 
     async fn handle_agg_job_req_failure_hpke_decrypt_error(version: DapVersion) {
         let t = Test::new(version);
@@ -1162,7 +994,7 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq.
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1248,7 +1080,7 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq with a very large batch interval.
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1273,7 +1105,7 @@ mod test {
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too large".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the past.
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1299,7 +1131,7 @@ mod test {
         assert_matches!(err, DapError::Abort(DapAbort::BadRequest(s)) => assert_eq!(s, "batch interval too far into past".to_string()));
 
         // Collector: Create a CollectReq with a batch interval in the future.
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1333,7 +1165,7 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
 
         // Collector: Create a CollectReq with a very large batch interval.
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1419,7 +1251,7 @@ mod test {
             query: task_config.query_for_current_batch_window(t.now),
             agg_param: Vec::default(),
         };
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1472,7 +1304,7 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.time_interval_task_id)
             .await;
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             &t.time_interval_task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1495,7 +1327,7 @@ mod test {
             .leader
             .unchecked_get_task_config(&t.fixed_size_task_id)
             .await;
-        let req = t.collector_authorized_req(
+        let req = Test::collector_req(
             &t.fixed_size_task_id,
             &task_config,
             DapMediaType::CollectReq,
@@ -1663,7 +1495,6 @@ mod test {
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),
                 taskprov: Some(taskprov_advertisement.clone()),
-                ..Default::default()
             };
             leader::handle_upload_req(&*t.leader, &req).await.unwrap();
         }

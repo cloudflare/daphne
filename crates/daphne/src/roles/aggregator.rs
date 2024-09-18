@@ -15,7 +15,7 @@ use crate::{
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapResponse, DapTaskConfig,
+    DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -45,22 +45,11 @@ pub enum MergeAggShareError {
 
 /// DAP Aggregator functionality.
 #[async_trait]
-pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
+pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
     /// A refernce to a task configuration stored by the Aggregator.
     type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig> + Send
     where
         Self: 'a;
-
-    /// Decide whether the given DAP request is authorized.
-    ///
-    /// If the return value is `None`, then the request is authorized. If the return value is
-    /// `Some(reason)`, then the request is denied and `reason` conveys details about how the
-    /// decision was reached.
-    async fn unauthorized_reason(
-        &self,
-        task_config: &DapTaskConfig,
-        req: &DapRequest<S>,
-    ) -> Result<Option<String>, DapError>;
 
     /// Look up the DAP global configuration.
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError>;
@@ -95,7 +84,7 @@ pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
     /// nothing.
     async fn taskprov_put(
         &self,
-        req: &DapRequest<S>,
+        req: &DapRequest,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError>;
 
@@ -164,19 +153,18 @@ pub trait DapAggregator<S: Sync>: HpkeProvider + DapReportInitializer + Sized {
 }
 
 /// Handle request for the Aggregator's HPKE configuration.
-pub async fn handle_hpke_config_req<S, A>(
+pub async fn handle_hpke_config_req<A>(
     aggregator: &A,
-    req: &DapRequest<S>,
+    version: DapVersion,
     task_id: Option<TaskId>,
 ) -> Result<DapResponse, DapError>
 where
-    S: Sync,
-    A: DapAggregator<S>,
+    A: DapAggregator,
 {
     let metrics = aggregator.metrics();
 
     let hpke_config = aggregator
-        .get_hpke_config_for(req.version, task_id.as_ref())
+        .get_hpke_config_for(version, task_id.as_ref())
         .await?;
 
     if let Some(task_id) = task_id {
@@ -186,10 +174,8 @@ where
             .ok_or(DapAbort::UnrecognizedTask { task_id })?;
 
         // Check whether the DAP version in the request matches the task config.
-        if task_config.as_ref().version != req.version {
-            return Err(
-                DapAbort::version_mismatch(req.version, task_config.as_ref().version).into(),
-            );
+        if task_config.as_ref().version != version {
+            return Err(DapAbort::version_mismatch(version, task_config.as_ref().version).into());
         }
     }
 
@@ -202,7 +188,7 @@ where
 
     metrics.inbound_req_inc(DaphneRequestType::HpkeConfig);
     Ok(DapResponse {
-        version: req.version,
+        version,
         media_type: DapMediaType::HpkeConfigList,
         payload,
     })

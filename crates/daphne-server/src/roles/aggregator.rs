@@ -1,12 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, future::ready, num::NonZeroUsize, ops::Range, time::SystemTime};
+use std::{future::ready, num::NonZeroUsize, ops::Range, time::SystemTime};
 
 use axum::async_trait;
 use daphne::{
     audit_log::AuditLog,
-    auth::{BearerToken, BearerTokenProvider},
     error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeProvider},
@@ -16,11 +15,8 @@ use daphne::{
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequest, DapTaskConfig, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
-use daphne_service_utils::{
-    auth::DaphneAuth,
-    durable_requests::bindings::{
-        self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
-    },
+use daphne_service_utils::durable_requests::bindings::{
+    self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
 };
 use futures::{future::try_join_all, StreamExt, TryStreamExt};
 use mappable_rc::Marc;
@@ -32,7 +28,7 @@ use crate::{
 };
 
 #[async_trait]
-impl DapAggregator<DaphneAuth> for crate::App {
+impl DapAggregator for crate::App {
     #[tracing::instrument(skip(self, task_config, agg_share_span))]
     async fn try_put_agg_share_span(
         &self,
@@ -151,54 +147,6 @@ impl DapAggregator<DaphneAuth> for crate::App {
     where
         Self: 'a;
 
-    async fn unauthorized_reason(
-        &self,
-        task_config: &DapTaskConfig,
-        req: &DapRequest<DaphneAuth>,
-    ) -> Result<Option<String>, DapError> {
-        let mut authorized = false;
-
-        let Some(ref sender_auth) = req.sender_auth else {
-            return Ok(Some("Missing authorization.".into()));
-        };
-
-        // If a bearer token is present, verify that it can be used to authorize the request.
-        if sender_auth.bearer_token.is_some() {
-            if let Some(unauthorized_reason) =
-                self.bearer_token_authorized(task_config, req).await?
-            {
-                return Ok(Some(unauthorized_reason));
-            }
-            authorized = true;
-        }
-
-        // If a TLS client certificate is present verify that it is valid.
-        if let Some(ref cf_tls_client_auth) = sender_auth.cf_tls_client_auth {
-            // TODO(cjpatton) Add support for TLS client authentication for non-Taskprov tasks.
-            let Some(ref _taskprov_config) = self.service_config.taskprov else {
-                return Ok(Some(
-                    "TLS client authentication is currently only supported with Taskprov.".into(),
-                ));
-            };
-
-            // Check that that the certificate is valid. This is indicated by literal "SUCCESS".
-            if cf_tls_client_auth.verified != "SUCCESS" {
-                return Ok(Some(format!(
-                    "Invalid TLS certificate ({}).",
-                    cf_tls_client_auth.verified
-                )));
-            }
-
-            authorized = true;
-        }
-
-        if authorized {
-            Ok(None)
-        } else {
-            Ok(Some("No suitable authorization method was found.".into()))
-        }
-    }
-
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
         let mut global_config = self.service_config.global.clone();
 
@@ -278,7 +226,7 @@ impl DapAggregator<DaphneAuth> for crate::App {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequest<DaphneAuth>,
+        req: &DapRequest,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
@@ -522,58 +470,5 @@ impl HpkeDecrypter for crate::App {
             .map_err(|e| fatal_error!(err = ?e, "failed to get the hpke config"))?
             .flatten()
             .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
-    }
-}
-
-#[async_trait]
-impl BearerTokenProvider for crate::App {
-    type WrappedBearerToken<'a> = Cow<'a,  BearerToken>
-        where Self: 'a;
-
-    async fn get_leader_bearer_token_for<'s>(
-        &'s self,
-        task_id: &'s TaskId,
-        task_config: &DapTaskConfig,
-    ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if self.service_config.global.allow_taskprov && task_config.method_is_taskprov() {
-            if let Some(bearer_token) = self
-                .service_config
-                .taskprov
-                .as_ref()
-                .and_then(|c| c.leader_auth.bearer_token.as_ref())
-            {
-                return Ok(Some(Cow::Borrowed(bearer_token)));
-            }
-        }
-
-        self.kv()
-            .get_cloned::<kv::prefix::LeaderBearerToken>(task_id, &KvGetOptions::default())
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to get the leader bearer token"))
-            .map(|r| r.map(Cow::Owned))
-    }
-
-    async fn get_collector_bearer_token_for<'s>(
-        &'s self,
-        task_id: &'s TaskId,
-        task_config: &DapTaskConfig,
-    ) -> std::result::Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if self.service_config.global.allow_taskprov && task_config.method_is_taskprov() {
-            if let Some(bearer_token) = self.service_config.taskprov.as_ref().and_then(|c| {
-                c.collector_auth
-                    .as_ref()
-                    .expect("collector auth method not set")
-                    .bearer_token
-                    .as_ref()
-            }) {
-                return Ok(Some(Cow::Borrowed(bearer_token)));
-            }
-        }
-
-        self.kv()
-            .get_cloned::<kv::prefix::CollectorBearerToken>(task_id, &KvGetOptions::default())
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to get the collector bearer token"))
-            .map(|r| r.map(Cow::Owned))
     }
 }

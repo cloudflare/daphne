@@ -3,7 +3,6 @@
 
 use axum::async_trait;
 use daphne::roles::DapHelper;
-use daphne_service_utils::auth::DaphneAuth;
 
 #[async_trait]
-impl DapHelper<DaphneAuth> for crate::App {}
+impl DapHelper for crate::App {}

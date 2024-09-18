@@ -16,6 +16,7 @@ description = "Workers backend for Daphne"
 axum = "0.6.0" # held back to use http 0.2
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
+either.workspace = true
 futures.workspace = true
 hex.workspace = true
 http = "0.2" # held back to use http 0.2
@@ -43,7 +44,7 @@ assert_matches.workspace = true
 clap.workspace = true
 config.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
-daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus"] }
+daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus", "test-utils"] }
 dhat.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true

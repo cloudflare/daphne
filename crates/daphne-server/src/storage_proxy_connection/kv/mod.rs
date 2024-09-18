@@ -33,10 +33,16 @@ pub trait KvPrefix {
 }
 
 pub mod prefix {
-    use std::{fmt::Display, marker::PhantomData};
+    use std::{
+        fmt::{self, Display},
+        marker::PhantomData,
+    };
 
-    use daphne::{auth::BearerToken, messages::TaskId, taskprov, DapTaskConfig, DapVersion};
-    use daphne_service_utils::config::HpkeRecieverConfigList;
+    use daphne::{
+        messages::{Base64Encode, TaskId},
+        taskprov, DapSender, DapTaskConfig, DapVersion,
+    };
+    use daphne_service_utils::{bearer_token::BearerToken, config::HpkeRecieverConfigList};
     use serde::{de::DeserializeOwned, Serialize};
 
     use super::KvPrefix;
@@ -98,20 +104,32 @@ pub mod prefix {
         type Value = HpkeRecieverConfigList;
     }
 
-    pub struct LeaderBearerToken();
-    impl KvPrefix for LeaderBearerToken {
-        const PREFIX: &'static str = "bearer_token/leader/task";
+    pub struct KvBearerToken();
+    impl KvPrefix for KvBearerToken {
+        const PREFIX: &'static str = "bearer_token";
 
-        type Key = TaskId;
+        type Key = KvBearerTokenKey;
         type Value = BearerToken;
     }
 
-    pub struct CollectorBearerToken();
-    impl KvPrefix for CollectorBearerToken {
-        const PREFIX: &'static str = "bearer_token/collector/task";
-
-        type Key = TaskId;
-        type Value = BearerToken;
+    #[derive(Debug)]
+    pub struct KvBearerTokenKey(DapSender, TaskId);
+    impl From<(DapSender, TaskId)> for KvBearerTokenKey {
+        fn from((s, t): (DapSender, TaskId)) -> Self {
+            Self(s, t)
+        }
+    }
+    impl fmt::Display for KvBearerTokenKey {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self(sender, task_id) = self;
+            let task_id = task_id.to_base64url();
+            match sender {
+                DapSender::Client => write!(f, "client/task/{task_id}"),
+                DapSender::Collector => write!(f, "collector/task/{task_id}"),
+                DapSender::Helper => write!(f, "helper/task/{task_id}"),
+                DapSender::Leader => write!(f, "leader/task/{task_id}"),
+            }
+        }
     }
 }
 
@@ -233,7 +251,7 @@ impl<'h> Kv<'h> {
             let resp = self
                 .http
                 .get(self.config.url.join(&key).unwrap())
-                .bearer_auth(&self.config.auth_token)
+                .bearer_auth(self.config.auth_token.as_str())
                 .send()
                 .await?;
             if resp.status() == StatusCode::NOT_FOUND {
@@ -275,7 +293,7 @@ impl<'h> Kv<'h> {
         let mut request = self
             .http
             .post(self.config.url.join(&key).unwrap())
-            .bearer_auth(&self.config.auth_token)
+            .bearer_auth(self.config.auth_token.as_str())
             .body(serde_json::to_vec(&value).unwrap());
 
         if let Some(expiration) = expiration {
@@ -336,7 +354,7 @@ impl<'h> Kv<'h> {
         let mut request = self
             .http
             .put(self.config.url.join(&key).unwrap())
-            .bearer_auth(&self.config.auth_token)
+            .bearer_auth(self.config.auth_token.as_str())
             .body(serde_json::to_vec(&value).unwrap());
 
         if let Some(expiration) = expiration {

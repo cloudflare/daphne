@@ -5,12 +5,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-pub mod auth;
+pub mod bearer_token;
 pub mod config;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
 pub mod metrics;
+#[cfg(feature = "test-utils")]
 pub mod test_route_types;
 
 // the generated code expects this module to be defined at the root of the library.
