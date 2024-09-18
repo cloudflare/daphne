@@ -16,14 +16,15 @@ use daphne::{
     roles::leader::{self, DapLeader},
     DapError, DapVersion,
 };
-use daphne_service_utils::auth::DaphneAuth;
 use prio::codec::ParameterizedEncode;
 
-use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
+use super::{
+    AxumDapResponse, DapRequestExtractor, DaphneService, UnauthenticatedDapRequestExtractor,
+};
 
 pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
-    A: DapLeader<DaphneAuth> + DaphneService + Send + Sync + 'static,
+    A: DapLeader + DaphneService + Send + Sync + 'static,
     B: Send + HttpBody + 'static,
     B::Data: Send,
     B::Error: Send + Sync,
@@ -49,10 +50,10 @@ where
 )]
 async fn upload<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor,
 ) -> Response
 where
-    A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
+    A: DapLeader + DaphneService + Send + Sync,
 {
     match leader::handle_upload_req(&*app, &req).await {
         Ok(()) => StatusCode::OK.into_response(),
@@ -72,7 +73,7 @@ async fn get_collect_uri<A>(
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> Response
 where
-    A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
+    A: DapLeader + DaphneService + Send + Sync,
 {
     match (leader::handle_coll_job_req(&*app, &req).await, req.version) {
         (Ok(collect_uri), DapVersion::Draft09 | DapVersion::Latest) => {
@@ -94,7 +95,7 @@ async fn collect<A>(
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> Response
 where
-    A: DapLeader<DaphneAuth> + DaphneService + Send + Sync,
+    A: DapLeader + DaphneService + Send + Sync,
 {
     let task_id = match req.task_id() {
         Ok(id) => id,

@@ -22,13 +22,9 @@ allow_taskprov = true
 default_num_agg_span_shards = 4
 
 [service.taskprov]
+peer_auth.collector.expected_token = "I-am-the-collector" # SECRET
+self_bearer_token = "I-am-the-leader" # SECRET
 vdaf_verify_key_init = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18" # SECRET
-leader_auth = """{
-  "bearer_token": "I-am-the-leader"
-}""" # SECRET
-collector_auth = """{
-  "bearer_token": "I-am-the-collector"
-}""" # SECRET
 hpke_collector_config = """{
     "id": 23,
     "kem_id": "p256_hkdf_sha256",

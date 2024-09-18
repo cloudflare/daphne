@@ -24,7 +24,6 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use daphne::{
-    auth::BearerToken,
     constants::DapMediaType,
     error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
@@ -40,7 +39,7 @@ use daphne::{
     DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion, EarlyReportStateConsumed,
     EarlyReportStateInitialized, ReplayProtection,
 };
-use daphne_service_utils::http_headers;
+use daphne_service_utils::{bearer_token::BearerToken, http_headers};
 use futures::{future::OptionFuture, StreamExt, TryStreamExt};
 use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder};

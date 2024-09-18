@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::future::try_join_all;
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
-use tracing::{debug, error};
+use tracing::debug;
 use url::Url;
 
 use super::{
@@ -45,8 +45,8 @@ enum LeaderHttpRequestMethod {
     Put,
 }
 
-async fn leader_send_http_request<S: Sync>(
-    role: &impl DapLeader<S>,
+async fn leader_send_http_request(
+    role: &impl DapLeader,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
     opts: LeaderHttpRequestOptions<'_>,
@@ -71,10 +71,6 @@ async fn leader_send_http_request<S: Sync>(
         media_type: Some(req_media_type),
         task_id: Some(*task_id),
         resource,
-        sender_auth: Some(
-            role.authorize(task_id, task_config, &req_media_type, &req_data)
-                .await?,
-        ),
         payload: req_data,
         taskprov,
     };
@@ -86,19 +82,6 @@ async fn leader_send_http_request<S: Sync>(
 
     check_response_content_type(&resp, resp_media_type)?;
     Ok(resp)
-}
-
-/// A party in the DAP protocol who is authorized to send requests to another party.
-#[async_trait]
-pub trait DapAuthorizedSender<S> {
-    /// Add authorization to an outbound DAP request with the given task ID, media type, and payload.
-    async fn authorize(
-        &self,
-        task_id: &TaskId,
-        task_config: &DapTaskConfig,
-        media_type: &DapMediaType,
-        payload: &[u8],
-    ) -> Result<S, DapError>;
 }
 
 /// A work item, either an aggregation job or collection job.
@@ -130,7 +113,7 @@ impl WorkItem {
 
 /// DAP Leader functionality.
 #[async_trait]
-pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
+pub trait DapLeader: DapAggregator {
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError>;
 
@@ -171,16 +154,16 @@ pub trait DapLeader<S: Sync>: DapAuthorizedSender<S> + DapAggregator<S> {
     ) -> Result<(), DapError>;
 
     /// Send an HTTP POST request.
-    async fn send_http_post(&self, req: DapRequest<S>, url: Url) -> Result<DapResponse, DapError>;
+    async fn send_http_post(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError>;
 
     /// Send an HTTP PUT request.
-    async fn send_http_put(&self, req: DapRequest<S>, url: Url) -> Result<DapResponse, DapError>;
+    async fn send_http_put(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError>;
 }
 
 /// Handle a report from a Client.
-pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
+pub async fn handle_upload_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest<S>,
+    req: &DapRequest,
 ) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let metrics = aggregator.metrics();
@@ -255,9 +238,9 @@ pub async fn handle_upload_req<S: Sync, A: DapLeader<S>>(
 
 /// Handle a collect job from the Collector. The response is the URI that the Collector will
 /// poll later on to get the collection.
-pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
+pub async fn handle_coll_job_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest<S>,
+    req: &DapRequest,
 ) -> Result<Url, DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
@@ -271,21 +254,11 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
         resolve_taskprov(aggregator, task_id, req, &global_config).await?;
     }
 
-    let task_id = req.task_id()?;
     let wrapped_task_config = aggregator
         .get_task_config_for(task_id)
         .await?
         .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
-
-    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
-        error!("aborted unauthorized collect request: {reason}");
-        return Err(DapAbort::UnauthorizedRequest {
-            detail: reason,
-            task_id: *task_id,
-        }
-        .into());
-    }
 
     let coll_job_req = CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
         .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
@@ -334,7 +307,7 @@ pub async fn handle_coll_job_req<S: Sync, A: DapLeader<S>>(
 
 /// Run an aggregation job for a set of reports. Return the number of reports that were
 /// aggregated successfully.
-async fn run_agg_job<S: Sync, A: DapLeader<S>>(
+async fn run_agg_job<A: DapLeader>(
     aggregator: &A,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
@@ -440,7 +413,7 @@ async fn run_agg_job<S: Sync, A: DapLeader<S>>(
 /// Handle a pending collection job. If the results are ready, then compute the aggregate
 /// results and store them to be retrieved by the Collector later. Returns the number of
 /// reports in the batch.
-async fn run_coll_job<S: Sync, A: DapLeader<S>>(
+async fn run_coll_job<A: DapLeader>(
     aggregator: &A,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
@@ -547,7 +520,7 @@ async fn run_coll_job<S: Sync, A: DapLeader<S>>(
 ///
 /// Collection jobs are processed in order. If a collection job is still pending once processed, it
 /// is pushed to the back of the work queue.
-pub async fn process<S: Sync, A: DapLeader<S>>(
+pub async fn process<A: DapLeader>(
     aggregator: &A,
     host: &str,
     num_items: usize,

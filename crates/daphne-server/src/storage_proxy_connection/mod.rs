@@ -79,7 +79,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
             .http
             .post(url)
             .body(self.request.into_bytes())
-            .bearer_auth(&self.durable.config.auth_token)
+            .bearer_auth(self.durable.config.auth_token.as_str())
             .send()
             .await?;
 

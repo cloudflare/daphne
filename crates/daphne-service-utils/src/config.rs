@@ -9,7 +9,7 @@ use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::{auth::DaphneWorkerAuthMethod, DapRole};
+use crate::{bearer_token::BearerToken, DapRole};
 
 /// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -22,13 +22,22 @@ pub struct TaskprovConfig {
     #[serde(with = "hex")]
     pub vdaf_verify_key_init: [u8; 32],
 
-    /// Leader, Helper: Method for authorizing Leader requests.
-    #[serde(with = "from_raw_string")]
-    pub leader_auth: DaphneWorkerAuthMethod,
+    /// Peer's bearer token.
+    pub peer_auth: PeerBearerToken,
 
-    /// Leader: Method for authorizing Collector requests.
-    #[serde(default, with = "from_raw_string")]
-    pub collector_auth: Option<DaphneWorkerAuthMethod>,
+    /// Bearer token used when trying to communicate with an aggregator using taskprov.
+    #[serde(default)]
+    pub self_bearer_token: Option<BearerToken>,
+}
+
+/// Peer authentication tokens for incomming requests. Different roles have different peers.
+/// - Helpers have a Leader peer.
+/// - Leaders have a Collector peer.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum PeerBearerToken {
+    Leader { expected_token: BearerToken },
+    Collector { expected_token: BearerToken },
 }
 
 pub type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;

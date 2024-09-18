@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::{
     body::HttpBody,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::{AppendHeaders, IntoResponse},
     routing::get,
 };
@@ -14,17 +14,17 @@ use daphne::{
     fatal_error,
     messages::{encode_base64url, TaskId},
     roles::{aggregator, DapAggregator},
-    DapError, DapResponse,
+    DapError, DapResponse, DapVersion,
 };
-use daphne_service_utils::{auth::DaphneAuth, http_headers};
+use daphne_service_utils::http_headers;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use serde::Deserialize;
 
-use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
+use super::{AxumDapResponse, DaphneService};
 
 pub fn add_aggregator_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
-    A: DapAggregator<DaphneAuth> + DaphneService + Send + Sync + 'static,
+    A: DapAggregator + DaphneService + Send + Sync + 'static,
     B: Send + HttpBody + 'static,
     B::Data: Send,
     B::Error: Send + Sync,
@@ -38,16 +38,16 @@ struct QueryTaskId {
     task_id: Option<TaskId>,
 }
 
-#[tracing::instrument(skip(app, req), fields(version = ?req.version))]
+#[tracing::instrument(skip(app), fields(version, task_id))]
 async fn hpke_config<A>(
     State(app): State<Arc<A>>,
     Query(QueryTaskId { task_id }): Query<QueryTaskId>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    Path(version): Path<DapVersion>,
 ) -> impl IntoResponse
 where
-    A: DapAggregator<DaphneAuth> + DaphneService,
+    A: DapAggregator + DaphneService,
 {
-    match aggregator::handle_hpke_config_req(&*app, &req, task_id).await {
+    match aggregator::handle_hpke_config_req(&*app, version, task_id).await {
         Ok(resp) => match app.signing_key().map(|k| sign_dap_response(k, &resp)) {
             None => AxumDapResponse::new_success(resp, app.server_metrics()).into_response(),
             Some(Ok(signed)) => (

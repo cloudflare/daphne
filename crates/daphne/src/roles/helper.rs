@@ -5,7 +5,6 @@ use std::{collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
 use prio::codec::{Encode, ParameterizedDecode};
-use tracing::error;
 
 use super::{check_batch, check_request_content_type, resolve_taskprov, DapAggregator};
 use crate::{
@@ -24,11 +23,11 @@ use crate::{
 
 /// DAP Helper functionality.
 #[async_trait]
-pub trait DapHelper<S: Sync>: DapAggregator<S> {}
+pub trait DapHelper: DapAggregator {}
 
-pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
+pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
     aggregator: &A,
-    req: &'req DapRequest<S>,
+    req: &'req DapRequest,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let global_config = aggregator.get_global_config().await?;
@@ -50,15 +49,6 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
         .await?
         .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
-
-    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
-        error!("aborted unauthorized collect request: {reason}");
-        return Err(DapAbort::UnauthorizedRequest {
-            detail: reason,
-            task_id: *task_id,
-        }
-        .into());
-    }
 
     let DapResource::AggregationJob(_agg_job_id) = req.resource else {
         return Err(DapAbort::BadRequest("missing aggregation job ID".to_string()).into());
@@ -120,9 +110,9 @@ pub async fn handle_agg_job_init_req<'req, S: Sync, A: DapHelper<S>>(
 }
 
 /// Handle a request pertaining to an aggregation job.
-pub async fn handle_agg_job_req<'req, S: Sync, A: DapHelper<S>>(
+pub async fn handle_agg_job_req<'req, A: DapHelper>(
     aggregator: &A,
-    req: &DapRequest<S>,
+    req: &DapRequest,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     match req.media_type {
@@ -135,9 +125,9 @@ pub async fn handle_agg_job_req<'req, S: Sync, A: DapHelper<S>>(
 
 /// Handle a request for an aggregate share. This is called by the Leader to complete a
 /// collection job.
-pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
+pub async fn handle_agg_share_req<'req, A: DapHelper>(
     aggregator: &A,
-    req: &DapRequest<S>,
+    req: &DapRequest,
 ) -> Result<DapResponse, DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
@@ -155,15 +145,6 @@ pub async fn handle_agg_share_req<'req, S: Sync, A: DapHelper<S>>(
         .await?
         .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
     let task_config = wrapped_task_config.as_ref();
-
-    if let Some(reason) = aggregator.unauthorized_reason(task_config, req).await? {
-        error!("aborted unauthorized collect request: {reason}");
-        return Err(DapAbort::UnauthorizedRequest {
-            detail: reason,
-            task_id: *task_id,
-        }
-        .into());
-    }
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.version != req.version {
@@ -276,8 +257,8 @@ fn check_part_batch(
     Ok(())
 }
 
-async fn finish_agg_job_and_aggregate<S: Sync>(
-    helper: &impl DapHelper<S>,
+async fn finish_agg_job_and_aggregate(
+    helper: &impl DapHelper,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,

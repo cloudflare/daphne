@@ -8,7 +8,6 @@ pub mod report_generator;
 
 use crate::{
     audit_log::AuditLog,
-    auth::{BearerToken, BearerTokenProvider},
     constants::DapMediaType,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
@@ -23,7 +22,7 @@ use crate::{
         aggregator::MergeAggShareError,
         helper,
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
-        DapAggregator, DapAuthorizedSender, DapHelper, DapLeader, DapReportInitializer,
+        DapAggregator, DapHelper, DapLeader, DapReportInitializer,
     },
     taskprov,
     vdaf::VdafVerifyKey,
@@ -577,8 +576,6 @@ pub struct InMemoryAggregator {
     pub(crate) global_config: DapGlobalConfig,
     tasks: Mutex<HashMap<TaskId, DapTaskConfig>>,
     pub hpke_receiver_config_list: Box<[HpkeReceiverConfig]>,
-    leader_token: BearerToken,
-    collector_token: Option<BearerToken>, // Not set by Helper
     collector_hpke_config: HpkeConfig,
 
     // aggregation state
@@ -591,8 +588,6 @@ pub struct InMemoryAggregator {
 
     // taskprov
     taskprov_vdaf_verify_key_init: [u8; 32],
-    taskprov_leader_token: BearerToken,
-    taskprov_collector_token: Option<BearerToken>, // Not set by Helper
 
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `InMemoryAggregator`. Not set by the Helper.
@@ -605,29 +600,21 @@ impl DeepSizeOf for InMemoryAggregator {
             global_config,
             tasks,
             hpke_receiver_config_list,
-            leader_token,
-            collector_token,
             leader_state_store,
             agg_store,
             collector_hpke_config,
             metrics: _,
             audit_log: _,
             taskprov_vdaf_verify_key_init,
-            taskprov_leader_token,
-            taskprov_collector_token,
             peer,
         } = self;
         global_config.deep_size_of_children(context)
             + tasks.deep_size_of_children(context)
             + hpke_receiver_config_list.deep_size_of_children(context)
-            + leader_token.deep_size_of_children(context)
-            + collector_token.deep_size_of_children(context)
             + leader_state_store.deep_size_of_children(context)
             + agg_store.deep_size_of_children(context)
             + collector_hpke_config.deep_size_of_children(context)
             + taskprov_vdaf_verify_key_init.deep_size_of_children(context)
-            + taskprov_leader_token.deep_size_of_children(context)
-            + taskprov_collector_token.deep_size_of_children(context)
             + peer.deep_size_of_children(context)
     }
 }
@@ -638,26 +625,20 @@ impl InMemoryAggregator {
         tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
         hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
         global_config: DapGlobalConfig,
-        leader_token: BearerToken,
         collector_hpke_config: HpkeConfig,
         registry: &prometheus::Registry,
         taskprov_vdaf_verify_key_init: [u8; 32],
-        taskprov_leader_token: BearerToken,
     ) -> Self {
         Self {
             global_config,
             tasks: Mutex::new(tasks.into_iter().collect()),
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
-            leader_token,
-            collector_token: None,
             leader_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
             metrics: DaphnePromMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
-            taskprov_leader_token,
-            taskprov_collector_token: None,
             peer: None,
         }
     }
@@ -667,29 +648,21 @@ impl InMemoryAggregator {
         tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
         hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
         global_config: DapGlobalConfig,
-        leader_token: BearerToken,
-        collector_token: impl Into<Option<BearerToken>>,
         collector_hpke_config: HpkeConfig,
         registry: &prometheus::Registry,
         taskprov_vdaf_verify_key_init: [u8; 32],
-        taskprov_leader_token: BearerToken,
-        taskprov_collector_token: impl Into<Option<BearerToken>>,
         peer: Arc<Self>,
     ) -> Self {
         Self {
             global_config,
             tasks: Mutex::new(tasks.into_iter().collect()),
             hpke_receiver_config_list: hpke_receiver_config_list.into_iter().collect(),
-            leader_token,
-            collector_token: collector_token.into(),
             leader_state_store: Default::default(),
             agg_store: Default::default(),
             collector_hpke_config,
             metrics: DaphnePromMetrics::register(registry).unwrap(),
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
-            taskprov_leader_token,
-            taskprov_collector_token: taskprov_collector_token.into(),
             peer: peer.into(),
         }
     }
@@ -714,39 +687,6 @@ impl InMemoryAggregator {
     pub fn clear_storage(&self) {
         self.leader_state_store.lock().unwrap().delete_all();
         self.agg_store.lock().unwrap().clear();
-    }
-}
-
-#[async_trait]
-impl BearerTokenProvider for InMemoryAggregator {
-    type WrappedBearerToken<'a> = &'a BearerToken;
-
-    async fn get_leader_bearer_token_for<'s>(
-        &'s self,
-        _task_id: &'s TaskId,
-        task_config: &DapTaskConfig,
-    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if task_config.method_is_taskprov() {
-            Ok(Some(&self.taskprov_leader_token))
-        } else {
-            Ok(Some(&self.leader_token))
-        }
-    }
-
-    async fn get_collector_bearer_token_for<'s>(
-        &'s self,
-        _task_id: &'s TaskId,
-        task_config: &DapTaskConfig,
-    ) -> Result<Option<Self::WrappedBearerToken<'s>>, DapError> {
-        if task_config.method_is_taskprov() {
-            Ok(Some(self.taskprov_collector_token.as_ref().expect(
-                "InMemoryAggregator not configured with taskprov collector token",
-            )))
-        } else {
-            Ok(Some(self.collector_token.as_ref().expect(
-                "InMemoryAggregator not configured with collector token",
-            )))
-        }
     }
 }
 
@@ -800,22 +740,6 @@ impl HpkeDecrypter for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapAuthorizedSender<BearerToken> for InMemoryAggregator {
-    async fn authorize(
-        &self,
-        task_id: &TaskId,
-        task_config: &DapTaskConfig,
-        media_type: &DapMediaType,
-        _payload: &[u8],
-    ) -> Result<BearerToken, DapError> {
-        Ok(self
-            .authorize_with_bearer_token(task_id, task_config, media_type)
-            .await?
-            .clone())
-    }
-}
-
-#[async_trait]
 impl DapReportInitializer for InMemoryAggregator {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
@@ -841,19 +765,11 @@ impl DapReportInitializer for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapAggregator<BearerToken> for InMemoryAggregator {
+impl DapAggregator for InMemoryAggregator {
     // The lifetimes on the traits ensure that we can return a reference to a task config stored by
     // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, InMemoryAggregator
     // clones the task config as needed.
     type WrappedDapTaskConfig<'a> = DapTaskConfig;
-
-    async fn unauthorized_reason(
-        &self,
-        task_config: &DapTaskConfig,
-        req: &DapRequest<BearerToken>,
-    ) -> Result<Option<String>, DapError> {
-        self.bearer_token_authorized(task_config, req).await
-    }
 
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
         Ok(self.global_config.clone())
@@ -882,7 +798,7 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequest<BearerToken>,
+        req: &DapRequest,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let task_id = req.task_id().map_err(DapError::Abort)?;
@@ -1063,10 +979,10 @@ impl DapAggregator<BearerToken> for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapHelper<BearerToken> for InMemoryAggregator {}
+impl DapHelper for InMemoryAggregator {}
 
 #[async_trait]
-impl DapLeader<BearerToken> for InMemoryAggregator {
+impl DapLeader for InMemoryAggregator {
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
@@ -1152,11 +1068,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
             .finish_collect_job(task_id, coll_job_id, collection)
     }
 
-    async fn send_http_post(
-        &self,
-        req: DapRequest<BearerToken>,
-        _url: Url,
-    ) -> Result<DapResponse, DapError> {
+    async fn send_http_post(&self, req: DapRequest, _url: Url) -> Result<DapResponse, DapError> {
         match req.media_type {
             Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),
@@ -1175,11 +1087,7 @@ impl DapLeader<BearerToken> for InMemoryAggregator {
         }
     }
 
-    async fn send_http_put(
-        &self,
-        req: DapRequest<BearerToken>,
-        _url: Url,
-    ) -> Result<DapResponse, DapError> {
+    async fn send_http_put(&self, req: DapRequest, _url: Url) -> Result<DapResponse, DapError> {
         if req.media_type == Some(DapMediaType::AggregationJobInitReq) {
             Ok(helper::handle_agg_job_req(
                 &**self.peer.as_ref().expect("peer not configured"),

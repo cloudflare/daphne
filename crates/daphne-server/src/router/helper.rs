@@ -13,7 +13,6 @@ use daphne::{
     error::DapAbort,
     roles::{helper, DapHelper},
 };
-use daphne_service_utils::auth::DaphneAuth;
 use http::StatusCode;
 
 use crate::{roles::fetch_replay_protection_override, App};
@@ -80,7 +79,7 @@ async fn agg_share<A>(
     DapRequestExtractor(req): DapRequestExtractor,
 ) -> AxumDapResponse
 where
-    A: DapHelper<DaphneAuth> + DaphneService + Send + Sync,
+    A: DapHelper + DaphneService + Send + Sync,
 {
     AxumDapResponse::from_result(
         helper::handle_agg_share_req(&*app, &req).await,

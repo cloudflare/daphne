@@ -41,7 +41,6 @@
 //!     > requests to a collect job URI whose results have been removed.
 
 pub mod audit_log;
-pub mod auth;
 pub mod constants;
 pub mod error;
 pub mod hpke;
@@ -1074,7 +1073,7 @@ pub enum DapResource {
 
 /// DAP request.
 #[derive(Debug)]
-pub struct DapRequest<S> {
+pub struct DapRequest {
     /// Protocol version indicated by the request.
     pub version: DapVersion,
 
@@ -1091,15 +1090,12 @@ pub struct DapRequest<S> {
     /// Request payload.
     pub payload: Vec<u8>,
 
-    /// Sender authorization, e.g., a bearer token.
-    pub sender_auth: Option<S>,
-
     /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
     pub taskprov: Option<String>,
 }
 
 #[cfg(test)]
-impl<S> Default for DapRequest<S> {
+impl Default for DapRequest {
     fn default() -> Self {
         Self {
             version: DapVersion::Draft09,
@@ -1107,13 +1103,12 @@ impl<S> Default for DapRequest<S> {
             task_id: Default::default(),
             resource: Default::default(),
             payload: Default::default(),
-            sender_auth: Default::default(),
             taskprov: Default::default(),
         }
     }
 }
 
-impl<S> DapRequest<S> {
+impl DapRequest {
     /// Return the task ID, handling a missing ID as a user error.
     pub fn task_id(&self) -> Result<&TaskId, DapAbort> {
         if let Some(ref id) = self.task_id {

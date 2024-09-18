@@ -106,8 +106,8 @@ fn malformed_task_config(task_id: &TaskId, detail: String) -> DapAbort {
 ///
 /// The `task_id` is the task ID indicated by the request; if this does not match the derived task
 /// ID, then we return `Err(DapError::Abort(DapAbort::UnrecognizedTask))`.
-pub(crate) fn resolve_advertised_task_config<S>(
-    req: &'_ DapRequest<S>,
+pub(crate) fn resolve_advertised_task_config(
+    req: &'_ DapRequest,
     verify_key_init: &[u8; 32],
     collector_hpke_config: &HpkeConfig,
     task_id: &TaskId,
@@ -126,8 +126,8 @@ pub(crate) fn resolve_advertised_task_config<S>(
 }
 
 /// Check for a taskprov extension in the report, and return it if found.
-fn get_taskprov_task_config<S>(
-    req: &'_ DapRequest<S>,
+fn get_taskprov_task_config(
+    req: &'_ DapRequest,
     task_id: &TaskId,
 ) -> Result<Option<TaskConfig>, DapAbort> {
     let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
@@ -621,13 +621,12 @@ mod test {
             let task_id = compute_task_id(&taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
-            let req = DapRequest::<()> {
+            let req = DapRequest {
                 version,
                 media_type: None, // ignored by test
                 task_id: Some(task_id),
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
-                sender_auth: None,                // ignored by test
                 taskprov: Some(taskprov_task_config_base64url),
             };
 
@@ -677,13 +676,12 @@ mod test {
             let task_id = compute_task_id(&taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
-            let req = DapRequest::<()> {
+            let req = DapRequest {
                 version,
                 media_type: None, // ignored by test
                 task_id: Some(task_id),
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
-                sender_auth: None,                // ignored by test
                 taskprov: Some(taskprov_task_config_base64url),
             };
 
