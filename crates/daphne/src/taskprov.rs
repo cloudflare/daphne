@@ -624,7 +624,7 @@ mod test {
             let req = DapRequest {
                 version,
                 media_type: None, // ignored by test
-                task_id: Some(task_id),
+                task_id,
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
                 taskprov: Some(taskprov_task_config_base64url),
@@ -679,7 +679,7 @@ mod test {
             let req = DapRequest {
                 version,
                 media_type: None, // ignored by test
-                task_id: Some(task_id),
+                task_id,
                 resource: DapResource::Undefined, // ignored by test
                 payload: Vec::default(),          // ignored by test
                 taskprov: Some(taskprov_task_config_base64url),

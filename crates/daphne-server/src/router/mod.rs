@@ -261,8 +261,8 @@ where
         #[serde(deny_unknown_fields)]
         struct PathParams {
             version: DapVersion,
-            #[serde(default, with = "daphne::messages::base64url_option")]
-            task_id: Option<TaskId>,
+            #[serde(default, with = "daphne::messages::base64url")]
+            task_id: TaskId,
             #[serde(default, with = "daphne::messages::base64url_option")]
             agg_job_id: Option<AggregationJobId>,
             #[serde(default, with = "daphne::messages::base64url_option")]
@@ -379,12 +379,7 @@ where
                 .server_metrics()
                 .auth_method_inc(metrics::AuthMethod::BearerToken);
             state
-                .check_bearer_token(
-                    &token,
-                    sender,
-                    request.task_id.unwrap(), // task ids are mandatory
-                    is_taskprov,
-                )
+                .check_bearer_token(&token, sender, request.task_id, is_taskprov)
                 .await
                 .map_err(|reason| {
                     reason.either(
@@ -599,7 +594,7 @@ mod test {
         .unwrap();
 
         assert_eq!(req.version, version);
-        assert_eq!(req.task_id.unwrap(), task_id);
+        assert_eq!(req.task_id, task_id);
     }
 
     async_test_versions! { parse_mandatory_fields }
@@ -626,7 +621,7 @@ mod test {
         .unwrap();
 
         assert_eq!(req.resource, DapResource::AggregationJob(agg_job_id));
-        assert_eq!(req.task_id.unwrap(), task_id);
+        assert_eq!(req.task_id, task_id);
     }
 
     async_test_versions! { parse_agg_job_id }
@@ -653,7 +648,7 @@ mod test {
         .unwrap();
 
         assert_eq!(req.resource, DapResource::CollectionJob(collect_job_id));
-        assert_eq!(req.task_id.unwrap(), task_id);
+        assert_eq!(req.task_id, task_id);
     }
 
     async_test_versions! { parse_collect_job_id }

@@ -1080,9 +1080,8 @@ pub struct DapRequest {
     /// Request media type, sent in the "content-type" header of the HTTP request.
     pub media_type: Option<DapMediaType>,
 
-    /// ID of the task with which the request is associated. This field is optional, since some
-    /// requests may apply to all tasks, e.g., the request for the HPKE configuration.
-    pub task_id: Option<TaskId>,
+    /// ID of the task with which the request is associated.
+    pub task_id: TaskId,
 
     /// The resource with which this request is associated.
     pub resource: DapResource,
@@ -1109,18 +1108,6 @@ impl Default for DapRequest {
 }
 
 impl DapRequest {
-    /// Return the task ID, handling a missing ID as a user error.
-    pub fn task_id(&self) -> Result<&TaskId, DapAbort> {
-        if let Some(ref id) = self.task_id {
-            Ok(id)
-        } else {
-            // Handle missing task ID as a bad request. The task ID is normally conveyed by the
-            // request path; if missing at this point, it is because it was missing or couldn't be
-            // parsed from the request path.
-            Err(DapAbort::BadRequest("missing or malformed task ID".into()))
-        }
-    }
-
     /// Return the collection job ID, handling a missing ID as a user error.
     pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
         if let DapResource::CollectionJob(collection_job_id) = &self.resource {

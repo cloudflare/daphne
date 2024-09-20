@@ -31,23 +31,23 @@ pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let global_config = aggregator.get_global_config().await?;
-    let task_id = req.task_id()?;
+    let task_id = req.task_id;
     let metrics = aggregator.metrics();
     let agg_job_init_req =
         AggregationJobInitReq::get_decoded_with_param(&req.version, &req.payload)
-            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+            .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
     metrics.agg_job_observe_batch_size(agg_job_init_req.prep_inits.len());
 
     // taskprov: Resolve the task config to use for the request.
     if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
+        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
-        .get_task_config_for(task_id)
+        .get_task_config_for(&task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     let DapResource::AggregationJob(_agg_job_id) = req.resource else {
@@ -61,7 +61,7 @@ pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
 
     // Ensure we know which batch the request pertains to.
     check_part_batch(
-        task_id,
+        &task_id,
         task_config,
         &agg_job_init_req.part_batch_sel,
         &agg_job_init_req.agg_param,
@@ -72,7 +72,7 @@ pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
         .consume_agg_job_req(
             aggregator,
             aggregator,
-            task_id,
+            &task_id,
             agg_job_init_req,
             replay_protection,
         )
@@ -81,7 +81,7 @@ pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
     let agg_job_resp = {
         let agg_job_resp = finish_agg_job_and_aggregate(
             aggregator,
-            task_id,
+            &task_id,
             task_config,
             &part_batch_sel,
             &initialized_reports,
@@ -95,7 +95,7 @@ pub async fn handle_agg_job_init_req<'req, A: DapHelper>(
     };
 
     aggregator.audit_log().on_aggregation_job(
-        task_id,
+        &task_id,
         task_config,
         agg_job_resp.transitions.len() as u64,
         0, /* vdaf step */
@@ -132,18 +132,18 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
-    let task_id = req.task_id()?;
+    let task_id = req.task_id;
 
     check_request_content_type(req, DapMediaType::AggregateShareReq)?;
 
     if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
+        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
-        .get_task_config_for(req.task_id()?)
+        .get_task_config_for(&task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     // Check whether the DAP version in the request matches the task config.
@@ -152,18 +152,18 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     }
 
     let agg_share_req = AggregateShareReq::get_decoded_with_param(&req.version, &req.payload)
-        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+        .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
     let agg_param =
         DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &agg_share_req.agg_param)
-            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+            .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
     // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
     // collected batches.
     check_batch(
         aggregator,
         task_config,
-        task_id,
+        &task_id,
         &agg_share_req.batch_sel.clone().into(),
         &agg_share_req.agg_param,
         now,
@@ -172,7 +172,7 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     .await?;
 
     let agg_share = aggregator
-        .get_agg_share(task_id, &agg_share_req.batch_sel)
+        .get_agg_share(&task_id, &agg_share_req.batch_sel)
         .await?;
 
     // Check that we have aggreagted the same set of reports as the Leader.
@@ -185,13 +185,13 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
                     hex::encode(agg_share_req.checksum),
                     agg_share.report_count,
                     hex::encode(agg_share.checksum)),
-                task_id: *task_id,
+                task_id,
             }.into());
     }
 
     // Check the batch size.
     if !task_config
-        .is_report_count_compatible(task_id, agg_share.report_count)
+        .is_report_count_compatible(&task_id, agg_share.report_count)
         .unwrap_or(false)
     {
         return Err(DapAbort::InvalidBatchSize {
@@ -199,19 +199,19 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
                 "Report count ({}) is less than minimum ({})",
                 agg_share.report_count, task_config.min_batch_size
             ),
-            task_id: *task_id,
+            task_id,
         }
         .into());
     }
 
     // Mark each aggregated report as collected.
     aggregator
-        .mark_collected(task_id, &agg_share_req.batch_sel)
+        .mark_collected(&task_id, &agg_share_req.batch_sel)
         .await?;
 
     let encrypted_agg_share = task_config.produce_helper_encrypted_agg_share(
         &task_config.collector_hpke_config,
-        task_id,
+        &task_id,
         &agg_share_req.batch_sel,
         &agg_param,
         &agg_share,

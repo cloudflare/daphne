@@ -116,12 +116,6 @@ impl crate::App {
         url: Url,
     ) -> Result<DapResponse, DapError> {
         use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
-        let Some(task_id) = req.task_id else {
-            return Err(fatal_error!(
-                err = "Cannot authorize request with missing task ID"
-            ));
-        };
-
         let content_type = req
             .media_type
             .and_then(|mt| mt.as_str_for_version(req.version))
@@ -153,12 +147,12 @@ impl crate::App {
                     detail: format!(
                         "taskprov authentication not setup for authentication with peer at {url}",
                     ),
-                    task_id: req.task_id.unwrap(),
+                    task_id: req.task_id,
                 }));
             }
         } else if let Some(bearer_token) = self
             .bearer_tokens()
-            .get(daphne::DapSender::Leader, task_id)
+            .get(daphne::DapSender::Leader, req.task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e, "failed to get leader bearer token"))?
         {
@@ -168,7 +162,7 @@ impl crate::App {
                 detail: format!(
                     "no suitable authentication method found for authenticating with peer at {url}",
                 ),
-                task_id: req.task_id.unwrap(),
+                task_id: req.task_id,
             }));
         };
 
@@ -242,7 +236,7 @@ impl crate::App {
                 StatusCode::UNAUTHORIZED => {
                     return Err(DapAbort::UnauthorizedRequest {
                         detail: format!("helper at {url} didn't authorize our request"),
-                        task_id,
+                        task_id: req.task_id,
                     }
                     .into())
                 }

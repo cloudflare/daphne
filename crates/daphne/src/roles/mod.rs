@@ -409,7 +409,7 @@ mod test {
             DapRequest {
                 version,
                 media_type: Some(DapMediaType::Report),
-                task_id: Some(*task_id),
+                task_id: *task_id,
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),
                 ..Default::default()
@@ -536,7 +536,7 @@ mod test {
             DapRequest {
                 version: task_config.version,
                 media_type: Some(media_type),
-                task_id: Some(*task_id),
+                task_id: *task_id,
                 resource: agg_job_id.map_or(DapResource::Undefined, |id| {
                     DapResource::AggregationJob(*id)
                 }),
@@ -557,7 +557,7 @@ mod test {
             DapRequest {
                 version: task_config.version,
                 media_type: Some(media_type),
-                task_id: Some(*task_id),
+                task_id: *task_id,
                 resource: DapResource::CollectionJob(coll_job_id),
                 payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
                 ..Default::default()
@@ -637,7 +637,7 @@ mod test {
             version,
             media_type: Some(DapMediaType::HpkeConfigList),
             payload: Vec::new(),
-            task_id: Some(task_id),
+            task_id,
             resource: DapResource::Undefined,
             ..Default::default()
         };
@@ -657,7 +657,7 @@ mod test {
         let req = DapRequest {
             version,
             media_type: Some(DapMediaType::HpkeConfigList),
-            task_id: Some(t.time_interval_task_id),
+            task_id: t.time_interval_task_id,
             resource: DapResource::Undefined,
             payload: Vec::new(),
             ..Default::default()
@@ -889,7 +889,7 @@ mod test {
         let req = DapRequest {
             version: task_config.version,
             media_type: Some(DapMediaType::Report),
-            task_id: Some(TaskId([0; 32])),
+            task_id: TaskId([0; 32]),
             resource: DapResource::Undefined,
             payload: report_invalid_task_id
                 .get_encoded_with_param(&task_config.version)
@@ -918,7 +918,7 @@ mod test {
         let req = DapRequest {
             version: task_config.version,
             media_type: Some(DapMediaType::Report),
-            task_id: Some(*task_id),
+            task_id: *task_id,
             resource: DapResource::Undefined,
             payload: report.get_encoded_with_param(&version).unwrap(),
             ..Default::default()
@@ -1491,7 +1491,7 @@ mod test {
             let req = DapRequest {
                 version,
                 media_type: Some(DapMediaType::Report),
-                task_id: Some(task_id),
+                task_id,
                 resource: DapResource::Undefined,
                 payload: report.get_encoded_with_param(&version).unwrap(),
                 taskprov: Some(taskprov_advertisement.clone()),

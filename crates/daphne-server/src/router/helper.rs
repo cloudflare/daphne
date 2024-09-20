@@ -37,8 +37,8 @@ where
     skip_all,
     fields(
         media_type = ?req.media_type,
-        task_id = ?req.task_id().ok(),
-        version = ?req.version
+        task_id = ?req.task_id,
+        version = ?req.version,
     )
 )]
 async fn agg_job(
@@ -70,8 +70,8 @@ async fn agg_job(
     skip_all,
     fields(
         media_type = ?req.media_type,
-        task_id = ?req.task_id().ok(),
-        version = ?req.version
+        task_id = ?req.task_id,
+        version = ?req.version,
     )
 )]
 async fn agg_share<A>(
