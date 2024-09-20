@@ -69,7 +69,7 @@ async fn leader_send_http_request(
     let req = DapRequest {
         version: task_config.version,
         media_type: Some(req_media_type),
-        task_id: Some(*task_id),
+        task_id: *task_id,
         resource,
         payload: req_data,
         taskprov,
@@ -167,22 +167,22 @@ pub async fn handle_upload_req<A: DapLeader>(
 ) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let metrics = aggregator.metrics();
-    let task_id = req.task_id()?;
+    let task_id = req.task_id;
     debug!("upload for task {task_id}");
 
     check_request_content_type(req, DapMediaType::Report)?;
 
     let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+        .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
     debug!("report id is {}", report.report_metadata.id);
 
     if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
+        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
     }
     let task_config = aggregator
-        .get_task_config_for(task_id)
+        .get_task_config_for(&task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.as_ref().version != req.version {
@@ -195,14 +195,14 @@ pub async fn handle_upload_req<A: DapLeader>(
                 "expected exactly two encrypted input shares; got {}",
                 report.encrypted_input_shares.len()
             ),
-            task_id: *task_id,
+            task_id,
         }
         .into());
     }
 
     // Check that the indicated HpkeConfig is present.
     if !aggregator
-        .can_hpke_decrypt(req.task_id()?, report.encrypted_input_shares[0].config_id)
+        .can_hpke_decrypt(&task_id, report.encrypted_input_shares[0].config_id)
         .await?
     {
         return Err(DapAbort::ReportRejected {
@@ -230,7 +230,7 @@ pub async fn handle_upload_req<A: DapLeader>(
     // Store the report for future processing. At this point, the report may be rejected if
     // the Leader detects that the report was replayed or pertains to a batch that has already
     // been collected.
-    aggregator.put_report(&report, req.task_id()?).await?;
+    aggregator.put_report(&report, &task_id).await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Upload);
     Ok(())
@@ -245,27 +245,27 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
-    let task_id = req.task_id()?;
+    let task_id = req.task_id;
     debug!("collect for task {task_id}");
 
     check_request_content_type(req, DapMediaType::CollectReq)?;
 
     if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, task_id, req, &global_config).await?;
+        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
     }
 
     let wrapped_task_config = aggregator
-        .get_task_config_for(task_id)
+        .get_task_config_for(&task_id)
         .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
+        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
     let coll_job_req = CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+        .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
     let agg_param =
         DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &coll_job_req.agg_param)
-            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+            .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.version != req.version {
@@ -277,7 +277,7 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     check_batch(
         aggregator,
         task_config,
-        task_id,
+        &task_id,
         &coll_job_req.query,
         &coll_job_req.agg_param,
         now,
@@ -293,12 +293,12 @@ pub async fn handle_coll_job_req<A: DapLeader>(
         Query::TimeInterval { batch_interval } => BatchSelector::TimeInterval { batch_interval },
         Query::FixedSizeByBatchId { batch_id } => BatchSelector::FixedSizeByBatchId { batch_id },
         Query::FixedSizeCurrentBatch => BatchSelector::FixedSizeByBatchId {
-            batch_id: aggregator.current_batch(task_id).await?,
+            batch_id: aggregator.current_batch(&task_id).await?,
         },
     };
 
     let collect_job_uri = aggregator
-        .init_collect_job(task_id, coll_job_id, batch_sel, agg_param)
+        .init_collect_job(&task_id, coll_job_id, batch_sel, agg_param)
         .await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Collect);

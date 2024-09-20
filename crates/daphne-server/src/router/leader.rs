@@ -44,8 +44,8 @@ where
 #[tracing::instrument(
     skip_all,
     fields(
-        task_id = ?req.task_id().ok(),
-        version = ?req.version
+        task_id = ?req.task_id,
+        version = ?req.version,
     )
 )]
 async fn upload<A>(
@@ -64,8 +64,8 @@ where
 #[tracing::instrument(
     skip_all,
     fields(
-        task_id = ?req.task_id().ok(),
-        version = ?req.version
+        task_id = ?req.task_id,
+        version = ?req.version,
     )
 )]
 async fn get_collect_uri<A>(
@@ -86,8 +86,8 @@ where
 #[tracing::instrument(
     skip_all,
     fields(
-        task_id = ?req.task_id().ok(),
-        version = ?req.version
+        task_id = ?req.task_id,
+        version = ?req.version,
     )
 )]
 async fn collect<A>(
@@ -97,15 +97,11 @@ async fn collect<A>(
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
-    let task_id = match req.task_id() {
-        Ok(id) => id,
-        Err(e) => return AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
-    };
     let collect_id = match req.collection_job_id() {
         Ok(id) => id,
         Err(e) => return AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     };
-    match app.poll_collect_job(task_id, collect_id).await {
+    match app.poll_collect_job(&req.task_id, collect_id).await {
         Ok(daphne::DapCollectionJob::Done(collect_resp)) => AxumDapResponse::new_success(
             daphne::DapResponse {
                 version: req.version,

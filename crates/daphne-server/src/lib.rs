@@ -168,7 +168,7 @@ impl router::DaphneService for App {
         if req.taskprov.is_some() {
             Ok(true)
         } else if self
-            .get_task_config_for(&req.task_id.unwrap())
+            .get_task_config_for(&req.task_id)
             .await?
             .is_some_and(|task_config| task_config.method_is_taskprov())
         {

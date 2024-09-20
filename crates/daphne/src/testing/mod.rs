@@ -801,9 +801,8 @@ impl DapAggregator for InMemoryAggregator {
         req: &DapRequest,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
-        let task_id = req.task_id().map_err(DapError::Abort)?;
         let mut tasks = self.tasks.lock().expect("tasks: lock failed");
-        tasks.deref_mut().insert(*task_id, task_config);
+        tasks.deref_mut().insert(req.task_id, task_config);
         Ok(())
     }
 

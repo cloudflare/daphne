@@ -229,7 +229,7 @@ impl DapAggregator for crate::App {
         req: &DapRequest,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
-        let task_id = req.task_id().map_err(DapError::Abort)?;
+        let task_id = &req.task_id;
         let expiration_time = task_config.not_after;
 
         if self.service_config.role.is_leader() || req.taskprov.is_none() {
