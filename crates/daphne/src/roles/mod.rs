@@ -10,7 +10,8 @@ pub mod leader;
 use crate::{
     constants::DapMediaType,
     messages::{Base64Encode, Query, TaskId, Time},
-    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapTaskConfig,
+    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapRequestMeta,
+    DapTaskConfig,
 };
 use tracing::warn;
 
@@ -103,7 +104,7 @@ fn check_request_content_type(req: &DapRequest, expected: DapMediaType) -> Resul
 async fn resolve_taskprov(
     agg: &impl DapAggregator,
     task_id: &TaskId,
-    req: &DapRequest,
+    req: &DapRequestMeta,
     global_config: &DapGlobalConfig,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
@@ -151,10 +152,10 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
-            AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
-            Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
-            TransitionFailure, TransitionVar,
+            request::DapRequestMeta, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
+            AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
+            CollectionReq, Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query,
+            Report, TaskId, Time, TransitionFailure, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -407,12 +408,14 @@ mod test {
             let version = task_config.version;
 
             DapRequest {
-                version,
-                media_type: Some(DapMediaType::Report),
-                task_id: *task_id,
-                resource: DapResource::Undefined,
+                meta: DapRequestMeta {
+                    version,
+                    media_type: Some(DapMediaType::Report),
+                    task_id: *task_id,
+                    resource: DapResource::Undefined,
+                    ..Default::default()
+                },
                 payload: report.get_encoded_with_param(&version).unwrap(),
-                ..Default::default()
             }
         }
 
@@ -534,14 +537,16 @@ mod test {
         ) -> DapRequest {
             let payload = msg.get_encoded_with_param(&task_config.version).unwrap();
             DapRequest {
-                version: task_config.version,
-                media_type: Some(media_type),
-                task_id: *task_id,
-                resource: agg_job_id.map_or(DapResource::Undefined, |id| {
-                    DapResource::AggregationJob(*id)
-                }),
+                meta: DapRequestMeta {
+                    version: task_config.version,
+                    media_type: Some(media_type),
+                    task_id: *task_id,
+                    resource: agg_job_id.map_or(DapResource::Undefined, |id| {
+                        DapResource::AggregationJob(*id)
+                    }),
+                    ..Default::default()
+                },
                 payload,
-                ..Default::default()
             }
         }
 
@@ -555,12 +560,14 @@ mod test {
             let coll_job_id = CollectionJobId(rng.gen());
 
             DapRequest {
-                version: task_config.version,
-                media_type: Some(media_type),
-                task_id: *task_id,
-                resource: DapResource::CollectionJob(coll_job_id),
+                meta: DapRequestMeta {
+                    version: task_config.version,
+                    media_type: Some(media_type),
+                    task_id: *task_id,
+                    resource: DapResource::CollectionJob(coll_job_id),
+                    ..Default::default()
+                },
                 payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
-                ..Default::default()
             }
         }
     }
@@ -634,12 +641,14 @@ mod test {
         let mut rng = thread_rng();
         let task_id = TaskId(rng.gen());
         let req = DapRequest {
-            version,
-            media_type: Some(DapMediaType::HpkeConfigList),
+            meta: DapRequestMeta {
+                version,
+                media_type: Some(DapMediaType::HpkeConfigList),
+                task_id,
+                resource: DapResource::Undefined,
+                ..Default::default()
+            },
             payload: Vec::new(),
-            task_id,
-            resource: DapResource::Undefined,
-            ..Default::default()
         };
 
         assert_eq!(
@@ -655,12 +664,14 @@ mod test {
     async fn handle_hpke_config_req_missing_task_id(version: DapVersion) {
         let t = Test::new(version);
         let req = DapRequest {
-            version,
-            media_type: Some(DapMediaType::HpkeConfigList),
-            task_id: t.time_interval_task_id,
-            resource: DapResource::Undefined,
+            meta: DapRequestMeta {
+                version,
+                media_type: Some(DapMediaType::HpkeConfigList),
+                task_id: t.time_interval_task_id,
+                resource: DapResource::Undefined,
+                ..Default::default()
+            },
             payload: Vec::new(),
-            ..Default::default()
         };
 
         // An Aggregator is permitted to abort an HPKE config request if the task ID is missing. Note
@@ -887,14 +898,16 @@ mod test {
         // Construct a report payload with an invalid task ID.
         let report_invalid_task_id = t.gen_test_report(task_id).await;
         let req = DapRequest {
-            version: task_config.version,
-            media_type: Some(DapMediaType::Report),
-            task_id: TaskId([0; 32]),
-            resource: DapResource::Undefined,
+            meta: DapRequestMeta {
+                version: task_config.version,
+                media_type: Some(DapMediaType::Report),
+                task_id: TaskId([0; 32]),
+                resource: DapResource::Undefined,
+                ..Default::default()
+            },
             payload: report_invalid_task_id
                 .get_encoded_with_param(&task_config.version)
                 .unwrap(),
-            ..Default::default()
         };
 
         // Expect failure due to invalid task ID in report.
@@ -916,12 +929,14 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let req = DapRequest {
-            version: task_config.version,
-            media_type: Some(DapMediaType::Report),
-            task_id: *task_id,
-            resource: DapResource::Undefined,
+            meta: DapRequestMeta {
+                version: task_config.version,
+                media_type: Some(DapMediaType::Report),
+                task_id: *task_id,
+                resource: DapResource::Undefined,
+                ..Default::default()
+            },
             payload: report.get_encoded_with_param(&version).unwrap(),
-            ..Default::default()
         };
 
         assert_eq!(
@@ -1489,12 +1504,14 @@ mod test {
                 .unwrap();
 
             let req = DapRequest {
-                version,
-                media_type: Some(DapMediaType::Report),
-                task_id,
-                resource: DapResource::Undefined,
+                meta: DapRequestMeta {
+                    version,
+                    media_type: Some(DapMediaType::Report),
+                    task_id,
+                    resource: DapResource::Undefined,
+                    taskprov: Some(taskprov_advertisement.clone()),
+                },
                 payload: report.get_encoded_with_param(&version).unwrap(),
-                taskprov: Some(taskprov_advertisement.clone()),
             };
             leader::handle_upload_req(&*t.leader, &req).await.unwrap();
         }

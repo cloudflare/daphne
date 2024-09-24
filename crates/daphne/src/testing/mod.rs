@@ -28,8 +28,8 @@ use crate::{
     vdaf::VdafVerifyKey,
     DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
-    DapMeasurement, DapQueryConfig, DapRequest, DapResponse, DapTaskConfig, DapVersion,
-    ReplayProtection, VdafConfig,
+    DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta, DapResponse, DapTaskConfig,
+    DapVersion, ReplayProtection, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -798,7 +798,7 @@ impl DapAggregator for InMemoryAggregator {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequest,
+        req: &DapRequestMeta,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let mut tasks = self.tasks.lock().expect("tasks: lock failed");

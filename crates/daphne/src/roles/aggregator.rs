@@ -15,7 +15,7 @@ use crate::{
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapResponse, DapTaskConfig, DapVersion,
+    DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -84,7 +84,7 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
     /// nothing.
     async fn taskprov_put(
         &self,
-        req: &DapRequest,
+        req: &DapRequestMeta,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError>;
 
