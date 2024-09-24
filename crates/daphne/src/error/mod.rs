@@ -32,21 +32,6 @@ pub enum DapError {
 }
 
 impl DapError {
-    pub fn into_problem_details(self) -> ProblemDetails {
-        if let Self::Abort(a) = self {
-            return a.into_problem_details();
-        }
-
-        ProblemDetails {
-            typ: None,
-            title: "Internal server error".into(),
-            agg_job_id: None,
-            task_id: None,
-            instance: "/problem-details/internal-server-error".into(),
-            detail: None,
-        }
-    }
-
     /// Construct a fatal encoding error.
     pub fn encoding(e: CodecError) -> DapError {
         DapError::Fatal(FatalDapError(format!(
@@ -67,6 +52,19 @@ impl DapError {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct FatalDapError(pub(crate) String);
+
+impl FatalDapError {
+    pub fn into_problem_details(self) -> ProblemDetails {
+        ProblemDetails {
+            typ: None,
+            title: "Internal server error".into(),
+            agg_job_id: None,
+            task_id: None,
+            instance: "/problem-details/internal-server-error".into(),
+            detail: None,
+        }
+    }
+}
 
 impl std::error::Error for FatalDapError {}
 
