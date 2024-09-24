@@ -111,7 +111,7 @@ impl DapLeader for crate::App {
 impl crate::App {
     async fn send_http(
         &self,
-        req: DapRequest,
+        mut req: DapRequest,
         method: Method,
         url: Url,
     ) -> Result<DapResponse, DapError> {
@@ -184,7 +184,7 @@ impl crate::App {
         let req_builder = self
             .http
             .request(method, url.clone())
-            .body(req.payload)
+            .body(std::mem::take(&mut req.payload))
             .headers(headers);
 
         let start = Instant::now();

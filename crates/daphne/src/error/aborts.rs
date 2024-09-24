@@ -4,9 +4,7 @@
 //! Definitions and tooling for DAP protocol aborts.
 
 use crate::{
-    fatal_error,
-    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
-    DapError, DapMediaType, DapRequest, DapVersion,
+    constants::DapMediaType, fatal_error, messages::{AggregationJobId, ReportId, TaskId, TransitionFailure}, DapError, DapRequestMeta, DapVersion
 };
 use hex::FromHexError;
 use prio::codec::CodecError;
@@ -181,7 +179,7 @@ impl DapAbort {
     }
 
     /// Abort due to unexpected value for HTTP content-type header.
-    pub fn content_type(req: &DapRequest, expected: DapMediaType) -> Self {
+    pub fn content_type(req: &DapRequestMeta, expected: DapMediaType) -> Self {
         let want_content_type = expected.as_str_for_version(req.version).unwrap_or_else(|| {
             unreachable!("unexpected content-type for DAP version {:?}", req.version)
         });

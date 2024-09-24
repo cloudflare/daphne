@@ -21,9 +21,9 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode,
-        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
-        PartialBatchSelector, Query, Report, TaskId,
+        request::DapRequestMeta, AggregateShare, AggregateShareReq, AggregationJobId,
+        AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
+        CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
@@ -67,12 +67,14 @@ async fn leader_send_http_request(
         .map_err(|e| fatal_error!(err = ?e, "failed to helper url {:?} with {path:?}", task_config.helper_url))?;
 
     let req = DapRequest {
-        version: task_config.version,
-        media_type: Some(req_media_type),
-        task_id: *task_id,
-        resource,
+        meta: DapRequestMeta {
+            version: task_config.version,
+            media_type: Some(req_media_type),
+            task_id: *task_id,
+            resource,
+            taskprov,
+        },
         payload: req_data,
-        taskprov,
     };
 
     let resp = match method {

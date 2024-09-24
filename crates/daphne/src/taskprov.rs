@@ -16,8 +16,8 @@ use crate::{
         Duration, TaskId, Time,
     },
     vdaf::VdafVerifyKey,
-    DapAbort, DapError, DapQueryConfig, DapRequest, DapTaskConfig, DapTaskConfigMethod, DapVersion,
-    Prio3Config, VdafConfig,
+    DapAbort, DapError, DapQueryConfig, DapRequestMeta, DapTaskConfig, DapTaskConfigMethod,
+    DapVersion, Prio3Config, VdafConfig,
 };
 use crate::{
     pine::PineParam,
@@ -107,7 +107,7 @@ fn malformed_task_config(task_id: &TaskId, detail: String) -> DapAbort {
 /// The `task_id` is the task ID indicated by the request; if this does not match the derived task
 /// ID, then we return `Err(DapError::Abort(DapAbort::UnrecognizedTask))`.
 pub(crate) fn resolve_advertised_task_config(
-    req: &'_ DapRequest,
+    req: &DapRequestMeta,
     verify_key_init: &[u8; 32],
     collector_hpke_config: &HpkeConfig,
     task_id: &TaskId,
@@ -127,7 +127,7 @@ pub(crate) fn resolve_advertised_task_config(
 
 /// Check for a taskprov extension in the report, and return it if found.
 fn get_taskprov_task_config(
-    req: &'_ DapRequest,
+    req: &DapRequestMeta,
     task_id: &TaskId,
 ) -> Result<Option<TaskConfig>, DapAbort> {
     let taskprov_data = if let Some(ref taskprov_base64url) = req.taskprov {
@@ -505,7 +505,7 @@ mod test {
     use crate::{
         error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
-        messages::{self, encode_base64url, TaskId},
+        messages::{self, encode_base64url, request::DapRequestMeta, TaskId},
         taskprov::{DapTaskConfigNeedsOptIn, OptInParam},
         test_versions,
         vdaf::{VdafConfig, VdafVerifyKey},
@@ -622,12 +622,14 @@ mod test {
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
             let req = DapRequest {
-                version,
-                media_type: None, // ignored by test
-                task_id,
-                resource: DapResource::Undefined, // ignored by test
-                payload: Vec::default(),          // ignored by test
-                taskprov: Some(taskprov_task_config_base64url),
+                meta: DapRequestMeta {
+                    version,
+                    media_type: None, // ignored by test
+                    task_id,
+                    resource: DapResource::Undefined, // ignored by test
+                    taskprov: Some(taskprov_task_config_base64url),
+                },
+                payload: Vec::default(), // ignored by test
             };
 
             (req, task_id)
@@ -677,12 +679,14 @@ mod test {
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
             let req = DapRequest {
-                version,
-                media_type: None, // ignored by test
-                task_id,
-                resource: DapResource::Undefined, // ignored by test
-                payload: Vec::default(),          // ignored by test
-                taskprov: Some(taskprov_task_config_base64url),
+                meta: DapRequestMeta {
+                    version,
+                    media_type: None, // ignored by test
+                    task_id,
+                    resource: DapResource::Undefined, // ignored by test
+                    taskprov: Some(taskprov_task_config_base64url),
+                },
+                payload: Vec::default(), // ignored by test
             };
 
             (req, task_id)
