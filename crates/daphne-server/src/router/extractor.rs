@@ -1,30 +1,104 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{AxumDapResponse, DaphneService};
+use std::io::Cursor;
+
 use axum::{
     async_trait,
-    body::HttpBody,
+    body::{Bytes, HttpBody},
     extract::{FromRequest, FromRequestParts, Path},
 };
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
-    messages::{request::DapRequestMeta, AggregationJobId, CollectionJobId, TaskId},
-    DapError, DapRequest, DapResource, DapVersion,
+    messages::{
+        AggregateShareReq, AggregationJobId, AggregationJobInitReq, CollectionJobId, CollectionReq,
+        Report, TaskId,
+    },
+    DapError, DapRequest, DapRequestMeta, DapResource, DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers, metrics};
 use http::{header::CONTENT_TYPE, HeaderMap, Request};
+use prio::codec::ParameterizedDecode;
 use serde::Deserialize;
+
+use super::{AxumDapResponse, DaphneService};
+
+pub trait DecodeFromDapHttpBody: Sized {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort>;
+}
+
+pub enum AggregationJobReq {
+    Init(AggregationJobInitReq),
+    // TODO: support continue requests
+}
+
+impl DecodeFromDapHttpBody for AggregationJobReq {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        let mut cursor = Cursor::new(bytes.as_ref());
+        let media_type = meta.get_checked_media_type([DapMediaType::AggregationJobInitReq])?;
+        match media_type {
+            DapMediaType::AggregationJobInitReq => Ok(Self::Init(
+                AggregationJobInitReq::decode_with_param(&meta.version, &mut cursor)
+                    .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))?,
+            )),
+            // we list out all the variants so we remember to come here when we implement
+            // AggregateShareContReq
+            DapMediaType::AggregateShareReq
+            | DapMediaType::Report
+            | DapMediaType::CollectReq
+            | DapMediaType::HpkeConfigList
+            | DapMediaType::AggregationJobResp
+            | DapMediaType::AggregateShare
+            | DapMediaType::Collection => {
+                unreachable!("get_checked_media_type already filtered these out")
+            }
+        }
+    }
+}
+
+impl DecodeFromDapHttpBody for AggregateShareReq {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        let mut cursor = Cursor::new(bytes.as_ref());
+        meta.get_checked_media_type([DapMediaType::AggregateShareReq])?;
+        Self::decode_with_param(&meta.version, &mut cursor)
+            .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
+    }
+}
+
+impl DecodeFromDapHttpBody for Report {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        let mut cursor = Cursor::new(bytes.as_ref());
+        meta.get_checked_media_type([DapMediaType::Report])?;
+        Self::decode_with_param(&meta.version, &mut cursor)
+            .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
+    }
+}
+
+impl DecodeFromDapHttpBody for CollectionReq {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        let mut cursor = Cursor::new(bytes.as_ref());
+        meta.get_checked_media_type([DapMediaType::CollectReq])?;
+        Self::decode_with_param(&meta.version, &mut cursor)
+            .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
+    }
+}
+
+impl DecodeFromDapHttpBody for () {
+    fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        Ok(())
+    }
+}
 
 /// An axum extractor capable of parsing a [`DapRequest`].
 #[derive(Debug)]
-pub(super) struct UnauthenticatedDapRequestExtractor(pub DapRequest);
+pub(super) struct UnauthenticatedDapRequestExtractor<P>(pub DapRequest<P>);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for UnauthenticatedDapRequestExtractor
+impl<S, B, P> FromRequest<S, B, P> for UnauthenticatedDapRequestExtractor<P>
 where
+    P: DecodeFromDapHttpBody,
     S: DaphneService + Send + Sync,
     B: HttpBody + Send + 'static,
     <B as HttpBody>::Data: Send,
@@ -76,8 +150,8 @@ where
             None
         };
 
-        // TODO(mendess): this is very eager, we could redesign DapResponse later to allow for
-        // streaming of data.
+        // TODO(mendess): this allocates needlessly, if prio supported some kind of
+        // AsyncParameterizedDecode we could avoid this allocation
         let payload = hyper::body::to_bytes(body).await;
 
         let Ok(payload) = payload else {
@@ -107,16 +181,18 @@ where
             (task_id, resource)
         };
 
-        let request = DapRequest {
-            meta: DapRequestMeta {
-                version,
-                task_id,
-                resource,
-                media_type,
-                taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
-            },
-            payload: payload.to_vec(),
+        let meta = DapRequestMeta {
+            version,
+            task_id,
+            taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
+            media_type,
+            resource,
         };
+
+        let payload = P::decode_from_http_body(payload, &meta)
+            .map_err(|e| AxumDapResponse::new_error(e, state.server_metrics()))?;
+
+        let request = DapRequest { meta, payload };
 
         Ok(UnauthenticatedDapRequestExtractor(request))
     }
@@ -126,11 +202,12 @@ where
 ///
 /// This extractor asserts that the request is authenticated.
 #[derive(Debug)]
-pub(super) struct DapRequestExtractor(pub DapRequest);
+pub(super) struct DapRequestExtractor<P>(pub DapRequest<P>);
 
 #[async_trait]
-impl<S, B> FromRequest<S, B> for DapRequestExtractor
+impl<S, B, P> FromRequest<S, B, P> for DapRequestExtractor<P>
 where
+    P: DecodeFromDapHttpBody + Send + Sync,
     S: DaphneService + Send + Sync,
     B: HttpBody + Send + 'static,
     <B as HttpBody>::Data: Send,
@@ -224,8 +301,9 @@ mod test {
     use daphne::{
         async_test_versions,
         constants::DapMediaType,
+        error::DapAbort,
         messages::{AggregationJobId, Base64Encode, CollectionJobId, TaskId},
-        DapError, DapRequest, DapResource, DapSender, DapVersion,
+        DapError, DapRequestMeta, DapResource, DapSender, DapVersion,
     };
     use daphne_service_utils::{
         bearer_token::BearerToken, http_headers, metrics::DaphnePromServiceMetrics,
@@ -239,11 +317,26 @@ mod test {
     };
     use tower::ServiceExt;
 
-    use super::DapRequestExtractor;
-
-    use super::UnauthenticatedDapRequestExtractor;
+    use super::DecodeFromDapHttpBody;
 
     const BEARER_TOKEN: &str = "test-token";
+
+    // in these tests we don't care about the body, so we can type alias it away
+    #[derive(Debug)]
+    struct EmptyBody;
+
+    impl DecodeFromDapHttpBody for EmptyBody {
+        fn decode_from_http_body(
+            _: axum::body::Bytes,
+            _: &DapRequestMeta,
+        ) -> Result<Self, DapAbort> {
+            Ok(Self)
+        }
+    }
+
+    type DapRequest = daphne::DapRequest<EmptyBody>;
+    type UnauthenticatedDapRequestExtractor = super::UnauthenticatedDapRequestExtractor<EmptyBody>;
+    type DapRequestExtractor = super::DapRequestExtractor<EmptyBody>;
 
     /// Return a function that will parse a request using the [`DapRequestExtractor`] or
     /// [`UnauthenticatedDapRequestExtractor`] and return the parsed request.
@@ -289,7 +382,7 @@ mod test {
                     .ok_or_else(|| Left("invalid token".into()))
             }
 
-            async fn is_using_taskprov(&self, req: &DapRequest) -> Result<bool, DapError> {
+            async fn is_using_taskprov(&self, req: &DapRequestMeta) -> Result<bool, DapError> {
                 Ok(req.taskprov.is_some())
             }
         }
@@ -314,17 +407,17 @@ mod test {
         // unauthenticated handler that simply sends the received request through the channel
         async fn handler(
             State(ch): State<Arc<Channel>>,
-            UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor,
+            req: UnauthenticatedDapRequestExtractor,
         ) -> impl IntoResponse {
-            ch.send(req).await.unwrap();
+            ch.send(req.0).await.unwrap();
         }
 
         // unauthenticated handler that simply sends the received request through the channel
         async fn auth_handler(
             State(ch): State<Arc<Channel>>,
-            DapRequestExtractor(req): DapRequestExtractor,
+            req: DapRequestExtractor,
         ) -> impl IntoResponse {
-            ch.send(req).await.unwrap();
+            ch.send(req.0).await.unwrap();
         }
 
         move |req| {

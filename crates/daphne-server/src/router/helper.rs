@@ -9,15 +9,14 @@ use axum::{
     routing::{post, put},
 };
 use daphne::{
-    constants::DapMediaType,
-    error::DapAbort,
+    messages::AggregateShareReq,
     roles::{helper, DapHelper},
 };
 use http::StatusCode;
 
 use crate::{roles::fetch_replay_protection_override, App};
 
-use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
+use super::{extractor::AggregationJobReq, AxumDapResponse, DapRequestExtractor, DaphneService};
 
 pub(super) fn add_helper_routes<B>(router: super::Router<App, B>) -> super::Router<App, B>
 where
@@ -43,13 +42,14 @@ where
 )]
 async fn agg_job(
     State(app): State<Arc<App>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<AggregationJobReq>,
 ) -> AxumDapResponse {
-    match req.media_type {
-        Some(DapMediaType::AggregationJobInitReq) => {
+    let (req, payload) = req.take_payload();
+    match payload {
+        AggregationJobReq::Init(agg_init_req) => {
             let resp = helper::handle_agg_job_init_req(
                 &*app,
-                &req,
+                req.map(|()| agg_init_req),
                 fetch_replay_protection_override(app.kv()).await,
             )
             .await;
@@ -59,10 +59,6 @@ async fn agg_job(
                 StatusCode::CREATED,
             )
         }
-        m => AxumDapResponse::new_error(
-            DapAbort::BadRequest(format!("unexpected media type: {m:?}")),
-            app.server_metrics(),
-        ),
     }
 }
 
@@ -76,13 +72,13 @@ async fn agg_job(
 )]
 async fn agg_share<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<AggregateShareReq>,
 ) -> AxumDapResponse
 where
     A: DapHelper + DaphneService + Send + Sync,
 {
     AxumDapResponse::from_result(
-        helper::handle_agg_share_req(&*app, &req).await,
+        helper::handle_agg_share_req(&*app, req).await,
         app.server_metrics(),
     )
 }

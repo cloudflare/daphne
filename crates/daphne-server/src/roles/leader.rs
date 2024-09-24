@@ -12,10 +12,11 @@ use daphne::{
     fatal_error,
     messages::{BatchId, BatchSelector, Collection, CollectionJobId, Report, TaskId},
     roles::{leader::WorkItem, DapAggregator, DapLeader},
-    DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse,
+    DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse, DapVersion,
 };
 use daphne_service_utils::http_headers;
 use http::StatusCode;
+use prio::codec::ParameterizedEncode;
 use tracing::{error, info};
 use url::Url;
 
@@ -99,22 +100,31 @@ impl DapLeader for crate::App {
         self.test_leader_state.lock().await.enqueue_work(items)
     }
 
-    async fn send_http_post(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_post<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         self.send_http(req, Method::POST, url).await
     }
 
-    async fn send_http_put(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_put<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         self.send_http(req, Method::PUT, url).await
     }
 }
 
 impl crate::App {
-    async fn send_http(
+    async fn send_http<M>(
         &self,
-        mut req: DapRequest,
+        req: DapRequest<M>,
         method: Method,
         url: Url,
-    ) -> Result<DapResponse, DapError> {
+    ) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
         let content_type = req
             .media_type
@@ -181,10 +191,15 @@ impl crate::App {
             );
         }
 
+        let (req, payload) = req.take_payload();
         let req_builder = self
             .http
             .request(method, url.clone())
-            .body(std::mem::take(&mut req.payload))
+            .body(
+                payload
+                    .get_encoded_with_param(&req.version)
+                    .map_err(|e| DapAbort::from_codec_error(e, req.task_id))?,
+            )
             .headers(headers);
 
         let start = Instant::now();

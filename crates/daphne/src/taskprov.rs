@@ -8,6 +8,7 @@
 use std::num::NonZeroUsize;
 
 use crate::{
+    error::DapAbort,
     fatal_error,
     hpke::HpkeConfig,
     messages::{
@@ -16,12 +17,15 @@ use crate::{
         Duration, TaskId, Time,
     },
     vdaf::VdafVerifyKey,
-    DapAbort, DapError, DapQueryConfig, DapRequestMeta, DapTaskConfig, DapTaskConfigMethod,
-    DapVersion, Prio3Config, VdafConfig,
+    DapError, DapQueryConfig, DapRequestMeta, DapTaskConfig, DapTaskConfigMethod, DapVersion,
+    VdafConfig,
 };
 use crate::{
     pine::PineParam,
-    vdaf::pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig},
+    vdaf::{
+        pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig},
+        Prio3Config,
+    },
 };
 use prio::codec::ParameterizedDecode;
 use ring::{
@@ -505,11 +509,11 @@ mod test {
     use crate::{
         error::DapAbort,
         hpke::{HpkeKemId, HpkeReceiverConfig},
-        messages::{self, encode_base64url, request::DapRequestMeta, TaskId},
+        messages::{self, encode_base64url, TaskId},
         taskprov::{DapTaskConfigNeedsOptIn, OptInParam},
         test_versions,
         vdaf::{VdafConfig, VdafVerifyKey},
-        DapRequest, DapResource, DapVersion,
+        DapRequestMeta, DapResource, DapVersion,
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
@@ -621,15 +625,12 @@ mod test {
             let task_id = compute_task_id(&taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
-            let req = DapRequest {
-                meta: DapRequestMeta {
-                    version,
-                    media_type: None, // ignored by test
-                    task_id,
-                    resource: DapResource::Undefined, // ignored by test
-                    taskprov: Some(taskprov_task_config_base64url),
-                },
-                payload: Vec::default(), // ignored by test
+            let req = DapRequestMeta {
+                version,
+                task_id,
+                taskprov: Some(taskprov_task_config_base64url),
+                media_type: None,                 // ignored by test
+                resource: DapResource::Undefined, // ignored by test
             };
 
             (req, task_id)
@@ -678,15 +679,12 @@ mod test {
             let task_id = compute_task_id(&taskprov_task_config_bytes);
             let taskprov_task_config_base64url = encode_base64url(&taskprov_task_config_bytes);
 
-            let req = DapRequest {
-                meta: DapRequestMeta {
-                    version,
-                    media_type: None, // ignored by test
-                    task_id,
-                    resource: DapResource::Undefined, // ignored by test
-                    taskprov: Some(taskprov_task_config_base64url),
-                },
-                payload: Vec::default(), // ignored by test
+            let req = crate::DapRequestMeta {
+                version,
+                task_id,
+                taskprov: Some(taskprov_task_config_base64url),
+                media_type: None,
+                resource: DapResource::Undefined,
             };
 
             (req, task_id)

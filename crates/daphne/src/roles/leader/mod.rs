@@ -12,30 +12,27 @@ use rand::{thread_rng, Rng};
 use tracing::debug;
 use url::Url;
 
-use super::{
-    aggregator::MergeAggShareError, check_batch, check_request_content_type, resolve_taskprov,
-    DapAggregator,
-};
+use super::{aggregator::MergeAggShareError, check_batch, resolve_taskprov, DapAggregator};
 use crate::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
     messages::{
-        request::DapRequestMeta, AggregateShare, AggregateShareReq, AggregationJobId,
-        AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-        CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
+        AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode,
+        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
+        PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
-    DapResource, DapResponse, DapTaskConfig,
+    DapRequestMeta, DapResource, DapResponse, DapTaskConfig, DapVersion,
 };
 
-struct LeaderHttpRequestOptions<'p> {
+struct LeaderHttpRequestOptions<'p, P> {
     path: &'p str,
     req_media_type: DapMediaType,
     resp_media_type: DapMediaType,
     resource: DapResource,
-    req_data: Vec<u8>,
+    req_data: P,
     method: LeaderHttpRequestMethod,
     taskprov: Option<String>,
 }
@@ -45,12 +42,15 @@ enum LeaderHttpRequestMethod {
     Put,
 }
 
-async fn leader_send_http_request(
+async fn leader_send_http_request<P>(
     role: &impl DapLeader,
     task_id: &TaskId,
     task_config: &DapTaskConfig,
-    opts: LeaderHttpRequestOptions<'_>,
-) -> Result<DapResponse, DapError> {
+    opts: LeaderHttpRequestOptions<'_, P>,
+) -> Result<DapResponse, DapError>
+where
+    P: Send + ParameterizedEncode<DapVersion>,
+{
     let LeaderHttpRequestOptions {
         path,
         req_media_type,
@@ -156,30 +156,35 @@ pub trait DapLeader: DapAggregator {
     ) -> Result<(), DapError>;
 
     /// Send an HTTP POST request.
-    async fn send_http_post(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError>;
+    async fn send_http_post<M>(
+        &self,
+        req: DapRequest<M>,
+        url: Url,
+    ) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>;
 
     /// Send an HTTP PUT request.
-    async fn send_http_put(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError>;
+    async fn send_http_put<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>;
 }
 
 /// Handle a report from a Client.
 pub async fn handle_upload_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest,
+    req: DapRequest<Report>,
 ) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let metrics = aggregator.metrics();
     let task_id = req.task_id;
     debug!("upload for task {task_id}");
 
-    check_request_content_type(req, DapMediaType::Report)?;
-
-    let report = Report::get_decoded_with_param(&req.version, req.payload.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
+    let report = &req.payload;
     debug!("report id is {}", report.report_metadata.id);
 
     if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
+        resolve_taskprov(aggregator, &task_id, &req, &global_config).await?;
     }
     let task_config = aggregator
         .get_task_config_for(&task_id)
@@ -232,7 +237,7 @@ pub async fn handle_upload_req<A: DapLeader>(
     // Store the report for future processing. At this point, the report may be rejected if
     // the Leader detects that the report was replayed or pertains to a batch that has already
     // been collected.
-    aggregator.put_report(&report, &task_id).await?;
+    aggregator.put_report(report, &task_id).await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Upload);
     Ok(())
@@ -242,15 +247,13 @@ pub async fn handle_upload_req<A: DapLeader>(
 /// poll later on to get the collection.
 pub async fn handle_coll_job_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest,
+    req: &DapRequest<CollectionReq>,
 ) -> Result<Url, DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
     let task_id = req.task_id;
     debug!("collect for task {task_id}");
-
-    check_request_content_type(req, DapMediaType::CollectReq)?;
 
     if global_config.allow_taskprov {
         resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
@@ -262,8 +265,7 @@ pub async fn handle_coll_job_req<A: DapLeader>(
         .ok_or(DapAbort::UnrecognizedTask { task_id })?;
     let task_config = wrapped_task_config.as_ref();
 
-    let coll_job_req = CollectionReq::get_decoded_with_param(&req.version, req.payload.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
+    let coll_job_req = &req.payload;
 
     let agg_param =
         DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &coll_job_req.agg_param)
@@ -287,9 +289,7 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     )
     .await?;
 
-    let DapResource::CollectionJob(coll_job_id) = &req.resource else {
-        return Err(DapAbort::BadRequest("missing collection ID".into()).into());
-    };
+    let coll_job_id = req.collection_job_id()?;
 
     let batch_sel = match coll_job_req.query {
         Query::TimeInterval { batch_interval } => BatchSelector::TimeInterval { batch_interval },
@@ -355,9 +355,7 @@ async fn run_agg_job<A: DapLeader>(
             req_media_type: DapMediaType::AggregationJobInitReq,
             resp_media_type: DapMediaType::AggregationJobResp,
             resource: DapResource::AggregationJob(agg_job_id),
-            req_data: agg_job_init_req
-                .get_encoded_with_param(&task_config.version)
-                .map_err(DapError::encoding)?,
+            req_data: agg_job_init_req,
             method: LeaderHttpRequestMethod::Put,
             taskprov: taskprov.clone(),
         },
@@ -459,6 +457,8 @@ async fn run_coll_job<A: DapLeader>(
 
     let url_path = format!("tasks/{}/aggregate_shares", task_id.to_base64url());
 
+    let agg_share_req_report_count = agg_share_req.report_count;
+    let agg_share_req_batch_sel = agg_share_req.batch_sel.clone();
     // Send AggregateShareReq and receive AggregateShareResp.
     let resp = leader_send_http_request(
         aggregator,
@@ -469,9 +469,7 @@ async fn run_coll_job<A: DapLeader>(
             req_media_type: DapMediaType::AggregateShareReq,
             resp_media_type: DapMediaType::AggregateShare,
             resource: DapResource::Undefined,
-            req_data: agg_share_req
-                .get_encoded_with_param(&task_config.version)
-                .map_err(DapError::encoding)?,
+            req_data: agg_share_req,
             method: LeaderHttpRequestMethod::Post,
             taskprov,
         },
@@ -508,11 +506,11 @@ async fn run_coll_job<A: DapLeader>(
 
     // Mark reports as collected.
     aggregator
-        .mark_collected(task_id, &agg_share_req.batch_sel)
+        .mark_collected(task_id, &agg_share_req_batch_sel)
         .await?;
 
-    metrics.report_inc_by(ReportStatus::Collected, agg_share_req.report_count);
-    Ok(agg_share_req.report_count)
+    metrics.report_inc_by(ReportStatus::Collected, agg_share_req_report_count);
+    Ok(agg_share_req_report_count)
 }
 
 /// Drain a number of items from the work queue and process them.

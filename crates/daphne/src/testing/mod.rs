@@ -33,6 +33,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
+use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1067,18 +1068,25 @@ impl DapLeader for InMemoryAggregator {
             .finish_collect_job(task_id, coll_job_id, collection)
     }
 
-    async fn send_http_post(&self, req: DapRequest, _url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_post<M>(
+        &self,
+        req: DapRequest<M>,
+        _url: Url,
+    ) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         match req.media_type {
-            Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_req(
+            Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_init_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                &req,
+                map_dap_req(req),
                 Default::default(),
             )
             .await
             .expect("peer aborted unexpectedly")),
             Some(DapMediaType::AggregateShareReq) => Ok(helper::handle_agg_share_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                &req,
+                map_dap_req(req),
             )
             .await
             .expect("peer aborted unexpectedly")),
@@ -1086,11 +1094,18 @@ impl DapLeader for InMemoryAggregator {
         }
     }
 
-    async fn send_http_put(&self, req: DapRequest, _url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_put<M: Send>(
+        &self,
+        req: DapRequest<M>,
+        _url: Url,
+    ) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         if req.media_type == Some(DapMediaType::AggregationJobInitReq) {
-            Ok(helper::handle_agg_job_req(
+            Ok(helper::handle_agg_job_init_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                &req,
+                map_dap_req(req),
                 Default::default(),
             )
             .await
@@ -1099,6 +1114,14 @@ impl DapLeader for InMemoryAggregator {
             unreachable!("unhandled media type: {:?}", req.media_type)
         }
     }
+}
+
+fn map_dap_req<I: ParameterizedEncode<DapVersion>, O: ParameterizedDecode<DapVersion>>(
+    req: DapRequest<I>,
+) -> DapRequest<O> {
+    let version = req.version;
+    req.map(|b| b.get_encoded_with_param(&version).unwrap())
+        .map(|b| O::get_decoded_with_param(&version, &b).unwrap())
 }
 
 /// Information associated to a certain helper state for a given task ID and aggregate job ID.

@@ -13,6 +13,7 @@ use axum::{
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
+    messages,
     roles::leader::{self, DapLeader},
     DapError, DapVersion,
 };
@@ -50,12 +51,12 @@ where
 )]
 async fn upload<A>(
     State(app): State<Arc<A>>,
-    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor,
+    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<messages::Report>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
-    match leader::handle_upload_req(&*app, &req).await {
+    match leader::handle_upload_req(&*app, req).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
@@ -70,7 +71,7 @@ where
 )]
 async fn get_collect_uri<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<messages::CollectionReq>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -92,7 +93,7 @@ where
 )]
 async fn collect<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<()>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
