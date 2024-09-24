@@ -590,7 +590,7 @@ impl TestRunner {
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_str(
-                DapMediaType::CollectReq
+                DapMediaType::CollectionReq
                     .as_str_for_version(self.version)
                     .context("no string for version")?,
             )?,
@@ -779,7 +779,7 @@ impl TestRunner {
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_str(
-                DapMediaType::CollectReq
+                DapMediaType::CollectionReq
                     .as_str_for_version(self.version)
                     .context("no string for version")?,
             )?,

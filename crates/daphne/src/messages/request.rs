@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops;
+use std::ops::Deref;
 
 use crate::{
     constants::DapMediaType,
@@ -53,24 +53,39 @@ pub struct DapRequestMeta {
     pub resource: DapResource,
 }
 
+impl DapRequestMeta {
+    /// Checks the request content type against the expected content type.
+    pub fn get_checked_media_type(&self, expected: DapMediaType) -> Result<DapMediaType, DapAbort> {
+        self.media_type
+            .filter(|m| *m == expected)
+            .ok_or_else(|| DapAbort::content_type(self, expected))
+    }
+}
+
 /// DAP request.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
-pub struct DapRequest {
+pub struct DapRequest<P> {
     pub meta: DapRequestMeta,
 
     /// Request payload.
-    pub payload: Vec<u8>,
+    pub payload: P,
 }
 
-impl ops::Deref for DapRequest {
+impl<P> AsRef<DapRequestMeta> for DapRequest<P> {
+    fn as_ref(&self) -> &DapRequestMeta {
+        &self.meta
+    }
+}
+
+impl<P> Deref for DapRequest<P> {
     type Target = DapRequestMeta;
     fn deref(&self) -> &Self::Target {
         &self.meta
     }
 }
 
-impl DapRequest {
+impl<P> DapRequest<P> {
     /// Return the collection job ID, handling a missing ID as a user error.
     pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
         if let DapResource::CollectionJob(collection_job_id) = &self.resource {

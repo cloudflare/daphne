@@ -19,7 +19,8 @@ use axum::{
     Json,
 };
 use daphne::{
-    error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequest, DapResponse, DapSender,
+    error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequestMeta, DapResponse,
+    DapSender,
 };
 use daphne_service_utils::{bearer_token::BearerToken, metrics::DaphneServiceMetrics, DapRole};
 use either::Either;
@@ -56,7 +57,7 @@ pub trait DaphneService {
     ) -> Result<(), Either<String, DapError>>;
 
     /// Checks if this request intends to use taskprov.
-    async fn is_using_taskprov(&self, req: &DapRequest) -> Result<bool, DapError>;
+    async fn is_using_taskprov(&self, req: &DapRequestMeta) -> Result<bool, DapError>;
 }
 
 #[axum::async_trait]
@@ -82,7 +83,7 @@ where
         S::check_bearer_token(&**self, presented_token, sender, task_id, is_taskprov).await
     }
 
-    async fn is_using_taskprov(&self, req: &DapRequest) -> Result<bool, DapError> {
+    async fn is_using_taskprov(&self, req: &DapRequestMeta) -> Result<bool, DapError> {
         S::is_using_taskprov(&**self, req).await
     }
 }

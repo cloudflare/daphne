@@ -164,7 +164,7 @@ impl router::DaphneService for App {
         }
     }
 
-    async fn is_using_taskprov(&self, req: &daphne::DapRequest) -> Result<bool, DapError> {
+    async fn is_using_taskprov(&self, req: &daphne::DapRequestMeta) -> Result<bool, DapError> {
         if req.taskprov.is_some() {
             Ok(true)
         } else if self

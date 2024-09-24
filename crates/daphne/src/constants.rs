@@ -23,7 +23,7 @@ pub enum DapMediaType {
     AggregationJobResp,
     AggregateShareReq,
     AggregateShare,
-    CollectReq,
+    CollectionReq,
     Collection,
     HpkeConfigList,
     Report,
@@ -40,7 +40,7 @@ impl DapMediaType {
             | Self::HpkeConfigList => DapSender::Leader,
             Self::AggregationJobResp | Self::AggregateShare => DapSender::Helper,
             Self::Report => DapSender::Client,
-            Self::CollectReq => DapSender::Collector,
+            Self::CollectionReq => DapSender::Collector,
         }
     }
 
@@ -54,7 +54,7 @@ impl DapMediaType {
             MEDIA_TYPE_COLLECTION => Self::Collection,
             MEDIA_TYPE_HPKE_CONFIG_LIST => Self::HpkeConfigList,
             MEDIA_TYPE_AGG_SHARE_REQ => Self::AggregateShareReq,
-            MEDIA_TYPE_COLLECT_REQ => Self::CollectReq,
+            MEDIA_TYPE_COLLECT_REQ => Self::CollectionReq,
             MEDIA_TYPE_REPORT => Self::Report,
             _ => return None,
         };
@@ -69,7 +69,7 @@ impl DapMediaType {
             Self::AggregationJobResp => Some(MEDIA_TYPE_AGG_JOB_RESP),
             Self::AggregateShareReq => Some(MEDIA_TYPE_AGG_SHARE_REQ),
             Self::AggregateShare => Some(MEDIA_TYPE_AGG_SHARE),
-            Self::CollectReq => Some(MEDIA_TYPE_COLLECT_REQ),
+            Self::CollectionReq => Some(MEDIA_TYPE_COLLECT_REQ),
             Self::Collection => Some(MEDIA_TYPE_COLLECTION),
             Self::HpkeConfigList => Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
             Self::Report => Some(MEDIA_TYPE_REPORT),
@@ -122,7 +122,7 @@ mod test {
         );
         assert_eq!(
             DapMediaType::from_str_for_version(DapVersion::Draft09, "application/dap-collect-req"),
-            Some(DapMediaType::CollectReq),
+            Some(DapMediaType::CollectionReq),
         );
         assert_eq!(
             DapMediaType::from_str_for_version(DapVersion::Draft09, "application/dap-collection"),

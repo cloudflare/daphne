@@ -12,10 +12,11 @@ use daphne::{
     fatal_error,
     messages::{BatchId, BatchSelector, Collection, CollectionJobId, Report, TaskId},
     roles::{leader::WorkItem, DapAggregator, DapLeader},
-    DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse,
+    DapAggregationParam, DapCollectionJob, DapError, DapRequest, DapResponse, DapVersion,
 };
 use daphne_service_utils::http_headers;
 use http::StatusCode;
+use prio::codec::ParameterizedEncode;
 use tracing::{error, info};
 use url::Url;
 
@@ -99,22 +100,31 @@ impl DapLeader for crate::App {
         self.test_leader_state.lock().await.enqueue_work(items)
     }
 
-    async fn send_http_post(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_post<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         self.send_http(req, Method::POST, url).await
     }
 
-    async fn send_http_put(&self, req: DapRequest, url: Url) -> Result<DapResponse, DapError> {
+    async fn send_http_put<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         self.send_http(req, Method::PUT, url).await
     }
 }
 
 impl crate::App {
-    async fn send_http(
+    async fn send_http<M>(
         &self,
-        mut req: DapRequest,
+        req: DapRequest<M>,
         method: Method,
         url: Url,
-    ) -> Result<DapResponse, DapError> {
+    ) -> Result<DapResponse, DapError>
+    where
+        M: Send + ParameterizedEncode<DapVersion>,
+    {
         use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
         let content_type = req
             .media_type
@@ -181,10 +191,15 @@ impl crate::App {
             );
         }
 
+        let DapRequest { meta, payload } = req;
         let req_builder = self
             .http
             .request(method, url.clone())
-            .body(std::mem::take(&mut req.payload))
+            .body(
+                payload
+                    .get_encoded_with_param(&meta.version)
+                    .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))?,
+            )
             .headers(headers);
 
         let start = Instant::now();
@@ -202,7 +217,7 @@ impl crate::App {
                 .get_all(reqwest::header::CONTENT_TYPE)
                 .into_iter()
                 .filter_map(|h| h.to_str().ok())
-                .find_map(|h| DapMediaType::from_str_for_version(req.version, h))
+                .find_map(|h| DapMediaType::from_str_for_version(meta.version, h))
                 .ok_or_else(|| fatal_error!(err = "peer response is missing media type"))?;
 
             let payload = reqwest_resp
@@ -212,7 +227,7 @@ impl crate::App {
                 .to_vec();
 
             Ok(DapResponse {
-                version: req.version,
+                version: meta.version,
                 payload,
                 media_type,
             })
@@ -236,7 +251,7 @@ impl crate::App {
                 StatusCode::UNAUTHORIZED => {
                     return Err(DapAbort::UnauthorizedRequest {
                         detail: format!("helper at {url} didn't authorize our request"),
-                        task_id: req.task_id,
+                        task_id: meta.task_id,
                     }
                     .into())
                 }
