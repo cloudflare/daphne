@@ -524,7 +524,7 @@ async fn handle_leader_actions(
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
                 reqwest::header::HeaderValue::from_str(
-                    DapMediaType::CollectReq
+                    DapMediaType::CollectionReq
                         .as_str_for_version(version)
                         .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
                 )

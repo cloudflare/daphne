@@ -8,10 +8,8 @@ pub mod helper;
 pub mod leader;
 
 use crate::{
-    constants::DapMediaType,
     messages::{Base64Encode, Query, TaskId, Time},
-    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequest, DapRequestMeta,
-    DapTaskConfig,
+    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
 };
 use tracing::warn;
 
@@ -93,14 +91,6 @@ async fn check_batch(
     Ok(())
 }
 
-fn check_request_content_type(req: &DapRequest, expected: DapMediaType) -> Result<(), DapAbort> {
-    if req.media_type != Some(expected) {
-        Err(DapAbort::content_type(req, expected))
-    } else {
-        Ok(())
-    }
-}
-
 async fn resolve_taskprov(
     agg: &impl DapAggregator,
     task_id: &TaskId,
@@ -152,21 +142,21 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
-            request::DapRequestMeta, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
-            AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-            CollectionReq, Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query,
-            Report, TaskId, Time, TransitionFailure, TransitionVar,
+            AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
+            Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
+            TransitionFailure, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
         vdaf::{Prio3Config, VdafConfig},
         DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
-        DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapResource,
-        DapTaskConfig, DapTaskParameters, DapVersion,
+        DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta,
+        DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
     use matchit::Router;
-    use prio::codec::{Decode, Encode, ParameterizedEncode};
+    use prio::codec::{Decode, Encode};
     #[cfg(feature = "experimental")]
     use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
@@ -403,7 +393,11 @@ mod test {
             data.with_leader(helper)
         }
 
-        pub async fn gen_test_upload_req(&self, report: Report, task_id: &TaskId) -> DapRequest {
+        pub async fn gen_test_upload_req(
+            &self,
+            report: Report,
+            task_id: &TaskId,
+        ) -> DapRequest<Report> {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let version = task_config.version;
 
@@ -415,11 +409,15 @@ mod test {
                     resource: DapResource::Undefined,
                     ..Default::default()
                 },
-                payload: report.get_encoded_with_param(&version).unwrap(),
+                payload: report,
             }
         }
 
-        pub async fn gen_test_coll_job_req(&self, query: Query, task_id: &TaskId) -> DapRequest {
+        pub async fn gen_test_coll_job_req(
+            &self,
+            query: Query,
+            task_id: &TaskId,
+        ) -> DapRequest<CollectionReq> {
             self.gen_test_coll_job_req_for_collection(query, DapAggregationParam::Empty, task_id)
                 .await
         }
@@ -429,13 +427,13 @@ mod test {
             query: Query,
             agg_param: DapAggregationParam,
             task_id: &TaskId,
-        ) -> DapRequest {
+        ) -> DapRequest<CollectionReq> {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
             Self::collector_req(
                 task_id,
                 &task_config,
-                DapMediaType::CollectReq,
+                DapMediaType::CollectionReq,
                 CollectionReq {
                     query,
                     agg_param: agg_param.get_encoded().unwrap(),
@@ -448,7 +446,7 @@ mod test {
             task_id: &TaskId,
             agg_param: DapAggregationParam,
             reports: Vec<Report>,
-        ) -> (DapAggregationJobState, DapRequest) {
+        ) -> (DapAggregationJobState, DapRequest<AggregationJobInitReq>) {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
@@ -528,14 +526,13 @@ mod test {
                 .unwrap()
         }
 
-        pub fn leader_req<M: ParameterizedEncode<DapVersion>>(
+        pub fn leader_req<P>(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             agg_job_id: Option<&AggregationJobId>,
             media_type: DapMediaType,
-            msg: M,
-        ) -> DapRequest {
-            let payload = msg.get_encoded_with_param(&task_config.version).unwrap();
+            payload: P,
+        ) -> DapRequest<P> {
             DapRequest {
                 meta: DapRequestMeta {
                     version: task_config.version,
@@ -550,12 +547,12 @@ mod test {
             }
         }
 
-        pub fn collector_req<M: ParameterizedEncode<DapVersion>>(
+        pub fn collector_req<C>(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             media_type: DapMediaType,
-            msg: M,
-        ) -> DapRequest {
+            payload: C,
+        ) -> DapRequest<C> {
             let mut rng = thread_rng();
             let coll_job_id = CollectionJobId(rng.gen());
 
@@ -567,7 +564,7 @@ mod test {
                     resource: DapResource::CollectionJob(coll_job_id),
                     ..Default::default()
                 },
-                payload: msg.get_encoded_with_param(&task_config.version).unwrap(),
+                payload,
             }
         }
     }
@@ -595,7 +592,7 @@ mod test {
             },
         );
         assert_matches!(
-            helper::handle_agg_job_req(&*t.helper, &req, Default::default())
+            helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
@@ -640,19 +637,9 @@ mod test {
         let t = Test::new(version);
         let mut rng = thread_rng();
         let task_id = TaskId(rng.gen());
-        let req = DapRequest {
-            meta: DapRequestMeta {
-                version,
-                media_type: Some(DapMediaType::HpkeConfigList),
-                task_id,
-                resource: DapResource::Undefined,
-                ..Default::default()
-            },
-            payload: Vec::new(),
-        };
 
         assert_eq!(
-            aggregator::handle_hpke_config_req(&*t.leader, req.version, Some(task_id))
+            aggregator::handle_hpke_config_req(&*t.leader, version, Some(task_id))
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::UnrecognizedTask { task_id })
@@ -663,22 +650,12 @@ mod test {
 
     async fn handle_hpke_config_req_missing_task_id(version: DapVersion) {
         let t = Test::new(version);
-        let req = DapRequest {
-            meta: DapRequestMeta {
-                version,
-                media_type: Some(DapMediaType::HpkeConfigList),
-                task_id: t.time_interval_task_id,
-                resource: DapResource::Undefined,
-                ..Default::default()
-            },
-            payload: Vec::new(),
-        };
 
         // An Aggregator is permitted to abort an HPKE config request if the task ID is missing. Note
         // that Daphne-Workder does not implement this behavior. Instead it returns the HPKE config
         // used for all tasks.
         assert_matches!(
-            aggregator::handle_hpke_config_req(&*t.leader, req.version, None).await,
+            aggregator::handle_hpke_config_req(&*t.leader, version, None).await,
             Err(DapError::Abort(DapAbort::MissingTaskId))
         );
     }
@@ -710,7 +687,7 @@ mod test {
             },
         );
         assert_matches!(
-            helper::handle_agg_share_req(&*t.helper, &req)
+            helper::handle_agg_share_req(&*t.helper, req)
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::QueryMismatch { .. })
@@ -736,7 +713,7 @@ mod test {
             },
         );
         assert_matches!(
-            helper::handle_agg_share_req(&*t.helper, &req)
+            helper::handle_agg_share_req(&*t.helper, req)
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::BatchInvalid { .. })
@@ -757,7 +734,7 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req, Default::default())
+            &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
                 .payload,
@@ -785,7 +762,7 @@ mod test {
 
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded(
-            &helper::handle_agg_job_req(&*t.helper, &req, Default::default())
+            &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
                 .payload,
@@ -806,7 +783,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
-        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, req).await.unwrap();
 
         let query = task_config.query_for_current_batch_window(t.now);
         let req = t.gen_test_coll_job_req(query, task_id).await;
@@ -853,7 +830,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
-        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, req).await.unwrap();
 
         // Add mock data to the aggreagte store backend. This is done in its own scope so that the lock
         // is released before running the test. Otherwise the test will deadlock.
@@ -905,14 +882,12 @@ mod test {
                 resource: DapResource::Undefined,
                 ..Default::default()
             },
-            payload: report_invalid_task_id
-                .get_encoded_with_param(&task_config.version)
-                .unwrap(),
+            payload: report_invalid_task_id,
         };
 
         // Expect failure due to invalid task ID in report.
         assert_eq!(
-            leader::handle_upload_req(&*t.leader, &req).await,
+            leader::handle_upload_req(&*t.leader, req).await,
             Err(DapError::Abort(DapAbort::UnrecognizedTask {
                 task_id: TaskId([0; 32])
             }))
@@ -936,11 +911,11 @@ mod test {
                 resource: DapResource::Undefined,
                 ..Default::default()
             },
-            payload: report.get_encoded_with_param(&version).unwrap(),
+            payload: report.clone(),
         };
 
         assert_eq!(
-            leader::handle_upload_req(&*t.leader, &req)
+            leader::handle_upload_req(&*t.leader, req)
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::ReportTooLate {
@@ -959,7 +934,7 @@ mod test {
         for _ in 0..10 {
             let report = t.gen_test_report(task_id).await;
             let req = t.gen_test_upload_req(report.clone(), task_id).await;
-            leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+            leader::handle_upload_req(&*t.leader, req).await.unwrap();
         }
 
         let query = task_config.query_for_current_batch_window(t.now);
@@ -1012,7 +987,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: task_config.query_for_current_batch_window(t.now),
                 agg_param: Vec::default(),
@@ -1098,7 +1073,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::TimeInterval {
                     batch_interval: Interval {
@@ -1123,7 +1098,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::TimeInterval {
                     batch_interval: Interval {
@@ -1149,7 +1124,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::TimeInterval {
                     batch_interval: Interval {
@@ -1183,7 +1158,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::TimeInterval {
                     batch_interval: Interval {
@@ -1209,7 +1184,7 @@ mod test {
 
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report.clone(), task_id).await;
-        leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+        leader::handle_upload_req(&*t.leader, req).await.unwrap();
 
         let query = task_config.query_for_current_batch_window(t.now);
         let req = t.gen_test_coll_job_req(query, task_id).await;
@@ -1269,7 +1244,7 @@ mod test {
         let req = Test::collector_req(
             task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             collector_collect_req.clone(),
         );
 
@@ -1322,7 +1297,7 @@ mod test {
         let req = Test::collector_req(
             &t.time_interval_task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::FixedSizeByBatchId {
                     batch_id: BatchId(rng.gen()),
@@ -1345,7 +1320,7 @@ mod test {
         let req = Test::collector_req(
             &t.fixed_size_task_id,
             &task_config,
-            DapMediaType::CollectReq,
+            DapMediaType::CollectionReq,
             CollectionReq {
                 query: Query::FixedSizeByBatchId {
                     batch_id: BatchId(rng.gen()), // Unrecognized batch ID
@@ -1370,7 +1345,7 @@ mod test {
         let report = t.gen_test_report(task_id).await;
         let req = t.gen_test_upload_req(report, task_id).await;
 
-        leader::handle_upload_req(&*t.leader, &req)
+        leader::handle_upload_req(&*t.leader, req)
             .await
             .expect("upload failed unexpectedly");
     }
@@ -1387,7 +1362,7 @@ mod test {
 
         // Client: Send upload request to Leader.
         let report = t.gen_test_report(task_id).await;
-        leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+        leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
             .await
             .unwrap();
 
@@ -1423,7 +1398,7 @@ mod test {
 
         // Client: Send upload request to Leader.
         let report = t.gen_test_report(task_id).await;
-        leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+        leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
             .await
             .unwrap();
 
@@ -1511,9 +1486,9 @@ mod test {
                     resource: DapResource::Undefined,
                     taskprov: Some(taskprov_advertisement.clone()),
                 },
-                payload: report.get_encoded_with_param(&version).unwrap(),
+                payload: report,
             };
-            leader::handle_upload_req(&*t.leader, &req).await.unwrap();
+            leader::handle_upload_req(&*t.leader, req).await.unwrap();
         }
 
         // Collector: Request result from the Leader.
@@ -1628,7 +1603,7 @@ mod test {
                 .await;
 
             let report = t.gen_test_report(task_id).await;
-            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+            leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
                 .await
                 .unwrap();
 
@@ -1643,7 +1618,7 @@ mod test {
             let task_id = &t.fixed_size_task_id;
 
             let report = t.gen_test_report(task_id).await;
-            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+            leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
                 .await
                 .unwrap();
 
@@ -1694,7 +1669,7 @@ mod test {
                     },
                 )
                 .await;
-            leader::handle_upload_req(&*t.leader, &t.gen_test_upload_req(report, task_id).await)
+            leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
                 .await
                 .unwrap();
         }

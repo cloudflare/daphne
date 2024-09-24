@@ -9,8 +9,7 @@ use axum::{
     routing::{post, put},
 };
 use daphne::{
-    constants::DapMediaType,
-    error::DapAbort,
+    messages::{AggregateShareReq, AggregationJobInitReq},
     roles::{helper, DapHelper},
 };
 use http::StatusCode;
@@ -43,27 +42,15 @@ where
 )]
 async fn agg_job(
     State(app): State<Arc<App>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<AggregationJobInitReq>,
 ) -> AxumDapResponse {
-    match req.media_type {
-        Some(DapMediaType::AggregationJobInitReq) => {
-            let resp = helper::handle_agg_job_init_req(
-                &*app,
-                &req,
-                fetch_replay_protection_override(app.kv()).await,
-            )
-            .await;
-            AxumDapResponse::from_result_with_success_code(
-                resp,
-                app.server_metrics(),
-                StatusCode::CREATED,
-            )
-        }
-        m => AxumDapResponse::new_error(
-            DapAbort::BadRequest(format!("unexpected media type: {m:?}")),
-            app.server_metrics(),
-        ),
-    }
+    let resp = helper::handle_agg_job_init_req(
+        &*app,
+        req,
+        fetch_replay_protection_override(app.kv()).await,
+    )
+    .await;
+    AxumDapResponse::from_result_with_success_code(resp, app.server_metrics(), StatusCode::CREATED)
 }
 
 #[tracing::instrument(
@@ -76,13 +63,13 @@ async fn agg_job(
 )]
 async fn agg_share<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor,
+    DapRequestExtractor(req): DapRequestExtractor<AggregateShareReq>,
 ) -> AxumDapResponse
 where
     A: DapHelper + DaphneService + Send + Sync,
 {
     AxumDapResponse::from_result(
-        helper::handle_agg_share_req(&*app, &req).await,
+        helper::handle_agg_share_req(&*app, req).await,
         app.server_metrics(),
     )
 }

@@ -4,7 +4,10 @@
 //! Definitions and tooling for DAP protocol aborts.
 
 use crate::{
-    constants::DapMediaType, fatal_error, messages::{AggregationJobId, ReportId, TaskId, TransitionFailure}, DapError, DapRequestMeta, DapVersion
+    constants::DapMediaType,
+    fatal_error,
+    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
+    DapError, DapRequestMeta, DapVersion,
 };
 use hex::FromHexError;
 use prio::codec::CodecError;
