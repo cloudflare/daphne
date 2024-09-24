@@ -1,6 +1,8 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops;
+
 use crate::{
     constants::DapMediaType,
     error::DapAbort,
@@ -31,9 +33,10 @@ pub enum DapResource {
     Undefined,
 }
 
-/// DAP request.
+/// Fields common to all dap requests.
 #[derive(Debug)]
-pub struct DapRequest {
+#[cfg_attr(test, derive(Default))]
+pub struct DapRequestMeta {
     /// Protocol version indicated by the request.
     pub version: DapVersion,
 
@@ -43,27 +46,27 @@ pub struct DapRequest {
     /// ID of the task with which the request is associated.
     pub task_id: TaskId,
 
+    /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
+    pub taskprov: Option<String>,
+
     /// The resource with which this request is associated.
     pub resource: DapResource,
+}
+
+/// DAP request.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Default))]
+pub struct DapRequest {
+    pub meta: DapRequestMeta,
 
     /// Request payload.
     pub payload: Vec<u8>,
-
-    /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
-    pub taskprov: Option<String>,
 }
 
-#[cfg(test)]
-impl Default for DapRequest {
-    fn default() -> Self {
-        Self {
-            version: DapVersion::Draft09,
-            media_type: None,
-            task_id: Default::default(),
-            resource: Default::default(),
-            payload: Default::default(),
-            taskprov: Default::default(),
-        }
+impl ops::Deref for DapRequest {
+    type Target = DapRequestMeta;
+    fn deref(&self) -> &Self::Target {
+        &self.meta
     }
 }
 

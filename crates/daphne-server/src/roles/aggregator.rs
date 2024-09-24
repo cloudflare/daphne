@@ -13,7 +13,8 @@ use daphne::{
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequest, DapTaskConfig, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
+    DapRequestMeta, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
+    EarlyReportStateInitialized,
 };
 use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
@@ -226,7 +227,7 @@ impl DapAggregator for crate::App {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequest,
+        req: &DapRequestMeta,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let task_id = &req.task_id;

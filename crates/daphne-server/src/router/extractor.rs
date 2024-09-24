@@ -11,7 +11,7 @@ use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     fatal_error,
-    messages::{AggregationJobId, CollectionJobId, TaskId},
+    messages::{request::DapRequestMeta, AggregationJobId, CollectionJobId, TaskId},
     DapError, DapRequest, DapResource, DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers, metrics};
@@ -108,12 +108,14 @@ where
         };
 
         let request = DapRequest {
-            version,
-            task_id,
-            resource,
+            meta: DapRequestMeta {
+                version,
+                task_id,
+                resource,
+                media_type,
+                taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
+            },
             payload: payload.to_vec(),
-            media_type,
-            taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
         };
 
         Ok(UnauthenticatedDapRequestExtractor(request))

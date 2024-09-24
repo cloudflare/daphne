@@ -65,7 +65,6 @@ use crate::{
         Prio3Config, VdafAggregateShare, VdafConfig, VdafPrepShare, VdafPrepState, VdafVerifyKey,
     },
 };
-use constants::DapMediaType;
 pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
@@ -91,7 +90,7 @@ use url::Url;
 #[cfg(feature = "experimental")]
 use vdaf::mastic::MasticWeight;
 
-pub use messages::request::{DapRequest, DapResource, DapResponse};
+pub use messages::request::{DapRequest, DapRequestMeta, DapResource, DapResponse};
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
