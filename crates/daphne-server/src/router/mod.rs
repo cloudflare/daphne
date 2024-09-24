@@ -187,21 +187,22 @@ impl AxumDapResponse {
             DapError::Fatal(e) => Err(e),
             DapError::Abort(abort) => Ok(abort),
         };
-        let status = if let Err(_e) = &error {
-            // TODO(mendess) uncomment the line below
-            // self.error_reporter.report_abort(&e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        } else {
-            StatusCode::BAD_REQUEST
-        };
-        let problem_details = match error {
-            Ok(error) => {
-                tracing::error!(?error, "request aborted due to protocol abort");
-                error.into_problem_details()
+        let (status, problem_details) = match error {
+            Ok(abort) => {
+                tracing::error!(error = ?abort, "request aborted due to protocol abort");
+                let status = if let DapAbort::UnauthorizedRequest { .. } = abort {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                (status, abort.into_problem_details())
             }
-            Err(error) => {
-                tracing::error!(?error, "request aborted due to fatal error");
-                DapError::Fatal(error).into_problem_details()
+            Err(fatal_error) => {
+                tracing::error!(error = ?fatal_error, "request aborted due to fatal error");
+                // TODO(mendess) uncomment the line below
+                // self.error_reporter.report_abort(&e);
+                let problem_details = fatal_error.into_problem_details();
+                (StatusCode::INTERNAL_SERVER_ERROR, problem_details)
             }
         };
         // this to string is bounded by the
@@ -254,7 +255,7 @@ where
     B: HttpBody + Send + 'static,
     <B as HttpBody>::Data: Send,
 {
-    type Rejection = (StatusCode, String);
+    type Rejection = AxumDapResponse;
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
         #[derive(Debug, Deserialize)]
@@ -277,52 +278,54 @@ where
             collect_job_id,
         }) = Path::from_request_parts(&mut parts, state)
             .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            .map_err(|_| {
+                AxumDapResponse::new_error(
+                    DapAbort::BadRequest("invalid path".into()),
+                    state.server_metrics(),
+                )
+            })?;
 
         let media_type = if let Some(content_type) = parts.headers.get(CONTENT_TYPE) {
             let content_type = content_type.to_str().map_err(|_| {
                 let msg = "header value contains non ascii or invisible characters".into();
-                (StatusCode::BAD_REQUEST, msg)
+                AxumDapResponse::new_error(DapAbort::BadRequest(msg), state.server_metrics())
             })?;
-            let mt = DapMediaType::from_str_for_version(version, content_type)
-                .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid media type".into()))?;
+            let mt =
+                DapMediaType::from_str_for_version(version, content_type).ok_or_else(|| {
+                    AxumDapResponse::new_error(
+                        DapAbort::BadRequest("invalid media type".into()),
+                        state.server_metrics(),
+                    )
+                })?;
             Some(mt)
         } else {
             None
         };
-
-        let taskprov = extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV);
 
         // TODO(mendess): this is very eager, we could redesign DapResponse later to allow for
         // streaming of data.
         let payload = hyper::body::to_bytes(body).await;
 
         let Ok(payload) = payload else {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "failed to get payload".into(),
+            return Err(AxumDapResponse::new_error(
+                fatal_error!(err = "failed to get payload"),
+                state.server_metrics(),
             ));
         };
 
         let (task_id, resource) = {
             let resource = match media_type {
                 Some(DapMediaType::AggregationJobInitReq) => {
-                    if let Some(agg_job_id) = agg_job_id {
-                        DapResource::AggregationJob(agg_job_id)
-                    } else {
-                        // Missing or invalid agg job ID. This should be handled as a bad
-                        // request (undefined resource) by the caller.
-                        DapResource::Undefined
-                    }
+                    let Some(agg_job_id) = agg_job_id else {
+                        panic!("route definition should guarantee that agg_job_id exists")
+                    };
+                    DapResource::AggregationJob(agg_job_id)
                 }
                 Some(DapMediaType::CollectReq) => {
-                    if let Some(collect_job_id) = collect_job_id {
-                        DapResource::CollectionJob(collect_job_id)
-                    } else {
-                        // Missing or invalid agg job ID. This should be handled as a bad
-                        // request (undefined resource) by the caller.
-                        DapResource::Undefined
-                    }
+                    let Some(collect_job_id) = collect_job_id else {
+                        panic!("route definition should guarantee that collect_job_id exists")
+                    };
+                    DapResource::CollectionJob(collect_job_id)
                 }
                 _ => DapResource::Undefined,
             };
@@ -336,7 +339,7 @@ where
             resource,
             payload: payload.to_vec(),
             media_type,
-            taskprov,
+            taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
         };
 
         Ok(UnauthenticatedDapRequestExtractor(request))
@@ -356,7 +359,7 @@ where
     B: HttpBody + Send + 'static,
     <B as HttpBody>::Data: Send,
 {
-    type Rejection = (StatusCode, String);
+    type Rejection = AxumDapResponse;
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
         let bearer_token = extract_header_as_string(req.headers(), http_headers::DAP_AUTH_TOKEN)
@@ -367,10 +370,21 @@ where
             .await?
             .0;
 
+        let error_to_response = |error| AxumDapResponse::new_error(error, state.server_metrics());
+        let auth_error = |detail| {
+            error_to_response(DapError::from(DapAbort::UnauthorizedRequest {
+                detail,
+                task_id: request.task_id,
+            }))
+        };
+
         let is_taskprov = state
             .is_using_taskprov(&request)
             .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "internal error".into()))?;
+            .map_err(
+                |e| fatal_error!(err = ?e, "failed to determine if request was using taskprov"),
+            )
+            .map_err(error_to_response)?;
 
         let bearer_authed = if let Some((token, sender)) =
             bearer_token.zip(request.media_type.map(|m| m.sender()))
@@ -381,12 +395,7 @@ where
             state
                 .check_bearer_token(&token, sender, request.task_id, is_taskprov)
                 .await
-                .map_err(|reason| {
-                    reason.either(
-                        |reason| (StatusCode::UNAUTHORIZED, reason),
-                        |_| (StatusCode::INTERNAL_SERVER_ERROR, "internal error".into()),
-                    )
-                })?;
+                .map_err(|reason| reason.either(auth_error, error_to_response))?;
             true
         } else {
             false
@@ -397,10 +406,9 @@ where
                 .auth_method_inc(metrics::AuthMethod::TlsClientAuth);
             // we always check if mtls succedded even if ...
             if verification_result != "SUCCESS" {
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    format!("Invalid TLS certificate ({verification_result})"),
-                ));
+                return Err(auth_error(format!(
+                    "Invalid TLS certificate ({verification_result})"
+                )));
             }
             // ... we only allow mtls auth for taskprov tasks
             is_taskprov
@@ -411,8 +419,7 @@ where
         if bearer_authed || mtls_authed {
             Ok(Self(request))
         } else {
-            Err((
-                StatusCode::UNAUTHORIZED,
+            Err(auth_error(
                 "No suitable authorization method was found".into(),
             ))
         }
@@ -440,6 +447,7 @@ mod test {
     };
     use daphne::{
         async_test_versions,
+        constants::DapMediaType,
         messages::{AggregationJobId, Base64Encode, CollectionJobId, TaskId},
         DapError, DapRequest, DapResource, DapSender, DapVersion,
     };
@@ -555,14 +563,6 @@ mod test {
 
                 match resp.status() {
                     StatusCode::NOT_FOUND => panic!("unsuported uri"),
-                    StatusCode::BAD_REQUEST => {
-                        panic!(
-                            "parsing failed: {}",
-                            String::from_utf8_lossy(
-                                &hyper::body::to_bytes(resp.into_body()).await.unwrap()
-                            )
-                        )
-                    }
                     // get the request sent through the channel in the handler
                     StatusCode::OK => Ok(rx.recv().now_or_never().unwrap().unwrap()),
                     code => Err(code),
@@ -585,7 +585,12 @@ mod test {
                     "/{version}/{}/parse-mandatory-fields",
                     task_id.to_base64url()
                 ))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::AggregateShareReq
+                        .as_str_for_version(version)
+                        .unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -612,7 +617,12 @@ mod test {
                     task_id.to_base64url(),
                     agg_job_id.to_base64url(),
                 ))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::AggregationJobInitReq
+                        .as_str_for_version(version)
+                        .unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -639,7 +649,12 @@ mod test {
                     task_id.to_base64url(),
                     collect_job_id.to_base64url(),
                 ))
-                .header(CONTENT_TYPE, "application/dap-collect-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::CollectReq
+                        .as_str_for_version(version)
+                        .unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -659,7 +674,10 @@ mod test {
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::Report.as_str_for_version(version).unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
                 .body(Body::empty())
                 .unwrap(),
@@ -678,7 +696,10 @@ mod test {
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::Report.as_str_for_version(version).unwrap(),
+                )
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -696,7 +717,10 @@ mod test {
         let req = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::Report.as_str_for_version(version).unwrap(),
+                )
                 .header("X-Client-Cert-Verified", "SUCCESS")
                 .header(http_headers::DAP_TASKPROV, "some-taskprov-string")
                 .body(Body::empty())
@@ -715,7 +739,10 @@ mod test {
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::Report.as_str_for_version(version).unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
                 .header("X-Client-Cert-Verified", "SUCCESS")
                 .body(Body::empty())
@@ -735,7 +762,10 @@ mod test {
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(CONTENT_TYPE, "application/dap-aggregation-job-init-req")
+                .header(
+                    CONTENT_TYPE,
+                    DapMediaType::Report.as_str_for_version(version).unwrap(),
+                )
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .header("X-Client-Cert-Verified", "FAILED")
                 .body(Body::empty())
