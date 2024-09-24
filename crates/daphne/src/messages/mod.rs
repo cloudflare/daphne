@@ -3,6 +3,7 @@
 
 //! Messages in the DAP protocol.
 
+pub mod request;
 pub mod taskprov;
 
 use crate::{
