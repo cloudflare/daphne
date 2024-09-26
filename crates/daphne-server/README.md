@@ -7,7 +7,7 @@ All of these commands are run from the root of the repo.
 ### Starting the storage layer
 
 ```sh
-make storage
+make storage-proxy
 ```
 
 This should start the storage for both the leader and the helper, exposed at
