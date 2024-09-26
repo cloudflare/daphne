@@ -4,6 +4,11 @@
 
 All of these commands are run from the root of the repo.
 
+## Requirements
+
+* [Rust 1.80+](https://www.rust-lang.org/tools/install)
+* [Cap'n Proto](https://capnproto.org/install.html)
+
 ### Starting the storage layer
 
 ```sh
