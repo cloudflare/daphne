@@ -275,11 +275,7 @@ async fn leader_upload(version: DapVersion) {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::CONTENT_TYPE,
-        DapMediaType::Report
-            .as_str_for_version(version)
-            .unwrap()
-            .parse()
-            .unwrap(),
+        reqwest::header::HeaderValue::from_static(DapMediaType::Report.as_str()),
     );
     let builder = client.put(url.as_str());
     let resp = builder

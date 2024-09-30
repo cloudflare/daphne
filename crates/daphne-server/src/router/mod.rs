@@ -18,10 +18,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use daphne::{
-    error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequestMeta, DapResponse,
-    DapSender,
-};
+use daphne::{error::DapAbort, messages::TaskId, DapError, DapRequestMeta, DapResponse, DapSender};
 use daphne_service_utils::{bearer_token::BearerToken, metrics::DaphneServiceMetrics, DapRole};
 use either::Either;
 use http::Request;
@@ -148,24 +145,10 @@ impl AxumDapResponse {
 
     pub fn new_success_with_code(
         response: DapResponse,
-        metrics: &dyn DaphneServiceMetrics,
+        _metrics: &dyn DaphneServiceMetrics,
         status_code: StatusCode,
     ) -> Self {
-        let Some(media_type) = response.media_type.as_str_for_version(response.version) else {
-            return AxumDapResponse::new_error(
-                fatal_error!(err = "invalid content-type for DAP version"),
-                metrics,
-            );
-        };
-        let media_type = match HeaderValue::from_str(media_type) {
-            Ok(media_type) => media_type,
-            Err(e) => {
-                return AxumDapResponse::new_error(
-                    fatal_error!(err = ?e, "content-type contained invalid bytes {media_type:?}"),
-                    metrics,
-                )
-            }
-        };
+        let media_type = HeaderValue::from_static(response.media_type.as_str());
 
         let headers = [(CONTENT_TYPE, media_type)];
 

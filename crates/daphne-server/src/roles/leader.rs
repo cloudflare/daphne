@@ -126,16 +126,14 @@ impl crate::App {
         M: Send + ParameterizedEncode<DapVersion>,
     {
         use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
-        let content_type = req
-            .media_type
-            .and_then(|mt| mt.as_str_for_version(req.version))
-            .ok_or_else(|| {
-                fatal_error!(
-                    err = "failed to construct content-type",
-                    ?req.media_type,
-                    ?req.version,
-                )
-            })?;
+
+        let content_type = req.media_type.map(|mt| mt.as_str()).ok_or_else(|| {
+            fatal_error!(
+                err = "failed to construct content-type",
+                ?req.media_type,
+                ?req.version,
+            )
+        })?;
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -217,7 +215,7 @@ impl crate::App {
                 .get_all(reqwest::header::CONTENT_TYPE)
                 .into_iter()
                 .filter_map(|h| h.to_str().ok())
-                .find_map(|h| DapMediaType::from_str_for_version(req.version, h))
+                .find_map(DapMediaType::from_http_content_type)
                 .ok_or_else(|| fatal_error!(err = "peer response is missing media type"))?;
 
             let payload = reqwest_resp

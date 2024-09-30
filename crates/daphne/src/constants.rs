@@ -3,7 +3,10 @@
 
 //! Constants used in the DAP protocol.
 
-use crate::{DapSender, DapVersion};
+use core::fmt;
+use std::str::FromStr;
+
+use crate::DapSender;
 
 // Media types for HTTP requests.
 const MEDIA_TYPE_AGG_JOB_INIT_REQ: &str = "application/dap-aggregation-job-init-req";
@@ -45,9 +48,31 @@ impl DapMediaType {
     }
 
     /// Parse the media type from the content-type HTTP header.
-    pub fn from_str_for_version(_version: DapVersion, content_type: &str) -> Option<Self> {
+    pub fn from_http_content_type(content_type: &str) -> Option<Self> {
         let (content_type, _) = content_type.split_once(';').unwrap_or((content_type, ""));
-        let media_type = match content_type {
+        content_type.parse().ok()
+    }
+
+    /// If the media type is used with the current DAP version, then return its representation as
+    /// an HTTP content type.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AggregationJobInitReq => MEDIA_TYPE_AGG_JOB_INIT_REQ,
+            Self::AggregationJobResp => MEDIA_TYPE_AGG_JOB_RESP,
+            Self::AggregateShareReq => MEDIA_TYPE_AGG_SHARE_REQ,
+            Self::AggregateShare => MEDIA_TYPE_AGG_SHARE,
+            Self::CollectReq => MEDIA_TYPE_COLLECT_REQ,
+            Self::Collection => MEDIA_TYPE_COLLECTION,
+            Self::HpkeConfigList => MEDIA_TYPE_HPKE_CONFIG_LIST,
+            Self::Report => MEDIA_TYPE_REPORT,
+        }
+    }
+}
+
+impl FromStr for DapMediaType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let media_type = match s {
             MEDIA_TYPE_AGG_JOB_INIT_REQ => Self::AggregationJobInitReq,
             MEDIA_TYPE_AGG_JOB_RESP => Self::AggregationJobResp,
             MEDIA_TYPE_AGG_SHARE => Self::AggregateShare,
@@ -56,24 +81,15 @@ impl DapMediaType {
             MEDIA_TYPE_AGG_SHARE_REQ => Self::AggregateShareReq,
             MEDIA_TYPE_COLLECT_REQ => Self::CollectReq,
             MEDIA_TYPE_REPORT => Self::Report,
-            _ => return None,
+            _ => return Err(format!("invalid media type: {s}")),
         };
-        Some(media_type)
+        Ok(media_type)
     }
+}
 
-    /// If the media type is used with the current DAP version, then return its representation as
-    /// an HTTP content type.
-    pub fn as_str_for_version(&self, _version: DapVersion) -> Option<&'static str> {
-        match self {
-            Self::AggregationJobInitReq => Some(MEDIA_TYPE_AGG_JOB_INIT_REQ),
-            Self::AggregationJobResp => Some(MEDIA_TYPE_AGG_JOB_RESP),
-            Self::AggregateShareReq => Some(MEDIA_TYPE_AGG_SHARE_REQ),
-            Self::AggregateShare => Some(MEDIA_TYPE_AGG_SHARE),
-            Self::CollectReq => Some(MEDIA_TYPE_COLLECT_REQ),
-            Self::Collection => Some(MEDIA_TYPE_COLLECTION),
-            Self::HpkeConfigList => Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
-            Self::Report => Some(MEDIA_TYPE_REPORT),
-        }
+impl fmt::Display for DapMediaType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -86,82 +102,59 @@ mod test {
     #[test]
     fn from_str_for_version() {
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                DapVersion::Draft09,
-                "application/dap-hpke-config-list",
-            ),
+            DapMediaType::from_http_content_type("application/dap-hpke-config-list",),
             Some(DapMediaType::HpkeConfigList)
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                DapVersion::Draft09,
-                "application/dap-aggregation-job-init-req"
-            ),
+            DapMediaType::from_http_content_type("application/dap-aggregation-job-init-req"),
             Some(DapMediaType::AggregationJobInitReq),
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                DapVersion::Draft09,
-                "application/dap-aggregation-job-resp"
-            ),
+            DapMediaType::from_http_content_type("application/dap-aggregation-job-resp"),
             Some(DapMediaType::AggregationJobResp),
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                DapVersion::Draft09,
-                "application/dap-aggregate-share-req"
-            ),
+            DapMediaType::from_http_content_type("application/dap-aggregate-share-req"),
             Some(DapMediaType::AggregateShareReq),
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                DapVersion::Draft09,
-                "application/dap-aggregate-share"
-            ),
+            DapMediaType::from_http_content_type("application/dap-aggregate-share"),
             Some(DapMediaType::AggregateShare),
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(DapVersion::Draft09, "application/dap-collect-req"),
+            DapMediaType::from_http_content_type("application/dap-collect-req"),
             Some(DapMediaType::CollectReq),
         );
         assert_eq!(
-            DapMediaType::from_str_for_version(DapVersion::Draft09, "application/dap-collection"),
+            DapMediaType::from_http_content_type("application/dap-collection"),
             Some(DapMediaType::Collection),
         );
 
         // Invalid media type
-        assert_eq!(
-            DapMediaType::from_str_for_version(DapVersion::Draft09, "blah-blah-blah"),
-            None,
-        );
+        assert_eq!(DapMediaType::from_http_content_type("blah-blah-blah"), None,);
     }
 
     // Test conversion of DAP media types to and from the content-type HTTP header.
     fn round_trip(version: DapVersion) {
         for media_type in DapMediaType::iter() {
-            if let Some(content_type) = media_type.as_str_for_version(version) {
-                // If the DAP media type is used for this version of DAP, then expect decoding the
-                // content-type should result in the same DAP media type.
-                assert_eq!(
-                    DapMediaType::from_str_for_version(version, content_type).unwrap(),
-                    media_type,
-                    "round trip test failed for {version:?} and {media_type:?}"
-                );
-            }
+            let content_type = media_type.as_str();
+            assert_eq!(
+                DapMediaType::from_http_content_type(content_type).unwrap(),
+                media_type,
+                "round trip test failed for {version:?} and {media_type:?}"
+            );
         }
     }
 
     test_versions! { round_trip }
 
-    fn media_type_parsing_ignores_content_type_paramters(version: DapVersion) {
+    #[test]
+    fn media_type_parsing_ignores_content_type_paramters() {
         assert_eq!(
-            DapMediaType::from_str_for_version(
-                version,
+            DapMediaType::from_http_content_type(
                 "application/dap-aggregation-job-init-req;version=09",
             ),
             Some(DapMediaType::AggregationJobInitReq),
         );
     }
-
-    test_versions! { media_type_parsing_ignores_content_type_paramters }
 }

@@ -631,8 +631,8 @@ fn check_response_content_type(resp: &DapResponse, expected: DapMediaType) -> Re
     if resp.media_type != expected {
         Err(fatal_error!(
             err = "response from peer has unexpected content-type",
-            got = resp.media_type.as_str_for_version(resp.version),
-            want = expected.as_str_for_version(resp.version),
+            got = resp.media_type.as_str(),
+            want = expected.as_str(),
         ))
     } else {
         Ok(())

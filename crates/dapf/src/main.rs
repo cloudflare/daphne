@@ -477,12 +477,7 @@ async fn handle_leader_actions(
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_str(
-                    DapMediaType::Report
-                        .as_str_for_version(version)
-                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
-                )
-                .expect("failecd to construct content-type header"),
+                reqwest::header::HeaderValue::from_static(DapMediaType::Report.as_str()),
             );
             let resp = http_client
                 .post(leader_url.join("upload")?)
@@ -523,12 +518,7 @@ async fn handle_leader_actions(
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_str(
-                    DapMediaType::CollectReq
-                        .as_str_for_version(version)
-                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
-                )
-                .expect("failed to construct content-type hader"),
+                reqwest::header::HeaderValue::from_static(DapMediaType::CollectReq.as_str()),
             );
             if let Ok(token) = std::env::var("LEADER_BEARER_TOKEN") {
                 headers.insert(

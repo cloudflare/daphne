@@ -183,25 +183,13 @@ impl DapAbort {
 
     /// Abort due to unexpected value for HTTP content-type header.
     pub fn content_type<const N: usize>(req: &DapRequestMeta, expected: [DapMediaType; N]) -> Self {
-        let want_content_type = expected.map(|m| {
-            m.as_str_for_version(req.version).unwrap_or_else(|| {
-                unreachable!("unexpected content-type for DAP version {:?}", req.version)
-            })
-        });
+        let want_content_type = expected.map(|m| m.as_str());
 
         let Some(media_type) = req.media_type else {
             return Self::BadRequest("missing content-type".into());
         };
 
-        let got_content_type = media_type
-            .as_str_for_version(req.version)
-            .unwrap_or_else(|| {
-                unreachable!(
-                    "missing or unexpected content type for DAP version {:?}",
-                    req.version
-                )
-            });
-
+        let got_content_type = media_type.as_str();
         Self::BadRequest(format!(
             "unexpected content-type: got {got_content_type}; want any of {want_content_type:?}"
         ))

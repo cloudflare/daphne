@@ -372,10 +372,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
+            reqwest::header::HeaderValue::from_static(media_type.as_str()),
         );
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
@@ -418,10 +415,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
+            reqwest::header::HeaderValue::from_static(media_type.as_str()),
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
@@ -481,10 +475,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
+            reqwest::header::HeaderValue::from_static(media_type.as_str()),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
@@ -531,10 +522,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
+            reqwest::header::HeaderValue::from_static(media_type.as_str()),
         );
         if let Some(token) = dap_auth_token {
             headers.insert(
@@ -589,11 +577,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_str(
-                DapMediaType::CollectReq
-                    .as_str_for_version(self.version)
-                    .context("no string for version")?,
-            )?,
+            reqwest::header::HeaderValue::from_static(DapMediaType::CollectReq.as_str()),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
@@ -778,11 +762,7 @@ impl TestRunner {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_str(
-                DapMediaType::CollectReq
-                    .as_str_for_version(self.version)
-                    .context("no string for version")?,
-            )?,
+            reqwest::header::HeaderValue::from_static(DapMediaType::CollectReq.as_str()),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),

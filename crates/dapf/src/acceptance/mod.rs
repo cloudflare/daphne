@@ -510,7 +510,7 @@ impl Test {
 
         // Send AggregationJobInitReq.
         let headers = construct_request_headers(
-            DapMediaType::AggregationJobInitReq.as_str_for_version(task_config.version),
+            DapMediaType::AggregationJobInitReq.as_str(),
             taskprov_advertisement.as_deref(),
             &self.bearer_token,
         )
@@ -604,7 +604,7 @@ impl Test {
         info!("Starting AggregationJobInitReq");
         let start = Instant::now();
         let headers = construct_request_headers(
-            DapMediaType::AggregateShareReq.as_str_for_version(version),
+            DapMediaType::AggregateShareReq.as_str(),
             taskprov_advertisement,
             &self.bearer_token,
         )?;

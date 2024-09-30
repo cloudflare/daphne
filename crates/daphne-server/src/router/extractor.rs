@@ -138,13 +138,12 @@ where
                 let msg = "header value contains non ascii or invisible characters".into();
                 AxumDapResponse::new_error(DapAbort::BadRequest(msg), state.server_metrics())
             })?;
-            let mt =
-                DapMediaType::from_str_for_version(version, content_type).ok_or_else(|| {
-                    AxumDapResponse::new_error(
-                        DapAbort::BadRequest("invalid media type".into()),
-                        state.server_metrics(),
-                    )
-                })?;
+            let mt = DapMediaType::from_http_content_type(content_type).ok_or_else(|| {
+                AxumDapResponse::new_error(
+                    DapAbort::BadRequest("invalid media type".into()),
+                    state.server_metrics(),
+                )
+            })?;
             Some(mt)
         } else {
             None
@@ -454,12 +453,7 @@ mod test {
                     "/{version}/{}/parse-mandatory-fields",
                     task_id.to_base64url()
                 ))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::AggregateShareReq
-                        .as_str_for_version(version)
-                        .unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::AggregateShareReq.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -486,12 +480,7 @@ mod test {
                     task_id.to_base64url(),
                     agg_job_id.to_base64url(),
                 ))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::AggregationJobInitReq
-                        .as_str_for_version(version)
-                        .unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::AggregationJobInitReq.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -518,12 +507,7 @@ mod test {
                     task_id.to_base64url(),
                     collect_job_id.to_base64url(),
                 ))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::CollectReq
-                        .as_str_for_version(version)
-                        .unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::CollectReq.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .body(Body::empty())
                 .unwrap(),
@@ -543,10 +527,7 @@ mod test {
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::Report.as_str_for_version(version).unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::Report.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
                 .body(Body::empty())
                 .unwrap(),
@@ -565,10 +546,7 @@ mod test {
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::Report.as_str_for_version(version).unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::Report.as_str())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -586,10 +564,7 @@ mod test {
         let req = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::Report.as_str_for_version(version).unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::Report.as_str())
                 .header("X-Client-Cert-Verified", "SUCCESS")
                 .header(http_headers::DAP_TASKPROV, "some-taskprov-string")
                 .body(Body::empty())
@@ -608,10 +583,7 @@ mod test {
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::Report.as_str_for_version(version).unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::Report.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
                 .header("X-Client-Cert-Verified", "SUCCESS")
                 .body(Body::empty())
@@ -631,10 +603,7 @@ mod test {
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
-                .header(
-                    CONTENT_TYPE,
-                    DapMediaType::Report.as_str_for_version(version).unwrap(),
-                )
+                .header(CONTENT_TYPE, DapMediaType::Report.as_str())
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
                 .header("X-Client-Cert-Verified", "FAILED")
                 .body(Body::empty())
