@@ -482,7 +482,7 @@ impl Default for BatchSelector {
 }
 
 /// The `PrepareInit` message consisting of the report share and the Leader's initial prep share.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct PrepareInit {
     pub report_share: ReportShare,
@@ -517,7 +517,7 @@ impl ParameterizedDecode<DapVersion> for PrepareInit {
 }
 
 /// Aggregate initialization request.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregationJobInitReq {
     pub agg_param: Vec<u8>,
     pub part_batch_sel: PartialBatchSelector,
@@ -552,7 +552,7 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
 
 /// Transition message. This conveyes a message sent from one Aggregator to another during the
 /// preparation phase of VDAF evaluation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct Transition {
     pub report_id: ReportId,
@@ -577,7 +577,7 @@ impl Decode for Transition {
 }
 
 /// Transition message variant.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum TransitionVar {
     Continued(Vec<u8>),
@@ -677,8 +677,7 @@ impl std::fmt::Display for TransitionFailure {
 }
 
 /// An aggregate response sent from the Helper to the Leader.
-#[derive(Debug, PartialEq, Eq, Default)]
-#[allow(missing_docs)]
+#[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AggregationJobResp {
     pub transitions: Vec<Transition>,
 }
@@ -915,7 +914,7 @@ impl ParameterizedDecode<DapVersion> for Collection {
 /// An aggregate-share request.
 //
 // TODO Add serialization tests.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregateShareReq {
     pub batch_sel: BatchSelector,
     pub agg_param: Vec<u8>,
@@ -958,7 +957,7 @@ impl ParameterizedDecode<DapVersion> for AggregateShareReq {
 }
 
 /// An aggregate-share response.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AggregateShare {
     pub encrypted_agg_share: HpkeCiphertext,
 }
@@ -978,7 +977,7 @@ impl Decode for AggregateShare {
 }
 
 /// A list of HPKE public key configurations.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HpkeConfigList {
     pub hpke_configs: Vec<HpkeConfig>,
 }
