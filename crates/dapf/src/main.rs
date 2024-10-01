@@ -3,6 +3,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{builder::PossibleValue, Args, Parser, Subcommand, ValueEnum};
+use core::fmt;
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     deduce_dap_version_from_url, response_to_anyhow, HttpClient,
@@ -251,7 +252,13 @@ enum HpkeAction {
         dap_version: DapVersion,
     },
     /// Generate an hpke receiver config.
-    GenerateReceiverConfig { kem_alg: KemAlg },
+    ///
+    /// This command outputs to stdout the hpke config in json and to stderr the config encoded
+    /// first by prio and then in base64. This version can later be used when TODO
+    Generate {
+        #[arg(default_value_t)]
+        kem_alg: KemAlg,
+    },
     /// Rotate the HPKE config advertised by the Aggregator.
     RotateReceiverConfig {
         #[arg(short = 'c', long)]
@@ -260,6 +267,7 @@ enum HpkeAction {
         wrangler_env: Option<String>,
         #[arg(default_value_t, long)]
         dap_version: DapVersion,
+        #[arg(default_value_t)]
         kem_alg: KemAlg,
     },
 }
@@ -269,7 +277,7 @@ enum TestAction {
     /// Add an hpke config to a test-utils enabled `daphne-server`.
     AddHpkeConfig {
         aggregator_url: Url,
-        #[arg(short, long, default_value = "x25519_hkdf_sha256")]
+        #[arg(short, long, default_value_t)]
         kem_alg: KemAlg,
     },
     /// Clear all storage of an aggregator.
@@ -286,6 +294,11 @@ enum TestAction {
 enum CliDapMediaType {
     AggregationJobResp,
     AggregateShare,
+    /// Decode a [DapMediaType::Collection].
+    ///
+    /// If the `--vdaf-config`, `--task-id` and `--hpke-config-path` are supplied, then the
+    /// aggregate share will also be decrypted and unsharded, presenting the final result of the
+    /// vdaf.
     Collection {
         #[clap(long, env)]
         vdaf_config: Option<CliVdafConfig>,
@@ -382,6 +395,18 @@ impl LoadControlParamsCli {
 
 #[derive(Clone, Debug)]
 struct KemAlg(HpkeKemId);
+
+impl Default for KemAlg {
+    fn default() -> Self {
+        Self(HpkeKemId::X25519HkdfSha256)
+    }
+}
+
+impl fmt::Display for KemAlg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_possible_value().unwrap().get_name())
+    }
+}
 
 impl ValueEnum for KemAlg {
     fn value_variants<'a>() -> &'a [Self] {
@@ -781,12 +806,12 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
             println!("{}", serde_json::to_string_pretty(&config)?);
             Ok(())
         }
-        HpkeAction::GenerateReceiverConfig { kem_alg } => {
+        HpkeAction::Generate { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
             println!(
                 "{}",
-                serde_json::to_string(&receiver_config)
+                serde_json::to_string_pretty(&receiver_config)
                     .with_context(|| "failed to JSON-encode the HPKE receiver config")?
             );
             eprintln!(
