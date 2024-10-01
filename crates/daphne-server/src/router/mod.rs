@@ -445,7 +445,7 @@ mod test {
     };
     use daphne::{
         async_test_versions,
-        messages::{AggregationJobId, Base64Encode, TaskId},
+        messages::{AggregationJobId, Base64Encode, CollectionJobId, TaskId},
         DapError, DapRequest, DapResource, DapSender, DapVersion,
     };
     use daphne_service_utils::{
@@ -630,6 +630,33 @@ mod test {
     }
 
     async_test_versions! { parse_agg_job_id }
+
+    async fn parse_collect_job_id(version: DapVersion) {
+        let test = test_router();
+
+        let task_id = mk_task_id();
+        let collect_job_id = CollectionJobId(thread_rng().gen());
+
+        let req = test(
+            Request::builder()
+                .uri(format!(
+                    "/{version}/{}/{}/parse-collect-job-id",
+                    task_id.to_base64url(),
+                    collect_job_id.to_base64url(),
+                ))
+                .header(CONTENT_TYPE, "application/dap-collect-req")
+                .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(req.resource, DapResource::CollectionJob(collect_job_id));
+        assert_eq!(req.task_id.unwrap(), task_id);
+    }
+
+    async_test_versions! { parse_collect_job_id }
 
     async fn incorrect_bearer_tokens_are_rejected(version: DapVersion) {
         let test = test_router();
