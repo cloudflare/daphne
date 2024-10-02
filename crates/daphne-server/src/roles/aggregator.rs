@@ -8,8 +8,8 @@ use daphne::{
     audit_log::AuditLog,
     error::DapAbort,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter, HpkeProvider},
-    messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time, TransitionFailure},
+    hpke::{self, HpkeConfig, HpkeProvider, HpkeReceiverConfig},
+    messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time},
     metrics::DaphneMetrics,
     roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
@@ -393,9 +393,23 @@ impl DapReportInitializer for crate::App {
     }
 }
 
+pub struct HpkeDecrypter(Marc<Vec<HpkeReceiverConfig>>);
+
+impl hpke::HpkeDecrypter for HpkeDecrypter {
+    fn hpke_decrypt(
+        &self,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
+    ) -> Result<Vec<u8>, DapError> {
+        self.0.hpke_decrypt(info, aad, ciphertext)
+    }
+}
+
 #[async_trait]
 impl HpkeProvider for crate::App {
     type WrappedHpkeConfig<'s> = Marc<HpkeConfig>;
+    type ReceiverConfigs<'s> = HpkeDecrypter;
 
     async fn get_hpke_config_for<'s>(
         &'s self,
@@ -439,37 +453,17 @@ impl HpkeProvider for crate::App {
             .map_err(|e| fatal_error!(err = ?e, "failed to get at the hpke config"))?
             .unwrap_or(false))
     }
-}
 
-#[async_trait]
-impl HpkeDecrypter for crate::App {
-    async fn hpke_decrypt(
-        &self,
-        task_id: &TaskId,
-        info: &[u8],
-        aad: &[u8],
-        ciphertext: &HpkeCiphertext,
-    ) -> Result<Vec<u8>, DapError> {
-        let version = self
-            .get_task_config_for(task_id)
-            .await?
-            .as_ref()
-            .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?
-            .version;
-        self.kv()
-            .peek::<kv::prefix::HpkeReceiverConfigSet, _, _>(
-                &version,
-                &KvGetOptions::default(),
-                |config_list| {
-                    config_list
-                        .iter()
-                        .find(|receiver| receiver.config.id == ciphertext.config_id)
-                        .map(|receiver| receiver.decrypt(info, aad, ciphertext))
-                },
-            )
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to get the hpke config"))?
-            .flatten()
-            .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
+    async fn get_receiver_configs<'s>(
+        &'s self,
+        version: DapVersion,
+    ) -> Result<Self::ReceiverConfigs<'s>, DapError> {
+        Ok(HpkeDecrypter(
+            self.kv()
+                .get::<kv::prefix::HpkeReceiverConfigSet>(&version, &KvGetOptions::default())
+                .await
+                .map_err(|e| fatal_error!(err= ?e,"failed to get the hpke config"))?
+                .ok_or_else(|| fatal_error!(err="there are no hpke configs in kv!!", %version))?,
+        ))
     }
 }

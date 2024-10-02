@@ -68,9 +68,7 @@ impl VdafConfig {
                 CTX_ROLE_HELPER
             };
 
-            let agg_share_data = decrypter
-                .hpke_decrypt(task_id, &info, &aad, agg_share_ciphertext)
-                .await?;
+            let agg_share_data = decrypter.hpke_decrypt(&info, &aad, agg_share_ciphertext)?;
             agg_shares.push(agg_share_data);
         }
 
