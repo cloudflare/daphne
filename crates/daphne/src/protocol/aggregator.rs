@@ -97,7 +97,7 @@ pub enum EarlyReportStateConsumed {
 }
 
 impl EarlyReportStateConsumed {
-    pub(crate) async fn consume(
+    pub(crate) fn consume(
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         is_leader: bool,
@@ -463,22 +463,19 @@ impl DapTaskConfig {
 
                 let [leader_share, helper_share] = report.encrypted_input_shares;
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        &decrypter,
-                        initializer,
-                        true,
-                        task_id,
-                        self,
-                        ReportShare {
-                            report_metadata: report.report_metadata,
-                            public_share: report.public_share,
-                            encrypted_input_share: leader_share,
-                        },
-                        None,
-                    )
-                    .await?,
-                );
+                consumed_reports.push(EarlyReportStateConsumed::consume(
+                    &decrypter,
+                    initializer,
+                    true,
+                    task_id,
+                    self,
+                    ReportShare {
+                        report_metadata: report.report_metadata,
+                        public_share: report.public_share,
+                        encrypted_input_share: leader_share,
+                    },
+                    None,
+                )?);
                 helper_shares.push(helper_share);
             }
         }
@@ -611,18 +608,15 @@ impl DapTaskConfig {
                     processed.insert(prep_init.report_share.report_metadata.id);
                 }
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        decrypter,
-                        initializer,
-                        false,
-                        task_id,
-                        self,
-                        prep_init.report_share,
-                        Some(prep_init.payload),
-                    )
-                    .await?,
-                );
+                consumed_reports.push(EarlyReportStateConsumed::consume(
+                    decrypter,
+                    initializer,
+                    false,
+                    task_id,
+                    self,
+                    prep_init.report_share,
+                    Some(prep_init.payload),
+                )?);
             }
             Ok::<_, DapError>(())
         }

@@ -371,7 +371,7 @@ impl AggregationJobTest {
     }
 
     /// Collector: Consume the aggregate shares.
-    pub async fn consume_encrypted_agg_shares(
+    pub fn consume_encrypted_agg_shares(
         &self,
         batch_selector: &BatchSelector,
         report_count: u64,
@@ -389,7 +389,6 @@ impl AggregationJobTest {
                 enc_agg_shares,
                 self.task_config.version,
             )
-            .await
             .unwrap()
     }
 
@@ -439,7 +438,6 @@ impl AggregationJobTest {
             &agg_param,
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         )
-        .await
     }
 }
 

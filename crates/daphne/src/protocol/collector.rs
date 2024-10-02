@@ -31,7 +31,7 @@ impl VdafConfig {
     ///
     /// * `version` is the `DapVersion` to use.
     #[allow(clippy::too_many_arguments)]
-    pub async fn consume_encrypted_agg_shares(
+    pub fn consume_encrypted_agg_shares(
         &self,
         decrypter: &impl HpkeDecrypter,
         task_id: &TaskId,
