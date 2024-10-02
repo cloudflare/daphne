@@ -51,6 +51,7 @@ paste.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 rcgen.workspace = true
+serde_yaml.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 webpki.workspace = true

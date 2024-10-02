@@ -8,11 +8,11 @@ use daphne_server::{router, App, StorageProxyConfig};
 use daphne_service_utils::{
     config::DaphneServiceConfig, metrics::DaphnePromServiceMetrics, DapRole,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Config {
     service: DaphneServiceConfig,
     port: u16,
@@ -98,7 +98,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     // Parse the configuration from the command line arguments.
     let config = Config::try_from(Args::parse())?;
-    println!("starting service with config:\n{config:#?}");
+    println!(
+        "starting service with config:\n{}",
+        serde_yaml::to_string(&config).unwrap()
+    );
 
     // Create a new prometheus registry where metrics will be registered and measured
     let registry = prometheus::Registry::new();
