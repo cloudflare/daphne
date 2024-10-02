@@ -47,7 +47,7 @@ mod test {
 
     const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
 
-    async fn roundtrip_report(version: DapVersion) {
+    fn roundtrip_report(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
@@ -76,7 +76,6 @@ mod test {
             },
             None,
         )
-        .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
             prep_share: leader_prep_share,
@@ -107,7 +106,6 @@ mod test {
             },
             None,
         )
-        .await
         .unwrap();
         let EarlyReportStateInitialized::Ready {
             prep_share: helper_prep_share,
@@ -166,7 +164,7 @@ mod test {
         }
     }
 
-    async_test_versions! { roundtrip_report }
+    test_versions! { roundtrip_report }
 
     fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -654,7 +652,7 @@ mod test {
         assert_eq!(leader_agg_span.report_count(), 2);
     }
 
-    async fn encrypted_agg_share(version: DapVersion) {
+    fn encrypted_agg_share(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let leader_agg_share = DapAggregateShare {
             report_count: 50,
@@ -691,21 +689,19 @@ mod test {
             &DapAggregationParam::Empty,
             &helper_agg_share,
         );
-        let agg_res = t
-            .consume_encrypted_agg_shares(
-                &batch_selector,
-                50,
-                &DapAggregationParam::Empty,
-                vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
-            )
-            .await;
+        let agg_res = t.consume_encrypted_agg_shares(
+            &batch_selector,
+            50,
+            &DapAggregationParam::Empty,
+            vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
+        );
 
         assert_eq!(agg_res, DapAggregateResult::U64(32));
     }
 
-    async_test_versions! { encrypted_agg_share }
+    test_versions! { encrypted_agg_share }
 
-    async fn handle_unrecognized_report_extensions(version: DapVersion) {
+    fn handle_unrecognized_report_extensions(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
@@ -738,7 +734,6 @@ mod test {
             },
             None,
         )
-        .await
         .unwrap();
 
         assert_eq!(consumed_report.metadata(), &report_metadata);
@@ -747,9 +742,9 @@ mod test {
         assert!(!consumed_report.is_ready());
     }
 
-    async_test_versions! { handle_unrecognized_report_extensions }
+    test_versions! { handle_unrecognized_report_extensions }
 
-    async fn handle_repeated_report_extensions(version: DapVersion) {
+    fn handle_repeated_report_extensions(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
@@ -788,14 +783,13 @@ mod test {
             },
             None,
         )
-        .await
         .unwrap();
 
         assert_eq!(consumed_report.metadata(), &report_metadata);
         assert!(!consumed_report.is_ready());
     }
 
-    async_test_versions! { handle_repeated_report_extensions }
+    test_versions! { handle_repeated_report_extensions }
 
     impl AggregationJobTest {
         // Tweak the Helper's share so that decoding succeeds but preparation fails.
