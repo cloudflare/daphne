@@ -18,7 +18,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
+use std::{borrow::Borrow, ops::Deref};
 
 // Various algorithm constants
 const KEM_ID_X25519_HKDF_SHA256: u16 = 0x0020;
@@ -171,12 +171,6 @@ impl deepsize::DeepSizeOf for HpkeConfig {
     }
 }
 
-impl AsRef<HpkeConfig> for HpkeConfig {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
-
 impl HpkeConfig {
     /// Encrypt `plaintext` with info string `info` and associated data `aad` using this HPKE
     /// configuration. The return values are the encapsulated key and the ciphertext.
@@ -215,9 +209,13 @@ impl HpkeConfig {
 }
 
 #[async_trait]
-pub trait HpkeProvider: HpkeDecrypter {
+pub trait HpkeProvider {
     /// Return type of `get_hpke_config_for()`, wraps a reference to an HPKE config.
     type WrappedHpkeConfig<'a>: Deref<Target = HpkeConfig> + Send
+    where
+        Self: 'a;
+
+    type ReceiverConfigs<'a>: HpkeDecrypter
     where
         Self: 'a;
 
@@ -228,6 +226,11 @@ pub trait HpkeProvider: HpkeDecrypter {
         task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig<'s>, DapError>;
 
+    async fn get_receiver_configs<'s>(
+        &'s self,
+        version: DapVersion,
+    ) -> Result<Self::ReceiverConfigs<'s>, DapError>;
+
     /// Returns `true` if a ciphertext with the HPKE config ID can be consumed in the current task.
     async fn can_hpke_decrypt(&self, task_id: &TaskId, config_id: u8) -> Result<bool, DapError>;
 }
@@ -235,13 +238,82 @@ pub trait HpkeProvider: HpkeDecrypter {
 #[async_trait]
 pub trait HpkeDecrypter {
     /// Decrypt the given HPKE ciphertext using the given info and AAD string.
-    async fn hpke_decrypt(
+    fn hpke_decrypt(
         &self,
-        task_id: &TaskId,
         info: &[u8],
         aad: &[u8],
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError>;
+}
+
+impl<T> HpkeDecrypter for &T
+where
+    T: HpkeDecrypter,
+{
+    fn hpke_decrypt(
+        &self,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
+    ) -> Result<Vec<u8>, DapError> {
+        <T as HpkeDecrypter>::hpke_decrypt(self, info, aad, ciphertext)
+    }
+}
+
+macro_rules! impl_decrypter_for_slice_types {
+    ($($(const $n:ident : usize)? $ty:ty),*$(,)?) => {
+        $(
+            impl$(<const $n: usize>)* HpkeDecrypter for $ty {
+                fn hpke_decrypt(
+                    &self,
+                    info: &[u8],
+                    aad: &[u8],
+                    ciphertext: &HpkeCiphertext,
+                ) -> Result<Vec<u8>, DapError> {
+                    self.iter().hpke_decrypt(info, aad, ciphertext)
+                }
+            }
+        )*
+    }
+}
+
+impl_decrypter_for_slice_types!(
+    Vec<HpkeReceiverConfig>,
+    &'_ [HpkeReceiverConfig],
+    &'_ [&'_ HpkeReceiverConfig],
+    const N: usize [HpkeReceiverConfig; N],
+    const N: usize [&'_ HpkeReceiverConfig; N],
+);
+
+impl<R> HpkeDecrypter for std::slice::Iter<'_, R>
+where
+    R: Borrow<HpkeReceiverConfig>,
+{
+    fn hpke_decrypt(
+        &self,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
+    ) -> Result<Vec<u8>, DapError> {
+        self.clone()
+            .map(|c| c.borrow())
+            .find(|c| c.config.id == ciphertext.config_id)
+            .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
+            .decrypt(info, aad, ciphertext)
+    }
+}
+
+// This let's us use a single config during tests to simplify test code.
+#[cfg(any(test, feature = "test-utils"))]
+impl HpkeDecrypter for HpkeReceiverConfig {
+    fn hpke_decrypt(
+        &self,
+        info: &[u8],
+        aad: &[u8],
+        ciphertext: &HpkeCiphertext,
+    ) -> Result<Vec<u8>, DapError> {
+        [self].hpke_decrypt(info, aad, ciphertext)
+    }
 }
 
 /// Struct that combines `HpkeConfig` and `HpkeSecretKey`
@@ -336,22 +408,6 @@ impl TryFrom<(HpkeConfig, HpkePrivateKey)> for HpkeReceiverConfig {
         } else {
             Err(fatal_error!(err = "public key does not match private key"))
         }
-    }
-}
-
-// This let's us use a single config during tests to simplify test code.
-#[cfg(any(test, feature = "test-utils"))]
-#[async_trait]
-impl HpkeDecrypter for HpkeReceiverConfig {
-    async fn hpke_decrypt(
-        &self,
-        _task_id: &TaskId,
-        info: &[u8],
-        aad: &[u8],
-        ciphertext: &HpkeCiphertext,
-    ) -> Result<Vec<u8>, DapError> {
-        self.config
-            .decrypt(&self.private_key, info, aad, ciphertext)
     }
 }
 

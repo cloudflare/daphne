@@ -10,11 +10,11 @@ use crate::{
     audit_log::AuditLog,
     constants::DapMediaType,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
+    hpke::{HpkeConfig, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
         self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
         Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
-        ReportId, TaskId, Time, TransitionFailure,
+        ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -695,6 +695,8 @@ impl InMemoryAggregator {
 impl HpkeProvider for InMemoryAggregator {
     type WrappedHpkeConfig<'a> = &'a HpkeConfig;
 
+    type ReceiverConfigs<'a> = &'a [HpkeReceiverConfig];
+
     async fn get_hpke_config_for<'s>(
         &'s self,
         _version: DapVersion,
@@ -717,26 +719,15 @@ impl HpkeProvider for InMemoryAggregator {
         Ok(&self.hpke_receiver_config_list[0].config)
     }
 
+    async fn get_receiver_configs<'s>(
+        &'s self,
+        _version: DapVersion,
+    ) -> Result<Self::ReceiverConfigs<'s>, DapError> {
+        Ok(&self.hpke_receiver_config_list)
+    }
+
     async fn can_hpke_decrypt(&self, _task_id: &TaskId, config_id: u8) -> Result<bool, DapError> {
         Ok(self.get_hpke_receiver_config_for(config_id).is_some())
-    }
-}
-
-#[async_trait]
-impl HpkeDecrypter for InMemoryAggregator {
-    async fn hpke_decrypt(
-        &self,
-        _task_id: &TaskId,
-        info: &[u8],
-        aad: &[u8],
-        ciphertext: &HpkeCiphertext,
-    ) -> Result<Vec<u8>, DapError> {
-        if let Some(hpke_receiver_config) = self.get_hpke_receiver_config_for(ciphertext.config_id)
-        {
-            Ok(hpke_receiver_config.decrypt(info, aad, ciphertext)?)
-        } else {
-            Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))
-        }
     }
 }
 
