@@ -1,6 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use core::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -51,5 +52,14 @@ impl FromStr for DapRole {
             "helper" => Ok(Self::Helper),
             _ => Err(s.to_string()),
         }
+    }
+}
+
+impl fmt::Display for DapRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Helper => "helper",
+            Self::Leader => "leader",
+        })
     }
 }

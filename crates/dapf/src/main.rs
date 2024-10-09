@@ -3,7 +3,6 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{builder::PossibleValue, Args, Parser, Subcommand, ValueEnum};
-use core::fmt;
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     deduce_dap_version_from_url, response_to_anyhow, HttpClient,
@@ -16,14 +15,20 @@ use daphne::{
         self, encode_base64url, Base64Encode, BatchSelector, Collection, CollectionReq, Query,
         TaskId,
     },
-    vdaf::VdafConfig,
-    DapAggregationParam, DapMeasurement, DapVersion,
+    vdaf::{Prio3Config, VdafConfig},
+    DapAggregationParam, DapMeasurement, DapQueryConfig, DapVersion,
 };
-use daphne_service_utils::http_headers;
+use daphne_service_utils::{
+    http_headers,
+    test_route_types::{InternalTestAddTask, InternalTestVdaf},
+    DapRole,
+};
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
+use std::fmt;
 use std::{
-    io::{stdin, Read},
+    io::{self, stdin, IsTerminal, Read},
+    ops::ControlFlow,
     path::PathBuf,
     process::Command,
     str::FromStr,
@@ -38,6 +43,12 @@ enum DefaultVdafConfigs {
     Prio2Dimension99k,
     Prio3NumProofs2,
     Prio3NumProofs3,
+}
+
+impl fmt::Display for DefaultVdafConfigs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.to_possible_value().unwrap().get_name())
+    }
 }
 
 impl ValueEnum for DefaultVdafConfigs {
@@ -62,22 +73,22 @@ impl DefaultVdafConfigs {
     fn into_vdaf(self) -> VdafConfig {
         match self {
             Self::Prio2Dimension99k => VdafConfig::Prio2 { dimension: 99_992 },
-            Self::Prio3NumProofs2 => VdafConfig::Prio3(
-                daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            Self::Prio3NumProofs2 => {
+                VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,
                     chunk_length: 320,
                     num_proofs: 2,
-                },
-            ),
-            Self::Prio3NumProofs3 => VdafConfig::Prio3(
-                daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                })
+            }
+            Self::Prio3NumProofs3 => {
+                VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,
                     chunk_length: 320,
                     num_proofs: 3,
-                },
-            ),
+                })
+            }
         }
     }
 }
@@ -86,6 +97,15 @@ impl DefaultVdafConfigs {
 enum CliVdafConfig {
     Default(DefaultVdafConfigs),
     Custom(VdafConfig),
+}
+
+impl fmt::Display for CliVdafConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default(default) => write!(f, "{default}"),
+            Self::Custom(custom) => write!(f, "{custom}"),
+        }
+    }
 }
 
 impl FromStr for CliVdafConfig {
@@ -113,6 +133,82 @@ impl CliVdafConfig {
             Self::Default(d) => d.into_vdaf(),
             Self::Custom(v) => v,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CliDapQueryConfig(DapQueryConfig);
+
+impl fmt::Display for CliDapQueryConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <DapQueryConfig as fmt::Display>::fmt(&self.0, f)
+    }
+}
+
+impl From<CliDapQueryConfig> for DapQueryConfig {
+    fn from(CliDapQueryConfig(val): CliDapQueryConfig) -> Self {
+        val
+    }
+}
+
+impl From<DapQueryConfig> for CliDapQueryConfig {
+    fn from(value: DapQueryConfig) -> Self {
+        Self(value)
+    }
+}
+
+impl FromStr for CliDapQueryConfig {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s == "time-interval" {
+            Ok(Self(DapQueryConfig::TimeInterval))
+        } else if let Some(size) = s.strip_prefix("fixed-size") {
+            Ok(Self(DapQueryConfig::FixedSize {
+                max_batch_size: if let Some(size) = size.strip_prefix("-") {
+                    Some(
+                        size.parse()
+                            .map_err(|e| format!("{s} is an invalid query config: {e:?}"))?,
+                    )
+                } else if size.is_empty() {
+                    None
+                } else {
+                    return Err(format!("{size} is an invalid fixed size max batch size"));
+                },
+            }))
+        } else {
+            Err(format!("{s} is an invalid query config"))
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CliTaskId(TaskId);
+
+impl fmt::Display for CliTaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <TaskId as fmt::Display>::fmt(&self.0, f)
+    }
+}
+
+impl From<TaskId> for CliTaskId {
+    fn from(id: TaskId) -> Self {
+        Self(id)
+    }
+}
+
+impl From<CliTaskId> for TaskId {
+    fn from(CliTaskId(id): CliTaskId) -> Self {
+        id
+    }
+}
+
+impl FromStr for CliTaskId {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        TaskId::try_from_base64url(s)
+            .ok_or_else(|| anyhow!("failed to decode ID"))
+            .context("expected URL-safe, base64 string")
+            .map(Self)
     }
 }
 
@@ -151,8 +247,8 @@ enum LeaderAction {
         certificate_file: Option<PathBuf>,
 
         /// DAP task ID (base64, URL-safe encoding)
-        #[arg(short, long, env, value_parser = parse_id)]
-        task_id: TaskId,
+        #[arg(short, long, env)]
+        task_id: CliTaskId,
     },
     /// Collect an aggregate result from the DAP Leader using the JSON-formatted batch selector
     /// provided on stdin.
@@ -162,8 +258,8 @@ enum LeaderAction {
         leader_url: Url,
 
         /// DAP task ID (base64, URL-safe encoding)
-        #[clap(short, long, env, value_parser = parse_id)]
-        task_id: TaskId,
+        #[clap(short, long, env)]
+        task_id: CliTaskId,
     },
     /// Poll the given collect URI for the aggregate result.
     CollectPoll {
@@ -180,8 +276,8 @@ enum LeaderAction {
         hpke_receiver: Option<HpkeReceiverConfig>,
 
         /// DAP task ID (base64, URL-safe encoding)
-        #[clap(short, long, env, value_parser = parse_id)]
-        task_id: TaskId,
+        #[clap(short, long, env)]
+        task_id: CliTaskId,
     },
 }
 #[derive(Debug, Subcommand)]
@@ -267,18 +363,45 @@ enum HpkeAction {
         wrangler_env: Option<String>,
         #[arg(default_value_t, long)]
         dap_version: DapVersion,
-        #[arg(default_value_t)]
+        #[arg(default_value_t, long)]
         kem_alg: KemAlg,
     },
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum TestAction {
     /// Add an hpke config to a test-utils enabled `daphne-server`.
     AddHpkeConfig {
         aggregator_url: Url,
         #[arg(short, long, default_value_t)]
         kem_alg: KemAlg,
+    },
+    CreateAddTaskJson {
+        #[arg(long)]
+        task_id: Option<CliTaskId>,
+        #[arg(long)]
+        leader_url: Option<Url>,
+        #[arg(long)]
+        helper_url: Option<Url>,
+        #[arg(long)]
+        vdaf: Option<CliVdafConfig>,
+        #[arg(long)]
+        leader_auth_token: Option<String>,
+        #[arg(long)]
+        collector_auth_token: Option<String>,
+        #[arg(long)]
+        role: Option<DapRole>,
+        #[arg(long)]
+        query: Option<CliDapQueryConfig>,
+        #[arg(long)]
+        min_batch_size: Option<u64>,
+        #[arg(long)]
+        collector_hpke_config: Option<String>,
+        #[arg(long)]
+        time_precision: Option<u64>,
+        #[arg(long)]
+        expires_in_seconds: Option<u64>,
     },
     /// Clear all storage of an aggregator.
     ClearStorage {
@@ -302,8 +425,8 @@ enum CliDapMediaType {
     Collection {
         #[clap(long, env)]
         vdaf_config: Option<CliVdafConfig>,
-        #[clap(long, env, value_parser = parse_id)]
-        task_id: Option<TaskId>,
+        #[clap(long, env)]
+        task_id: Option<CliTaskId>,
         #[clap(long, env)]
         hpke_config_path: Option<PathBuf>,
     },
@@ -457,22 +580,8 @@ async fn main() -> Result<()> {
         Action::Leader(leader) => handle_leader_actions(leader, http_client).await,
         Action::Hpke(hpke) => handle_hpke_actions(hpke, http_client).await,
         Action::Helper(helper) => handle_helper_actions(helper, http_client).await,
-        Action::TestRoutes(TestAction::AddHpkeConfig {
-            aggregator_url,
-            kem_alg,
-        }) => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
-        Action::TestRoutes(TestAction::ClearStorage {
-            aggregator_url,
-            set_hpke_key,
-        }) => {
-            dapf::test_routes::delete_all_storage(
-                &http_client,
-                &aggregator_url,
-                set_hpke_key.map(|k| k.0),
-            )
-            .await
-        }
         Action::Decode(decode) => handle_decode_actions(decode).await,
+        Action::TestRoutes(test) => handle_test_routes(test, http_client).await,
     }
 }
 
@@ -522,7 +631,7 @@ async fn handle_leader_actions(
                 .produce_report(
                     &[leader_hpke_config, helper_hpke_config],
                     now,
-                    &task_id,
+                    &task_id.into(),
                     measurement,
                     version,
                 )
@@ -645,7 +754,7 @@ async fn handle_leader_actions(
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
             let agg_res = vdaf_config.into_vdaf().consume_encrypted_agg_shares(
                 receiver,
-                &task_id,
+                &task_id.into(),
                 &batch_selector,
                 collect_resp.report_count,
                 &DapAggregationParam::Empty,
@@ -806,20 +915,25 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
         HpkeAction::Generate { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&receiver_config)
-                    .with_context(|| "failed to JSON-encode the HPKE receiver config")?
+            if std::io::stdout().is_terminal() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&receiver_config).unwrap()
+                );
+            } else {
+                print!("{}", serde_json::to_string(&receiver_config).unwrap())
+            }
+            let encoded = encode_base64url(
+                receiver_config
+                    .config
+                    .get_encoded_with_param(&DapVersion::Latest)
+                    .unwrap(),
             );
-            eprintln!(
-                "DAP and base64 encoded hpke config: {}",
-                encode_base64url(
-                    receiver_config
-                        .config
-                        .get_encoded_with_param(&DapVersion::Latest)
-                        .unwrap()
-                )
-            );
+            if std::io::stderr().is_terminal() {
+                eprintln!("DAP and base64 encoded hpke config: {encoded}");
+            } else {
+                eprint!("{encoded}");
+            }
             Ok(())
         }
         HpkeAction::RotateReceiverConfig {
@@ -930,14 +1044,13 @@ async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
                         .into_vdaf()
                         .consume_encrypted_agg_shares(
                             &hpke_config,
-                            &task_id,
+                            &task_id.into(),
                             &batch_selector,
                             message.report_count,
                             &DapAggregationParam::Empty,
                             message.encrypted_agg_shares.to_vec(),
                             action.version,
-                        )
-                        .await?;
+                        )?;
                     Some(agg_shares)
                 }
                 (None, None, None) => None,
@@ -957,8 +1070,251 @@ async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_id(id_str: &str) -> Result<TaskId> {
-    TaskId::try_from_base64url(id_str)
-        .ok_or_else(|| anyhow!("failed to decode ID"))
-        .context("expected URL-safe, base64 string")
+async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyhow::Result<()> {
+    match action {
+        TestAction::AddHpkeConfig {
+            aggregator_url,
+            kem_alg,
+        } => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
+        TestAction::ClearStorage {
+            aggregator_url,
+            set_hpke_key,
+        } => {
+            dapf::test_routes::delete_all_storage(
+                &http_client,
+                &aggregator_url,
+                set_hpke_key.map(|k| k.0),
+            )
+            .await
+        }
+        TestAction::CreateAddTaskJson {
+            task_id,
+            leader_url,
+            helper_url,
+            vdaf,
+            leader_auth_token,
+            collector_auth_token,
+            role,
+            query,
+            min_batch_size,
+            collector_hpke_config,
+            time_precision,
+            expires_in_seconds: task_expiration,
+        } => {
+            let (vdaf_verify_key, vdaf) = use_or_request_from_user_or_default(
+                vdaf,
+                || CliVdafConfig::Default(DefaultVdafConfigs::Prio3NumProofs3),
+                "vdaf",
+            )
+            .map(|vdaf| {
+                let vdaf = vdaf.into_vdaf();
+                let vdaf_verify_key = vdaf.gen_verify_key();
+                let (typ, bits, length, chunk_length) = match vdaf {
+                    VdafConfig::Prio3(prio3) => match prio3 {
+                        Prio3Config::Count => ("Prio3Count", None, None, None),
+                        Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
+                        Prio3Config::Histogram {
+                            length,
+                            chunk_length,
+                        } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
+                        Prio3Config::SumVec {
+                            bits,
+                            length,
+                            chunk_length,
+                        } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
+                        Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                            bits,
+                            length,
+                            chunk_length,
+                            num_proofs: _,
+                        } => (
+                            "Prio3SumVecField64MultiproofHmacSha256Aes128",
+                            Some(bits),
+                            Some(length),
+                            Some(chunk_length),
+                        ),
+                    },
+                    VdafConfig::Prio2 { .. } => ("Prio2", None, None, None),
+                    VdafConfig::Pine(_) => ("Pine", None, None, None),
+                    #[cfg(feature = "experimental")]
+                    VdafConfig::Mastic { .. } => todo!(),
+                };
+                (
+                    encode_base64url(vdaf_verify_key),
+                    InternalTestVdaf {
+                        typ: typ.into(),
+                        bits: bits.map(|a| a.to_string()),
+                        length: length.map(|a| a.to_string()),
+                        chunk_length: chunk_length.map(|a| a.to_string()),
+                    },
+                )
+            })?;
+            let CliDapQueryConfig(query) = use_or_request_from_user_or_default(
+                query,
+                || DapQueryConfig::FixedSize {
+                    max_batch_size: None,
+                },
+                "query",
+            )?;
+            let role = use_or_request_from_user(role, "role")?;
+            let internal_task = InternalTestAddTask {
+                task_id: use_or_request_from_user_or_default(
+                    task_id,
+                    {
+                        let t = TaskId(thread_rng().gen());
+                        move || t
+                    },
+                    "task id",
+                )?
+                .into(),
+                leader: use_or_request_from_user(leader_url, "leader url")?,
+                helper: use_or_request_from_user(helper_url, "helper url")?,
+                vdaf,
+                leader_authentication_token: use_or_request_from_user(
+                    leader_auth_token,
+                    "leader auth token",
+                )?,
+                collector_authentication_token: match role {
+                    DapRole::Leader => Some(use_or_request_from_user(
+                        collector_auth_token,
+                        "collector auth token",
+                    )?),
+                    DapRole::Helper => None,
+                },
+                role,
+                vdaf_verify_key,
+                query_type: match query {
+                    DapQueryConfig::TimeInterval => 1,
+                    DapQueryConfig::FixedSize { .. } => 2,
+                },
+                min_batch_size: use_or_request_from_user_or_default(
+                    min_batch_size,
+                    || 10u64,
+                    "min batch size",
+                )?,
+                max_batch_size: match query {
+                    DapQueryConfig::TimeInterval => None,
+                    DapQueryConfig::FixedSize { max_batch_size } => max_batch_size,
+                },
+                time_precision: use_or_request_from_user_or_default(
+                    time_precision,
+                    || 3600u64,
+                    "time precision",
+                )?,
+                collector_hpke_config: use_or_request_from_user(
+                    collector_hpke_config,
+                    "collector hpke config",
+                )?,
+                task_expiration: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + use_or_request_from_user_or_default(
+                        task_expiration,
+                        || 604_800u64,
+                        "task should expire in",
+                    )?,
+            };
+
+            if std::io::stdout().is_terminal() {
+                println!("{}", serde_json::to_string_pretty(&internal_task).unwrap())
+            } else {
+                print!("{}", serde_json::to_string(&internal_task).unwrap())
+            };
+
+            Ok(())
+        }
+    }
+}
+
+fn use_or_request_from_user_or_default<T, U>(
+    value: Option<T>,
+    mut default: impl FnMut() -> U,
+    field: &'static str,
+) -> io::Result<T>
+where
+    U: Into<T>,
+    T: FromStr + fmt::Display,
+    T::Err: fmt::Debug,
+{
+    match value {
+        Some(v) => Ok(v),
+        None => Ok(request_from_user::<T>(
+            field,
+            format!("leave empty to default: {}", default().into()).as_str(),
+            || ControlFlow::Break(Some(default().into())),
+        )?
+        .unwrap()),
+    }
+}
+
+fn use_or_request_from_user<T>(value: Option<T>, field: &'static str) -> io::Result<T>
+where
+    T: FromStr + fmt::Display,
+    T::Err: fmt::Debug,
+{
+    match value {
+        Some(v) => Ok(v),
+        None => request_from_user::<T>(field, None, || ControlFlow::Continue(()))
+            .transpose()
+            .unwrap()
+            .map(Into::into),
+    }
+}
+
+fn request_from_user<'e, T>(
+    field: &'static str,
+    extra_info: impl Into<Option<&'e str>>,
+    mut on_empty: impl FnMut() -> ControlFlow<Option<T>>,
+) -> io::Result<Option<T>>
+where
+    T: FromStr + fmt::Display,
+    T::Err: fmt::Debug,
+{
+    if !std::io::stdin().is_terminal() {
+        return match on_empty() {
+            ControlFlow::Break(b) => {
+                eprintln!(
+                    "defaulting {field} to {}",
+                    b.as_ref()
+                        .map(|b| format!("{b}"))
+                        .unwrap_or_else(|| "None".into())
+                );
+                Ok(b)
+            }
+            ControlFlow::Continue(()) => Err(io::Error::other(format!(
+                "{field:?} is required. use command line options to specify it"
+            ))),
+        };
+    }
+    let extra_info = extra_info.into();
+    loop {
+        eprint!(
+            "{field}{}?: ",
+            extra_info.map(|e| format!(" ({e})")).unwrap_or_default()
+        );
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf)?;
+
+        if buf.is_empty() {
+            // <C-d>
+            break Err(io::ErrorKind::UnexpectedEof.into());
+        }
+
+        buf.pop();
+
+        if buf.is_empty() {
+            match on_empty() {
+                ControlFlow::Continue(()) => continue,
+                ControlFlow::Break(b) => break Ok(b),
+            }
+        }
+
+        match buf.parse::<T>() {
+            Ok(t) => break Ok(Some(t)),
+            Err(e) => {
+                eprintln!("{buf} is not a valid {field}: {e:?}");
+            }
+        }
+    }
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use daphne::messages::{Duration, TaskId, Time};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[derive(Deserialize)]
@@ -11,7 +11,7 @@ pub struct InternalTestEndpointForTask {
     pub role: super::DapRole,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InternalTestVdaf {
     #[serde(rename = "type")]
     pub typ: String,
@@ -23,7 +23,7 @@ pub struct InternalTestVdaf {
     pub chunk_length: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct InternalTestAddTask {
     pub task_id: TaskId, // base64url
