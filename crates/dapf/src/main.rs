@@ -1,8 +1,9 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{anyhow, Context, Result};
-use clap::{builder::PossibleValue, Parser, Subcommand, ValueEnum};
+use anyhow::{anyhow, bail, Context, Result};
+use clap::{builder::PossibleValue, Args, Parser, Subcommand, ValueEnum};
+use core::fmt;
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     deduce_dap_version_from_url, response_to_anyhow, HttpClient,
@@ -11,7 +12,10 @@ use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
     hpke::{HpkeKemId, HpkeReceiverConfig},
-    messages::{Base64Encode, BatchSelector, Collection, CollectionReq, Query, TaskId},
+    messages::{
+        self, encode_base64url, Base64Encode, BatchSelector, Collection, CollectionReq, Query,
+        TaskId,
+    },
     vdaf::VdafConfig,
     DapAggregationParam, DapMeasurement, DapVersion,
 };
@@ -248,7 +252,13 @@ enum HpkeAction {
         dap_version: DapVersion,
     },
     /// Generate an hpke receiver config.
-    GenerateReceiverConfig { kem_alg: KemAlg },
+    ///
+    /// This command outputs to stdout the hpke config in json and to stderr the config encoded
+    /// first by prio and then in base64. This version can later be used when TODO
+    Generate {
+        #[arg(default_value_t)]
+        kem_alg: KemAlg,
+    },
     /// Rotate the HPKE config advertised by the Aggregator.
     RotateReceiverConfig {
         #[arg(short = 'c', long)]
@@ -257,6 +267,7 @@ enum HpkeAction {
         wrangler_env: Option<String>,
         #[arg(default_value_t, long)]
         dap_version: DapVersion,
+        #[arg(default_value_t)]
         kem_alg: KemAlg,
     },
 }
@@ -266,7 +277,7 @@ enum TestAction {
     /// Add an hpke config to a test-utils enabled `daphne-server`.
     AddHpkeConfig {
         aggregator_url: Url,
-        #[arg(short, long, default_value = "x25519_hkdf_sha256")]
+        #[arg(short, long, default_value_t)]
         kem_alg: KemAlg,
     },
     /// Clear all storage of an aggregator.
@@ -277,6 +288,35 @@ enum TestAction {
         #[arg(short, long)]
         set_hpke_key: Option<KemAlg>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum CliDapMediaType {
+    AggregationJobResp,
+    AggregateShare,
+    /// Decode a [DapMediaType::Collection].
+    ///
+    /// If the `--vdaf-config`, `--task-id` and `--hpke-config-path` are supplied, then the
+    /// aggregate share will also be decrypted and unsharded, presenting the final result of the
+    /// vdaf.
+    Collection {
+        #[clap(long, env)]
+        vdaf_config: Option<CliVdafConfig>,
+        #[clap(long, env, value_parser = parse_id)]
+        task_id: Option<TaskId>,
+        #[clap(long, env)]
+        hpke_config_path: Option<PathBuf>,
+    },
+    HpkeConfigList,
+}
+
+#[derive(Debug, Args)]
+struct DecodeAction {
+    input: Option<PathBuf>,
+    #[arg(long = "dap-version", env, default_value_t = DapVersion::Latest)]
+    version: DapVersion,
+    #[command(subcommand)]
+    media_type: CliDapMediaType,
 }
 
 #[derive(Debug, Subcommand)]
@@ -293,6 +333,8 @@ enum Action {
     /// Interact with test routes behind `test-utils` feature flags.
     #[command(subcommand)]
     TestRoutes(TestAction),
+    /// Decode payloads returned by dap requests.
+    Decode(DecodeAction),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -353,6 +395,18 @@ impl LoadControlParamsCli {
 
 #[derive(Clone, Debug)]
 struct KemAlg(HpkeKemId);
+
+impl Default for KemAlg {
+    fn default() -> Self {
+        Self(HpkeKemId::X25519HkdfSha256)
+    }
+}
+
+impl fmt::Display for KemAlg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_possible_value().unwrap().get_name())
+    }
+}
 
 impl ValueEnum for KemAlg {
     fn value_variants<'a>() -> &'a [Self] {
@@ -418,6 +472,7 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Action::Decode(decode) => handle_decode_actions(decode).await,
     }
 }
 
@@ -751,13 +806,22 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
             println!("{}", serde_json::to_string_pretty(&config)?);
             Ok(())
         }
-        HpkeAction::GenerateReceiverConfig { kem_alg } => {
+        HpkeAction::Generate { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
             println!(
                 "{}",
-                serde_json::to_string(&receiver_config)
+                serde_json::to_string_pretty(&receiver_config)
                     .with_context(|| "failed to JSON-encode the HPKE receiver config")?
+            );
+            eprintln!(
+                "DAP and base64 encoded hpke config: {}",
+                encode_base64url(
+                    receiver_config
+                        .config
+                        .get_encoded_with_param(&DapVersion::Latest)
+                        .unwrap()
+                )
             );
             Ok(())
         }
@@ -828,6 +892,72 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
             Ok(())
         }
     }
+}
+
+async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
+    let mut buf = Vec::new();
+    match action.input.map(std::fs::File::open).transpose()? {
+        Some(mut file) => file.read_to_end(&mut buf)?,
+        None => std::io::stdin().read_to_end(&mut buf)?,
+    };
+    let s = match action.media_type {
+        CliDapMediaType::AggregationJobResp => serde_json::to_string_pretty(
+            &messages::AggregationJobResp::get_decoded_with_param(&action.version, &buf)?,
+        ),
+        CliDapMediaType::AggregateShare => serde_json::to_string_pretty(
+            &messages::AggregateShare::get_decoded_with_param(&action.version, &buf)?,
+        ),
+        CliDapMediaType::Collection {
+            vdaf_config,
+            task_id,
+            hpke_config_path,
+        } => {
+            let message = messages::Collection::get_decoded_with_param(&action.version, &buf)
+                .context("decoding collection payload")?;
+            let agg_shares = match (vdaf_config, task_id, hpke_config_path) {
+                (Some(vdaf_config), Some(task_id), Some(hpke_config_path)) => {
+                    let hpke_config: HpkeReceiverConfig = serde_json::from_reader(
+                        std::fs::File::open(&hpke_config_path)
+                            .with_context(|| format!("opening {}", hpke_config_path.display()))?,
+                    )
+                    .with_context(|| {
+                        format!("deserializing the config at {}", hpke_config_path.display())
+                    })?;
+                    let batch_selector = match message.part_batch_sel {
+                        messages::PartialBatchSelector::TimeInterval => todo!(),
+                        messages::PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
+                            BatchSelector::FixedSizeByBatchId { batch_id }
+                        }
+                    };
+                    let agg_shares = vdaf_config
+                        .into_vdaf()
+                        .consume_encrypted_agg_shares(
+                            &hpke_config,
+                            &task_id,
+                            &batch_selector,
+                            message.report_count,
+                            &DapAggregationParam::Empty,
+                            message.encrypted_agg_shares.to_vec(),
+                            action.version,
+                        )
+                        .await?;
+                    Some(agg_shares)
+                }
+                (None, None, None) => None,
+                _ => bail!("to decrypt the collection job please provide the vdaf, task_id and hpke receiver config path"),
+            };
+
+            serde_json::to_string_pretty(&serde_json::json!({
+                "original": &message,
+                "decrypted": &agg_shares,
+            }))
+        }
+        CliDapMediaType::HpkeConfigList => serde_json::to_string_pretty(
+            &messages::HpkeConfigList::get_decoded_with_param(&action.version, &buf)?,
+        ),
+    };
+    println!("{}", s.unwrap());
+    Ok(())
 }
 
 fn parse_id(id_str: &str) -> Result<TaskId> {
