@@ -15,12 +15,12 @@ tool replace all instances of `dapf` with `cargo run --bin dapf`.
 ### Generate an hpke config
 
 With the default algorithm:
-```
+```sh
 dapf hpke generate
 ```
 
 With a specific algorithm:
-```
+```sh
 dapf hpke generate x25519_hkdf_sha256
 ```
 
@@ -44,6 +44,54 @@ Second as a [DAP encoded][hpke-config-encoding] + base64 encoded string which ca
 used when issuing requests to `internal/test/add_task`:
 ```
 DAP and base64 encoded hpke config: mwAgAAEAAQAgpj3X5rv8aNVOiyXjnOuCbN9RAVkqAmWQy5NddU5PIQ0
+```
+
+### Generating the requert payload for `internal/test/add_task`
+
+Using `dapf test-routes create-add-task-json` the json used for adding a new
+testing task can be easily created.
+
+All the parameters of this task can be passed through commandline options, the
+parameters that aren't passed in are then asked interactively.
+
+```sh
+Options:
+      --task-id <TASK_ID>
+      --leader-url <LEADER_URL>
+      --helper-url <HELPER_URL>
+      --vdaf <VDAF>
+      --leader-auth-token <LEADER_AUTH_TOKEN>
+      --collector-authentication-token <COLLECTOR_AUTHENTICATION_TOKEN>
+      --role <ROLE>
+      --query <QUERY>
+      --min-batch-size <MIN_BATCH_SIZE>
+      --collector-hpke-config <COLLECTOR_HPKE_CONFIG>
+      --time-precision <TIME_PRECISION>
+      --expires-in-seconds <EXPIRES_IN_SECONDS>
+```
+
+Using this command should output something like this, which you can then use to
+issue requests to `internal/test/add_task`
+```json
+{
+  "task_id": "64ac1bf7ef08295c22ad8b3d17c122da2136dca03e73604a6f2832cb19325a5a",
+  "leader": "http://leader/",
+  "helper": "http://helper/",
+  "vdaf": {
+    "type": "Prio3SumVecField64MultiproofHmacSha256Aes128",
+    "bits": "1",
+    "length": "100000",
+    "chunk_length": "320"
+  },
+  "leader_authentication_token": "I-am-the-leader",
+  "role": "helper",
+  "vdaf_verify_key": "L0-8P4AtmM2EMkYMBe8VkPsh03hKXdj648zgAZ3ULJU",
+  "query_type": 2,
+  "min_batch_size": 10,
+  "time_precision": 3600,
+  "collector_hpke_config": "gwAgAAEAAQAgPMw62iLcCzNn0DHqSwKHanelnvMrWhwGEJVSpRpzmhM",
+  "task_expiration": 1729085516
+}
 ```
 
 ### Decoding responses from aggregators
