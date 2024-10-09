@@ -460,7 +460,7 @@ mod test {
 
             let (leader_state, agg_job_init_req) = task_config
                 .produce_agg_job_req(
-                    &*self.leader,
+                    &*self.leader.hpke_receiver_config_list,
                     &*self.leader,
                     task_id,
                     &part_batch_sel,

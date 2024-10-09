@@ -588,18 +588,15 @@ async fn handle_leader_actions(
             })?;
             let version = deduce_dap_version_from_url(&uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
-            let agg_res = vdaf_config
-                .into_vdaf()
-                .consume_encrypted_agg_shares(
-                    receiver,
-                    &task_id,
-                    &batch_selector,
-                    collect_resp.report_count,
-                    &DapAggregationParam::Empty,
-                    collect_resp.encrypted_agg_shares.to_vec(),
-                    version,
-                )
-                .await?;
+            let agg_res = vdaf_config.into_vdaf().consume_encrypted_agg_shares(
+                receiver,
+                &task_id,
+                &batch_selector,
+                collect_resp.report_count,
+                &DapAggregationParam::Empty,
+                collect_resp.encrypted_agg_shares.to_vec(),
+                version,
+            )?;
 
             print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())

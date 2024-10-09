@@ -68,7 +68,7 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
     let version = req.version;
     let initialized_reports = task_config
         .consume_agg_job_req(
-            aggregator,
+            &aggregator.get_receiver_configs(task_config.version).await?,
             aggregator,
             &task_id,
             req.payload,

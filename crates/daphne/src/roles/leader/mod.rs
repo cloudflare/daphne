@@ -325,7 +325,7 @@ async fn run_agg_job<A: DapLeader>(
     let agg_job_id = AggregationJobId(thread_rng().gen());
     let (agg_job_state, agg_job_init_req) = task_config
         .produce_agg_job_req(
-            aggregator,
+            aggregator.get_receiver_configs(task_config.version).await?,
             aggregator,
             task_id,
             part_batch_sel,

@@ -97,7 +97,7 @@ pub enum EarlyReportStateConsumed {
 }
 
 impl EarlyReportStateConsumed {
-    pub(crate) async fn consume(
+    pub(crate) fn consume(
         decrypter: &impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         is_leader: bool,
@@ -151,19 +151,17 @@ impl EarlyReportStateConsumed {
             .map_err(DapError::encoding)?;
         encode_u32_bytes(&mut aad, &report_share.public_share).map_err(DapError::encoding)?;
 
-        let encoded_input_share = match decrypter
-            .hpke_decrypt(task_id, &info, &aad, &report_share.encrypted_input_share)
-            .await
-        {
-            Ok(encoded_input_share) => encoded_input_share,
-            Err(DapError::Transition(failure)) => {
-                return Ok(Self::Rejected {
-                    metadata: report_share.report_metadata,
-                    failure,
-                })
-            }
-            Err(e) => return Err(e),
-        };
+        let encoded_input_share =
+            match decrypter.hpke_decrypt(&info, &aad, &report_share.encrypted_input_share) {
+                Ok(encoded_input_share) => encoded_input_share,
+                Err(DapError::Transition(failure)) => {
+                    return Ok(Self::Rejected {
+                        metadata: report_share.report_metadata,
+                        failure,
+                    })
+                }
+                Err(e) => return Err(e),
+            };
 
         let (input_share, extensions) = {
             match PlaintextInputShare::get_decoded_with_param(
@@ -405,7 +403,7 @@ impl DapTaskConfig {
     #[allow(clippy::too_many_arguments)]
     pub async fn produce_agg_job_req<S>(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
@@ -432,7 +430,7 @@ impl DapTaskConfig {
     #[allow(clippy::too_many_arguments)]
     async fn produce_agg_job_req_impl<S>(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
@@ -465,22 +463,19 @@ impl DapTaskConfig {
 
                 let [leader_share, helper_share] = report.encrypted_input_shares;
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        decrypter,
-                        initializer,
-                        true,
-                        task_id,
-                        self,
-                        ReportShare {
-                            report_metadata: report.report_metadata,
-                            public_share: report.public_share,
-                            encrypted_input_share: leader_share,
-                        },
-                        None,
-                    )
-                    .await?,
-                );
+                consumed_reports.push(EarlyReportStateConsumed::consume(
+                    &decrypter,
+                    initializer,
+                    true,
+                    task_id,
+                    self,
+                    ReportShare {
+                        report_metadata: report.report_metadata,
+                        public_share: report.public_share,
+                        encrypted_input_share: leader_share,
+                    },
+                    None,
+                )?);
                 helper_shares.push(helper_share);
             }
         }
@@ -556,7 +551,7 @@ impl DapTaskConfig {
     #[cfg(any(test, feature = "test-utils"))]
     pub async fn test_produce_agg_job_req<S>(
         &self,
-        decrypter: &impl HpkeDecrypter,
+        decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
@@ -613,18 +608,15 @@ impl DapTaskConfig {
                     processed.insert(prep_init.report_share.report_metadata.id);
                 }
 
-                consumed_reports.push(
-                    EarlyReportStateConsumed::consume(
-                        decrypter,
-                        initializer,
-                        false,
-                        task_id,
-                        self,
-                        prep_init.report_share,
-                        Some(prep_init.payload),
-                    )
-                    .await?,
-                );
+                consumed_reports.push(EarlyReportStateConsumed::consume(
+                    decrypter,
+                    initializer,
+                    false,
+                    task_id,
+                    self,
+                    prep_init.report_share,
+                    Some(prep_init.payload),
+                )?);
             }
             Ok::<_, DapError>(())
         }

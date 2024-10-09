@@ -554,7 +554,6 @@ async fn leader_collect_ok(version: DapVersion) {
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
-        .await
         .unwrap();
     assert_eq!(
         agg_res,
@@ -998,7 +997,6 @@ async fn fixed_size() {
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
-        .await
         .unwrap();
     assert_eq!(
         agg_res,
@@ -1210,7 +1208,6 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
             collection.encrypted_agg_shares.to_vec(),
             version,
         )
-        .await
         .unwrap();
     assert_eq!(
         agg_res,
