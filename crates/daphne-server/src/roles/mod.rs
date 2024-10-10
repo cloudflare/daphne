@@ -192,15 +192,23 @@ mod test_utils {
                 }),
                 ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)) => {
                     VdafConfig::Prio3(Prio3Config::SumVec {
-                        bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits fro Prio3Config::SumVec"))?,
-                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length fro Prio3Config::SumVec"))?,
-                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length fro Prio3Config::SumVec"))?,
+                        bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::SumVec"))?,
+                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::SumVec"))?,
+                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::SumVec"))?,
                     })
                 }
                 ("Prio3Histogram", None, Some(length), Some(chunk_length)) => {
                     VdafConfig::Prio3(Prio3Config::Histogram {
-                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length fro Prio3Config::Histogram"))?,
-                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length fro Prio3Config::Histogram"))?,
+                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::Histogram"))?,
+                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::Histogram"))?,
+                    })
+                }
+                ("Prio3SumVecField64MultiproofHmacSha256Aes128", Some(bits), Some(length), Some(chunk_length)) => {
+                    VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                        bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,
+                        length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,
+                        chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,
+                        num_proofs: 2,
                     })
                 }
                 _ => return Err(fatal_error!(err = "command failed: unrecognized VDAF")),
