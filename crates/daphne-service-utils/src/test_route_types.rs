@@ -26,7 +26,6 @@ pub struct InternalTestVdaf {
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct InternalTestAddTask {
-    #[serde(deserialize_with = "daphne::messages::base64url::deserialize")]
     pub task_id: TaskId, // base64url
     pub leader: Url,
     pub helper: Url,

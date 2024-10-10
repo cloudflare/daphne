@@ -79,11 +79,8 @@ where
         #[serde(deny_unknown_fields)]
         struct PathParams {
             version: DapVersion,
-            #[serde(default, with = "daphne::messages::base64url")]
             task_id: TaskId,
-            #[serde(default, with = "daphne::messages::base64url_option")]
             agg_job_id: Option<AggregationJobId>,
-            #[serde(default, with = "daphne::messages::base64url_option")]
             collect_job_id: Option<CollectionJobId>,
         }
 

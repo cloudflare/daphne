@@ -9,7 +9,6 @@ use crate::{
     messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
     DapError, DapRequestMeta, DapVersion,
 };
-use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
@@ -319,13 +318,6 @@ impl DapAbort {
             task_id,
         }
     }
-
-    pub fn from_hex_error(e: FromHexError, task_id: TaskId) -> Self {
-        Self::InvalidMessage {
-            detail: format!("invalid hexadecimal string {e:?}"),
-            task_id,
-        }
-    }
 }
 
 /// A problem details document compatible with RFC 7807.
@@ -338,19 +330,11 @@ pub struct ProblemDetails {
     pub typ: Option<String>,
 
     #[serde(rename = "taskid")]
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        with = "crate::messages::base64url_option",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub(crate) task_id: Option<TaskId>,
 
     #[serde(rename = "aggregationjobid")]
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        with = "crate::messages::base64url_option",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub(crate) agg_job_id: Option<AggregationJobId>,
 
     pub(crate) instance: String,
