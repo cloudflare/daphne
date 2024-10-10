@@ -13,7 +13,9 @@ use prio::codec::{Decode as _, ParameterizedEncode as _};
 use reqwest::header;
 use url::Url;
 
-use crate::{response_to_anyhow, HttpClient};
+use crate::HttpClient;
+
+use super::response_to_anyhow;
 
 impl HttpClient {
     pub async fn submit_aggregation_job_init_req(

@@ -4,11 +4,21 @@
 .PHONY: accept acceptance e2e load
 
 leader:
-	cargo run --profile release-symbols --features test-utils --example service -- -c ./crates/daphne-server/examples/configuration-leader.toml
+	RUST_LOG=hyper=off,debug cargo run \
+		--profile release-symbols \
+		--features test-utils \
+		--example service \
+		-- \
+		-c ./crates/daphne-server/examples/configuration-leader.toml
 l: leader
 
 helper:
-	cargo run --profile release-symbols --features test-utils --example service -- -c ./crates/daphne-server/examples/configuration-helper.toml
+	RUST_LOG=hyper=off,debug cargo run \
+		--profile release-symbols \
+		--features test-utils \
+		--example service \
+		-- \
+		-c ./crates/daphne-server/examples/configuration-helper.toml
 h: helper
 
 storage-proxy:
