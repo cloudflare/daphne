@@ -3,7 +3,7 @@
 
 //! Constants used in the DAP protocol.
 
-use crate::{DapSender, DapVersion};
+use crate::DapVersion;
 
 // Media types for HTTP requests.
 const MEDIA_TYPE_AGG_JOB_INIT_REQ: &str = "application/dap-aggregation-job-init-req";
@@ -30,20 +30,6 @@ pub enum DapMediaType {
 }
 
 impl DapMediaType {
-    /// Return the sender that would send a DAP request or response with the given media type (or
-    /// none if the sender can't be determined).
-    pub fn sender(&self) -> DapSender {
-        match self {
-            Self::AggregationJobInitReq
-            | Self::AggregateShareReq
-            | Self::Collection
-            | Self::HpkeConfigList => DapSender::Leader,
-            Self::AggregationJobResp | Self::AggregateShare => DapSender::Helper,
-            Self::Report => DapSender::Client,
-            Self::CollectionReq => DapSender::Collector,
-        }
-    }
-
     /// Parse the media type from the content-type HTTP header.
     pub fn from_str_for_version(_version: DapVersion, content_type: &str) -> Option<Self> {
         let (content_type, _) = content_type.split_once(';').unwrap_or((content_type, ""));
