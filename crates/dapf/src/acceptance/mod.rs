@@ -687,7 +687,7 @@ impl Test {
             ..
         } = &test_task_config;
 
-        info!("task id: {}", task_id.to_hex());
+        info!("task id: {task_id}");
 
         // Generate enough reports to complete a batch.
         let measurement = match &opt.measurement {

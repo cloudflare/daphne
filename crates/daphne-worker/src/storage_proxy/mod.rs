@@ -44,13 +44,14 @@
 //!     DurableRequest,
 //!     bindings::{self, DurableMethod}
 //! };
+//! use daphne::messages::TaskId;
 //!
 //! let (durable_request, uri) = DurableRequest::new(
 //!     bindings::AggregateStore::Merge,
 //!     // some mock data here
 //!     (
 //!         daphne::DapVersion::Draft09,
-//!         "some-task-id-in-hex",
+//!         &TaskId([13; 32]),
 //!         &daphne::DapBatchBucket::TimeInterval { batch_window: 50, shard: 0 }
 //!     ),
 //! );

@@ -85,7 +85,6 @@ async fn leader_process(State(app): State<Arc<App>>) -> Response {
 
 #[derive(Deserialize)]
 struct PathTaskId {
-    #[serde(deserialize_with = "daphne::messages::base64url::deserialize")]
     task_id: TaskId,
 }
 
