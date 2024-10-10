@@ -7,7 +7,7 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{AggregationJobId, CollectionJobId, TaskId},
-    DapSender, DapVersion,
+    DapVersion,
 };
 
 /// Types of resources associated with DAP tasks.
@@ -95,10 +95,6 @@ impl<P> DapRequest<P> {
                 "missing or malformed collection job ID".into(),
             ))
         }
-    }
-
-    pub fn sender(&self) -> Option<DapSender> {
-        self.media_type.map(|m| m.sender())
     }
 }
 

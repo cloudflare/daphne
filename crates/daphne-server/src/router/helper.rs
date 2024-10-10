@@ -16,7 +16,9 @@ use http::StatusCode;
 
 use crate::{roles::fetch_replay_protection_override, App};
 
-use super::{AxumDapResponse, DapRequestExtractor, DaphneService};
+use super::{
+    extractor::dap_sender::FROM_LEADER, AxumDapResponse, DapRequestExtractor, DaphneService,
+};
 
 pub(super) fn add_helper_routes<B>(router: super::Router<App, B>) -> super::Router<App, B>
 where
@@ -42,7 +44,7 @@ where
 )]
 async fn agg_job(
     State(app): State<Arc<App>>,
-    DapRequestExtractor(req): DapRequestExtractor<AggregationJobInitReq>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_LEADER, AggregationJobInitReq>,
 ) -> AxumDapResponse {
     let resp = helper::handle_agg_job_init_req(
         &*app,
@@ -63,7 +65,7 @@ async fn agg_job(
 )]
 async fn agg_share<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<AggregateShareReq>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_LEADER, AggregateShareReq>,
 ) -> AxumDapResponse
 where
     A: DapHelper + DaphneService + Send + Sync,

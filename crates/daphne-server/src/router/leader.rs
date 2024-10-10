@@ -8,19 +8,20 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{post, put},
+    routing::put,
 };
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     messages,
     roles::leader::{self, DapLeader},
-    DapError, DapVersion,
+    DapError,
 };
 use prio::codec::ParameterizedEncode;
 
 use super::{
-    AxumDapResponse, DapRequestExtractor, DaphneService, UnauthenticatedDapRequestExtractor,
+    extractor::dap_sender::FROM_COLLECTOR, AxumDapResponse, DapRequestExtractor, DaphneService,
+    UnauthenticatedDapRequestExtractor,
 };
 
 pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
@@ -67,7 +68,7 @@ where
 )]
 async fn start_collection_job<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<messages::CollectionReq>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, messages::CollectionReq>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -87,7 +88,7 @@ where
 )]
 async fn collect<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<()>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, ()>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,

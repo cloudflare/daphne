@@ -161,14 +161,34 @@ where
     }
 }
 
+pub mod dap_sender {
+    pub type DapSender = u8;
+
+    pub const FROM_CLIENT: DapSender = 0;
+    pub const FROM_COLLECTOR: DapSender = 1 << 1;
+    pub const FROM_HELPER: DapSender = 1 << 2;
+    pub const FROM_LEADER: DapSender = 1 << 3;
+
+    pub const fn to_enum(id: DapSender) -> daphne::DapSender {
+        match id {
+            FROM_CLIENT => daphne::DapSender::Client,
+            FROM_COLLECTOR => daphne::DapSender::Collector,
+            FROM_HELPER => daphne::DapSender::Helper,
+            FROM_LEADER => daphne::DapSender::Leader,
+            _ => panic!("invalid dap sender. Please specify a valid dap_sender from the crate::extractor::dap_sender module"),
+        }
+    }
+}
+
 /// An axum extractor capable of parsing a [`DapRequest`].
 ///
 /// This extractor asserts that the request is authenticated.
 #[derive(Debug)]
-pub(super) struct DapRequestExtractor<P>(pub DapRequest<P>);
+pub(super) struct DapRequestExtractor<const SENDER: dap_sender::DapSender, P>(pub DapRequest<P>);
 
 #[async_trait]
-impl<S, B, P> FromRequest<S, B, P> for DapRequestExtractor<P>
+impl<const SENDER: dap_sender::DapSender, S, B, P> FromRequest<S, B, P>
+    for DapRequestExtractor<SENDER, P>
 where
     P: DecodeFromDapHttpBody + Send + Sync,
     S: DaphneService + Send + Sync,
@@ -202,14 +222,17 @@ where
             )
             .map_err(error_to_response)?;
 
-        let bearer_authed = if let Some((token, sender)) =
-            bearer_token.zip(request.media_type.map(|m| m.sender()))
-        {
+        let bearer_authed = if let Some(token) = bearer_token {
             state
                 .server_metrics()
                 .auth_method_inc(metrics::AuthMethod::BearerToken);
             state
-                .check_bearer_token(&token, sender, request.task_id, is_taskprov)
+                .check_bearer_token(
+                    &token,
+                    const { dap_sender::to_enum(SENDER) },
+                    request.task_id,
+                    is_taskprov,
+                )
                 .await
                 .map_err(|reason| reason.either(auth_error, error_to_response))?;
             true
@@ -279,12 +302,14 @@ mod test {
 
     use crate::metrics::{DaphnePromServiceMetrics, DaphneServiceMetrics};
 
+    use super::dap_sender::FROM_LEADER;
+
     const BEARER_TOKEN: &str = "test-token";
 
     // In these tests we don't care about the body, so we can type alias it away.
     type DapRequest = daphne::DapRequest<()>;
     type UnauthenticatedDapRequestExtractor = super::UnauthenticatedDapRequestExtractor<()>;
-    type DapRequestExtractor = super::DapRequestExtractor<()>;
+    type DapRequestExtractor = super::DapRequestExtractor<FROM_LEADER, ()>;
 
     /// Return a function that will parse a request using the [`DapRequestExtractor`] or
     /// [`UnauthenticatedDapRequestExtractor`] and return the parsed request.
