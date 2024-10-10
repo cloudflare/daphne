@@ -4,7 +4,9 @@
 use std::collections::HashSet;
 
 use daphne::{
-    messages::ReportId, vdaf::VdafAggregateShare, DapAggregateShare, DapBatchBucket, DapVersion,
+    messages::{ReportId, TaskId},
+    vdaf::VdafAggregateShare,
+    DapAggregateShare, DapBatchBucket, DapVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,20 +27,20 @@ super::define_do_binding! {
         CheckCollected = "/internal/do/aggregate_store/check_collected",
     }
 
-    fn name((version, task_id_hex, bucket): (DapVersion, &'n str, &'n DapBatchBucket)) -> ObjectIdFrom {
+    fn name((version, task_id, bucket): (DapVersion, &'n TaskId, &'n DapBatchBucket)) -> ObjectIdFrom {
         fn durable_name_bucket(bucket: &DapBatchBucket) -> String {
             format!("{bucket}")
         }
         ObjectIdFrom::Name(format!(
             "{}/{}",
-            durable_name_task(version, task_id_hex),
+            durable_name_task(version, task_id),
             durable_name_bucket(bucket),
         ))
     }
 }
 
-fn durable_name_task(version: DapVersion, task_id_hex: &str) -> String {
-    format!("{}/task/{}", version.as_ref(), task_id_hex)
+fn durable_name_task(version: DapVersion, task_id: &TaskId) -> String {
+    format!("{}/task/{task_id}", version.as_ref())
 }
 
 #[derive(Debug, PartialEq, Eq)]

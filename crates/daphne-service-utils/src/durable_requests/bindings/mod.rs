@@ -141,11 +141,11 @@ mod tests {
     #[test]
     fn bucket_display() {
         assert_eq!(
-            "batch/1111111111111111111111111111111111111111111111111111111111111111",
+            "batch/IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
             format!(
                 "{}",
                 DapBatchBucket::FixedSize {
-                    batch_id: BatchId([17; 32]),
+                    batch_id: BatchId([34; 32]),
                     shard: 0,
                 }
             )
@@ -161,11 +161,11 @@ mod tests {
             )
         );
         assert_eq!(
-            "batch/1111111111111111111111111111111111111111111111111111111111111111/shard/2323",
+            "batch/IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI/shard/2323",
             format!(
                 "{}",
                 DapBatchBucket::FixedSize {
-                    batch_id: BatchId([17; 32]),
+                    batch_id: BatchId([34; 32]),
                     shard: 2323,
                 }
             )
