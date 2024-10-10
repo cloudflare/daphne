@@ -295,7 +295,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use daphne::{DapBatchBucket, DapVersion};
+    use daphne::{messages::TaskId, DapBatchBucket, DapVersion};
+    use rand::{thread_rng, Rng};
 
     use crate::durable_requests::bindings::AggregateStore;
 
@@ -307,7 +308,7 @@ mod test {
             AggregateStore::Merge,
             (
                 DapVersion::Draft09,
-                "some-task-id-hex",
+                &TaskId(thread_rng().gen()),
                 &DapBatchBucket::TimeInterval {
                     batch_window: 0,
                     shard: 17,
@@ -327,7 +328,7 @@ mod test {
             bindings::AggregateStore::Merge,
             (
                 DapVersion::Draft09,
-                "some-task-id-hex",
+                &TaskId(thread_rng().gen()),
                 &DapBatchBucket::TimeInterval {
                     batch_window: 0,
                     shard: 16,

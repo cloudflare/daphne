@@ -37,7 +37,6 @@ impl DapAggregator for crate::App {
         task_config: &DapTaskConfig,
         agg_share_span: DapAggregateSpan<DapAggregateShare>,
     ) -> DapAggregateSpan<Result<(), MergeAggShareError>> {
-        let task_id_hex = task_id.to_hex();
         let durable = self.durable();
 
         let replay_protection = fetch_replay_protection_override(self.kv()).await;
@@ -47,7 +46,7 @@ impl DapAggregator for crate::App {
                 let result = durable
                     .request(
                         bindings::AggregateStore::Merge,
-                        (task_config.version, &task_id_hex, &bucket),
+                        (task_config.version, task_id, &bucket),
                     )
                     .encode(&AggregateStoreMergeReq {
                         contained_reports: report_metadatas.iter().map(|(id, _)| *id).collect(),
@@ -96,7 +95,7 @@ impl DapAggregator for crate::App {
                 durable
                     .request(
                         bindings::AggregateStore::Get,
-                        (task_config.as_ref().version, &task_id.to_hex(), &bucket),
+                        (task_config.as_ref().version, task_id, &bucket),
                     )
                     .send(),
             );
@@ -132,7 +131,7 @@ impl DapAggregator for crate::App {
                 durable
                     .request(
                         bindings::AggregateStore::MarkCollected,
-                        (task_config.as_ref().version, &task_id.to_hex(), &bucket),
+                        (task_config.as_ref().version, task_id, &bucket),
                     )
                     .send::<()>(),
             );
@@ -289,7 +288,7 @@ impl DapAggregator for crate::App {
                     durable
                         .request(
                             bindings::AggregateStore::CheckCollected,
-                            (task_config.as_ref().version, &task_id.to_hex(), &bucket),
+                            (task_config.as_ref().version, task_id, &bucket),
                         )
                         .send()
                 })
@@ -320,10 +319,7 @@ impl DapAggregator for crate::App {
                 Ok::<bool, DapError>(
                     !self
                         .durable()
-                        .request(
-                            bindings::AggregateStore::Get,
-                            (version, &task_id.to_hex(), &bucket),
-                        )
+                        .request(bindings::AggregateStore::Get, (version, task_id, &bucket))
                         .send::<DapAggregateShare>()
                         .await
                         .map_err(|e| fatal_error!(err = ?e, "failed to get an agg share"))?

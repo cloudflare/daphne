@@ -9,7 +9,6 @@ use crate::{
     messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
     DapError, DapRequestMeta, DapVersion,
 };
-use hex::FromHexError;
 use prio::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
@@ -316,13 +315,6 @@ impl DapAbort {
     pub fn from_codec_error(e: CodecError, task_id: TaskId) -> Self {
         Self::InvalidMessage {
             detail: format!("codec error: {e}"),
-            task_id,
-        }
-    }
-
-    pub fn from_hex_error(e: FromHexError, task_id: TaskId) -> Self {
-        Self::InvalidMessage {
-            detail: format!("invalid hexadecimal string {e:?}"),
             task_id,
         }
     }

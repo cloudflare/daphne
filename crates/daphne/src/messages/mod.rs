@@ -52,14 +52,7 @@ macro_rules! id_struct {
             Copy, Clone, Default, Deserialize, Hash, PartialEq, Eq, Serialize, PartialOrd, Ord,
         )]
         #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-        pub struct $sname(#[serde(with = "hex")] pub [u8; $len]);
-
-        impl $sname {
-            /// Return the ID encoded as a hex string.
-            pub fn to_hex(&self) -> String {
-                hex::encode(self.0)
-            }
-        }
+        pub struct $sname(#[serde(with = "base64url_bytes")] pub [u8; $len]);
 
         impl $crate::messages::Base64Encode for $sname {
             /// Return the URL-safe, base64 encoding of the ID.
@@ -102,13 +95,13 @@ macro_rules! id_struct {
 
         impl fmt::Display for $sname {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}", self.to_hex())
+                write!(f, "{}", self.to_base64url())
             }
         }
 
         impl fmt::Debug for $sname {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}({})", ::std::stringify!($sname), self.to_hex())
+                write!(f, "{}({self})", ::std::stringify!($sname))
             }
         }
     };
@@ -119,6 +112,57 @@ id_struct!(BatchId, 32, "Batch ID");
 id_struct!(CollectionJobId, 16, "Collection Job ID");
 id_struct!(ReportId, 16, "Report ID");
 id_struct!(TaskId, 32, "Task ID");
+
+/// module to serialize and deserialize types ids into base64
+mod base64url_bytes {
+    use serde::{de, ser};
+
+    use crate::messages::decode_base64url;
+
+    use super::encode_base64url;
+
+    pub fn serialize<I, S>(id: &I, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        I: AsRef<[u8]>,
+        S: ser::Serializer,
+    {
+        serializer.serialize_str(&encode_base64url(id))
+    }
+
+    pub fn deserialize<'de, const N: usize, O, D>(deserializer: D) -> Result<O, D::Error>
+    where
+        D: de::Deserializer<'de>,
+        D::Error: de::Error,
+        O: From<[u8; N]>,
+    {
+        struct Visitor<const N: usize, O>(std::marker::PhantomData<[O; N]>);
+        impl<'de, const N: usize, O> de::Visitor<'de> for Visitor<N, O>
+        where
+            O: From<[u8; N]>,
+        {
+            type Value = O;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a base64 encoded value")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                decode_base64url(v)
+                    .map(|v| O::from(v))
+                    .ok_or_else(|| E::custom("invalid base64"))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+        deserializer.deserialize_str(Visitor::<N, O>(std::marker::PhantomData))
+    }
+}
 
 /// serde module for base64url-encoded serialization of ids
 pub mod base64url {
