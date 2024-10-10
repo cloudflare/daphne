@@ -6,27 +6,30 @@ use clap::{Args, Parser, Subcommand};
 use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     cli_parsers::{
-        use_or_request_from_user, use_or_request_from_user_or_default, CliDapQueryConfig,
-        CliHpkeKemId, CliTaskId, CliVdafConfig,
+        self, use_or_request_from_user, use_or_request_from_user_or_default, CliCollectionJobId,
+        CliDapQueryConfig, CliHpkeKemId, CliTaskId, CliVdafConfig,
     },
-    deduce_dap_version_from_url, response_to_anyhow, HttpClient,
+    deduce_dap_version_from_url,
+    functions::decrypt,
+    HttpClient,
 };
 use daphne::{
-    constants::DapMediaType,
-    error::aborts::ProblemDetails,
     hpke::HpkeReceiverConfig,
-    messages::{self, encode_base64url, BatchSelector, Collection, CollectionReq, Query, TaskId},
-    DapAggregationParam, DapMeasurement, DapQueryConfig, DapVersion,
+    messages::{
+        self, encode_base64url, BatchSelector, CollectionReq, PartialBatchSelector, Query, TaskId,
+    },
+    DapMeasurement, DapQueryConfig, DapVersion,
 };
 use daphne_service_utils::{
-    http_headers,
+    bearer_token::BearerToken,
     test_route_types::{InternalTestAddTask, InternalTestVdaf},
     DapRole,
 };
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
+use serde::Serialize;
 use std::{
-    io::{stdin, IsTerminal, Read},
+    io::{IsTerminal, Read},
     path::PathBuf,
     process::Command,
     time::{Duration, SystemTime},
@@ -63,7 +66,7 @@ enum LeaderAction {
 
         /// JSON-formatted VDAF config
         #[clap(short, long, env)]
-        vdaf_config: CliVdafConfig,
+        vdaf: CliVdafConfig,
 
         /// Path to the certificate file to use to verify the signature of the hpke config
         #[arg(short, long, env)]
@@ -72,35 +75,54 @@ enum LeaderAction {
         /// DAP task ID (base64, URL-safe encoding)
         #[arg(short, long, env)]
         task_id: CliTaskId,
+
+        #[arg(value_parser = cli_parsers::from_json_str::<DapMeasurement>)]
+        measurement: DapMeasurement,
     },
     /// Collect an aggregate result from the DAP Leader using the JSON-formatted batch selector
     /// provided on stdin.
     Collect {
         /// Base URL of the Leader
-        #[clap(long, env)]
+        #[arg(long, env)]
         leader_url: Url,
 
         /// DAP task ID (base64, URL-safe encoding)
-        #[clap(short, long, env)]
+        #[arg(long, env)]
         task_id: CliTaskId,
+
+        #[arg(long, env)]
+        collector_auth_token: Option<BearerToken>,
+
+        #[arg(env, value_parser = cli_parsers::from_json_str::<Query>)]
+        query: Query,
     },
     /// Poll the given collect URI for the aggregate result.
     CollectPoll {
         /// The collect URI
-        #[clap(short, long, env)]
-        uri: Url,
+        #[arg(long, env)]
+        leader_url: Url,
 
         /// JSON-formatted VDAF config
-        #[clap(short, long, env)]
-        vdaf_config: CliVdafConfig,
+        #[arg(long, env)]
+        vdaf: Option<CliVdafConfig>,
 
         /// HPKE receiver configuration for decrypting response
-        #[clap(long, env)]
-        hpke_receiver: Option<HpkeReceiverConfig>,
+        #[arg(long, env)]
+        hpke_config_path: Option<PathBuf>,
 
         /// DAP task ID (base64, URL-safe encoding)
-        #[clap(short, long, env)]
+        #[arg(long, env)]
         task_id: CliTaskId,
+
+        #[arg(long, env)]
+        collect_job_id: CliCollectionJobId,
+
+        #[arg(long, env)]
+        collector_auth_token: Option<BearerToken>,
+
+        /// batch selector.
+        #[arg(long, env, value_parser = cli_parsers::from_json_str::<BatchSelector>)]
+        batch_selector: Option<BatchSelector>,
     },
 }
 #[derive(Debug, Subcommand)]
@@ -252,6 +274,8 @@ enum CliDapMediaType {
         task_id: Option<CliTaskId>,
         #[clap(long, env)]
         hpke_config_path: Option<PathBuf>,
+        #[arg(long, env, value_parser = cli_parsers::from_json_str::<BatchSelector>)]
+        batch_selector: Option<BatchSelector>,
     },
     HpkeConfigList,
 }
@@ -388,19 +412,12 @@ async fn handle_leader_actions(
         LeaderAction::Upload {
             leader_url,
             helper_url,
-            vdaf_config,
+            vdaf: vdaf_config,
             certificate_file,
             task_id,
+            measurement,
         } => {
-            // Read the measurement from stdin.
-            let mut buf = String::new();
-            stdin()
-                .lock()
-                .read_to_string(&mut buf)
-                .with_context(|| "failed to read measurement from stdin")?;
-            let measurement: DapMeasurement =
-                serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
-
+            let task_id = task_id.into();
             // Get the Aggregators' HPKE configs.
             let leader_hpke_config = http_client
                 .get_hpke_config(&leader_url, certificate_file.as_deref())
@@ -422,140 +439,81 @@ async fn handle_leader_actions(
                 .produce_report(
                     &[leader_hpke_config, helper_hpke_config],
                     now,
-                    &task_id.into(),
+                    &task_id,
                     measurement,
                     version,
                 )
                 .with_context(|| "failed to produce report")?;
 
-            // Post the report to the Leader.
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_str(
-                    DapMediaType::Report
-                        .as_str_for_version(version)
-                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
-                )
-                .expect("failecd to construct content-type header"),
-            );
-            let resp = http_client
-                .post(leader_url.join("upload")?)
-                .body(report.get_encoded_with_param(&version)?)
-                .headers(headers)
-                .send()
+            http_client
+                .upload(&leader_url, &task_id, report, version)
                 .await?;
-            if resp.status() == 400 {
-                let problem_details: ProblemDetails = serde_json::from_str(&resp.text().await?)
-                    .with_context(|| "unexpected response")?;
-                return Err(anyhow!(serde_json::to_string(&problem_details)?));
-            } else if resp.status() != 200 {
-                return Err(response_to_anyhow(resp).await);
-            }
 
             Ok(())
         }
         LeaderAction::Collect {
             leader_url,
-            task_id: _,
+            task_id,
+            collector_auth_token,
+            query,
         } => {
-            // Read the batch selector from stdin.
-            let mut buf = String::new();
-            stdin()
-                .lock()
-                .read_to_string(&mut buf)
-                .with_context(|| "failed to read measurement from stdin")?;
-            let query: Query =
-                serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
-
-            let version = deduce_dap_version_from_url(&leader_url)?;
-            // Construct collect request.
-            let collect_req = CollectionReq {
-                query,
-                agg_param: Vec::default(),
-            };
-
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_str(
-                    DapMediaType::CollectionReq
-                        .as_str_for_version(version)
-                        .ok_or_else(|| anyhow!("invalid content-type for dap version"))?,
+            let collect_job_id = http_client
+                .start_collection_job(
+                    &leader_url,
+                    &task_id.into(),
+                    &CollectionReq {
+                        query,
+                        agg_param: Vec::default(),
+                    },
+                    deduce_dap_version_from_url(&leader_url)?,
+                    collector_auth_token.as_ref(),
                 )
-                .expect("failed to construct content-type hader"),
-            );
-            if let Ok(token) = std::env::var("LEADER_BEARER_TOKEN") {
-                headers.insert(
-                    reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-                    reqwest::header::HeaderValue::from_str(&token)?,
-                );
-            }
-
-            let resp = http_client
-                .post(leader_url.join("collect")?)
-                .body(collect_req.get_encoded_with_param(&version)?)
-                .headers(headers)
-                .send()
                 .await?;
-            if resp.status() == 400 {
-                let problem_details: ProblemDetails = serde_json::from_str(&resp.text().await?)
-                    .with_context(|| "unexpected response")?;
-                return Err(anyhow!(serde_json::to_string(&problem_details)?));
-            } else if resp.status() != 303 {
-                return Err(response_to_anyhow(resp).await);
+            if std::io::stdout().is_terminal() {
+                println!("collection job started with job id: {collect_job_id}");
+            } else {
+                print!("{collect_job_id}");
             }
-
-            let uri_str = resp
-                .headers()
-                .get("Location")
-                .ok_or_else(|| anyhow!("response is missing Location header"))?
-                .to_str()?;
-            let uri =
-                Url::parse(uri_str).with_context(|| "Leader did not respond with valid URI")?;
-
-            println!("{uri}");
             Ok(())
         }
         LeaderAction::CollectPoll {
-            uri,
-            vdaf_config,
-            hpke_receiver,
+            leader_url,
+            vdaf: vdaf_config,
+            hpke_config_path,
             task_id,
+            collect_job_id,
+            collector_auth_token,
+            batch_selector,
         } => {
-            // Read the batch selector from stdin.
-            let mut buf = String::new();
-            stdin()
-                .lock()
-                .read_to_string(&mut buf)
-                .with_context(|| "failed to read measurement from stdin")?;
-            let batch_selector: BatchSelector =
-                serde_json::from_str(&buf).with_context(|| "failed to parse JSON from stdin")?;
-
-            let resp = http_client.get(uri.clone()).send().await?;
-            if resp.status() == 202 {
-                return Err(anyhow!("aggregate result not ready"));
-            } else if resp.status() != 200 {
-                return Err(response_to_anyhow(resp).await);
-            }
-            let receiver = hpke_receiver.as_ref().ok_or_else(|| {
-                anyhow!("received response, but cannot decrypt without HPKE receiver config")
-            })?;
-            let version = deduce_dap_version_from_url(&uri)?;
-            let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
-            let agg_res = vdaf_config
-                .into_vdaf_config()
-                .consume_encrypted_agg_shares(
-                    receiver,
+            let version = deduce_dap_version_from_url(&leader_url)?;
+            let collection = http_client
+                .poll_collection_job(
+                    &leader_url,
                     &task_id.into(),
-                    &batch_selector,
-                    collect_resp.report_count,
-                    &DapAggregationParam::Empty,
-                    collect_resp.encrypted_agg_shares.to_vec(),
+                    &collect_job_id.into(),
                     version,
-                )?;
+                    collector_auth_token.as_ref(),
+                )
+                .await?;
+            let Some(collection) = collection else {
+                bail!("collection job not finished");
+            };
+            match (hpke_config_path, vdaf_config, batch_selector) {
+                (Some(hpke_config_path), Some(vdaf_config), Some(batch_selector)) => {
+                    let agg_shares = decrypt::collection(
+                        &task_id.into(),
+                        &hpke_config_path,
+                        &vdaf_config.into_vdaf_config(),
+                        batch_selector,
+                        version,
+                        &collection,
+                    )?;
+                    print_json(&agg_shares);
+                },
+                (None, None, None) => {},
+                _ => bail!("to decrypt the collection job please provide the vdaf, task_id and hpke receiver config path"),
+            };
 
-            print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())
         }
     }
@@ -687,11 +645,7 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
                 .get_hpke_config(&aggregator_url, certificate_file.as_deref())
                 .await
                 .with_context(|| "failed to fetch the HPKE config")?;
-            println!(
-                "{}",
-                serde_json::to_string(&hpke_config.hpke_configs)
-                    .with_context(|| "failed to encode HPKE config")?
-            );
+            print_json(&hpke_config.hpke_configs);
 
             Ok(())
         }
@@ -702,20 +656,13 @@ async fn handle_hpke_actions(hpke: HpkeAction, http_client: HttpClient) -> anyho
         } => {
             let config =
                 get_receiver_config(&wrangler_config, wrangler_env.as_deref(), dap_version).await?;
-            println!("{}", serde_json::to_string_pretty(&config)?);
+            print_json(&config);
             Ok(())
         }
         HpkeAction::Generate { kem_alg } => {
             let receiver_config = HpkeReceiverConfig::gen(rng.gen(), kem_alg.0)
                 .with_context(|| "failed to generate HPKE receiver config")?;
-            if std::io::stdout().is_terminal() {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&receiver_config).unwrap()
-                );
-            } else {
-                print!("{}", serde_json::to_string(&receiver_config).unwrap())
-            }
+            print_json(&receiver_config);
             let encoded = encode_base64url(
                 receiver_config
                     .config
@@ -804,62 +751,53 @@ async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
         Some(mut file) => file.read_to_end(&mut buf)?,
         None => std::io::stdin().read_to_end(&mut buf)?,
     };
-    let s = match action.media_type {
-        CliDapMediaType::AggregationJobResp => serde_json::to_string_pretty(
+    match action.media_type {
+        CliDapMediaType::AggregationJobResp => print_json(
             &messages::AggregationJobResp::get_decoded_with_param(&action.version, &buf)?,
         ),
-        CliDapMediaType::AggregateShare => serde_json::to_string_pretty(
+        CliDapMediaType::AggregateShare => print_json(
             &messages::AggregateShare::get_decoded_with_param(&action.version, &buf)?,
         ),
         CliDapMediaType::Collection {
             vdaf_config,
             task_id,
             hpke_config_path,
+            batch_selector,
         } => {
             let message = messages::Collection::get_decoded_with_param(&action.version, &buf)
                 .context("decoding collection payload")?;
-            let agg_shares = match (vdaf_config, task_id, hpke_config_path) {
-                (Some(vdaf_config), Some(task_id), Some(hpke_config_path)) => {
-                    let hpke_config: HpkeReceiverConfig = serde_json::from_reader(
-                        std::fs::File::open(&hpke_config_path)
-                            .with_context(|| format!("opening {}", hpke_config_path.display()))?,
-                    )
-                    .with_context(|| {
-                        format!("deserializing the config at {}", hpke_config_path.display())
-                    })?;
-                    let batch_selector = match message.part_batch_sel {
-                        messages::PartialBatchSelector::TimeInterval => todo!(),
-                        messages::PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                            BatchSelector::FixedSizeByBatchId { batch_id }
+            let agg_shares = match (vdaf_config, task_id, hpke_config_path, batch_selector) {
+                (Some(vdaf_config), Some(task_id), Some(hpke_config_path), batch_selector) => {
+                    let batch_selector = batch_selector.unwrap_or_else(||
+                        match message.part_batch_sel {
+                            PartialBatchSelector::TimeInterval => panic!("can't deduce the time interval, please provide a batch selector"),
+                            PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
+                                BatchSelector::FixedSizeByBatchId { batch_id }
+                            }
                         }
-                    };
-                    let agg_shares = vdaf_config
-                        .into_vdaf_config()
-                        .consume_encrypted_agg_shares(
-                            &hpke_config,
-                            &task_id.into(),
-                            &batch_selector,
-                            message.report_count,
-                            &DapAggregationParam::Empty,
-                            message.encrypted_agg_shares.to_vec(),
-                            action.version,
-                        )?;
-                    Some(agg_shares)
+                    );
+                    Some(decrypt::collection(
+                        &task_id.into(),
+                        &hpke_config_path ,
+                        &vdaf_config.into_vdaf_config(),
+                        batch_selector,
+                        action.version,
+                        &message,
+                    )?)
                 }
-                (None, None, None) => None,
+                (None, None, None, _) => None,
                 _ => bail!("to decrypt the collection job please provide the vdaf, task_id and hpke receiver config path"),
             };
 
-            serde_json::to_string_pretty(&serde_json::json!({
+            print_json(&serde_json::json!({
                 "original": &message,
                 "decrypted": &agg_shares,
-            }))
+            }));
         }
-        CliDapMediaType::HpkeConfigList => serde_json::to_string_pretty(
+        CliDapMediaType::HpkeConfigList => print_json(
             &messages::HpkeConfigList::get_decoded_with_param(&action.version, &buf)?,
         ),
     };
-    println!("{}", s.unwrap());
     Ok(())
 }
 
@@ -969,13 +907,17 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     )?,
             };
 
-            if std::io::stdout().is_terminal() {
-                println!("{}", serde_json::to_string_pretty(&internal_task).unwrap())
-            } else {
-                print!("{}", serde_json::to_string(&internal_task).unwrap())
-            };
+            print_json(&internal_task);
 
             Ok(())
         }
     }
+}
+
+fn print_json<T: Serialize>(t: &T) {
+    if std::io::stdout().is_terminal() {
+        println!("{}", serde_json::to_string_pretty(&t).unwrap())
+    } else {
+        print!("{}", serde_json::to_string(&t).unwrap())
+    };
 }
