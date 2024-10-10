@@ -31,14 +31,10 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route(
-            "/:version/collect/task/:task_id/req/:collect_job_id",
-            post(collect),
-        )
         .route("/:version/tasks/:task_id/reports", put(upload))
         .route(
             "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
-            put(get_collect_uri),
+            put(start_collection_job).post(collect),
         )
 }
 
@@ -69,18 +65,16 @@ where
         version = ?req.version,
     )
 )]
-async fn get_collect_uri<A>(
+async fn start_collection_job<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor<messages::CollectionReq>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
-    match (leader::handle_coll_job_req(&*app, &req).await, req.version) {
-        (Ok(collect_uri), DapVersion::Draft09 | DapVersion::Latest) => {
-            (StatusCode::CREATED, axum::Json(collect_uri)).into_response()
-        }
-        (Err(e), _) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
+    match leader::handle_coll_job_req(&*app, &req).await {
+        Ok(()) => StatusCode::CREATED.into_response(),
+        Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }
 

@@ -11,7 +11,6 @@ use std::{
 };
 
 use rand::{thread_rng, Rng};
-use url::Url;
 
 use crate::{
     error::DapAbort,
@@ -124,18 +123,8 @@ impl InMemoryLeaderState {
         coll_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
-    ) -> Result<Url, DapError> {
+    ) -> Result<(), DapError> {
         let per_task = self.per_task.entry(*task_id).or_default();
-
-        // Construct the collection URI for this collection job.
-        let coll_job_uri = task_config
-            .leader_url
-            .join(&format!(
-                "collect/task/{}/req/{}",
-                task_id.to_base64url(),
-                coll_job_id.to_base64url(),
-            ))
-            .map_err(|e| fatal_error!(err = ?e, "failed to calculate coll_job_uri"))?;
 
         // Store the collection job in the pending state.
         if per_task.coll_jobs.contains_key(coll_job_id) {
@@ -181,7 +170,7 @@ impl InMemoryLeaderState {
             agg_param,
         });
 
-        Ok(coll_job_uri)
+        Ok(())
     }
 
     pub fn poll_collect_job(

@@ -131,7 +131,7 @@ pub trait DapLeader: DapAggregator {
         collect_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
-    ) -> Result<Url, DapError>;
+    ) -> Result<(), DapError>;
 
     /// Check the status of a collect job.
     async fn poll_collect_job(
@@ -248,7 +248,7 @@ pub async fn handle_upload_req<A: DapLeader>(
 pub async fn handle_coll_job_req<A: DapLeader>(
     aggregator: &A,
     req: &DapRequest<CollectionReq>,
-) -> Result<Url, DapError> {
+) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
     let metrics = aggregator.metrics();
@@ -299,12 +299,12 @@ pub async fn handle_coll_job_req<A: DapLeader>(
         },
     };
 
-    let collect_job_uri = aggregator
+    aggregator
         .init_collect_job(&task_id, coll_job_id, batch_sel, agg_param)
         .await?;
 
     metrics.inbound_req_inc(DaphneRequestType::Collect);
-    Ok(collect_job_uri)
+    Ok(())
 }
 
 /// Run an aggregation job for a set of reports. Return the number of reports that were
