@@ -54,7 +54,7 @@ impl DapLeader for crate::App {
         coll_job_id: &CollectionJobId,
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
-    ) -> Result<url::Url, DapError> {
+    ) -> Result<(), DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?

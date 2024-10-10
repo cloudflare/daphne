@@ -143,8 +143,8 @@ mod test {
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
             AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
-            Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
+            BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Extension,
+            HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
             TransitionFailure, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
@@ -155,7 +155,6 @@ mod test {
         DapResource, DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
-    use matchit::Router;
     use prio::codec::{Decode, Encode};
     #[cfg(feature = "experimental")]
     use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
@@ -1172,7 +1171,7 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let _collect_uri = leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
     }
 
     async_test_versions! { handle_coll_job_req_succeed_max_batch_interval }
@@ -1249,10 +1248,10 @@ mod test {
         );
 
         // Leader: Handle the CollectReq received from Collector.
-        let url = leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
+        leader::handle_coll_job_req(&*t.leader, &req).await.unwrap();
         let WorkItem::CollectionJob {
             task_id: _,
-            coll_job_id: leader_collect_id,
+            coll_job_id: _,
             batch_sel: leader_batch_sel,
             agg_param: leader_agg_param,
         } = t.leader.dequeue_work(1).await.unwrap().pop().unwrap()
@@ -1265,20 +1264,6 @@ mod test {
         assert_eq!(
             collector_collect_req.agg_param,
             leader_agg_param.get_encoded().unwrap()
-        );
-
-        // Check that the collect_id included in the URI is the same with the one received
-        // by Leader.
-        let path = url.path().to_string();
-        let mut router = Router::new();
-        router
-            .insert("/:version/collect/task/:task_id/req/:collect_id", true)
-            .unwrap();
-        let url_match = router.at(&path).unwrap();
-        let collector_collect_id = url_match.params.get("collect_id").unwrap();
-        assert_eq!(
-            collector_collect_id.to_string(),
-            leader_collect_id.to_base64url()
         );
     }
 

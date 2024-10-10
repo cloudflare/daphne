@@ -620,7 +620,7 @@ impl TestRunner {
             "request failed: {:?}",
             resp.text().await?,
         );
-        Ok(resp.json().await?)
+        Ok(url)
     }
 
     pub async fn leader_post_collect(
@@ -776,6 +776,7 @@ impl TestRunner {
     ) -> anyhow::Result<reqwest::Response> {
         let builder = client.post(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
+        // TODO: delete as spec does not require this
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_str(
