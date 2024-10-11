@@ -9,7 +9,7 @@ use axum::{
     routing::{post, put},
 };
 use daphne::{
-    messages::{AggregateShareReq, AggregationJobInitReq},
+    messages::{request::resource, AggregateShareReq, AggregationJobInitReq},
     roles::{helper, DapHelper},
 };
 use http::StatusCode;
@@ -44,7 +44,11 @@ where
 )]
 async fn agg_job(
     State(app): State<Arc<App>>,
-    DapRequestExtractor(req): DapRequestExtractor<FROM_LEADER, AggregationJobInitReq>,
+    DapRequestExtractor(req): DapRequestExtractor<
+        FROM_LEADER,
+        AggregationJobInitReq,
+        resource::AggregationJobId,
+    >,
 ) -> AxumDapResponse {
     let resp = helper::handle_agg_job_init_req(
         &*app,

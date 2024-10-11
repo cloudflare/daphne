@@ -776,15 +776,6 @@ impl TestRunner {
     ) -> anyhow::Result<reqwest::Response> {
         let builder = client.post(url.as_str());
         let mut headers = reqwest::header::HeaderMap::new();
-        // TODO: delete as spec does not require this
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_str(
-                DapMediaType::CollectionReq
-                    .as_str_for_version(self.version)
-                    .context("no string for version")?,
-            )?,
-        );
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
             reqwest::header::HeaderValue::from_str(token)?,

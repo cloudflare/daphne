@@ -13,7 +13,7 @@ use axum::{
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
-    messages,
+    messages::{self, request::resource},
     roles::leader::{self, DapLeader},
     DapError,
 };
@@ -48,7 +48,10 @@ where
 )]
 async fn upload<A>(
     State(app): State<Arc<A>>,
-    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<messages::Report>,
+    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
+        messages::Report,
+        resource::None,
+    >,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -68,7 +71,11 @@ where
 )]
 async fn start_collection_job<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, messages::CollectionReq>,
+    DapRequestExtractor(req): DapRequestExtractor<
+        FROM_COLLECTOR,
+        messages::CollectionReq,
+        resource::CollectionJobId,
+    >,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -88,16 +95,12 @@ where
 )]
 async fn collect<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, ()>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, (), resource::CollectionJobId>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
-    let collect_id = match req.collection_job_id() {
-        Ok(id) => id,
-        Err(e) => return AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
-    };
-    match app.poll_collect_job(&req.task_id, collect_id).await {
+    match app.poll_collect_job(&req.task_id, &req.resource_id).await {
         Ok(daphne::DapCollectionJob::Done(collect_resp)) => AxumDapResponse::new_success(
             daphne::DapResponse {
                 version: req.version,

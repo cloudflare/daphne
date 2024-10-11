@@ -11,13 +11,14 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobInitReq,
-        AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
+        constant_time_eq, request::resource, AggregateShare, AggregateShareReq,
+        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure,
+        TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::{ReplayProtection, ReportProcessedStatus},
     roles::aggregator::MergeAggShareError,
-    DapAggregationParam, DapError, DapRequest, DapResource, DapResponse, DapTaskConfig,
+    DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig,
     EarlyReportStateInitialized,
 };
 
@@ -27,7 +28,7 @@ pub trait DapHelper: DapAggregator {}
 
 pub async fn handle_agg_job_init_req<A: DapHelper>(
     aggregator: &A,
-    req: DapRequest<AggregationJobInitReq>,
+    req: DapRequest<AggregationJobInitReq, resource::AggregationJobId>,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let global_config = aggregator.get_global_config().await?;
@@ -46,10 +47,6 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
         .await?
         .ok_or(DapAbort::UnrecognizedTask { task_id })?;
     let task_config = wrapped_task_config.as_ref();
-
-    let DapResource::AggregationJob(_agg_job_id) = req.resource else {
-        return Err(DapAbort::BadRequest("missing aggregation job ID".to_string()).into());
-    };
 
     // Check whether the DAP version in the request matches the task config.
     if task_config.version != req.version {
