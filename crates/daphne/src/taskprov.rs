@@ -513,7 +513,7 @@ mod test {
         taskprov::{DapTaskConfigNeedsOptIn, OptInParam},
         test_versions,
         vdaf::{VdafConfig, VdafVerifyKey},
-        DapRequestMeta, DapResource, DapVersion,
+        DapRequestMeta, DapVersion,
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
@@ -629,8 +629,7 @@ mod test {
                 version,
                 task_id,
                 taskprov: Some(taskprov_task_config_base64url),
-                media_type: None,                 // ignored by test
-                resource: DapResource::Undefined, // ignored by test
+                media_type: None, // ignored by test
             };
 
             (req, task_id)
@@ -684,7 +683,6 @@ mod test {
                 task_id,
                 taskprov: Some(taskprov_task_config_base64url),
                 media_type: None,
-                resource: DapResource::Undefined,
             };
 
             (req, task_id)

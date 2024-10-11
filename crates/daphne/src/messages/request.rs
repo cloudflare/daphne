@@ -3,21 +3,13 @@
 
 use std::ops::Deref;
 
-use crate::{
-    constants::DapMediaType,
-    error::DapAbort,
-    messages::{AggregationJobId, CollectionJobId, TaskId},
-    DapVersion,
-};
+use crate::{constants::DapMediaType, error::DapAbort, messages::TaskId, DapVersion};
 
-/// Types of resources associated with DAP tasks.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum DapResource {
+pub mod resource {
     /// Aggregation job resource.
-    AggregationJob(AggregationJobId),
-
+    pub use crate::messages::AggregationJobId;
     /// Collection job resource.
-    CollectionJob(CollectionJobId),
+    pub use crate::messages::CollectionJobId;
 
     /// Undefined (or undetermined) resource.
     ///
@@ -26,11 +18,8 @@ pub enum DapResource {
     ///
     ///   * The Client->Aggregator request for the HPKE config or to upload a report
     ///   * The Leader->Helper request for an aggregate share
-    ///
-    /// The resource of a DAP request is undetermined if its identifier could not be parsed from
-    /// request path.
-    #[default]
-    Undefined,
+    #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
+    pub struct None;
 }
 
 /// Fields common to all DAP requests.
@@ -48,9 +37,6 @@ pub struct DapRequestMeta {
 
     /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
     pub taskprov: Option<String>,
-
-    /// The resource with which this request is associated.
-    pub resource: DapResource,
 }
 
 impl DapRequestMeta {
@@ -65,36 +51,26 @@ impl DapRequestMeta {
 /// DAP request.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
-pub struct DapRequest<P> {
+pub struct DapRequest<P, R = resource::None> {
     pub meta: DapRequestMeta,
+
+    /// The resource with which this request is associated.
+    pub resource_id: R,
 
     /// Request payload.
     pub payload: P,
 }
 
-impl<P> AsRef<DapRequestMeta> for DapRequest<P> {
+impl<P, R> AsRef<DapRequestMeta> for DapRequest<P, R> {
     fn as_ref(&self) -> &DapRequestMeta {
         &self.meta
     }
 }
 
-impl<P> Deref for DapRequest<P> {
+impl<P, R> Deref for DapRequest<P, R> {
     type Target = DapRequestMeta;
     fn deref(&self) -> &Self::Target {
         &self.meta
-    }
-}
-
-impl<P> DapRequest<P> {
-    /// Return the collection job ID, handling a missing ID as a user error.
-    pub fn collection_job_id(&self) -> Result<&CollectionJobId, DapAbort> {
-        if let DapResource::CollectionJob(collection_job_id) = &self.resource {
-            Ok(collection_job_id)
-        } else {
-            Err(DapAbort::BadRequest(
-                "missing or malformed collection job ID".into(),
-            ))
-        }
     }
 }
 

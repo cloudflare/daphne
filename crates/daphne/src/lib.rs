@@ -90,7 +90,7 @@ use url::Url;
 #[cfg(feature = "experimental")]
 use vdaf::mastic::MasticWeight;
 
-pub use messages::request::{DapRequest, DapRequestMeta, DapResource, DapResponse};
+pub use messages::request::{DapRequest, DapRequestMeta, DapResponse};
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };

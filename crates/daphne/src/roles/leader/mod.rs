@@ -18,20 +18,19 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode,
-        BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
+        request::resource, AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp,
+        Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
         PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
-    DapRequestMeta, DapResource, DapResponse, DapTaskConfig, DapVersion,
+    DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
 };
 
 struct LeaderHttpRequestOptions<'p, P> {
     path: &'p str,
     req_media_type: DapMediaType,
     resp_media_type: DapMediaType,
-    resource: DapResource,
     req_data: P,
     method: LeaderHttpRequestMethod,
     taskprov: Option<String>,
@@ -55,7 +54,6 @@ where
         path,
         req_media_type,
         resp_media_type,
-        resource,
         req_data,
         method,
         taskprov,
@@ -66,20 +64,16 @@ where
         .join(path)
         .map_err(|e| fatal_error!(err = ?e, "failed to helper url {:?} with {path:?}", task_config.helper_url))?;
 
-    let req = DapRequest {
-        meta: DapRequestMeta {
-            version: task_config.version,
-            media_type: Some(req_media_type),
-            task_id: *task_id,
-            resource,
-            taskprov,
-        },
-        payload: req_data,
+    let meta = DapRequestMeta {
+        version: task_config.version,
+        media_type: Some(req_media_type),
+        task_id: *task_id,
+        taskprov,
     };
 
     let resp = match method {
-        LeaderHttpRequestMethod::Put => role.send_http_put(req, url).await?,
-        LeaderHttpRequestMethod::Post => role.send_http_post(req, url).await?,
+        LeaderHttpRequestMethod::Put => role.send_http_put(meta, url, req_data).await?,
+        LeaderHttpRequestMethod::Post => role.send_http_post(meta, url, req_data).await?,
     };
 
     check_response_content_type(&resp, resp_media_type)?;
@@ -156,18 +150,24 @@ pub trait DapLeader: DapAggregator {
     ) -> Result<(), DapError>;
 
     /// Send an HTTP POST request.
-    async fn send_http_post<M>(
+    async fn send_http_post<P>(
         &self,
-        req: DapRequest<M>,
+        req: DapRequestMeta,
         url: Url,
+        payload: P,
     ) -> Result<DapResponse, DapError>
     where
-        M: Send + ParameterizedEncode<DapVersion>;
+        P: Send + ParameterizedEncode<DapVersion>;
 
     /// Send an HTTP PUT request.
-    async fn send_http_put<M>(&self, req: DapRequest<M>, url: Url) -> Result<DapResponse, DapError>
+    async fn send_http_put<P>(
+        &self,
+        req: DapRequestMeta,
+        url: Url,
+        payload: P,
+    ) -> Result<DapResponse, DapError>
     where
-        M: Send + ParameterizedEncode<DapVersion>;
+        P: Send + ParameterizedEncode<DapVersion>;
 }
 
 /// Handle a report from a Client.
@@ -247,7 +247,7 @@ pub async fn handle_upload_req<A: DapLeader>(
 /// poll later on to get the collection.
 pub async fn handle_coll_job_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest<CollectionReq>,
+    req: &DapRequest<CollectionReq, resource::CollectionJobId>,
 ) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();
@@ -289,7 +289,7 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     )
     .await?;
 
-    let coll_job_id = req.collection_job_id()?;
+    let coll_job_id = &req.resource_id;
 
     let batch_sel = match coll_job_req.query {
         Query::TimeInterval { batch_interval } => BatchSelector::TimeInterval { batch_interval },
@@ -354,7 +354,6 @@ async fn run_agg_job<A: DapLeader>(
             path: &url_path,
             req_media_type: DapMediaType::AggregationJobInitReq,
             resp_media_type: DapMediaType::AggregationJobResp,
-            resource: DapResource::AggregationJob(agg_job_id),
             req_data: agg_job_init_req,
             method: LeaderHttpRequestMethod::Put,
             taskprov: taskprov.clone(),
@@ -468,7 +467,6 @@ async fn run_coll_job<A: DapLeader>(
             path: &url_path,
             req_media_type: DapMediaType::AggregateShareReq,
             resp_media_type: DapMediaType::AggregateShare,
-            resource: DapResource::Undefined,
             req_data: agg_share_req,
             method: LeaderHttpRequestMethod::Post,
             taskprov,

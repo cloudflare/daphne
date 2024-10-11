@@ -12,9 +12,9 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
-        self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, BatchId, BatchSelector,
-        Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector, Report,
-        ReportId, TaskId, Time,
+        self, request::resource, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
+        Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, HpkeCiphertext,
+        Interval, PartialBatchSelector, Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
@@ -1057,46 +1057,70 @@ impl DapLeader for InMemoryAggregator {
             .finish_collect_job(task_id, coll_job_id, collection)
     }
 
-    async fn send_http_post<M>(
+    async fn send_http_post<P>(
         &self,
-        req: DapRequest<M>,
-        _url: Url,
+        meta: DapRequestMeta,
+        url: Url,
+        payload: P,
     ) -> Result<DapResponse, DapError>
     where
-        M: Send + ParameterizedEncode<DapVersion>,
+        P: Send + ParameterizedEncode<DapVersion>,
     {
-        match req.media_type {
+        match meta.media_type {
             Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_init_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                map_dap_req(req),
+                DapRequest {
+                    payload: re_encode(&meta, payload),
+                    resource_id: resource::AggregationJobId::try_from_base64url(
+                        url.path().split('/').last().unwrap(),
+                    )
+                    .unwrap(),
+                    meta,
+                },
                 Default::default(),
             )
             .await
             .expect("peer aborted unexpectedly")),
             Some(DapMediaType::AggregateShareReq) => Ok(helper::handle_agg_share_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                map_dap_req(req),
+                DapRequest {
+                    payload: re_encode(&meta, payload),
+                    resource_id: resource::None,
+                    meta,
+                },
             )
             .await
             .expect("peer aborted unexpectedly")),
-            _ => unreachable!("unhandled media type: {:?}", req.media_type),
+            _ => unreachable!("unhandled media type: {:?}", meta.media_type),
         }
     }
 
-    async fn send_http_put<P>(&self, req: DapRequest<P>, _url: Url) -> Result<DapResponse, DapError>
+    async fn send_http_put<P>(
+        &self,
+        meta: DapRequestMeta,
+        url: Url,
+        payload: P,
+    ) -> Result<DapResponse, DapError>
     where
         P: Send + ParameterizedEncode<DapVersion>,
     {
-        if req.media_type == Some(DapMediaType::AggregationJobInitReq) {
+        if meta.media_type == Some(DapMediaType::AggregationJobInitReq) {
             Ok(helper::handle_agg_job_init_req(
                 &**self.peer.as_ref().expect("peer not configured"),
-                map_dap_req(req),
+                DapRequest {
+                    payload: re_encode(&meta, payload),
+                    resource_id: resource::AggregationJobId::try_from_base64url(
+                        url.path().split('/').last().unwrap(),
+                    )
+                    .unwrap(),
+                    meta,
+                },
                 Default::default(),
             )
             .await
             .expect("peer aborted unexpectedly"))
         } else {
-            unreachable!("unhandled media type: {:?}", req.media_type)
+            unreachable!("unhandled media type: {:?}", meta.media_type)
         }
     }
 }
@@ -1105,18 +1129,13 @@ impl DapLeader for InMemoryAggregator {
 // the wire (ParameterizedEncode) and decode from the wire (ParameterizedDecode).
 //
 // This is only correct if I is the same type as O. But this can't be checked at compile time.
-fn map_dap_req<I: ParameterizedEncode<DapVersion>, O: ParameterizedDecode<DapVersion>>(
-    req: DapRequest<I>,
-) -> DapRequest<O> {
-    let version = req.version;
-    DapRequest {
-        meta: req.meta,
-        payload: O::get_decoded_with_param(
-            &version,
-            &req.payload.get_encoded_with_param(&version).unwrap(),
-        )
-        .unwrap(),
-    }
+fn re_encode<I, O>(meta: &DapRequestMeta, payload: I) -> O
+where
+    I: ParameterizedEncode<DapVersion>,
+    O: ParameterizedDecode<DapVersion>,
+{
+    let version = meta.version;
+    O::get_decoded_with_param(&version, &payload.get_encoded_with_param(&version).unwrap()).unwrap()
 }
 
 /// Information associated to a certain helper state for a given task ID and aggregate job ID.
