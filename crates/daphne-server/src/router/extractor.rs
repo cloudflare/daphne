@@ -269,7 +269,7 @@ mod test {
     };
     use daphne_service_utils::{bearer_token::BearerToken, http_headers};
     use either::Either::{self, Left};
-    use futures::{future::BoxFuture, FutureExt};
+    use futures::FutureExt;
     use rand::{thread_rng, Rng};
     use tokio::{
         sync::mpsc::{self, Sender},
@@ -294,8 +294,7 @@ mod test {
     ///  - `/:version/:task_id/parse-mandatory-fields` uses the [`UnauthenticatedDapRequestExtractor`]
     ///  - `/:version/:agg_job_id/parse-agg-job-id` uses the [`UnauthenticatedDapRequestExtractor`]
     ///  - `/:version/:collect_job_id/parse-collect-job-id` uses the [`UnauthenticatedDapRequestExtractor`]
-    fn test_router<B>(
-    ) -> impl FnOnce(Request<B>) -> BoxFuture<'static, Result<DapRequest, StatusCode>>
+    async fn test<B>(req: Request<B>) -> Result<DapRequest, StatusCode>
     where
         B: Send + Sync + 'static + HttpBody,
         B::Data: Send,
@@ -368,23 +367,19 @@ mod test {
             ch.send(req.0).await.unwrap();
         }
 
-        move |req| {
-            Box::pin(async move {
-                let resp = match timeout(Duration::from_secs(1), router.oneshot(req))
-                    .await
-                    .unwrap()
-                {
-                    Ok(resp) => resp,
-                    Err(i) => match i {},
-                };
+        let resp = match timeout(Duration::from_secs(1), router.oneshot(req))
+            .await
+            .unwrap()
+        {
+            Ok(resp) => resp,
+            Err(i) => match i {},
+        };
 
-                match resp.status() {
-                    StatusCode::NOT_FOUND => panic!("unsuported uri"),
-                    // get the request sent through the channel in the handler
-                    StatusCode::OK => Ok(rx.recv().now_or_never().unwrap().unwrap()),
-                    code => Err(code),
-                }
-            })
+        match resp.status() {
+            StatusCode::NOT_FOUND => panic!("unsuported uri"),
+            // get the request sent through the channel in the handler
+            StatusCode::OK => Ok(rx.recv().now_or_never().unwrap().unwrap()),
+            code => Err(code),
         }
     }
 
@@ -393,8 +388,6 @@ mod test {
     }
 
     async fn parse_mandatory_fields(version: DapVersion) {
-        let test = test_router();
-
         let task_id = mk_task_id();
         let req = test(
             Request::builder()
@@ -422,8 +415,6 @@ mod test {
     async_test_versions! { parse_mandatory_fields }
 
     async fn parse_agg_job_id(version: DapVersion) {
-        let test = test_router();
-
         let task_id = mk_task_id();
         let agg_job_id = AggregationJobId(thread_rng().gen());
 
@@ -454,8 +445,6 @@ mod test {
     async_test_versions! { parse_agg_job_id }
 
     async fn parse_collect_job_id(version: DapVersion) {
-        let test = test_router();
-
         let task_id = mk_task_id();
         let collect_job_id = CollectionJobId(thread_rng().gen());
 
@@ -486,8 +475,6 @@ mod test {
     async_test_versions! { parse_collect_job_id }
 
     async fn incorrect_bearer_tokens_are_rejected(version: DapVersion) {
-        let test = test_router();
-
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
@@ -508,8 +495,6 @@ mod test {
     async_test_versions! { incorrect_bearer_tokens_are_rejected }
 
     async fn missing_auth_is_rejected(version: DapVersion) {
-        let test = test_router();
-
         let status_code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
@@ -529,8 +514,6 @@ mod test {
     async_test_versions! { missing_auth_is_rejected }
 
     async fn mtls_auth_is_enough(version: DapVersion) {
-        let test = test_router();
-
         let req = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
@@ -551,8 +534,6 @@ mod test {
     async_test_versions! { mtls_auth_is_enough }
 
     async fn incorrect_bearer_tokens_are_rejected_even_with_mtls_auth(version: DapVersion) {
-        let test = test_router();
-
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
@@ -574,8 +555,6 @@ mod test {
     async_test_versions! { incorrect_bearer_tokens_are_rejected_even_with_mtls_auth }
 
     async fn invalid_mtls_auth_is_rejected_despite_correct_bearer_token(version: DapVersion) {
-        let test = test_router();
-
         let code = test(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
