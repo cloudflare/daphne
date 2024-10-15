@@ -893,52 +893,9 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             time_precision,
             expires_in_seconds: task_expiration,
         } => {
-            let (vdaf_verify_key, vdaf) =
-                use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf").map(
-                    |vdaf| {
-                        let vdaf = vdaf.into_vdaf();
-                        let vdaf_verify_key = vdaf.gen_verify_key();
-                        let (typ, bits, length, chunk_length) = match vdaf {
-                            VdafConfig::Prio3(prio3) => match prio3 {
-                                Prio3Config::Count => ("Prio3Count", None, None, None),
-                                Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
-                                Prio3Config::Histogram {
-                                    length,
-                                    chunk_length,
-                                } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
-                                Prio3Config::SumVec {
-                                    bits,
-                                    length,
-                                    chunk_length,
-                                } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
-                                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                                    bits,
-                                    length,
-                                    chunk_length,
-                                    num_proofs: _,
-                                } => (
-                                    "Prio3SumVecField64MultiproofHmacSha256Aes128",
-                                    Some(bits),
-                                    Some(length),
-                                    Some(chunk_length),
-                                ),
-                            },
-                            VdafConfig::Prio2 { .. } => ("Prio2", None, None, None),
-                            VdafConfig::Pine(_) => ("Pine", None, None, None),
-                            #[cfg(feature = "experimental")]
-                            VdafConfig::Mastic { .. } => todo!(),
-                        };
-                        (
-                            encode_base64url(vdaf_verify_key),
-                            InternalTestVdaf {
-                                typ: typ.into(),
-                                bits: bits.map(|a| a.to_string()),
-                                length: length.map(|a| a.to_string()),
-                                chunk_length: chunk_length.map(|a| a.to_string()),
-                            },
-                        )
-                    },
-                )?;
+            let vdaf = use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf")?
+                .into_vdaf();
+            let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key());
             let CliDapQueryConfig(query) = use_or_request_from_user_or_default(
                 query,
                 || DapQueryConfig::FixedSize {
@@ -947,19 +904,17 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 "query",
             )?;
             let role = use_or_request_from_user(role, "role")?;
+            let default_task_id = TaskId(thread_rng().gen());
             let internal_task = InternalTestAddTask {
                 task_id: use_or_request_from_user_or_default(
                     task_id,
-                    {
-                        let t = TaskId(thread_rng().gen());
-                        move || t
-                    },
+                    || default_task_id,
                     "task id",
                 )?
                 .into(),
                 leader: use_or_request_from_user(leader_url, "leader url")?,
                 helper: use_or_request_from_user(helper_url, "helper url")?,
-                vdaf,
+                vdaf: InternalTestVdaf::from(vdaf),
                 leader_authentication_token: use_or_request_from_user(
                     leader_auth_token,
                     "leader auth token",

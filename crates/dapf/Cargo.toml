@@ -39,6 +39,3 @@ tracing.workspace = true
 url.workspace = true
 webpki.workspace = true
 x509-parser.workspace = true
-
-[features]
-experimental = ["daphne/experimental"]

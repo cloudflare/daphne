@@ -1,7 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne::messages::{Duration, TaskId, Time};
+use daphne::{
+    messages::{Duration, TaskId, Time},
+    vdaf::{Prio3Config, VdafConfig},
+};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -21,6 +24,47 @@ pub struct InternalTestVdaf {
     pub length: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_length: Option<String>,
+}
+
+impl From<VdafConfig> for InternalTestVdaf {
+    fn from(vdaf: VdafConfig) -> Self {
+        let (typ, bits, length, chunk_length) = match vdaf {
+            VdafConfig::Prio3(prio3) => match prio3 {
+                Prio3Config::Count => ("Prio3Count", None, None, None),
+                Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
+                Prio3Config::Histogram {
+                    length,
+                    chunk_length,
+                } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
+                Prio3Config::SumVec {
+                    bits,
+                    length,
+                    chunk_length,
+                } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
+                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits,
+                    length,
+                    chunk_length,
+                    num_proofs: _unimplemented,
+                } => (
+                    "Prio3SumVecField64MultiproofHmacSha256Aes128",
+                    Some(bits),
+                    Some(length),
+                    Some(chunk_length),
+                ),
+            },
+            VdafConfig::Prio2 { .. } => ("Prio2", None, None, None),
+            VdafConfig::Pine(_) => ("Pine", None, None, None),
+            #[cfg(feature = "experimental")]
+            VdafConfig::Mastic { .. } => todo!(),
+        };
+        Self {
+            typ: typ.into(),
+            bits: bits.map(|a| a.to_string()),
+            length: length.map(|a| a.to_string()),
+            chunk_length: chunk_length.map(|a| a.to_string()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

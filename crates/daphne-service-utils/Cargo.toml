@@ -28,6 +28,7 @@ capnpc = { workspace = true, optional = true }
 [features]
 test-utils = ["dep:url", "daphne/prometheus", "daphne/test-utils"]
 durable_requests = ["dep:capnp", "dep:capnpc", "dep:prio"]
+experimental = ["daphne/experimental"]
 
 [lints]
 workspace = true
