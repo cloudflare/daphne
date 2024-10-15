@@ -1,20 +1,12 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, env, io::Cursor, path::Path};
+use std::{borrow::Cow, env};
 
-use anyhow::{anyhow, bail, Context};
-use daphne::messages::{decode_base64url_vec, HpkeConfigList};
-use daphne_service_utils::http_headers;
-use prio::codec::Decode;
+use anyhow::{anyhow, bail};
 use reqwest::{Client, IntoUrl, RequestBuilder};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls_pemfile::Item;
-use url::Url;
-use webpki::{EndEntityCert, ECDSA_P256_SHA256};
-use x509_parser::pem::Pem;
-
-use crate::response_to_anyhow;
 
 pub struct HttpClient {
     using_mtls: bool,
@@ -150,44 +142,5 @@ impl HttpClient {
 
     pub fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder {
         self.client().put(url)
-    }
-
-    pub async fn get_hpke_config(
-        &self,
-        base_url: &Url,
-        certificate_file: Option<&Path>,
-    ) -> anyhow::Result<HpkeConfigList> {
-        let url = base_url.join("hpke_config")?;
-        let resp = self
-            .get(url.as_str())
-            .send()
-            .await
-            .with_context(|| "request failed")?;
-        if !resp.status().is_success() {
-            return Err(response_to_anyhow(resp).await);
-        }
-        let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
-        let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
-        if let Some(cert_path) = certificate_file {
-            let cert = std::fs::read_to_string(cert_path).context("reading the certificate")?;
-            let Some(signature) = maybe_signature else {
-                anyhow::bail!("Aggregator did not sign its response");
-            };
-            let signature_bytes =
-                decode_base64url_vec(signature.as_bytes()).context("decoding the signature")?;
-            let (cert_pem, _bytes_read) =
-                Pem::read(Cursor::new(cert.as_bytes())).context("reading PEM certificate")?;
-            let cert = EndEntityCert::try_from(cert_pem.contents.as_ref())
-                .map_err(|e| anyhow!("{e:?}")) // webpki::Error does not implement std::error::Error
-                .context("parsing PEM certificate")?;
-
-            cert.verify_signature(
-                &ECDSA_P256_SHA256,
-                &hpke_config_bytes,
-                signature_bytes.as_ref(),
-            )
-            .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
-        }
-        Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
     }
 }

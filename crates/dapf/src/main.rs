@@ -16,7 +16,6 @@ use daphne::{
     error::aborts::ProblemDetails,
     hpke::HpkeReceiverConfig,
     messages::{self, encode_base64url, BatchSelector, Collection, CollectionReq, Query, TaskId},
-    vdaf::{Prio3Config, VdafConfig},
     DapAggregationParam, DapMeasurement, DapQueryConfig, DapVersion,
 };
 use daphne_service_utils::{
@@ -867,17 +866,24 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
         TestAction::AddHpkeConfig {
             aggregator_url,
             kem_alg,
-        } => dapf::test_routes::add_hpke_config(&http_client, &aggregator_url, kem_alg.0).await,
+        } => {
+            http_client
+                .add_hpke_config(&aggregator_url, kem_alg.0)
+                .await?;
+            println!("config added");
+            Ok(())
+        }
         TestAction::ClearStorage {
             aggregator_url,
             set_hpke_key,
         } => {
-            dapf::test_routes::delete_all_storage(
-                &http_client,
-                &aggregator_url,
-                set_hpke_key.map(|k| k.0),
-            )
-            .await
+            http_client.delete_all_storage(&aggregator_url).await?;
+            if let Some(CliHpkeKemId(kem_alg)) = set_hpke_key {
+                http_client
+                    .add_hpke_config(&aggregator_url, kem_alg)
+                    .await?;
+            }
+            Ok(())
         }
         TestAction::CreateAddTaskJson {
             task_id,
