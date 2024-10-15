@@ -12,32 +12,22 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-async-trait.workspace = true
 capnp = { workspace = true, optional = true }
 daphne = { path = "../daphne", default-features = false }
-futures.workspace = true
-itertools.workspace = true
-hex.workspace = true
-p256.workspace = true
-prio.workspace = true
-ring.workspace = true
+prio = { workspace = true, optional = true }
 serde.workspace = true
-serde_json.workspace = true
-url.workspace = true
-tracing.workspace = true
-rayon.workspace = true
+url = { workspace = true, optional = true }
 
 [dev-dependencies]
 daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
-prometheus.workspace = true
 rand.workspace = true
 
 [build-dependencies]
-capnpc = { version = "0.18.1", optional = true }
+capnpc = { workspace = true, optional = true }
 
 [features]
-test-utils = ["daphne/prometheus", "daphne/test-utils"]
-durable_requests = ["dep:capnp", "dep:capnpc"]
+test-utils = ["dep:url", "daphne/prometheus", "daphne/test-utils"]
+durable_requests = ["dep:capnp", "dep:capnpc", "dep:prio"]
 
 [lints]
 workspace = true

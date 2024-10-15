@@ -987,22 +987,12 @@ dependencies = [
 name = "daphne-service-utils"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "capnp",
  "capnpc",
  "daphne",
- "futures",
- "hex",
- "itertools 0.12.1",
- "p256",
  "prio",
- "prometheus",
  "rand",
- "rayon",
- "ring",
  "serde",
- "serde_json",
- "tracing",
  "url",
 ]
 
