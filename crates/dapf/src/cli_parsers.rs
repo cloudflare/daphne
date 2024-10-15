@@ -1,6 +1,7 @@
-//! Human friendly parsers for common types of parameters to DAP functions.
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
+
+//! Human friendly parsers for common types of parameters to DAP functions.
 
 use std::{
     fmt,
@@ -51,7 +52,7 @@ impl ValueEnum for DefaultVdafConfigs {
 }
 
 impl DefaultVdafConfigs {
-    fn into_vdaf(self) -> VdafConfig {
+    fn into_vdaf_config(self) -> VdafConfig {
         match self {
             Self::Prio2Dimension99k => VdafConfig::Prio2 { dimension: 99_992 },
             Self::Prio3NumProofs2 => {
@@ -115,9 +116,9 @@ impl FromStr for CliVdafConfig {
 }
 
 impl CliVdafConfig {
-    pub fn into_vdaf(self) -> VdafConfig {
+    pub fn into_vdaf_config(self) -> VdafConfig {
         match self {
-            Self::Default(d) => d.into_vdaf(),
+            Self::Default(d) => d.into_vdaf_config(),
             Self::Custom(v) => v,
         }
     }
