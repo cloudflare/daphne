@@ -418,7 +418,7 @@ async fn handle_leader_actions(
             let version = deduce_dap_version_from_url(&leader_url)?;
             // Generate a report for the measurement.
             let report = vdaf_config
-                .into_vdaf()
+                .into_vdaf_config()
                 .produce_report(
                     &[leader_hpke_config, helper_hpke_config],
                     now,
@@ -543,15 +543,17 @@ async fn handle_leader_actions(
             })?;
             let version = deduce_dap_version_from_url(&uri)?;
             let collect_resp = Collection::get_decoded_with_param(&version, &resp.bytes().await?)?;
-            let agg_res = vdaf_config.into_vdaf().consume_encrypted_agg_shares(
-                receiver,
-                &task_id.into(),
-                &batch_selector,
-                collect_resp.report_count,
-                &DapAggregationParam::Empty,
-                collect_resp.encrypted_agg_shares.to_vec(),
-                version,
-            )?;
+            let agg_res = vdaf_config
+                .into_vdaf_config()
+                .consume_encrypted_agg_shares(
+                    receiver,
+                    &task_id.into(),
+                    &batch_selector,
+                    collect_resp.report_count,
+                    &DapAggregationParam::Empty,
+                    collect_resp.encrypted_agg_shares.to_vec(),
+                    version,
+                )?;
 
             print!("{}", serde_json::to_string(&agg_res)?);
             Ok(())
@@ -578,7 +580,7 @@ async fn handle_helper_actions(
 
             let t = dapf::acceptance::Test::from_env(
                 helper_url,
-                vdaf_config.into_vdaf(),
+                vdaf_config.into_vdaf_config(),
                 hpke_signing_certificate_path,
                 http_client,
                 load_control,
@@ -620,7 +622,7 @@ async fn handle_helper_actions(
         } => {
             load_testing::execute_single_combination_from_env(
                 helper_url,
-                vdaf_config.into_vdaf(),
+                vdaf_config.into_vdaf_config(),
                 reports_per_batch,
                 reports_per_agg_job,
                 http_client,
@@ -832,7 +834,7 @@ async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
                         }
                     };
                     let agg_shares = vdaf_config
-                        .into_vdaf()
+                        .into_vdaf_config()
                         .consume_encrypted_agg_shares(
                             &hpke_config,
                             &task_id.into(),
@@ -900,7 +902,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             expires_in_seconds: task_expiration,
         } => {
             let vdaf = use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf")?
-                .into_vdaf();
+                .into_vdaf_config();
             let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key());
             let CliDapQueryConfig(query) = use_or_request_from_user_or_default(
                 query,

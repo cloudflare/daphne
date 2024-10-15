@@ -18,18 +18,14 @@
 
 pub mod load_testing;
 
-use crate::{
-    deduce_dap_version_from_url, response_to_anyhow, test_durations::TestDurations, HttpClient,
-};
+use crate::{deduce_dap_version_from_url, functions, test_durations::TestDurations, HttpClient};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use daphne::{
-    constants::DapMediaType,
-    error::aborts::ProblemDetails,
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        self, AggregateShareReq, AggregationJobId, AggregationJobResp, Base64Encode, BatchId,
-        BatchSelector, PartialBatchSelector, TaskId,
+        self, AggregateShareReq, AggregationJobId, Base64Encode, BatchId, BatchSelector,
+        PartialBatchSelector, TaskId,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
@@ -39,9 +35,8 @@ use daphne::{
     DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion, EarlyReportStateConsumed,
     EarlyReportStateInitialized, ReplayProtection,
 };
-use daphne_service_utils::{bearer_token::BearerToken, http_headers};
+use daphne_service_utils::bearer_token::BearerToken;
 use futures::{future::OptionFuture, StreamExt, TryStreamExt};
-use prio::codec::{Decode, ParameterizedEncode};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder};
 use rand::{rngs, Rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -509,62 +504,30 @@ impl Test {
             .context("producing agg job init request")?;
 
         // Send AggregationJobInitReq.
-        let headers = construct_request_headers(
-            DapMediaType::AggregationJobInitReq.as_str_for_version(task_config.version),
-            taskprov_advertisement.as_deref(),
-            &self.bearer_token,
-        )
-        .context("constructing request headers for AggregationJobInitReq")?;
-        let url = self.helper_url.join(&format!(
-            "tasks/{}/aggregation_jobs/{}",
-            task_id.to_base64url(),
-            agg_job_id.to_base64url()
-        ))?;
-
         // wait for all agg jobs to be ready to fire.
         info!("Reports generated, waiting for other tasks...");
         let _guard = load_control.wait().await;
         info!("Starting AggregationJobInitReq");
         let start = Instant::now();
-        let resp = send(
-            self.http_client
-                .put(url)
-                .body(
-                    agg_job_init_req
-                        .get_encoded_with_param(&task_config.version)
-                        .unwrap(),
-                )
-                .headers(headers),
-        )
-        .await?;
+        let agg_job_resp = self
+            .http_client
+            .submit_aggregation_job_init_req(
+                self.helper_url.join(&format!(
+                    "tasks/{}/aggregation_jobs/{}",
+                    task_id.to_base64url(),
+                    agg_job_id.to_base64url()
+                ))?,
+                agg_job_init_req,
+                task_config.version,
+                functions::helper::Options {
+                    taskprov_advertisement: taskprov_advertisement.as_deref(),
+                    bearer_token: self.bearer_token.as_ref(),
+                },
+            )
+            .await?;
         let duration = start.elapsed();
         info!("Finished AggregationJobInitReq in {duration:#?}");
 
-        if resp.status() == 400 {
-            let text = resp.text().await?;
-            let problem_details: ProblemDetails =
-                serde_json::from_str(&text).with_context(|| {
-                    format!("400 Bad Request: failed to parse problem details document: {text:?}")
-                })?;
-            return Err(anyhow!("400 Bad Request: {problem_details:?}"));
-        } else if resp.status() == 500 {
-            return Err(anyhow::anyhow!(
-                "500 Internal Server Error: {}",
-                resp.text().await?
-            ));
-        } else if !resp.status().is_success() {
-            return Err(response_to_anyhow(resp).await)
-                .context("while running an AggregateInitReq");
-        }
-
-        // Handle AggregationJobResp..
-        let agg_job_resp = AggregationJobResp::get_decoded(
-            &resp
-                .bytes()
-                .await
-                .context("transfering bytes from the AggregateInitReq")?,
-        )
-        .with_context(|| "failed to parse response to AggregateInitReq from Helper")?;
         let agg_share_span = task_config.consume_agg_job_resp(
             task_id,
             agg_job_state,
@@ -603,43 +566,21 @@ impl Test {
         // Send AggregateShareReq.
         info!("Starting AggregationJobInitReq");
         let start = Instant::now();
-        let headers = construct_request_headers(
-            DapMediaType::AggregateShareReq.as_str_for_version(version),
-            taskprov_advertisement,
-            &self.bearer_token,
-        )?;
-        let url = self.helper_url.join(&format!(
-            "tasks/{}/aggregate_shares",
-            task_id.to_base64url()
-        ))?;
-        let resp = send(
-            self.http_client
-                .post(url)
-                .body(agg_share_req.get_encoded_with_param(&version).unwrap())
-                .headers(headers),
-        )
-        .await?;
-        let duration = start.elapsed();
-        info!("Finished AggregateShareReq in {duration:#?}");
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails = serde_json::from_slice(
-                &resp
-                    .bytes()
-                    .await
-                    .context("transfering bytes for AggregateShareReq")?,
+        self.http_client
+            .get_aggregate_share(
+                self.helper_url.join(&format!(
+                    "tasks/{}/aggregate_shares",
+                    task_id.to_base64url()
+                ))?,
+                agg_share_req,
+                version,
+                functions::helper::Options {
+                    taskprov_advertisement,
+                    bearer_token: self.bearer_token.as_ref(),
+                },
             )
-            .with_context(|| "400 Bad Request: failed to parse problem details document")?;
-            return Err(anyhow!("400 Bad Request: {problem_details:?}"));
-        } else if resp.status() == 500 {
-            return Err(anyhow::anyhow!(
-                "500 Internal Server Error: {}",
-                resp.text().await?
-            ));
-        } else if !resp.status().is_success() {
-            return Err(response_to_anyhow(resp).await)
-                .context("while running an AggregateInitReq");
-        }
-        Ok(duration)
+            .await?;
+        Ok(start.elapsed())
     }
 
     pub async fn test_helper(&self, opt: &TestOptions) -> Result<TestDurations> {
@@ -792,60 +733,6 @@ impl DapReportInitializer for Test {
         .await
         .unwrap()
     }
-}
-
-fn construct_request_headers<'a, M, T, B>(
-    media_type: M,
-    taskprov: T,
-    bearer_token: B,
-) -> Result<reqwest::header::HeaderMap>
-where
-    M: Into<Option<&'a str>>,
-    T: Into<Option<&'a str>>,
-    B: Into<Option<&'a BearerToken>>,
-{
-    let mut headers = reqwest::header::HeaderMap::new();
-    if let Some(media_type) = media_type.into() {
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_str(media_type)?,
-        );
-    }
-    if let Some(taskprov) = taskprov.into() {
-        headers.insert(
-            reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-            reqwest::header::HeaderValue::from_str(taskprov)?,
-        );
-    }
-    if let Some(token) = bearer_token.into() {
-        headers.insert(
-            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-            reqwest::header::HeaderValue::from_str(token.as_ref())?,
-        );
-    }
-    Ok(headers)
-}
-
-async fn send(req: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
-    for i in 0..4 {
-        let resp = req.try_clone().unwrap().send().await;
-        match &resp {
-            Ok(r) if r.status() != reqwest::StatusCode::BAD_GATEWAY => {
-                return resp;
-            }
-            Ok(r) if r.status().is_client_error() => {
-                return resp;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::error!("request failed: {e:?}");
-            }
-        }
-        if i == 3 {
-            return resp;
-        }
-    }
-    unreachable!()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
