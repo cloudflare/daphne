@@ -19,7 +19,7 @@ use daphne::{
 use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
 };
-use futures::{future::try_join_all, StreamExt, TryStreamExt};
+use futures::{future::try_join_all, StreamExt, TryFutureExt, TryStreamExt};
 use mappable_rc::Marc;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
@@ -316,15 +316,34 @@ impl DapAggregator for crate::App {
 
         futures::stream::iter(agg_span)
             .map(|bucket| async move {
-                Ok::<bool, DapError>(
-                    !self
-                        .durable()
-                        .request(bindings::AggregateStore::Get, (version, task_id, &bucket))
+                let durable = self.durable();
+                let params = (version, task_id, &bucket);
+
+                let get_report_count = || {
+                    durable
+                        .request(bindings::AggregateStore::ReportCount, params)
+                        .send::<u64>()
+                };
+
+                // TODO: remove this after the worker has this feature deployed.
+                let backwards_compat_get_report_count = || {
+                    durable
+                        .request(bindings::AggregateStore::Get, params)
                         .send::<DapAggregateShare>()
-                        .await
-                        .map_err(|e| fatal_error!(err = ?e, "failed to get an agg share"))?
-                        .empty(),
-                )
+                        .map_ok(|r| r.report_count)
+                };
+
+                let count = get_report_count()
+                    .or_else(|_| backwards_compat_get_report_count())
+                    .await
+                    .map_err(|e| {
+                        fatal_error!(
+                            err = ?e,
+                            params = ?params,
+                            "failed fetching report count of an agg share"
+                        )
+                    })?;
+                Ok(count > 0)
             })
             .buffer_unordered(usize::MAX)
             .collect::<Vec<_>>()
