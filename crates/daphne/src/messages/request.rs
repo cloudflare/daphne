@@ -49,6 +49,13 @@ impl DapRequestMeta {
 }
 
 /// DAP request.
+///
+/// # Type parameters
+/// - `P`: is the payload of the request.
+/// - `R`: is the resource id this request points to. Possible values of this are:
+///     - [`AggregationJobId`](resource::AggregationJobId)
+///     - [`CollectionJobId`](resource::CollectionJobId)
+///     - [`None`](resource::None)
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct DapRequest<P, R = resource::None> {

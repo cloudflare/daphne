@@ -26,6 +26,7 @@ use crate::metrics;
 
 use super::{AxumDapResponse, DaphneService};
 
+/// Trait used to decode a DAP http body.
 pub trait DecodeFromDapHttpBody: Sized {
     fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort>;
 }
@@ -39,7 +40,9 @@ macro_rules! impl_decode_from_dap_http_body {
                     meta: &DapRequestMeta,
                 ) -> Result<Self, DapAbort> {
                     let mut cursor = Cursor::new(bytes.as_ref());
+                    // Check that media type matches.
                     meta.get_checked_media_type(DapMediaType::$type)?;
+                    // Decode the body
                     $type::decode_with_param(&meta.version, &mut cursor)
                         .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
                 }
@@ -55,29 +58,42 @@ impl_decode_from_dap_http_body!(
     CollectionReq,
 );
 
+/// Using `()` ignores the body of a request.
 impl DecodeFromDapHttpBody for () {
     fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
         Ok(())
     }
 }
 
+/// Parsers that allow us to have to deduce the resource parser to use based on the resource passed
+/// in through the `R` type parameter in [`DapRequestExtractor`] and
+/// [`UnauthenticatedDapRequestExtractor`].
 mod resource_parsers {
     use daphne::messages::request::resource;
     use serde::{de::DeserializeOwned, Deserialize};
 
     #[derive(Deserialize)]
     pub struct AggregationJobIdParser {
+        /// This field name defines the parameter name in the route matcher because we use
+        /// `#[serde(flatten)]` in the
+        /// `UnauthenticatedDapRequestExtractor::from_request::PathParams::resource_parser` field.
         agg_job_id: resource::AggregationJobId,
     }
 
     #[derive(Deserialize)]
     pub struct CollectionJobIdParser {
+        /// This field name defines the parameter name in the route matcher because we use
+        /// `#[serde(flatten)]` in the
+        /// `UnauthenticatedDapRequestExtractor::from_request::PathParams::resource_parser` field.
         collect_job_id: resource::CollectionJobId,
     }
 
+    /// This parser has no fields, so `#[serde(flatten)]` correctly omits this field from the
+    /// fields it requires.
     #[derive(Deserialize)]
     pub struct NoneParser;
 
+    /// Trait that lets us go from resource to resource parser.
     pub trait Resource: Sized + Send + Sync {
         type Parser: Into<Self> + Send + Sync + DeserializeOwned;
     }
@@ -101,7 +117,8 @@ mod resource_parsers {
     impl_parser!(NoneParser             => resource::None             |_| resource::None);
 }
 
-/// An axum extractor capable of parsing a [`DapRequest`].
+/// An axum extractor capable of parsing a [`DapRequest`]. See [`DapRequest`] for an explanation on
+/// the type parameters.
 #[derive(Debug)]
 pub(super) struct UnauthenticatedDapRequestExtractor<P, R>(pub DapRequest<P, R>);
 
@@ -210,6 +227,10 @@ pub mod dap_sender {
 /// An axum extractor capable of parsing a [`DapRequest`].
 ///
 /// This extractor asserts that the request is authenticated.
+///
+/// # Type and const parameters
+/// - `SENDER`: The role that is expected to send this request. See [`dap_sender`] for possible values.
+/// - `P` and `R`: See [`DapRequest`] for an explanation these type parameters.
 #[derive(Debug)]
 pub(super) struct DapRequestExtractor<const SENDER: dap_sender::DapSender, P, R = resource::None>(
     pub DapRequest<P, R>,
