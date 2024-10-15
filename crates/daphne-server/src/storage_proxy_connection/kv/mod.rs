@@ -42,8 +42,10 @@ pub mod prefix {
         messages::{Base64Encode, TaskId},
         taskprov, DapSender, DapTaskConfig, DapVersion,
     };
-    use daphne_service_utils::{bearer_token::BearerToken, config::HpkeRecieverConfigList};
+    use daphne_service_utils::bearer_token::BearerToken;
     use serde::{de::DeserializeOwned, Serialize};
+
+    use crate::config::HpkeRecieverConfigList;
 
     use super::KvPrefix;
 

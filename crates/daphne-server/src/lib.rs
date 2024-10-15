@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use config::{DaphneServiceConfig, PeerBearerToken};
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
     fatal_error,
@@ -10,10 +11,7 @@ use daphne::{
     roles::{leader::in_memory_leader::InMemoryLeaderState, DapAggregator},
     DapError, DapSender,
 };
-use daphne_service_utils::{
-    bearer_token::BearerToken,
-    config::{DaphneServiceConfig, PeerBearerToken},
-};
+use daphne_service_utils::bearer_token::BearerToken;
 use either::Either::{self, Left, Right};
 use futures::lock::Mutex;
 use metrics::DaphneServiceMetrics;
@@ -23,6 +21,7 @@ use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;
 use url::Url;
 
+pub mod config;
 pub mod metrics;
 mod roles;
 pub mod router;
@@ -50,11 +49,9 @@ mod storage_proxy_connection;
 ///     router,
 ///     StorageProxyConfig,
 ///     metrics::DaphnePromServiceMetrics,
-/// };
-/// use daphne_service_utils::{
 ///     config::DaphneServiceConfig,
-///     DapRole,
 /// };
+/// use daphne_service_utils::DapRole;
 ///
 /// let storage_proxy_settings = StorageProxyConfig {
 ///     url: Url::parse("http://example.com").unwrap(),

@@ -4,8 +4,10 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use daphne_server::{metrics::DaphnePromServiceMetrics, router, App, StorageProxyConfig};
-use daphne_service_utils::{config::DaphneServiceConfig, DapRole};
+use daphne_server::{
+    config::DaphneServiceConfig, metrics::DaphnePromServiceMetrics, router, App, StorageProxyConfig,
+};
+use daphne_service_utils::DapRole;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::EnvFilter;
 use url::Url;
