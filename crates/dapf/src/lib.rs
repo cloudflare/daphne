@@ -3,9 +3,9 @@
 
 pub mod acceptance;
 pub mod cli_parsers;
+pub mod functions;
 pub mod http_client;
 mod test_durations;
-pub mod test_routes;
 
 use anyhow::{anyhow, Context};
 use daphne::DapVersion;
