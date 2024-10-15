@@ -12,6 +12,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Workers backend for Daphne"
 
+[package.metadata."docs.rs"]
+all-features = true
+
 [dependencies]
 axum = "0.6.0" # held back to use http 0.2
 daphne = { path = "../daphne" }
@@ -24,6 +27,7 @@ hyper.workspace = true
 mappable-rc.workspace = true
 p256.workspace = true
 prio.workspace = true
+prometheus = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -44,7 +48,7 @@ assert_matches.workspace = true
 clap.workspace = true
 config.workspace = true
 daphne = { path = "../daphne", features = ["test-utils"] }
-daphne-service-utils = { path = "../daphne-service-utils", features = ["prometheus", "test-utils"] }
+daphne-service-utils = { path = "../daphne-service-utils", features = ["test-utils"] }
 dhat.workspace = true
 hpke-rs.workspace = true
 paste.workspace = true
@@ -58,8 +62,10 @@ webpki.workspace = true
 x509-parser.workspace = true
 
 [features]
+default = ["prometheus"]
 test-utils = ["daphne/test-utils", "daphne-service-utils/test-utils"]
 test_e2e = []
+prometheus = ["dep:prometheus", "daphne/prometheus"]
 
 [lints]
 workspace = true

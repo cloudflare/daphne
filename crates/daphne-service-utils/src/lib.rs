@@ -11,7 +11,6 @@ pub mod config;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
-pub mod metrics;
 #[cfg(feature = "test-utils")]
 pub mod test_route_types;
 

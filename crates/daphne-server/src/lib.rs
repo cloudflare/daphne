@@ -13,16 +13,17 @@ use daphne::{
 use daphne_service_utils::{
     bearer_token::BearerToken,
     config::{DaphneServiceConfig, PeerBearerToken},
-    metrics::DaphneServiceMetrics,
 };
 use either::Either::{self, Left, Right};
 use futures::lock::Mutex;
+use metrics::DaphneServiceMetrics;
 use roles::BearerTokens;
 use serde::{Deserialize, Serialize};
 use storage_proxy_connection::{kv, Do, Kv};
 use tokio::sync::RwLock;
 use url::Url;
 
+pub mod metrics;
 mod roles;
 pub mod router;
 mod storage_proxy_connection;
@@ -44,11 +45,15 @@ mod storage_proxy_connection;
 /// use std::num::NonZeroUsize;
 /// use url::Url;
 /// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
-/// use daphne_server::{App, router, StorageProxyConfig};
+/// use daphne_server::{
+///     App,
+///     router,
+///     StorageProxyConfig,
+///     metrics::DaphnePromServiceMetrics,
+/// };
 /// use daphne_service_utils::{
 ///     config::DaphneServiceConfig,
 ///     DapRole,
-///     metrics::DaphnePromServiceMetrics
 /// };
 ///
 /// let storage_proxy_settings = StorageProxyConfig {
