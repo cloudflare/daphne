@@ -234,6 +234,16 @@ impl AggregateStore {
         Ok(())
     }
 
+    async fn agg_share_report_count(&self) -> Result<u64> {
+        if let Some(agg_share) = &self.agg_share {
+            return Ok(agg_share.report_count);
+        };
+        Ok(self
+            .get::<DapAggregateShareMetadata>(METADATA_KEY)
+            .await?
+            .map_or(0, |m| m.report_count))
+    }
+
     async fn get_agg_share(&mut self) -> Result<&mut DapAggregateShare> {
         let keys = Self::agg_share_shard_keys();
         let agg_share = if let Some(agg_share) = self.agg_share.take() {
@@ -475,6 +485,15 @@ impl GcDurableObject for AggregateStore {
             Some(bindings::AggregateStore::Get) => {
                 let agg_share = self.get_agg_share().await?;
                 Response::from_json(&agg_share)
+            }
+
+            // Get the number of reports in this aggregate share.
+            //
+            // Idempotent
+            // Output: `u64`
+            Some(bindings::AggregateStore::ReportCount) => {
+                let count = self.agg_share_report_count().await?;
+                Response::from_json(&count)
             }
 
             // Mark this bucket as collected.
