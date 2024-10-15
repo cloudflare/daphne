@@ -46,7 +46,7 @@ tower-service.workspace = true
 
 [dependencies.daphne-service-utils]
 path = "../daphne-service-utils"
-features = ["prometheus", "durable_requests"]
+features = ["durable_requests"]
 
 [dev-dependencies]
 daphne = { path = "../daphne", features = ["test-utils"] }

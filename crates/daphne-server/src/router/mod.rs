@@ -22,11 +22,11 @@ use daphne::{
     error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequestMeta, DapResponse,
     DapSender,
 };
-use daphne_service_utils::{bearer_token::BearerToken, metrics::DaphneServiceMetrics, DapRole};
+use daphne_service_utils::{bearer_token::BearerToken, DapRole};
 use either::Either;
 use http::Request;
 
-use crate::App;
+use crate::{metrics::DaphneServiceMetrics, App};
 use extractor::{DapRequestExtractor, UnauthenticatedDapRequestExtractor};
 
 type Router<A, B> = axum::Router<Arc<A>, B>;

@@ -18,7 +18,7 @@ pub enum AuthMethod {
     TlsClientAuth,
 }
 
-#[cfg(any(feature = "prometheus", feature = "test-utils", test))]
+#[cfg(any(feature = "prometheus", test))]
 mod prometheus {
     use super::DaphneServiceMetrics;
     use daphne::{
@@ -131,5 +131,5 @@ mod prometheus {
     }
 }
 
-#[cfg(any(feature = "prometheus", feature = "test-utils", test))]
+#[cfg(any(feature = "prometheus", test))]
 pub use prometheus::DaphnePromServiceMetrics;

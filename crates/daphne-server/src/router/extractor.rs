@@ -18,10 +18,12 @@ use daphne::{
     },
     DapError, DapRequest, DapRequestMeta, DapResource, DapVersion,
 };
-use daphne_service_utils::{bearer_token::BearerToken, http_headers, metrics};
+use daphne_service_utils::{bearer_token::BearerToken, http_headers};
 use http::{header::CONTENT_TYPE, HeaderMap, Request};
 use prio::codec::ParameterizedDecode;
 use serde::Deserialize;
+
+use crate::metrics;
 
 use super::{AxumDapResponse, DaphneService};
 
@@ -265,9 +267,7 @@ mod test {
         messages::{AggregationJobId, Base64Encode, CollectionJobId, TaskId},
         DapError, DapRequestMeta, DapResource, DapSender, DapVersion,
     };
-    use daphne_service_utils::{
-        bearer_token::BearerToken, http_headers, metrics::DaphnePromServiceMetrics,
-    };
+    use daphne_service_utils::{bearer_token::BearerToken, http_headers};
     use either::Either::{self, Left};
     use futures::{future::BoxFuture, FutureExt};
     use rand::{thread_rng, Rng};
@@ -276,6 +276,8 @@ mod test {
         time::timeout,
     };
     use tower::ServiceExt;
+
+    use crate::metrics::{DaphnePromServiceMetrics, DaphneServiceMetrics};
 
     const BEARER_TOKEN: &str = "test-token";
 
@@ -303,7 +305,7 @@ mod test {
 
         #[axum::async_trait]
         impl super::DaphneService for Channel {
-            fn server_metrics(&self) -> &dyn daphne_service_utils::metrics::DaphneServiceMetrics {
+            fn server_metrics(&self) -> &dyn DaphneServiceMetrics {
                 // These tests don't care about metrics so we just store a static instance here so I
                 // can implement the DaphneService trait for Channel.
                 static METRICS: OnceLock<DaphnePromServiceMetrics> = OnceLock::new();

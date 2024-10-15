@@ -19,7 +19,6 @@ futures.workspace = true
 itertools.workspace = true
 hex.workspace = true
 p256.workspace = true
-prometheus = { workspace = true, optional = true }
 prio.workspace = true
 ring.workspace = true
 serde.workspace = true
@@ -37,8 +36,7 @@ rand.workspace = true
 capnpc = { version = "0.18.1", optional = true }
 
 [features]
-test-utils = ["dep:prometheus", "daphne/prometheus", "daphne/test-utils"]
-prometheus = ["dep:prometheus", "daphne/prometheus"]
+test-utils = ["daphne/prometheus", "daphne/test-utils"]
 durable_requests = ["dep:capnp", "dep:capnpc"]
 
 [lints]
