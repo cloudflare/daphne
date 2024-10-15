@@ -25,6 +25,7 @@ super::define_do_binding! {
         Merge = "/internal/do/aggregate_store/merge",
         MarkCollected = "/internal/do/aggregate_store/mark_collected",
         CheckCollected = "/internal/do/aggregate_store/check_collected",
+        ReportCount = "/internal/do/aggregate_store/report_count"
     }
 
     fn name((version, task_id, bucket): (DapVersion, &'n TaskId, &'n DapBatchBucket)) -> ObjectIdFrom {
