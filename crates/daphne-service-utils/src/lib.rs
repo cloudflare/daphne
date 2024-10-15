@@ -7,7 +7,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 pub mod bearer_token;
-pub mod config;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;

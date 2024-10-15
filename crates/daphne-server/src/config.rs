@@ -5,11 +5,10 @@ use daphne::{
     hpke::{HpkeConfig, HpkeReceiverConfig},
     DapGlobalConfig, DapVersion,
 };
+use daphne_service_utils::{bearer_token::BearerToken, DapRole};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use url::Url;
-
-use crate::{bearer_token::BearerToken, DapRole};
 
 /// draft-wang-ppm-dap-taskprov: Long-lived parameters for the taskprov extension.
 #[derive(Serialize, Deserialize, Debug, Clone)]
