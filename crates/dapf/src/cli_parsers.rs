@@ -19,6 +19,9 @@ use daphne::{
     DapQueryConfig,
 };
 
+/// Some defaults for ease of use from the CLI. Instead of specifying the entire vdaf config json
+/// these names can be used. Check the [`ValueEnum::to_possible_value`] implementation for the
+/// names of these in the commandline.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum DefaultVdafConfigs {
     Prio2Dimension99k,

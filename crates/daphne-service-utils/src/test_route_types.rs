@@ -1,6 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Types used in `/internal/*` routes to implement the [interop][interop] draft
+//!
+//! [interop]: https://divergentdave.github.io/draft-dcook-ppm-dap-interop-test-design/draft-dcook-ppm-dap-interop-test-design.html
+
 use daphne::{
     messages::{Duration, TaskId, Time},
     vdaf::{Prio3Config, VdafConfig},
