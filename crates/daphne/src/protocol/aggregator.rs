@@ -255,7 +255,7 @@ impl EarlyReportState for EarlyReportStateConsumed {
 }
 
 /// Report state during aggregation initialization after the VDAF preparation step.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum EarlyReportStateInitialized {
@@ -400,7 +400,7 @@ impl ReplayProtection {
 impl DapTaskConfig {
     /// Leader -> Helper: Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the outbound `AggregationJobInitReq` message.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
@@ -427,7 +427,7 @@ impl DapTaskConfig {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn produce_agg_job_req_impl<S>(
         &self,
         decrypter: impl HpkeDecrypter,
@@ -547,7 +547,7 @@ impl DapTaskConfig {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[cfg(any(test, feature = "test-utils"))]
     pub async fn test_produce_agg_job_req<S>(
         &self,

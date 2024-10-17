@@ -30,7 +30,7 @@ impl VdafConfig {
     ///   Aggregators. The first encrypted aggregate shares must be the Leader's.
     ///
     /// * `version` is the `DapVersion` to use.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn consume_encrypted_agg_shares(
         &self,
         decrypter: &impl HpkeDecrypter,

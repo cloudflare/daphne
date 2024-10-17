@@ -359,7 +359,7 @@ impl TestRunner {
         get_raw_hpke_config(client, self.task_id.as_ref(), &self.helper_url, "helper").await
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub async fn leader_post_expect_ok(
         &self,
         client: &reqwest::Client,
@@ -401,7 +401,7 @@ impl TestRunner {
         Ok(())
     }
 
-    #[allow(dead_code, clippy::too_many_arguments)]
+    #[expect(dead_code, clippy::too_many_arguments)]
     pub async fn leader_post_expect_abort(
         &self,
         client: &reqwest::Client,
@@ -515,7 +515,7 @@ impl TestRunner {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn leader_put_expect_abort(
         &self,
         client: &reqwest::Client,

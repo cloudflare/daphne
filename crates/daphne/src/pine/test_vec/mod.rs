@@ -89,7 +89,7 @@ impl TestVec {
         // Check that the test vector parameters have the values we expect.
         //
         // clippy: These are test vectors, so we expect the value to match precisely.
-        #[allow(clippy::float_cmp)]
+        #[expect(clippy::float_cmp)]
         {
             assert_eq!(self.alpha, ALPHA);
         }

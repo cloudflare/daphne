@@ -66,7 +66,7 @@ pub struct AggregationJobTest {
     pub(crate) valid_report_range: Range<Time>,
 
     // operational parameters
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) leader_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphnePromMetrics,
 }
@@ -100,7 +100,7 @@ async fn initialize_reports(
 }
 
 #[cfg(not(test))]
-#[allow(clippy::unused_async)]
+#[expect(clippy::unused_async)]
 async fn initialize_reports(
     is_leader: bool,
     vdaf_verify_key: VdafVerifyKey,
@@ -509,7 +509,7 @@ macro_rules! async_test_versions {
 pub struct MockAuditLog(AtomicU32);
 
 impl MockAuditLog {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn invocations(&self) -> u32 {
         self.0.load(Ordering::Relaxed)
     }
@@ -619,7 +619,6 @@ impl DeepSizeOf for InMemoryAggregator {
 }
 
 impl InMemoryAggregator {
-    #[allow(clippy::too_many_arguments)]
     pub fn new_helper(
         tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
         hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
@@ -642,7 +641,6 @@ impl InMemoryAggregator {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new_leader(
         tasks: impl IntoIterator<Item = (TaskId, DapTaskConfig)>,
         hpke_receiver_config_list: impl IntoIterator<Item = HpkeReceiverConfig>,
@@ -1213,7 +1211,6 @@ macro_rules! assert_metrics_include {
 
 impl VdafConfig {
     pub fn gen_measurement(&self) -> Result<DapMeasurement, DapError> {
-        #[allow(clippy::match_wildcard_for_single_variants)]
         match self {
             Self::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
             Self::Prio3(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {

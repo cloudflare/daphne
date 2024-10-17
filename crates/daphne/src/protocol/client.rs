@@ -64,7 +64,7 @@ impl VdafConfig {
     }
 
     /// Generate a report for the given public and input shares with the given extensions.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn produce_report_with_extensions_for_shares(
         public_share: Vec<u8>,
         input_shares: [Vec<u8>; 2],

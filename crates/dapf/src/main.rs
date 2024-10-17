@@ -192,7 +192,7 @@ enum HpkeAction {
 }
 
 #[derive(Debug, Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 enum TestAction {
     /// Add an hpke config to a test-utils enabled `daphne-server`.
     AddHpkeConfig {

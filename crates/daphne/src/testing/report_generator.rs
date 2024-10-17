@@ -57,7 +57,7 @@ impl Stream for ReportGenerator {
 }
 
 impl ReportGenerator {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         vdaf: &VdafConfig,
         hpke_config_list: &[HpkeConfig; 2],

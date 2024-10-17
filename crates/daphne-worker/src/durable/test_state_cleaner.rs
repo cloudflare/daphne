@@ -19,7 +19,6 @@ use super::GcDurableObject;
 /// Durable Object (DO) for keeping track of all persistent DO storage.
 #[durable_object]
 pub struct TestStateCleaner {
-    #[allow(dead_code)]
     state: State,
     env: Env,
 }
