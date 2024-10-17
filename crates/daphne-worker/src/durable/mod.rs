@@ -80,7 +80,8 @@ macro_rules! mk_durable_object {
             #[doc(hidden)]
             pub async fn fetch(
                 &mut self,
-                #[allow(unused_mut)] mut req: ::worker::Request
+                #[cfg(feature = "test-utils")] mut req: ::worker::Request,
+                #[cfg(not(feature = "test-utils"))] req: ::worker::Request,
             ) -> ::worker::Result<::worker::Response> {
                 use $crate::durable::{create_span_from_request, GcDurableObject};
                 use ::tracing::Instrument;
@@ -135,7 +136,6 @@ macro_rules! mk_durable_object {
                 &self.env
             }
 
-            #[allow(dead_code)]
             async fn get<T>(&self, key: &str) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned,
@@ -143,7 +143,6 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get(&self.state, key).await
             }
 
-            #[allow(dead_code)]
             async fn get_or_default<T>(&self, key: &str) -> ::worker::Result<T>
                 where
                     T: ::serde::de::DeserializeOwned + std::default::Default,
@@ -151,7 +150,7 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get_or_default(&self.state, key).await
             }
 
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             async fn set_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned + ::serde::Serialize,

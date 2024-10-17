@@ -211,8 +211,8 @@ impl<F: FftFriendlyFieldElement, X, const SEED_SIZE: usize> Pine<F, X, SEED_SIZE
         };
 
         let (wr_test_bound, wr_test_bits) = {
-            #[allow(clippy::cast_possible_truncation)]
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_sign_loss)]
             let wr_test_bound_int =
                 (((param.norm_bound as f64) * ALPHA).ceil() as u64 + 1).next_power_of_two();
             let wr_test_bits = bits(2 * wr_test_bound_int - 1);
@@ -308,8 +308,8 @@ fn f64_to_field<F: FftFriendlyFieldElement>(x: f64, two_to_frac_bits: f64) -> Re
     let out = x * two_to_frac_bits;
     let out = out.floor();
     let out = if neg { -out } else { out };
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_sign_loss)]
     let out = out as u64;
     let out = usize::try_from(out).map_err(|e| {
         VdafError::Uncategorized(format!(
@@ -375,8 +375,8 @@ fn norm_bound_f64_to_u64(norm_bound: f64, frac_bits: usize) -> u64 {
     let two_to_frac_bits = f64::from(1 << frac_bits);
     let norm_bound = norm_bound * two_to_frac_bits;
     let norm_bound = norm_bound.floor();
-    #[allow(clippy::cast_sign_loss)]
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_possible_truncation)]
     let norm_bound = norm_bound as u64;
     norm_bound
 }
@@ -527,7 +527,7 @@ mod tests {
             },
         ] {
             // clippy: We expect the values to match precisely.
-            #[allow(clippy::float_cmp)]
+            #[expect(clippy::float_cmp)]
             {
                 assert_eq!(
                     field_to_f64(

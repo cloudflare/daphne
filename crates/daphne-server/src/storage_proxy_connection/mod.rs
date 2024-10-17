@@ -42,7 +42,7 @@ impl<'h> Do<'h> {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn with_retry(self) -> Self {
         Self {
             retry: true,
@@ -126,7 +126,7 @@ impl<'w> Do<'w> {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn request_with_id<B: DurableMethod + Copy>(
         &self,
         path: B,
