@@ -1,6 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Functions used to interact with `/internal/*` routes that implement the [interop][interop] draft.
+//!
+//! [interop]: https://divergentdave.github.io/draft-dcook-ppm-dap-interop-test-design/draft-dcook-ppm-dap-interop-test-design.html
+
 use anyhow::Context;
 use daphne::{
     hpke::{HpkeKemId, HpkeReceiverConfig},
