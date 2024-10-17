@@ -546,7 +546,6 @@ pub struct DapTaskParameters {
 impl DapTaskParameters {
     /// Construct a new task config using the taskprov extension. Return the task ID and the
     /// taskprov advertisement encoded as a base64url string.
-    #[allow(clippy::type_complexity)]
     pub fn to_config_with_taskprov(
         &self,
         task_info: Vec<u8>,

@@ -230,7 +230,6 @@ impl ParameterizedDecode<DapVersion> for Extension {
 
 /// Report metadata.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[allow(missing_docs)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReportMetadata {
     pub id: ReportId,
@@ -1056,7 +1055,6 @@ impl Decode for HpkeCiphertext {
 
 /// A plaintext input share.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
 pub struct PlaintextInputShare {
     pub extensions: Vec<Extension>,
     pub payload: Vec<u8>,

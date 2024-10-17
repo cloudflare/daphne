@@ -84,7 +84,6 @@ pub mod prometheus {
         /// Register Daphne metrics with the specified registry. If a prefix is provided, then
         /// "{prefix_}" is prepended to the name.
         pub fn register(registry: &Registry) -> Result<Self, DapError> {
-            #[allow(clippy::ignored_unit_patterns)]
             let inbound_request_counter = register_int_counter_vec_with_registry!(
                 "inbound_request_counter",
                 "Total number of successful inbound requests.",
@@ -93,7 +92,6 @@ pub mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to regsiter inbound_request_counter"))?;
 
-            #[allow(clippy::ignored_unit_patterns)]
             let report_counter = register_int_counter_vec_with_registry!(
                 "report_counter",
                 "Total number reports rejected, aggregated, and collected.",
@@ -102,7 +100,6 @@ pub mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to register report_counter"))?;
 
-            #[allow(clippy::ignored_unit_patterns)]
             let aggregation_job_batch_size_histogram = register_histogram_with_registry!(
                 "aggregation_job_batch_size",
                 "Number of records in an incoming AggregationJobInitReq.",
@@ -113,7 +110,6 @@ pub mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_batch_size"))?;
 
-            #[allow(clippy::ignored_unit_patterns)]
             let aggregation_job_counter = register_int_counter_vec_with_registry!(
                 format!("aggregation_job_counter"),
                 "Total number of aggregation jobs started and completed.",
@@ -122,7 +118,6 @@ pub mod prometheus {
             )
             .map_err(|e| fatal_error!(err = ?e, "failed to register aggregation_job_counter"))?;
 
-            #[allow(clippy::ignored_unit_patterns)]
             let aggregation_job_put_span_retry_counter =
                 register_int_counter_with_registry!(
                     format!("aggregation_job_put_span_retry_counter"),
