@@ -11,7 +11,9 @@ use url::Url;
 use webpki::{EndEntityCert, ECDSA_P256_SHA256};
 use x509_parser::pem::Pem;
 
-use crate::{response_to_anyhow, HttpClient};
+use crate::HttpClient;
+
+use super::response_to_anyhow;
 
 impl HttpClient {
     pub async fn get_hpke_config(

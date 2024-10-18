@@ -14,7 +14,7 @@ use anyhow::{anyhow, Context};
 use clap::{builder::PossibleValue, ValueEnum};
 use daphne::{
     hpke::HpkeKemId,
-    messages::{Base64Encode, TaskId},
+    messages::{Base64Encode, CollectionJobId, TaskId},
     vdaf::{Prio3Config, VdafConfig},
     DapQueryConfig,
 };
@@ -172,7 +172,7 @@ impl FromStr for CliDapQueryConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CliTaskId(pub TaskId);
 
 impl fmt::Display for CliTaskId {
@@ -197,6 +197,37 @@ impl FromStr for CliTaskId {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         TaskId::try_from_base64url(s)
+            .ok_or_else(|| anyhow!("failed to decode ID"))
+            .context("expected URL-safe, base64 string")
+            .map(Self)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CliCollectionJobId(pub CollectionJobId);
+
+impl fmt::Display for CliCollectionJobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <CollectionJobId as fmt::Display>::fmt(&self.0, f)
+    }
+}
+
+impl From<CollectionJobId> for CliCollectionJobId {
+    fn from(id: CollectionJobId) -> Self {
+        Self(id)
+    }
+}
+
+impl From<CliCollectionJobId> for CollectionJobId {
+    fn from(CliCollectionJobId(id): CliCollectionJobId) -> Self {
+        id
+    }
+}
+
+impl FromStr for CliCollectionJobId {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        CollectionJobId::try_from_base64url(s)
             .ok_or_else(|| anyhow!("failed to decode ID"))
             .context("expected URL-safe, base64 string")
             .map(Self)
@@ -325,4 +356,11 @@ where
             }
         }
     }
+}
+
+pub fn from_json_str<T>(s: &str) -> serde_json::Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str(s)
 }
