@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
-FROM rust:1.80.1-bookworm
+FROM rust:1.82-bookworm
 
 WORKDIR /tmp/dap_test
 

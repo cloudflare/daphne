@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
-FROM rust:1.80.1-bookworm AS builder
+FROM rust:1.82-bookworm AS builder
 RUN apt update && apt install -y capnproto clang cmake
 
 # Pre-install worker-build and Rust's wasm32 target to speed up our custom build command
