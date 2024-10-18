@@ -111,20 +111,11 @@ where
         req: Request<B>,
         next: Next<B>,
     ) -> impl IntoResponse {
-        tracing::info!(
-            method = %req.method(),
-            uri = %req.uri(),
-            headers = ?req.headers(),
-            "received request",
-        );
+        tracing::info!(method = %req.method(), uri = %req.uri(), "received request");
         let resp = next.run(req).await;
         app.server_metrics()
             .count_http_status_code(resp.status().as_u16());
-        tracing::info!(
-            status_code = %resp.status(),
-            headers = ?resp.headers(),
-            "request finished"
-        );
+        tracing::info!(status_code = %resp.status(), "request finished");
         resp
     }
 
