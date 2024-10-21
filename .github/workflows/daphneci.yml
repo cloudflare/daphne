@@ -22,6 +22,8 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
           override: true
+      - name: Machete
+        uses: bnjbvr/cargo-machete@main
       - name: Cargo hack
         uses: taiki-e/install-action@cargo-hack
       - name: Cap'n'proto

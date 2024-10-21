@@ -18,11 +18,8 @@ chrono.workspace = true
 clap = { workspace = true, features = ["env"] }
 daphne = { path = "../daphne", features = ["report-generator", "prometheus"] }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["test-utils"] }
-deepsize.workspace = true
 futures.workspace = true
 hex.workspace = true
-itertools.workspace = true
-pin-project.workspace = true
 prio.workspace = true
 prometheus.workspace = true
 rand.workspace = true
