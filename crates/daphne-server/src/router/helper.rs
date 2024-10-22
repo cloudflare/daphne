@@ -50,12 +50,19 @@ async fn agg_job(
         resource::AggregationJobId,
     >,
 ) -> AxumDapResponse {
+    let timer = std::time::Instant::now();
+
     let resp = helper::handle_agg_job_init_req(
         &*app,
         req,
         fetch_replay_protection_override(app.kv()).await,
     )
     .await;
+
+    let elapsed = timer.elapsed();
+
+    app.server_metrics().aggregate_job_latency(elapsed);
+
     AxumDapResponse::from_result_with_success_code(resp, app.server_metrics(), StatusCode::CREATED)
 }
 
