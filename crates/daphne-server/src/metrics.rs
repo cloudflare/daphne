@@ -10,6 +10,7 @@ pub trait DaphneServiceMetrics: DaphneMetrics {
     fn count_http_status_code(&self, status_code: u16);
     fn daphne(&self) -> &dyn DaphneMetrics;
     fn auth_method_inc(&self, method: AuthMethod);
+    fn aggregate_job_latency(&self, time: std::time::Duration);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,7 @@ mod prometheus {
         DapError,
     };
     use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
+    use std::time::Duration;
 
     impl DaphneMetrics for DaphnePromServiceMetrics {
         fn report_inc_by(&self, status: ReportStatus, val: u64) {
@@ -75,6 +77,10 @@ mod prometheus {
 
         fn daphne(&self) -> &dyn DaphneMetrics {
             self
+        }
+
+        fn aggregate_job_latency(&self, _time: Duration) {
+            // unimplemented by default due to elevated cardinality
         }
     }
 
