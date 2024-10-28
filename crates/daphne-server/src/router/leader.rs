@@ -8,14 +8,14 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::put,
+    routing::{post, put},
 };
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{self, request::resource},
     roles::leader::{self, DapLeader},
-    DapError,
+    DapError, DapVersion,
 };
 use prio::codec::ParameterizedEncode;
 
@@ -32,7 +32,8 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route("/:version/tasks/:task_id/reports", put(upload))
+        .route("/:version/tasks/:task_id/reports", put(upload_draft09))
+        .route("/:version/tasks/:task_id/reports", post(upload_draft13))
         .route(
             "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
             put(start_collection_job).post(collect),
@@ -46,7 +47,7 @@ where
         version = ?req.version,
     )
 )]
-async fn upload<A>(
+async fn upload_draft13<A>(
     State(app): State<Arc<A>>,
     UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
         messages::Report,
@@ -56,12 +57,41 @@ async fn upload<A>(
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
+    if req.version == DapVersion::Draft09 {
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            format!("route not implemented for version {}", req.version),
+        )
+            .into_response();
+    }
     match leader::handle_upload_req(&*app, req).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }
 
+async fn upload_draft09<A>(
+    State(app): State<Arc<A>>,
+    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
+        messages::Report,
+        resource::None,
+    >,
+) -> Response
+where
+    A: DapLeader + DaphneService + Send + Sync,
+{
+    if req.version != DapVersion::Draft09 {
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            format!("route not implemented for version {}", req.version),
+        )
+            .into_response();
+    }
+    match leader::handle_upload_req(&*app, req).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
+    }
+}
 #[tracing::instrument(
     skip_all,
     fields(

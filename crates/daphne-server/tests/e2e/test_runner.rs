@@ -358,11 +358,11 @@ impl TestRunner {
         get_raw_hpke_config(client, self.task_id.as_ref(), &self.helper_url, "helper").await
     }
 
-    #[expect(dead_code)]
-    pub async fn leader_post_expect_ok(
+    pub async fn leader_request_expect_ok(
         &self,
         client: &reqwest::Client,
         path: &str,
+        method: &http::Method,
         media_type: DapMediaType,
         taskprov: Option<&str>,
         data: Vec<u8>,
@@ -383,123 +383,7 @@ impl TestRunner {
             );
         }
         let resp = client
-            .post(url.as_str())
-            .body(data)
-            .headers(headers)
-            .send()
-            .await
-            .context("request failed")?;
-
-        anyhow::ensure!(
-            resp.status() == reqwest::StatusCode::OK,
-            "unexpected response status. Expected {} got {}: Body is {:?}",
-            resp.status(),
-            reqwest::StatusCode::OK,
-            resp.text().await?,
-        );
-        Ok(())
-    }
-
-    #[expect(dead_code, clippy::too_many_arguments)]
-    pub async fn leader_post_expect_abort(
-        &self,
-        client: &reqwest::Client,
-        dap_auth_token: Option<&str>,
-        path: &str,
-        media_type: DapMediaType,
-        taskprov: Option<&str>,
-        data: Vec<u8>,
-        expected_status: u16,
-        expected_err_type: &str,
-    ) -> anyhow::Result<()> {
-        let url = self.leader_url.join(path)?;
-
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
-        );
-        if let Some(token) = dap_auth_token {
-            headers.insert(
-                reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-                reqwest::header::HeaderValue::from_str(token)?,
-            );
-        }
-        if let Some(taskprov_advertisement) = taskprov {
-            headers.insert(
-                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
-            );
-        }
-
-        let resp = client
-            .post(url.as_str())
-            .body(data)
-            .headers(headers)
-            .send()
-            .await
-            .context("request failed")?;
-
-        anyhow::ensure!(
-            resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
-            "unexpected response status. Expected {} got {}: Body is {:?}",
-            expected_status,
-            resp.status(),
-            resp.text().await?,
-        );
-
-        anyhow::ensure!(
-            resp.headers()
-                .get("Content-Type")
-                .context("no Content-Type header")?
-                == "application/problem+json"
-        );
-
-        let problem_details: serde_json::Value = resp.json().await?;
-        let got = problem_details
-            .as_object()
-            .context("problem details is not an object")?
-            .get("type")
-            .context("problem details doesn't have a `type` field")?;
-        anyhow::ensure!(got == &format!("urn:ietf:params:ppm:dap:error:{expected_err_type}"));
-        Ok(())
-    }
-
-    pub async fn leader_put_expect_ok(
-        &self,
-        client: &reqwest::Client,
-        path: &str,
-        media_type: DapMediaType,
-        taskprov: Option<&TaskprovAdvertisement>,
-        data: Vec<u8>,
-    ) -> anyhow::Result<()> {
-        let url = self.leader_url.join(path)?;
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            media_type
-                .as_str_for_version(self.version)
-                .context("no string for version")?
-                .parse()?,
-        );
-        headers.insert(
-            reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
-            reqwest::header::HeaderValue::from_str(&self.collector_bearer_token)?,
-        );
-        if let Some(taskprov_advertisement) = taskprov {
-            headers.insert(
-                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(
-                    &taskprov_advertisement.serialize_to_header_value(self.version)?,
-                )?,
-            );
-        }
-
-        let resp = client
-            .put(url.as_str())
+            .request(method.clone(), url.as_str())
             .body(data)
             .headers(headers)
             .send()
@@ -517,12 +401,14 @@ impl TestRunner {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn leader_put_expect_abort(
+    pub async fn leader_request_expect_abort(
         &self,
         client: &reqwest::Client,
         dap_auth_token: Option<&str>,
         path: &str,
+        method: &http::Method,
         media_type: DapMediaType,
+        taskprov: Option<&str>,
         data: Vec<u8>,
         expected_status: u16,
         expected_err_type: &str,
@@ -543,9 +429,15 @@ impl TestRunner {
                 reqwest::header::HeaderValue::from_str(token)?,
             );
         }
+        if let Some(taskprov_advertisement) = taskprov {
+            headers.insert(
+                reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
+                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
+            );
+        }
 
         let resp = client
-            .put(url.as_str())
+            .request(method.clone(), url.as_str())
             .body(data)
             .headers(headers)
             .send()
