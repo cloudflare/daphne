@@ -14,6 +14,7 @@ use daphne::{
     DapVersion,
 };
 use daphne_service_utils::http_headers;
+use http::Method;
 use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
@@ -157,6 +158,10 @@ async fn leader_upload(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // Generate and upload a report.
     let report = t
@@ -170,9 +175,10 @@ async fn leader_upload(version: DapVersion) {
             version,
         )
         .unwrap();
-    t.leader_put_expect_ok(
+    t.leader_request_expect_ok(
         client,
         &path,
+        method,
         DapMediaType::Report,
         None,
         report.get_encoded_with_param(&version).unwrap(),
@@ -183,11 +189,13 @@ async fn leader_upload(version: DapVersion) {
     // Try uploading a report with the incorrect task ID.
     let bad_id = TaskId(rng.gen());
     let bad_path = TestRunner::upload_path_for_task(&bad_id);
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         None, // dap_auth_token
         &bad_path,
+        method,
         DapMediaType::Report,
+        None,
         t.task_config
             .vdaf
             .produce_report(
@@ -219,11 +227,13 @@ async fn leader_upload(version: DapVersion) {
         )
         .unwrap();
     report.encrypted_input_shares[0].config_id ^= 0xff;
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         None, // dap_auth_token
         &path,
+        method,
         DapMediaType::Report,
+        None,
         report.get_encoded_with_param(&version).unwrap(),
         400,
         "reportRejected",
@@ -232,11 +242,13 @@ async fn leader_upload(version: DapVersion) {
     .unwrap();
 
     // Try uploading a malformed report.
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         None, // dap_auth_token
         &path,
+        method,
         DapMediaType::Report,
+        None,
         b"junk data".to_vec(),
         400,
         "invalidMessage",
@@ -256,11 +268,13 @@ async fn leader_upload(version: DapVersion) {
             version,
         )
         .unwrap();
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         None, // dap_auth_token
         &path,
+        method,
         DapMediaType::Report,
+        None,
         report.get_encoded_with_param(&version).unwrap(),
         400,
         "reportTooLate",
@@ -281,7 +295,7 @@ async fn leader_upload(version: DapVersion) {
             .parse()
             .unwrap(),
     );
-    let builder = client.put(url.as_str());
+    let builder = client.request(method.clone(), url.as_str());
     let resp = builder
         .body(
             Report {
@@ -320,6 +334,56 @@ async fn leader_upload(version: DapVersion) {
 
 async_test_versions! { leader_upload }
 
+async fn leader_back_compat_upload(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
+    let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::POST,
+        DapVersion::Latest => &Method::PUT,
+    };
+
+    // Generate and upload a report.
+    let report = t
+        .task_config
+        .vdaf
+        .produce_report(
+            &hpke_config_list,
+            t.now,
+            &t.task_id,
+            DapMeasurement::U64(23),
+            version,
+        )
+        .unwrap();
+
+    let url = t.leader_url.join(&path).unwrap();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        DapMediaType::Report
+            .as_str_for_version(version)
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    let builder = client.request(method.clone(), url.as_str());
+    let resp = builder
+        .body(report.get_encoded_with_param(&version).unwrap())
+        .headers(headers)
+        .send()
+        .await
+        .unwrap_or_else(|_| panic!("route not implemented for version {version}"));
+    assert_eq!(
+        405,
+        resp.status(),
+        "unexpected response status: {:?}",
+        resp.text().await.unwrap()
+    );
+}
+
+async_test_versions! {leader_back_compat_upload}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "test_e2e"), ignore)]
 async fn leader_upload_taskprov() {
@@ -357,11 +421,16 @@ async fn leader_upload_taskprov() {
             version,
         )
         .unwrap();
-    t.leader_put_expect_ok(
+    t.leader_request_expect_ok(
         client,
         &format!("tasks/{}/reports", task_id.to_base64url()),
+        &http::Method::PUT,
         DapMediaType::Report,
-        Some(&taskprov_advertisement),
+        Some(
+            &taskprov_advertisement
+                .serialize_to_header_value(version)
+                .unwrap(),
+        ),
         report.get_encoded_with_param(&version).unwrap(),
     )
     .await
@@ -379,7 +448,7 @@ async fn leader_upload_taskprov() {
             version,
         )
         .unwrap();
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         None,
         // Generate a random ID.
@@ -387,7 +456,13 @@ async fn leader_upload_taskprov() {
             "tasks/{}/reports",
             TaskId(thread_rng().gen()).to_base64url()
         ),
+        &http::Method::PUT,
         DapMediaType::Report,
+        Some(
+            &taskprov_advertisement
+                .serialize_to_header_value(version)
+                .unwrap(),
+        ),
         report.get_encoded_with_param(&version).unwrap(),
         400,
         "unrecognizedTask",
@@ -402,14 +477,19 @@ async fn internal_leader_process(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let batch_interval = t.batch_interval();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // Upload a number of reports (a few more than the aggregation rate).
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size + 3 {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -473,6 +553,10 @@ async fn leader_collect_ok(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
@@ -482,9 +566,10 @@ async fn leader_collect_ok(version: DapVersion) {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
         time_min = min(time_min, now);
         time_max = max(time_max, now);
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -610,14 +695,19 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
     let batch_interval = t.batch_interval();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // The reports are uploaded ...
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -669,14 +759,19 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // A number of reports are uploaded, but not enough to meet the minimum batch requirement.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size - 1 {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -785,11 +880,13 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         Some(&t.collector_bearer_token),
         path,
+        &http::Method::PUT,
         DapMediaType::CollectionReq,
+        None,
         collect_req.get_encoded_with_param(&t.version).unwrap(),
         400,
         "batchInvalid",
@@ -807,11 +904,13 @@ async fn leader_collect_abort_invalid_batch_interval(version: DapVersion) {
         },
         agg_param: Vec::new(),
     };
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         Some(&t.collector_bearer_token),
         path,
+        &http::Method::PUT,
         DapMediaType::CollectionReq,
+        None,
         collect_req.get_encoded_with_param(&t.version).unwrap(),
         400,
         "batchInvalid",
@@ -828,14 +927,19 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
     let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -897,11 +1001,13 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
         agg_param: Vec::new(),
     };
     let path = &TestRunner::collect_path_for_task(&t.task_id);
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         Some(&t.collector_bearer_token),
         path,
+        &http::Method::PUT,
         DapMediaType::CollectionReq,
+        None,
         collect_req.get_encoded_with_param(&t.version).unwrap(),
         400,
         "batchOverlap",
@@ -919,12 +1025,17 @@ async fn fixed_size() {
     let path = t.upload_path();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // Clients: Upload reports.
     for _ in 0..t.task_config.min_batch_size {
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -1016,9 +1127,10 @@ async fn fixed_size() {
 
     // Clients: Upload reports.
     for _ in 0..2 {
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
             None,
             t.task_config
@@ -1066,11 +1178,13 @@ async fn fixed_size() {
     assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 
     // Collector: Try CollectReq with out-dated batch ID.
-    t.leader_put_expect_abort(
+    t.leader_request_expect_abort(
         client,
         Some(&t.collector_bearer_token),
         &TestRunner::collect_path_for_task(&t.task_id),
+        &http::Method::PUT,
         DapMediaType::CollectionReq,
+        None,
         CollectionReq {
             query: Query::FixedSizeByBatchId {
                 batch_id: prev_batch_id,
@@ -1113,17 +1227,26 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     .unwrap();
 
     let path = TestRunner::upload_path_for_task(&task_id);
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
 
     // The reports are uploaded in the background.
     let mut rng = thread_rng();
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov];
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_put_expect_ok(
+        t.leader_request_expect_ok(
             client,
             &path,
+            method,
             DapMediaType::Report,
-            Some(&taskprov_advertisement),
+            Some(
+                &taskprov_advertisement
+                    .serialize_to_header_value(version)
+                    .unwrap(),
+            ),
             task_config
                 .vdaf
                 .produce_report_with_extensions(
