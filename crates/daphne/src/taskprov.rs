@@ -375,7 +375,7 @@ impl DapTaskConfigNeedsOptIn {
             vdaf_verify_key,
             collector_hpke_config: collector_hpke_config.clone(),
             method: DapTaskConfigMethod::Taskprov {
-                info: Some(task_config.task_info),
+                info: task_config.task_info,
             },
         })
     }
@@ -466,10 +466,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
     type Error = DapError;
 
     fn try_from(task_config: &DapTaskConfig) -> Result<Self, DapError> {
-        let DapTaskConfigMethod::Taskprov {
-            info: Some(task_info),
-        } = &task_config.method
-        else {
+        let DapTaskConfigMethod::Taskprov { info: task_info } = &task_config.method else {
             return Err(fatal_error!(err = "task was not configured by taskprov"));
         };
 
