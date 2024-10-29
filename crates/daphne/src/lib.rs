@@ -503,7 +503,7 @@ pub enum DapTaskConfigMethod {
     /// draft-wang-ppm-dap-taskprov
     Taskprov {
         /// `TaskConfig.task_info`. If not set, then the task info is unknown.
-        info: Option<Vec<u8>>,
+        info: Vec<u8>,
     },
 
     #[default]
@@ -619,7 +619,6 @@ impl Default for DapTaskParameters {
 /// Per-task DAP parameters.
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
-#[serde(try_from = "ShadowDapTaskConfig")]
 pub struct DapTaskConfig {
     /// Same as [`DapTaskParameters`].
     pub version: DapVersion,
@@ -648,59 +647,6 @@ pub struct DapTaskConfig {
     /// Number of aggregate span shards for this task. See [`DapGlobalConfig`] for details.
     #[serde(default = "default_num_agg_span_shards")]
     pub num_agg_span_shards: NonZeroUsize,
-}
-
-#[derive(Deserialize, Serialize)]
-struct ShadowDapTaskConfig {
-    version: DapVersion,
-    leader_url: Url,
-    helper_url: Url,
-    time_precision: Duration,
-    min_batch_size: u64,
-    query: DapQueryConfig,
-    vdaf: VdafConfig,
-    not_after: Time,
-    not_before: Time,
-    vdaf_verify_key: VdafVerifyKey,
-    collector_hpke_config: HpkeConfig,
-    #[serde(default)]
-    method: DapTaskConfigMethod,
-
-    // Deprecated. Indicates that the task was configured via draft-wang-ppm-taskprov. This flag
-    // was replaced by `method`.
-    #[serde(default, rename = "taskprov")]
-    deprecated_taskprov: bool,
-
-    num_agg_span_shards: NonZeroUsize,
-}
-
-impl TryFrom<ShadowDapTaskConfig> for DapTaskConfig {
-    type Error = DapError;
-
-    fn try_from(shadow: ShadowDapTaskConfig) -> Result<Self, DapError> {
-        Ok(Self {
-            version: shadow.version,
-            leader_url: shadow.leader_url,
-            helper_url: shadow.helper_url,
-            time_precision: shadow.time_precision,
-            min_batch_size: shadow.min_batch_size,
-            query: shadow.query,
-            vdaf: shadow.vdaf,
-            not_before: shadow.not_before,
-            not_after: shadow.not_after,
-            vdaf_verify_key: shadow.vdaf_verify_key,
-            collector_hpke_config: shadow.collector_hpke_config,
-            method: match shadow.method {
-                // If the configuration method is unknown or unspecified, but the deprecated
-                // taskprov flag is set, then set the method to taskprov with unknown info.
-                DapTaskConfigMethod::Unknown if shadow.deprecated_taskprov => {
-                    DapTaskConfigMethod::Taskprov { info: None }
-                }
-                method => method,
-            },
-            num_agg_span_shards: shadow.num_agg_span_shards,
-        })
-    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -818,15 +764,7 @@ impl DapTaskConfig {
 
     /// Leader: Resolve taskprov advertisement to send in a request to the Helper.
     pub(crate) fn resolve_taskprove_advertisement(&self) -> Result<Option<String>, DapError> {
-        if let DapTaskConfigMethod::Taskprov { info } = &self.method {
-            if info.is_none() {
-                // The task config indicates that the configuration method was taskprov, but we
-                // don't have enough information to construct the advertisement.
-                return Err(fatal_error!(
-                    err = "not enough information to resolve taskprov advertisement"
-                ));
-            }
-
+        if let DapTaskConfigMethod::Taskprov { info: _ } = &self.method {
             let encoded_taskprov_config = messages::taskprov::TaskConfig::try_from(self)?
                 .get_encoded_with_param(&self.version)
                 .map_err(DapError::encoding)?;
