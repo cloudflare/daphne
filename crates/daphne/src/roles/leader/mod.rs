@@ -12,7 +12,7 @@ use rand::{thread_rng, Rng};
 use tracing::debug;
 use url::Url;
 
-use super::{aggregator::MergeAggShareError, check_batch, resolve_taskprov, DapAggregator};
+use super::{aggregator::MergeAggShareError, check_batch, DapAggregator};
 use crate::{
     constants::DapMediaType,
     error::DapAbort,
@@ -23,6 +23,7 @@ use crate::{
         PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
+    roles::resolve_task_config,
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
     DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
 };
@@ -182,18 +183,7 @@ pub async fn handle_upload_req<A: DapLeader>(
     let report = &req.payload;
     debug!("report id is {}", report.report_metadata.id);
 
-    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
-        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
-    }
-    let task_config = aggregator
-        .get_task_config_for(&task_id)
-        .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
-
-    // Check whether the DAP version in the request matches the task config.
-    if task_config.as_ref().version != req.version {
-        return Err(DapAbort::version_mismatch(req.version, task_config.as_ref().version).into());
-    }
+    let task_config = resolve_task_config(aggregator, &req.meta).await?;
 
     if report.encrypted_input_shares.len() != 2 {
         return Err(DapAbort::InvalidMessage {
@@ -254,15 +244,7 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     let task_id = req.task_id;
     debug!("collect for task {task_id}");
 
-    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
-        resolve_taskprov(aggregator, &task_id, req, taskprov_config).await?;
-    }
-
-    let wrapped_task_config = aggregator
-        .get_task_config_for(&task_id)
-        .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
-    let task_config = wrapped_task_config.as_ref();
+    let task_config = resolve_task_config(aggregator, &req.meta).await?;
 
     let coll_job_req = &req.payload;
 
@@ -270,16 +252,11 @@ pub async fn handle_coll_job_req<A: DapLeader>(
         DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &coll_job_req.agg_param)
             .map_err(|e| DapAbort::from_codec_error(e, task_id))?;
 
-    // Check whether the DAP version in the request matches the task config.
-    if task_config.version != req.version {
-        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-    }
-
     // Ensure the batch boundaries are valid and that the batch doesn't overlap with previosuly
     // collected batches.
     check_batch(
         aggregator,
-        task_config,
+        &task_config,
         &task_id,
         &coll_job_req.query,
         &coll_job_req.agg_param,

@@ -12,7 +12,6 @@ use crate::{
     taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
 };
 
-use aggregator::TaskprovConfig;
 pub use aggregator::{DapAggregator, DapReportInitializer};
 pub use helper::DapHelper;
 pub use leader::DapLeader;
@@ -91,33 +90,37 @@ async fn check_batch(
     Ok(())
 }
 
-async fn resolve_taskprov(
+async fn resolve_task_config(
     agg: &impl DapAggregator,
-    task_id: &TaskId,
     req: &DapRequestMeta,
-    taskprov_config: TaskprovConfig<'_>,
-) -> Result<(), DapError> {
-    if agg.get_task_config_for(task_id).await?.is_some() {
-        // Task already configured, so nothing to do.
-        return Ok(());
+) -> Result<DapTaskConfig, DapError> {
+    let task_config = if let Some(config) = agg.get_task_config_for(&req.task_id).await? {
+        config
+    } else {
+        let taskprov_config = agg.get_taskprov_config();
+        let (Some(taskprov_msg), Some(taskprov_config)) = (&req.taskprov, taskprov_config) else {
+            return Err(DapAbort::UnrecognizedTask {
+                task_id: req.task_id,
+            }
+            .into());
+        };
+        let task_config = taskprov::resolve_advertised_task_config(
+            taskprov_msg,
+            req.version,
+            taskprov_config,
+            &req.task_id,
+        )?;
+        let task_config = agg.taskprov_opt_in(&req.task_id, task_config).await?;
+        agg.taskprov_put(&req.task_id, task_config.clone()).await?;
+        task_config
+    };
+
+    // Check whether the DAP version in the request matches the task config.
+    if task_config.version != req.version {
+        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
     }
 
-    let Some(taskprov_msg) = &req.taskprov else {
-        // No task configuration advertised, so nothing to do.
-        return Ok(());
-    };
-    let task_config = taskprov::resolve_advertised_task_config(
-        taskprov_msg,
-        req.version,
-        taskprov_config,
-        task_id,
-    )?;
-
-    // This is the opt-in / opt-out decision point.
-    let task_config = agg.taskprov_opt_in(task_id, task_config).await?;
-
-    agg.taskprov_put(req, task_config).await?;
-    Ok(())
+    Ok(task_config)
 }
 
 #[cfg(test)]

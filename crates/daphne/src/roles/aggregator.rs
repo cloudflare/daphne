@@ -15,7 +15,7 @@ use crate::{
     metrics::{DaphneMetrics, DaphneRequestType},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
+    DapResponse, DapTaskConfig, DapVersion,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -54,11 +54,6 @@ pub struct TaskprovConfig<'s> {
 /// DAP Aggregator functionality.
 #[async_trait]
 pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
-    /// A refernce to a task configuration stored by the Aggregator.
-    type WrappedDapTaskConfig<'a>: AsRef<DapTaskConfig> + Send
-    where
-        Self: 'a;
-
     /// Look up the DAP global configuration.
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError>;
 
@@ -87,7 +82,7 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
     /// nothing.
     async fn taskprov_put(
         &self,
-        req: &DapRequestMeta,
+        task_id: &TaskId,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError>;
 
@@ -95,7 +90,7 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
     async fn get_task_config_for<'req>(
         &'req self,
         task_id: &'req TaskId,
-    ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError>;
+    ) -> Result<Option<DapTaskConfig>, DapError>;
 
     /// Get the current time (number of seconds since the beginning of UNIX time).
     fn get_current_time(&self) -> Time;

@@ -754,11 +754,6 @@ impl DapReportInitializer for InMemoryAggregator {
 
 #[async_trait]
 impl DapAggregator for InMemoryAggregator {
-    // The lifetimes on the traits ensure that we can return a reference to a task config stored by
-    // the DapAggregator. (See DaphneWorkerConfig for an example.) For simplicity, InMemoryAggregator
-    // clones the task config as needed.
-    type WrappedDapTaskConfig<'a> = DapTaskConfig;
-
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
         Ok(self.global_config.clone())
     }
@@ -784,18 +779,18 @@ impl DapAggregator for InMemoryAggregator {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequestMeta,
+        task_id: &TaskId,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
         let mut tasks = self.tasks.lock().expect("tasks: lock failed");
-        tasks.deref_mut().insert(req.task_id, task_config);
+        tasks.deref_mut().insert(*task_id, task_config);
         Ok(())
     }
 
     async fn get_task_config_for<'req>(
         &'req self,
         task_id: &'req TaskId,
-    ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
+    ) -> Result<Option<DapTaskConfig>, DapError> {
         let tasks = self.tasks.lock().expect("tasks: lock failed");
         Ok(tasks.get(task_id).cloned())
     }

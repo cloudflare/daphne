@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Once};
 use async_trait::async_trait;
 use prio::codec::{Encode, ParameterizedDecode};
 
-use super::{check_batch, resolve_taskprov, DapAggregator};
+use super::{check_batch, resolve_task_config, DapAggregator};
 use crate::{
     constants::DapMediaType,
     error::DapAbort,
@@ -36,26 +36,12 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
 
     metrics.agg_job_observe_batch_size(req.payload.prep_inits.len());
 
-    // taskprov: Resolve the task config to use for the request.
-    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
-        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
-    }
-
-    let wrapped_task_config = aggregator
-        .get_task_config_for(&task_id)
-        .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
-    let task_config = wrapped_task_config.as_ref();
-
-    // Check whether the DAP version in the request matches the task config.
-    if task_config.version != req.version {
-        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-    }
+    let task_config = resolve_task_config(aggregator, &req.meta).await?;
 
     // Ensure we know which batch the request pertains to.
     check_part_batch(
         &task_id,
-        task_config,
+        &task_config,
         &req.payload.part_batch_sel,
         &req.payload.agg_param,
     )?;
@@ -76,7 +62,7 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
         let agg_job_resp = finish_agg_job_and_aggregate(
             aggregator,
             &task_id,
-            task_config,
+            &task_config,
             &part_batch_sel,
             &initialized_reports,
             metrics,
@@ -90,7 +76,7 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
 
     aggregator.audit_log().on_aggregation_job(
         &task_id,
-        task_config,
+        &task_config,
         agg_job_resp.transitions.len() as u64,
         0, /* vdaf step */
     );
@@ -114,20 +100,7 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     let metrics = aggregator.metrics();
     let task_id = req.task_id;
 
-    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
-        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
-    }
-
-    let wrapped_task_config = aggregator
-        .get_task_config_for(&task_id)
-        .await?
-        .ok_or(DapAbort::UnrecognizedTask { task_id })?;
-    let task_config = wrapped_task_config.as_ref();
-
-    // Check whether the DAP version in the request matches the task config.
-    if task_config.version != req.version {
-        return Err(DapAbort::version_mismatch(req.version, task_config.version).into());
-    }
+    let task_config = resolve_task_config(aggregator, &req.meta).await?;
 
     let agg_param =
         DapAggregationParam::get_decoded_with_param(&task_config.vdaf, &req.payload.agg_param)
@@ -137,7 +110,7 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     // collected batches.
     check_batch(
         aggregator,
-        task_config,
+        &task_config,
         &task_id,
         &req.payload.batch_sel.clone().into(),
         &req.payload.agg_param,
