@@ -11,8 +11,8 @@ use crate::{
     messages::{Base64Encode, Query, TaskId, Time},
     taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
 };
-use tracing::warn;
 
+use aggregator::TaskprovConfig;
 pub use aggregator::{DapAggregator, DapReportInitializer};
 pub use helper::DapHelper;
 pub use leader::DapLeader;
@@ -95,38 +95,26 @@ async fn resolve_taskprov(
     agg: &impl DapAggregator,
     task_id: &TaskId,
     req: &DapRequestMeta,
-    global_config: &DapGlobalConfig,
+    taskprov_config: TaskprovConfig<'_>,
 ) -> Result<(), DapError> {
     if agg.get_task_config_for(task_id).await?.is_some() {
         // Task already configured, so nothing to do.
         return Ok(());
     }
 
-    let Some(vdaf_verify_key_init) = agg.taskprov_vdaf_verify_key_init() else {
-        warn!("Taskprov disabled due to missing VDAF verification key initializer.");
-        return Ok(());
-    };
-
-    let Some(collector_hpke_config) = agg.taskprov_collector_hpke_config() else {
-        warn!("Taskprov disabled due to missing Collector HPKE configuration.");
-        return Ok(());
-    };
-
-    let Some(task_config) = taskprov::resolve_advertised_task_config(
-        req,
-        vdaf_verify_key_init,
-        collector_hpke_config,
-        task_id,
-    )?
-    else {
+    let Some(taskprov_msg) = &req.taskprov else {
         // No task configuration advertised, so nothing to do.
         return Ok(());
     };
+    let task_config = taskprov::resolve_advertised_task_config(
+        taskprov_msg,
+        req.version,
+        taskprov_config,
+        task_id,
+    )?;
 
     // This is the opt-in / opt-out decision point.
-    let task_config = agg
-        .taskprov_opt_in(task_id, task_config, global_config)
-        .await?;
+    let task_config = agg.taskprov_opt_in(task_id, task_config).await?;
 
     agg.taskprov_put(req, task_config).await?;
     Ok(())
@@ -194,7 +182,6 @@ mod test {
                 min_batch_interval_start: 259_200,
                 max_batch_interval_end: 259_200,
                 supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-                allow_taskprov: true,
                 default_num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
             };
 
@@ -1433,8 +1420,7 @@ mod test {
         .to_config_with_taskprov(
             b"cool task".to_vec(),
             t.now,
-            t.leader.taskprov_vdaf_verify_key_init().unwrap(),
-            t.leader.taskprov_collector_hpke_config().unwrap(),
+            t.leader.get_taskprov_config().unwrap(),
         )
         .unwrap();
 

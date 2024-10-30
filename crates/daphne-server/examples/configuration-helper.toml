@@ -18,7 +18,6 @@ supported_hpke_kems = ["x25519_hkdf_sha256"]
 default_version = "v09"
 report_storage_epoch_duration = 300000
 base_url = "http://127.0.0.1:8788"
-allow_taskprov = true
 default_num_agg_span_shards = 4
 
 [service.taskprov]

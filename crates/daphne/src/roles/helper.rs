@@ -31,15 +31,14 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
     req: DapRequest<AggregationJobInitReq, resource::AggregationJobId>,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
-    let global_config = aggregator.get_global_config().await?;
     let task_id = req.task_id;
     let metrics = aggregator.metrics();
 
     metrics.agg_job_observe_batch_size(req.payload.prep_inits.len());
 
     // taskprov: Resolve the task config to use for the request.
-    if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, &task_id, &req, &global_config).await?;
+    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
+        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
     }
 
     let wrapped_task_config = aggregator
@@ -115,8 +114,8 @@ pub async fn handle_agg_share_req<'req, A: DapHelper>(
     let metrics = aggregator.metrics();
     let task_id = req.task_id;
 
-    if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, &task_id, &req, &global_config).await?;
+    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
+        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
     }
 
     let wrapped_task_config = aggregator

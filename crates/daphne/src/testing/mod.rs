@@ -19,7 +19,7 @@ use crate::{
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     roles::{
-        aggregator::MergeAggShareError,
+        aggregator::{MergeAggShareError, TaskprovConfig},
         helper,
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
         DapAggregator, DapHelper, DapLeader, DapReportInitializer,
@@ -763,19 +763,17 @@ impl DapAggregator for InMemoryAggregator {
         Ok(self.global_config.clone())
     }
 
-    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
-        Some(&self.taskprov_vdaf_verify_key_init)
-    }
-
-    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig> {
-        Some(&self.collector_hpke_config)
+    fn get_taskprov_config(&self) -> Option<TaskprovConfig<'_>> {
+        Some(TaskprovConfig {
+            hpke_collector_config: &self.collector_hpke_config,
+            vdaf_verify_key_init: &self.taskprov_vdaf_verify_key_init,
+        })
     }
 
     async fn taskprov_opt_in(
         &self,
         _task_id: &TaskId,
         task_config: taskprov::DapTaskConfigNeedsOptIn,
-        _global_config: &DapGlobalConfig,
     ) -> Result<DapTaskConfig, DapError> {
         // Always opt-in with four shards.
         Ok(task_config.into_opted_in(&taskprov::OptInParam {

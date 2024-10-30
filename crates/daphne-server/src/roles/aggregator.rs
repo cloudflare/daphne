@@ -11,7 +11,10 @@ use daphne::{
     hpke::{self, HpkeConfig, HpkeProvider, HpkeReceiverConfig},
     messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time},
     metrics::DaphneMetrics,
-    roles::{aggregator::MergeAggShareError, DapAggregator, DapReportInitializer},
+    roles::{
+        aggregator::{MergeAggShareError, TaskprovConfig},
+        DapAggregator, DapReportInitializer,
+    },
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
     DapRequestMeta, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
     EarlyReportStateInitialized,
@@ -172,25 +175,20 @@ impl DapAggregator for crate::App {
         Ok(global_config)
     }
 
-    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]> {
+    fn get_taskprov_config(&self) -> Option<TaskprovConfig<'_>> {
         self.service_config
             .taskprov
             .as_ref()
-            .map(|c| &c.vdaf_verify_key_init)
-    }
-
-    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig> {
-        self.service_config
-            .taskprov
-            .as_ref()
-            .map(|c| &c.hpke_collector_config)
+            .map(|t| TaskprovConfig {
+                hpke_collector_config: &t.hpke_collector_config,
+                vdaf_verify_key_init: &t.vdaf_verify_key_init,
+            })
     }
 
     async fn taskprov_opt_in(
         &self,
         task_id: &TaskId,
         task_config: taskprov::DapTaskConfigNeedsOptIn,
-        global_config: &DapGlobalConfig,
     ) -> Result<DapTaskConfig, DapError> {
         if let Some(param) = self
             .kv()
@@ -200,6 +198,7 @@ impl DapAggregator for crate::App {
         {
             Ok(task_config.into_opted_in(&param))
         } else {
+            let global_config = self.get_global_config().await?;
             let param = taskprov::OptInParam {
                 not_before: self.get_current_time(),
                 num_agg_span_shards: global_config.default_num_agg_span_shards,

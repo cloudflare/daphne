@@ -175,7 +175,6 @@ pub async fn handle_upload_req<A: DapLeader>(
     aggregator: &A,
     req: DapRequest<Report>,
 ) -> Result<(), DapError> {
-    let global_config = aggregator.get_global_config().await?;
     let metrics = aggregator.metrics();
     let task_id = req.task_id;
     debug!("upload for task {task_id}");
@@ -183,8 +182,8 @@ pub async fn handle_upload_req<A: DapLeader>(
     let report = &req.payload;
     debug!("report id is {}", report.report_metadata.id);
 
-    if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, &task_id, &req, &global_config).await?;
+    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
+        resolve_taskprov(aggregator, &task_id, &req, taskprov_config).await?;
     }
     let task_config = aggregator
         .get_task_config_for(&task_id)
@@ -255,8 +254,8 @@ pub async fn handle_coll_job_req<A: DapLeader>(
     let task_id = req.task_id;
     debug!("collect for task {task_id}");
 
-    if global_config.allow_taskprov {
-        resolve_taskprov(aggregator, &task_id, req, &global_config).await?;
+    if let Some(taskprov_config) = aggregator.get_taskprov_config() {
+        resolve_taskprov(aggregator, &task_id, req, taskprov_config).await?;
     }
 
     let wrapped_task_config = aggregator

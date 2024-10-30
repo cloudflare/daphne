@@ -64,7 +64,6 @@ mod storage_proxy_connection;
 ///     min_batch_interval_start: 259_200,
 ///     max_batch_interval_end: 259_200,
 ///     supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-///     allow_taskprov: false,
 ///     default_num_agg_span_shards: NonZeroUsize::new(2).unwrap(),
 /// };
 /// let service_config = DaphneServiceConfig {
@@ -132,7 +131,7 @@ impl router::DaphneService for App {
             .taskprov
             .as_ref()
             // we only use taskprov auth if it's allowed by config and if the request is using taskprov
-            .filter(|_| self.service_config.global.allow_taskprov && is_taskprov)
+            .filter(|_| self.service_config.taskprov.is_some() && is_taskprov)
         {
             match (&taskprov.peer_auth, sender) {
                 (PeerBearerToken::Leader { expected_token }, DapSender::Leader)
