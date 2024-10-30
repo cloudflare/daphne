@@ -94,7 +94,6 @@ pub use messages::request::{DapRequest, DapRequestMeta, DapResponse};
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
-use roles::aggregator::TaskprovConfig;
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -546,7 +545,7 @@ impl DapTaskParameters {
         &self,
         task_info: Vec<u8>,
         now: Time,
-        taskprov_config: TaskprovConfig<'_>,
+        taskprov_config: roles::aggregator::TaskprovConfig<'_>,
     ) -> Result<(DapTaskConfig, TaskId, String), DapError> {
         let task_config = messages::taskprov::TaskConfig {
             task_info,

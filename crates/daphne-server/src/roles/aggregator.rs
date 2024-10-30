@@ -16,8 +16,7 @@ use daphne::{
         DapAggregator, DapReportInitializer,
     },
     taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapRequestMeta, DapTaskConfig, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized,
+    DapTaskConfig, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
 use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
@@ -146,10 +145,6 @@ impl DapAggregator for crate::App {
         Ok(())
     }
 
-    type WrappedDapTaskConfig<'a> = DapTaskConfig
-    where
-        Self: 'a;
-
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
         let mut global_config = self.service_config.global.clone();
 
@@ -225,13 +220,12 @@ impl DapAggregator for crate::App {
 
     async fn taskprov_put(
         &self,
-        req: &DapRequestMeta,
+        task_id: &TaskId,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
-        let task_id = &req.task_id;
         let expiration_time = task_config.not_after;
 
-        if self.service_config.role.is_leader() || req.taskprov.is_none() {
+        if self.service_config.role.is_leader() {
             self.kv()
                 .put_with_expiration::<kv::prefix::TaskConfig>(
                     task_id,
@@ -251,7 +245,7 @@ impl DapAggregator for crate::App {
     async fn get_task_config_for<'req>(
         &'req self,
         task_id: &'req TaskId,
-    ) -> Result<Option<Self::WrappedDapTaskConfig<'req>>, DapError> {
+    ) -> Result<Option<DapTaskConfig>, DapError> {
         self.kv()
             .get_cloned::<kv::prefix::TaskConfig>(task_id, &KvGetOptions::default())
             .await
