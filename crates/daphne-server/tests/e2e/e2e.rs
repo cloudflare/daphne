@@ -339,8 +339,10 @@ async fn leader_upload_taskprov() {
     .to_config_with_taskprov(
         b"cool task".to_vec(),
         t.now,
-        &t.taskprov_vdaf_verify_key_init,
-        &t.taskprov_collector_hpke_receiver.config,
+        daphne::roles::aggregator::TaskprovConfig {
+            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
+            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
+        },
     )
     .unwrap();
 
@@ -1103,8 +1105,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     .to_config_with_taskprov(
         b"cool task".to_vec(),
         t.now,
-        &t.taskprov_vdaf_verify_key_init,
-        &t.taskprov_collector_hpke_receiver.config,
+        daphne::roles::aggregator::TaskprovConfig {
+            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
+            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
+        },
     )
     .unwrap();
 

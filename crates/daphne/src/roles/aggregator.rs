@@ -43,6 +43,14 @@ pub enum MergeAggShareError {
     Other(DapError),
 }
 
+pub struct TaskprovConfig<'s> {
+    /// HPKE collector configuration for all taskprov tasks.
+    pub hpke_collector_config: &'s HpkeConfig,
+
+    /// VDAF verify key init secret, used to generate the VDAF verification key for a taskprov task.
+    pub vdaf_verify_key_init: &'s [u8; 32],
+}
+
 /// DAP Aggregator functionality.
 #[async_trait]
 pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
@@ -54,13 +62,9 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
     /// Look up the DAP global configuration.
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError>;
 
-    /// taskprov: The VDAF verification key initializer. Used to derive the VDAF verify key for all
-    /// tasks configured by this extension.
-    fn taskprov_vdaf_verify_key_init(&self) -> Option<&[u8; 32]>;
-
-    /// taskprov: The Collector's HPKE configuration used for all tasks configured by this
-    /// extension.
-    fn taskprov_collector_hpke_config(&self) -> Option<&HpkeConfig>;
+    /// Get the taskprov configuration. This method also controls whether taskprov is enabled.
+    /// Returning [`None`] disables taskprov.
+    fn get_taskprov_config(&self) -> Option<TaskprovConfig<'_>>;
 
     /// taskprov: Complete the opt-in process.
     ///
@@ -76,7 +80,6 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
         &self,
         task_id: &TaskId,
         task_config: taskprov::DapTaskConfigNeedsOptIn,
-        global_config: &DapGlobalConfig,
     ) -> Result<DapTaskConfig, DapError>;
 
     /// taskprov: Configure a task. This is called after opting in. If successful, the next call to

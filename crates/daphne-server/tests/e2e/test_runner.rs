@@ -103,7 +103,6 @@ impl TestRunner {
             min_batch_interval_start: 259_200,
             max_batch_interval_end: 259_200,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-            allow_taskprov: true,
             default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         };
 

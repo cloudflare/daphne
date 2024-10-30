@@ -393,8 +393,10 @@ impl Test {
         .to_config_with_taskprov(
             b"cool task".to_vec(),
             now.0,
-            &self.vdaf_verify_init,
-            &fake_collector_hpke_receiver_config.config,
+            daphne::roles::aggregator::TaskprovConfig {
+                hpke_collector_config: &fake_collector_hpke_receiver_config.config,
+                vdaf_verify_key_init: &self.vdaf_verify_init,
+            },
         )?;
 
         Ok((

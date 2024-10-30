@@ -94,6 +94,7 @@ pub use messages::request::{DapRequest, DapRequestMeta, DapResponse};
 pub use protocol::aggregator::{
     EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
 };
+use roles::aggregator::TaskprovConfig;
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -156,10 +157,6 @@ pub struct DapGlobalConfig {
     /// receiver config.
     pub supported_hpke_kems: Vec<HpkeKemId>,
 
-    /// draft-wang-ppm-dap-taskprov: Indicates if the taskprov extension is enabled.
-    #[serde(default)]
-    pub allow_taskprov: bool,
-
     /// Default number of aggregate span shards for a task.
     ///
     /// At the end of an aggregation job, each Aggregator produces a [`DapAggregateSpan`] that maps
@@ -195,7 +192,6 @@ impl Default for DapGlobalConfig {
             min_batch_interval_start: 60,
             max_batch_interval_end: 60,
             supported_hpke_kems: vec![HpkeKemId::X25519HkdfSha256],
-            allow_taskprov: false,
             default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         }
     }
@@ -550,10 +546,9 @@ impl DapTaskParameters {
         &self,
         task_info: Vec<u8>,
         now: Time,
-        vdaf_verify_key_init: &[u8; 32],
-        collector_hpke_config: &HpkeConfig,
+        taskprov_config: TaskprovConfig<'_>,
     ) -> Result<(DapTaskConfig, TaskId, String), DapError> {
-        let taskprov_config = messages::taskprov::TaskConfig {
+        let task_config = messages::taskprov::TaskConfig {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
                 bytes: self.leader_url.to_string().into_bytes(),
@@ -574,7 +569,7 @@ impl DapTaskParameters {
             },
         };
 
-        let encoded_taskprov_config = taskprov_config
+        let encoded_taskprov_config = task_config
             .get_encoded_with_param(&self.version)
             .map_err(DapError::encoding)?;
         let task_id = taskprov::compute_task_id(&encoded_taskprov_config);
@@ -583,9 +578,8 @@ impl DapTaskParameters {
         let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov(
             self.version,
             &task_id,
+            task_config,
             taskprov_config,
-            vdaf_verify_key_init,
-            collector_hpke_config,
         )
         .unwrap()
         .into_opted_in(&taskprov::OptInParam {
