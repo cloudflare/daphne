@@ -153,7 +153,7 @@ impl crate::App {
                 .map_err(|e| fatal_error!(err = ?e, "failed to construct content-type header"))?,
         );
 
-        let bearer_token = if meta.taskprov.is_some() {
+        let bearer_token = if meta.taskprov_advertisement.is_some() {
             if let Some(bearer_token) = self
                 .service_config
                 .taskprov
@@ -191,7 +191,7 @@ impl crate::App {
                 .map_err(|e| fatal_error!(err = ?e, "failed to construct authentication header"))?,
         );
 
-        if let Some(taskprov_advertisement) = meta.taskprov.as_deref() {
+        if let Some(taskprov_advertisement) = meta.taskprov_advertisement.as_deref() {
             headers.insert(
                 HeaderName::from_static(http_headers::DAP_TASKPROV),
                 HeaderValue::from_str(taskprov_advertisement).map_err(

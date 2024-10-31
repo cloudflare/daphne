@@ -36,7 +36,7 @@ pub struct DapRequestMeta {
     pub task_id: TaskId,
 
     /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
-    pub taskprov: Option<String>,
+    pub taskprov_advertisement: Option<String>,
 }
 
 impl DapRequestMeta {

@@ -547,7 +547,7 @@ impl DapTaskParameters {
         now: Time,
         taskprov_config: roles::aggregator::TaskprovConfig<'_>,
     ) -> Result<(DapTaskConfig, TaskId, String), DapError> {
-        let task_config = messages::taskprov::TaskConfig {
+        let taskprov_advertisement = messages::taskprov::TaskprovAdvertisement {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
                 bytes: self.leader_url.to_string().into_bytes(),
@@ -568,7 +568,7 @@ impl DapTaskParameters {
             },
         };
 
-        let encoded_taskprov_config = task_config
+        let encoded_taskprov_config = taskprov_advertisement
             .get_encoded_with_param(&self.version)
             .map_err(DapError::encoding)?;
         let task_id = taskprov::compute_task_id(&encoded_taskprov_config);
@@ -577,7 +577,7 @@ impl DapTaskParameters {
         let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov(
             self.version,
             &task_id,
-            task_config,
+            taskprov_advertisement,
             taskprov_config,
         )
         .unwrap()
@@ -758,9 +758,10 @@ impl DapTaskConfig {
     /// Leader: Resolve taskprov advertisement to send in a request to the Helper.
     pub(crate) fn resolve_taskprove_advertisement(&self) -> Result<Option<String>, DapError> {
         if let DapTaskConfigMethod::Taskprov { info: _ } = &self.method {
-            let encoded_taskprov_config = messages::taskprov::TaskConfig::try_from(self)?
-                .get_encoded_with_param(&self.version)
-                .map_err(DapError::encoding)?;
+            let encoded_taskprov_config =
+                messages::taskprov::TaskprovAdvertisement::try_from(self)?
+                    .get_encoded_with_param(&self.version)
+                    .map_err(DapError::encoding)?;
             Ok(Some(encode_base64url(encoded_taskprov_config)))
         } else {
             Ok(None)

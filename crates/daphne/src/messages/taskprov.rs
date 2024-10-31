@@ -408,7 +408,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
 
 /// A DAP task configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct TaskConfig {
+pub struct TaskprovAdvertisement {
     pub task_info: Vec<u8>,
     pub leader_url: UrlBytes,
     pub helper_url: UrlBytes,
@@ -417,7 +417,7 @@ pub struct TaskConfig {
     pub vdaf_config: VdafConfig,
 }
 
-impl ParameterizedEncode<DapVersion> for TaskConfig {
+impl ParameterizedEncode<DapVersion> for TaskprovAdvertisement {
     fn encode_with_param(
         &self,
         version: &DapVersion,
@@ -437,7 +437,7 @@ impl ParameterizedEncode<DapVersion> for TaskConfig {
     }
 }
 
-impl ParameterizedDecode<DapVersion> for TaskConfig {
+impl ParameterizedDecode<DapVersion> for TaskprovAdvertisement {
     fn decode_with_param(
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
@@ -463,7 +463,7 @@ impl ParameterizedDecode<DapVersion> for TaskConfig {
             VdafConfig::decode_with_param(&(version, len), inner)
         })?;
 
-        Ok(TaskConfig {
+        Ok(TaskprovAdvertisement {
             task_info,
             leader_url,
             helper_url,
@@ -481,7 +481,7 @@ mod tests {
     use super::*;
 
     fn read_task_config(version: DapVersion) {
-        let want = TaskConfig {
+        let want = TaskprovAdvertisement {
             task_info: b"this is a cool task!".to_vec(),
             leader_url: UrlBytes {
                 bytes: b"http://exmaple.com/v02".to_vec(),
@@ -512,7 +512,8 @@ mod tests {
             188, 79, 242, 5, 57, 0, 0, 0, 55, 2, 0, 0, 0, 57, 0, 0, 0, 5, 104, 191, 187, 40, 0, 11,
             0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
         ];
-        let got = TaskConfig::get_decoded_with_param(&version, &task_config_bytes).unwrap();
+        let got =
+            TaskprovAdvertisement::get_decoded_with_param(&version, &task_config_bytes).unwrap();
         assert_eq!(got, want);
     }
 

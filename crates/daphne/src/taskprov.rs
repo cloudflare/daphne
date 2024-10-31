@@ -13,7 +13,7 @@ use crate::{
     hpke::HpkeConfig,
     messages::{
         self, decode_base64url_vec,
-        taskprov::{QueryConfigVar, TaskConfig, VdafTypeVar},
+        taskprov::{QueryConfigVar, TaskprovAdvertisement, VdafTypeVar},
         Duration, TaskId, Time,
     },
     roles::aggregator::TaskprovConfig,
@@ -126,11 +126,11 @@ pub(crate) fn resolve_advertised_task_config(
 
 /// Check for a taskprov extension in the report, and return it if found.
 fn get_taskprov_task_config(
-    taskprov_msg: &str,
+    taskprov_advertisement: &str,
     task_id: &TaskId,
     version: DapVersion,
-) -> Result<TaskConfig, DapAbort> {
-    let taskprov_data = decode_base64url_vec(taskprov_msg).ok_or_else(|| {
+) -> Result<TaskprovAdvertisement, DapAbort> {
+    let taskprov_data = decode_base64url_vec(taskprov_advertisement).ok_or_else(|| {
         DapAbort::BadRequest(
             r#"Invalid advertisement in "dap-taskprov" header: base64url parsing failed"#
                 .to_string(),
@@ -143,8 +143,9 @@ fn get_taskprov_task_config(
     }
 
     // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
-    let task_config = TaskConfig::get_decoded_with_param(&version, taskprov_data.as_ref())
-        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+    let task_config =
+        TaskprovAdvertisement::get_decoded_with_param(&version, taskprov_data.as_ref())
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     Ok(task_config)
 }
@@ -338,7 +339,7 @@ impl DapTaskConfigNeedsOptIn {
     pub(crate) fn try_from_taskprov(
         version: DapVersion,
         task_id: &TaskId,
-        task_config: TaskConfig,
+        task_config: TaskprovAdvertisement,
         taskprov_config: TaskprovConfig<'_>,
     ) -> Result<Self, DapAbort> {
         // Only one query per batch is currently supported.
@@ -458,7 +459,7 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
     }
 }
 
-impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskConfig {
+impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
     type Error = DapError;
 
     fn try_from(task_config: &DapTaskConfig) -> Result<Self, DapError> {
@@ -510,7 +511,7 @@ mod test {
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
     fn try_from_taskprov(version: DapVersion) {
-        let taskprov_config = messages::taskprov::TaskConfig {
+        let taskprov_config = messages::taskprov::TaskprovAdvertisement {
             task_info: "cool task".as_bytes().to_vec(),
             leader_url: messages::taskprov::UrlBytes {
                 bytes: b"https://leader.com/".to_vec(),
@@ -551,7 +552,7 @@ mod test {
         });
 
         assert_eq!(
-            messages::taskprov::TaskConfig::try_from(&task_config).unwrap(),
+            messages::taskprov::TaskprovAdvertisement::try_from(&task_config).unwrap(),
             taskprov_config
         );
     }
@@ -590,7 +591,7 @@ mod test {
     fn resolve_advertised_task_config_expect_abort_unrecognized_vdaf(version: DapVersion) {
         // Create a request for a taskprov task with an unrecognized VDAF.
         let (req, task_id) = {
-            let taskprov_task_config_bytes = messages::taskprov::TaskConfig {
+            let taskprov_task_config_bytes = messages::taskprov::TaskprovAdvertisement {
                 task_info: "cool task".as_bytes().to_vec(),
                 leader_url: messages::taskprov::UrlBytes {
                     bytes: b"https://leader.com/".to_vec(),
@@ -622,7 +623,7 @@ mod test {
             let req = DapRequestMeta {
                 version,
                 task_id,
-                taskprov: Some(taskprov_task_config_base64url),
+                taskprov_advertisement: Some(taskprov_task_config_base64url),
                 media_type: None, // ignored by test
             };
 
@@ -635,7 +636,7 @@ mod test {
 
         assert_matches::assert_matches!(
             resolve_advertised_task_config(
-                req.taskprov.as_deref().unwrap(),
+                req.taskprov_advertisement.as_deref().unwrap(),
                 req.version,
                 crate::roles::aggregator::TaskprovConfig {
                     vdaf_verify_key_init: &[0; 32],
@@ -652,7 +653,7 @@ mod test {
     fn resolve_advertised_task_config_ignore_unimplemented_dp_ocnfig(version: DapVersion) {
         // Create a request for a taskprov task with an unrecognized DP mechanism.
         let (req, task_id) = {
-            let taskprov_task_config_bytes = messages::taskprov::TaskConfig {
+            let taskprov_task_config_bytes = messages::taskprov::TaskprovAdvertisement {
                 task_info: "cool task".as_bytes().to_vec(),
                 leader_url: messages::taskprov::UrlBytes {
                     bytes: b"https://leader.com/".to_vec(),
@@ -683,7 +684,7 @@ mod test {
             let req = crate::DapRequestMeta {
                 version,
                 task_id,
-                taskprov: Some(taskprov_task_config_base64url),
+                taskprov_advertisement: Some(taskprov_task_config_base64url),
                 media_type: None,
             };
 
@@ -695,7 +696,7 @@ mod test {
             .config;
 
         let _ = resolve_advertised_task_config(
-            req.taskprov.as_deref().unwrap(),
+            req.taskprov_advertisement.as_deref().unwrap(),
             req.version,
             crate::roles::aggregator::TaskprovConfig {
                 hpke_collector_config: &collector_hpke_config,

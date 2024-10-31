@@ -34,7 +34,7 @@ struct LeaderHttpRequestOptions<'p, P> {
     resp_media_type: DapMediaType,
     req_data: P,
     method: LeaderHttpRequestMethod,
-    taskprov: Option<String>,
+    taskprov_advertisement: Option<String>,
 }
 
 enum LeaderHttpRequestMethod {
@@ -57,7 +57,7 @@ where
         resp_media_type,
         req_data,
         method,
-        taskprov,
+        taskprov_advertisement,
     } = opts;
 
     let url = task_config
@@ -69,7 +69,7 @@ where
         version: task_config.version,
         media_type: Some(req_media_type),
         task_id: *task_id,
-        taskprov,
+        taskprov_advertisement,
     };
 
     let resp = match method {
@@ -295,7 +295,7 @@ async fn run_agg_job<A: DapLeader>(
 ) -> Result<u64, DapError> {
     let metrics = aggregator.metrics();
 
-    let taskprov = task_config.resolve_taskprove_advertisement()?;
+    let taskprov_advertisement = task_config.resolve_taskprove_advertisement()?;
 
     // Prepare AggregationJobInitReq.
     let agg_job_id = AggregationJobId(thread_rng().gen());
@@ -332,7 +332,7 @@ async fn run_agg_job<A: DapLeader>(
             resp_media_type: DapMediaType::AggregationJobResp,
             req_data: agg_job_init_req,
             method: LeaderHttpRequestMethod::Put,
-            taskprov: taskprov.clone(),
+            taskprov_advertisement: taskprov_advertisement.clone(),
         },
     )
     .await?;
@@ -401,7 +401,7 @@ async fn run_coll_job<A: DapLeader>(
     debug!("collecting id {coll_job_id}");
     let leader_agg_share = aggregator.get_agg_share(task_id, batch_sel).await?;
 
-    let taskprov = task_config.resolve_taskprove_advertisement()?;
+    let taskprov_advertisement = task_config.resolve_taskprove_advertisement()?;
 
     // Check the batch size. If not not ready, then return early.
     //
@@ -445,7 +445,7 @@ async fn run_coll_job<A: DapLeader>(
             resp_media_type: DapMediaType::AggregateShare,
             req_data: agg_share_req,
             method: LeaderHttpRequestMethod::Post,
-            taskprov,
+            taskprov_advertisement,
         },
     )
     .await?;

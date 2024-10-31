@@ -188,7 +188,10 @@ where
         let meta = DapRequestMeta {
             version,
             task_id,
-            taskprov: extract_header_as_string(&parts.headers, http_headers::DAP_TASKPROV),
+            taskprov_advertisement: extract_header_as_string(
+                &parts.headers,
+                http_headers::DAP_TASKPROV,
+            ),
             media_type,
         };
 
@@ -408,7 +411,7 @@ mod test {
             }
 
             async fn is_using_taskprov(&self, req: &DapRequestMeta) -> Result<bool, DapError> {
-                Ok(req.taskprov.is_some())
+                Ok(req.taskprov_advertisement.is_some())
             }
         }
 

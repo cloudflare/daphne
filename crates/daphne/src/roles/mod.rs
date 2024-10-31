@@ -98,14 +98,16 @@ async fn resolve_task_config(
         config
     } else {
         let taskprov_config = agg.get_taskprov_config();
-        let (Some(taskprov_msg), Some(taskprov_config)) = (&req.taskprov, taskprov_config) else {
+        let (Some(taskprov_advertisement), Some(taskprov_config)) =
+            (&req.taskprov_advertisement, taskprov_config)
+        else {
             return Err(DapAbort::UnrecognizedTask {
                 task_id: req.task_id,
             }
             .into());
         };
         let task_config = taskprov::resolve_advertised_task_config(
-            taskprov_msg,
+            taskprov_advertisement,
             req.version,
             taskprov_config,
             &req.task_id,
@@ -1458,7 +1460,7 @@ mod test {
                     version,
                     media_type: Some(DapMediaType::Report),
                     task_id,
-                    taskprov: Some(taskprov_advertisement.clone()),
+                    taskprov_advertisement: Some(taskprov_advertisement.clone()),
                 },
                 resource_id: resource::None,
                 payload: report,
