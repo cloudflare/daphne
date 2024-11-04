@@ -68,13 +68,13 @@ use crate::{
 pub use error::DapError;
 use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
-use messages::encode_base64url;
+use messages::taskprov::TaskprovAdvertisement;
 #[cfg(feature = "experimental")]
 use prio::codec::Decode;
 #[cfg(feature = "experimental")]
 use prio::vdaf::poplar1::Poplar1AggregationParam;
 use prio::{
-    codec::{CodecError, Encode, ParameterizedDecode, ParameterizedEncode},
+    codec::{CodecError, Encode, ParameterizedDecode},
     vdaf::Aggregatable as AggregatableTrait,
 };
 pub use protocol::aggregator::ReplayProtection;
@@ -540,13 +540,13 @@ pub struct DapTaskParameters {
 #[cfg(any(test, feature = "test-utils"))]
 impl DapTaskParameters {
     /// Construct a new task config using the taskprov extension. Return the task ID and the
-    /// taskprov advertisement encoded as a base64url string.
+    /// taskprov advertisement
     pub fn to_config_with_taskprov(
         &self,
         task_info: Vec<u8>,
         now: Time,
         taskprov_config: roles::aggregator::TaskprovConfig<'_>,
-    ) -> Result<(DapTaskConfig, TaskId, String), DapError> {
+    ) -> Result<(DapTaskConfig, TaskId, TaskprovAdvertisement), DapError> {
         let taskprov_advertisement = messages::taskprov::TaskprovAdvertisement {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
@@ -568,16 +568,13 @@ impl DapTaskParameters {
             },
         };
 
-        let encoded_taskprov_config = taskprov_advertisement
-            .get_encoded_with_param(&self.version)
-            .map_err(DapError::encoding)?;
-        let task_id = taskprov::compute_task_id(&encoded_taskprov_config);
+        let task_id = taskprov_advertisement.compute_task_id(self.version);
 
         // Compute the DAP task config.
         let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov(
             self.version,
             &task_id,
-            taskprov_advertisement,
+            taskprov_advertisement.clone(),
             taskprov_config,
         )
         .unwrap()
@@ -585,8 +582,6 @@ impl DapTaskParameters {
             not_before: now,
             num_agg_span_shards: self.num_agg_span_shards,
         });
-
-        let taskprov_advertisement = encode_base64url(&encoded_taskprov_config);
 
         Ok((task_config, task_id, taskprov_advertisement))
     }
@@ -756,13 +751,13 @@ impl DapTaskConfig {
     }
 
     /// Leader: Resolve taskprov advertisement to send in a request to the Helper.
-    pub(crate) fn resolve_taskprove_advertisement(&self) -> Result<Option<String>, DapError> {
+    pub(crate) fn resolve_taskprove_advertisement(
+        &self,
+    ) -> Result<Option<TaskprovAdvertisement>, DapError> {
         if let DapTaskConfigMethod::Taskprov { info: _ } = &self.method {
-            let encoded_taskprov_config =
-                messages::taskprov::TaskprovAdvertisement::try_from(self)?
-                    .get_encoded_with_param(&self.version)
-                    .map_err(DapError::encoding)?;
-            Ok(Some(encode_base64url(encoded_taskprov_config)))
+            Ok(Some(messages::taskprov::TaskprovAdvertisement::try_from(
+                self,
+            )?))
         } else {
             Ok(None)
         }

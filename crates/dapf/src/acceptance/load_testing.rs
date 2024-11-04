@@ -462,7 +462,7 @@ pub async fn execute_single_combination_from_env(
                     leader_agg_share,
                     batch_id,
                     VERSION,
-                    test_task_config.taskprov_advertisement.as_deref(),
+                    test_task_config.taskprov_advertisement.as_ref(),
                     test_task_config.task_id,
                 )
                 .await

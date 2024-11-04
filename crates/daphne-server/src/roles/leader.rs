@@ -191,12 +191,13 @@ impl crate::App {
                 .map_err(|e| fatal_error!(err = ?e, "failed to construct authentication header"))?,
         );
 
-        if let Some(taskprov_advertisement) = meta.taskprov_advertisement.as_deref() {
+        if let Some(taskprov_advertisement) = &meta.taskprov_advertisement {
             headers.insert(
                 HeaderName::from_static(http_headers::DAP_TASKPROV),
-                HeaderValue::from_str(taskprov_advertisement).map_err(
-                    |e| fatal_error!(err = ?e, "failed to construct dap-taskprov header"),
-                )?,
+                HeaderValue::from_str(
+                    &taskprov_advertisement.serialize_to_header_value(meta.version)?,
+                )
+                .map_err(|e| fatal_error!(err = ?e, "failed to construct dap-taskprov header"))?,
             );
         }
 
