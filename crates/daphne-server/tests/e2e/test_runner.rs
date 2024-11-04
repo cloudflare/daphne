@@ -7,8 +7,8 @@ use daphne::{
     constants::DapMediaType,
     hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        encode_base64url, Base64Encode, BatchId, CollectionJobId, Duration, HpkeConfigList,
-        Interval, TaskId,
+        encode_base64url, taskprov::TaskprovAdvertisement, Base64Encode, BatchId, CollectionJobId,
+        Duration, HpkeConfigList, Interval, TaskId,
     },
     vdaf::{Prio3Config, VdafConfig},
     DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
@@ -473,7 +473,7 @@ impl TestRunner {
         client: &reqwest::Client,
         path: &str,
         media_type: DapMediaType,
-        taskprov: Option<&str>,
+        taskprov: Option<&TaskprovAdvertisement>,
         data: Vec<u8>,
     ) -> anyhow::Result<()> {
         let url = self.leader_url.join(path)?;
@@ -492,7 +492,9 @@ impl TestRunner {
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
+                reqwest::header::HeaderValue::from_str(
+                    &taskprov_advertisement.serialize_to_header_value(self.version)?,
+                )?,
             );
         }
 
@@ -579,7 +581,7 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
         token: &str,
-        taskprov: Option<&str>,
+        taskprov: Option<&TaskprovAdvertisement>,
         task_id: Option<&TaskId>,
         data: Vec<u8>,
     ) -> anyhow::Result<Url> {
@@ -601,7 +603,9 @@ impl TestRunner {
         if let Some(taskprov_advertisement) = taskprov {
             headers.insert(
                 reqwest::header::HeaderName::from_static(http_headers::DAP_TASKPROV),
-                reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
+                reqwest::header::HeaderValue::from_str(
+                    &taskprov_advertisement.serialize_to_header_value(self.version)?,
+                )?,
             );
         }
 

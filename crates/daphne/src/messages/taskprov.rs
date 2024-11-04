@@ -8,7 +8,7 @@ use crate::messages::{
     QUERY_TYPE_TIME_INTERVAL,
 };
 use crate::pine::PineParam;
-use crate::DapVersion;
+use crate::{DapError, DapVersion};
 use prio::codec::{
     decode_u8_items, encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode,
     ParameterizedEncode,
@@ -16,7 +16,11 @@ use prio::codec::{
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
 
-use super::{decode_u16_prefixed, encode_u16_prefixed};
+use super::{
+    decode_base64url_vec, decode_u16_prefixed, encode_base64url, encode_u16_prefixed, TaskId,
+};
+use crate::error::DapAbort;
+use crate::taskprov::compute_task_id;
 
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
@@ -417,6 +421,46 @@ pub struct TaskprovAdvertisement {
     pub vdaf_config: VdafConfig,
 }
 
+impl TaskprovAdvertisement {
+    /// Check for a taskprov extension in the report, and return it if found.
+    pub fn parse_taskprov_advertisement(
+        taskprov_advertisement: &str,
+        task_id: &TaskId,
+        version: DapVersion,
+    ) -> Result<TaskprovAdvertisement, DapAbort> {
+        let taskprov_data = decode_base64url_vec(taskprov_advertisement).ok_or_else(|| {
+            DapAbort::BadRequest(
+                r#"Invalid advertisement in "dap-taskprov" header: base64url parsing failed"#
+                    .to_string(),
+            )
+        })?;
+
+        if compute_task_id(taskprov_data.as_ref()) != *task_id {
+            // Return unrecognizedTask following section 5.1 of the taskprov draft.
+            return Err(DapAbort::UnrecognizedTask { task_id: *task_id });
+        }
+
+        // Return unrecognizedMessage if parsing fails following section 5.1 of the taskprov draft.
+        let task_config =
+            TaskprovAdvertisement::get_decoded_with_param(&version, taskprov_data.as_ref())
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+
+        Ok(task_config)
+    }
+
+    pub fn serialize_to_header_value(&self, version: DapVersion) -> Result<String, DapError> {
+        let encoded = self
+            .get_encoded_with_param(&version)
+            .map_err(DapError::encoding)?;
+        Ok(encode_base64url(encoded))
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn compute_task_id(&self, version: DapVersion) -> TaskId {
+        compute_task_id(&self.get_encoded_with_param(&version).unwrap())
+    }
+}
+
 impl ParameterizedEncode<DapVersion> for TaskprovAdvertisement {
     fn encode_with_param(
         &self,
@@ -691,6 +735,43 @@ mod tests {
     }
 
     test_versions! { roundtrip_vdaf_config_pine64_hmac_sha256_aes128 }
+
+    fn roundtrip_taskprov_advertisement(version: DapVersion) {
+        let taskprov_advertisement = TaskprovAdvertisement {
+            task_info: b"this is a cool task!".to_vec(),
+            leader_url: UrlBytes {
+                bytes: b"http://exmaple.com/v02".to_vec(),
+            },
+            helper_url: UrlBytes {
+                bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
+            },
+            query_config: QueryConfig {
+                time_precision: 12_341_234,
+                max_batch_query_count: 1337,
+                min_batch_size: 55,
+                var: QueryConfigVar::FixedSize { max_batch_size: 57 },
+            },
+            task_expiration: 23_232_232_232,
+            vdaf_config: VdafConfig {
+                dp_config: DpConfig::None,
+                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            },
+        };
+
+        assert_eq!(
+            taskprov_advertisement,
+            TaskprovAdvertisement::parse_taskprov_advertisement(
+                &taskprov_advertisement
+                    .serialize_to_header_value(version)
+                    .unwrap(),
+                &taskprov_advertisement.compute_task_id(version),
+                version,
+            )
+            .unwrap()
+        );
+    }
+
+    test_versions! { roundtrip_taskprov_advertisement }
 
     fn roundtrip_vdaf_config_not_implemented(version: DapVersion) {
         let vdaf_config = VdafConfig {

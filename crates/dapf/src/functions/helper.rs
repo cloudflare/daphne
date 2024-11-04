@@ -5,7 +5,10 @@ use anyhow::{anyhow, Context as _};
 use daphne::{
     constants::DapMediaType,
     error::aborts::ProblemDetails,
-    messages::{AggregateShareReq, AggregationJobInitReq, AggregationJobResp},
+    messages::{
+        taskprov::TaskprovAdvertisement, AggregateShareReq, AggregationJobInitReq,
+        AggregationJobResp,
+    },
     DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers};
@@ -34,6 +37,7 @@ impl HttpClient {
                     .with_context(|| {
                         format!("AggregationJobInitReq media type is not defined for {version}")
                     })?,
+                version,
                 opts,
             )?)
             .send()
@@ -80,6 +84,7 @@ impl HttpClient {
                     .with_context(|| {
                         format!("AggregateShareReq media type is not defined for {version}")
                     })?,
+                version,
                 opts,
             )?)
             .send()
@@ -106,12 +111,13 @@ impl HttpClient {
 
 #[derive(Default, Debug)]
 pub struct Options<'s> {
-    pub taskprov_advertisement: Option<&'s str>,
+    pub taskprov_advertisement: Option<&'s TaskprovAdvertisement>,
     pub bearer_token: Option<&'s BearerToken>,
 }
 
 fn construct_request_headers(
     media_type: &str,
+    version: DapVersion,
     options: Options<'_>,
 ) -> Result<header::HeaderMap, header::InvalidHeaderValue> {
     let mut headers = header::HeaderMap::new();
@@ -126,7 +132,7 @@ fn construct_request_headers(
     if let Some(taskprov) = taskprov_advertisement {
         headers.insert(
             const { header::HeaderName::from_static(http_headers::DAP_TASKPROV) },
-            header::HeaderValue::from_str(taskprov)?,
+            header::HeaderValue::from_str(&taskprov.serialize_to_header_value(version).unwrap())?,
         );
     }
     if let Some(token) = bearer_token {

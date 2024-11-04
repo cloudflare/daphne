@@ -24,8 +24,8 @@ use async_trait::async_trait;
 use daphne::{
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
-        self, AggregateShareReq, AggregationJobId, Base64Encode, BatchId, BatchSelector,
-        PartialBatchSelector, TaskId,
+        self, taskprov::TaskprovAdvertisement, AggregateShareReq, AggregationJobId, Base64Encode,
+        BatchId, BatchSelector, PartialBatchSelector, TaskId,
     },
     metrics::DaphneMetrics,
     roles::DapReportInitializer,
@@ -203,7 +203,7 @@ struct TestTaskConfig {
     pub hpke_config_list: [HpkeConfig; 2],
     pub fake_leader_hpke_receiver_config: HpkeReceiverConfig,
     pub task_config: DapTaskConfig,
-    pub taskprov_advertisement: Option<String>,
+    pub taskprov_advertisement: Option<TaskprovAdvertisement>,
 }
 
 impl Test {
@@ -522,7 +522,7 @@ impl Test {
                 agg_job_init_req,
                 task_config.version,
                 functions::helper::Options {
-                    taskprov_advertisement: taskprov_advertisement.as_deref(),
+                    taskprov_advertisement: taskprov_advertisement.as_ref(),
                     bearer_token: self.bearer_token.as_ref(),
                 },
             )
@@ -554,7 +554,7 @@ impl Test {
         leader_agg_share: DapAggregateShare,
         batch_id: BatchId,
         version: DapVersion,
-        taskprov_advertisement: Option<&str>,
+        taskprov_advertisement: Option<&TaskprovAdvertisement>,
         task_id: TaskId,
     ) -> Result<Duration> {
         // Prepare AggregateShareReq.
@@ -672,7 +672,7 @@ impl Test {
                 leader_agg_share,
                 batch_id,
                 version,
-                taskprov_advertisement.as_deref(),
+                taskprov_advertisement.as_ref(),
                 *task_id,
             )
             .await?;

@@ -18,9 +18,9 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::resource, AggregateShare, AggregateShareReq, AggregationJobId, AggregationJobResp,
-        Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Interval,
-        PartialBatchSelector, Query, Report, TaskId,
+        request::resource, taskprov::TaskprovAdvertisement, AggregateShare, AggregateShareReq,
+        AggregationJobId, AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection,
+        CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     roles::resolve_task_config,
@@ -34,7 +34,7 @@ struct LeaderHttpRequestOptions<'p, P> {
     resp_media_type: DapMediaType,
     req_data: P,
     method: LeaderHttpRequestMethod,
-    taskprov_advertisement: Option<String>,
+    taskprov_advertisement: Option<TaskprovAdvertisement>,
 }
 
 enum LeaderHttpRequestMethod {

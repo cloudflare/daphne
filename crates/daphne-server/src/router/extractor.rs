@@ -13,7 +13,8 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::resource, AggregateShareReq, AggregationJobInitReq, CollectionReq, Report, TaskId,
+        request::resource, taskprov::TaskprovAdvertisement, AggregateShareReq,
+        AggregationJobInitReq, CollectionReq, Report, TaskId,
     },
     DapError, DapRequest, DapRequestMeta, DapVersion,
 };
@@ -185,13 +186,16 @@ where
             ));
         };
 
+        let taskprov_advertisement =
+            extract_header_as_str(&parts.headers, http_headers::DAP_TASKPROV)
+                .map(|h| TaskprovAdvertisement::parse_taskprov_advertisement(h, &task_id, version))
+                .transpose()
+                .map_err(|e| AxumDapResponse::new_error(e, state.server_metrics()))?;
+
         let meta = DapRequestMeta {
             version,
             task_id,
-            taskprov_advertisement: extract_header_as_string(
-                &parts.headers,
-                http_headers::DAP_TASKPROV,
-            ),
+            taskprov_advertisement,
             media_type,
         };
 
@@ -252,9 +256,10 @@ where
     type Rejection = AxumDapResponse;
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
-        let bearer_token = extract_header_as_string(req.headers(), http_headers::DAP_AUTH_TOKEN)
+        let bearer_token = extract_header_as_str(req.headers(), http_headers::DAP_AUTH_TOKEN)
             .map(BearerToken::from);
-        let cf_tls_client_auth = extract_header_as_string(req.headers(), "X-Client-Cert-Verified");
+        let cf_tls_client_auth =
+            extract_header_as_str(req.headers(), "X-Client-Cert-Verified").map(ToString::to_string);
 
         let request = UnauthenticatedDapRequestExtractor::from_request(req, state)
             .await?
@@ -319,8 +324,8 @@ where
     }
 }
 
-fn extract_header_as_string(headers: &HeaderMap, header: &'static str) -> Option<String> {
-    headers.get(header)?.to_str().ok().map(ToString::to_string)
+fn extract_header_as_str<'s>(headers: &'s HeaderMap, header: &'static str) -> Option<&'s str> {
+    headers.get(header)?.to_str().ok()
 }
 
 #[cfg(test)]
@@ -341,7 +346,10 @@ mod test {
     use daphne::{
         async_test_versions,
         constants::DapMediaType,
-        messages::{request::resource, AggregationJobId, Base64Encode, CollectionJobId, TaskId},
+        messages::{
+            request::resource, taskprov::TaskprovAdvertisement, AggregationJobId, Base64Encode,
+            CollectionJobId, TaskId,
+        },
         DapError, DapRequestMeta, DapSender, DapVersion,
     };
     use daphne_service_utils::{bearer_token::BearerToken, http_headers};
@@ -463,7 +471,14 @@ mod test {
             StatusCode::NOT_FOUND => panic!("unsuported uri"),
             // get the request sent through the channel in the handler
             StatusCode::OK => Ok(rx.recv().now_or_never().unwrap().unwrap()),
-            code => Err(code),
+            code => {
+                let payload = hyper::body::to_bytes(resp.into_body()).await.unwrap();
+                eprintln!(
+                    "body was: {}",
+                    String::from_utf8_lossy(&payload).into_owned()
+                );
+                Err(code)
+            }
         }
     }
 
@@ -578,11 +593,42 @@ mod test {
     async_test_versions! { missing_auth_is_rejected }
 
     async fn mtls_auth_is_enough(version: DapVersion) {
+        let taskprov_advertisement = TaskprovAdvertisement {
+            task_info: b"cool task".into(),
+            leader_url: daphne::messages::taskprov::UrlBytes {
+                bytes: b"http://leader".into(),
+            },
+            helper_url: daphne::messages::taskprov::UrlBytes {
+                bytes: b"http://helper".into(),
+            },
+            query_config: daphne::messages::taskprov::QueryConfig {
+                time_precision: 1,
+                max_batch_query_count: 1,
+                min_batch_size: 1,
+                var: daphne::messages::taskprov::QueryConfigVar::TimeInterval,
+            },
+            task_expiration: 1,
+            vdaf_config: daphne::messages::taskprov::VdafConfig {
+                dp_config: daphne::messages::taskprov::DpConfig::None,
+                var: daphne::messages::taskprov::VdafTypeVar::Prio2 { dimension: 1 },
+            },
+        };
+
         let req = test::<_, resource::None>(
             Request::builder()
-                .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
+                .uri(format!(
+                    "/{version}/{}/auth",
+                    taskprov_advertisement
+                        .compute_task_id(version)
+                        .to_base64url()
+                ))
                 .header("X-Client-Cert-Verified", "SUCCESS")
-                .header(http_headers::DAP_TASKPROV, "some-taskprov-string")
+                .header(
+                    http_headers::DAP_TASKPROV,
+                    taskprov_advertisement
+                        .serialize_to_header_value(version)
+                        .unwrap(),
+                )
                 .body(Body::empty())
                 .unwrap(),
         )

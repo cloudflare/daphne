@@ -3,6 +3,7 @@
 
 use std::ops::Deref;
 
+use super::taskprov::TaskprovAdvertisement;
 use crate::{constants::DapMediaType, error::DapAbort, messages::TaskId, DapVersion};
 
 pub mod resource {
@@ -36,7 +37,7 @@ pub struct DapRequestMeta {
     pub task_id: TaskId,
 
     /// taskprov: The task advertisement, sent in the `dap-taskprov` header.
-    pub taskprov_advertisement: Option<String>,
+    pub taskprov_advertisement: Option<TaskprovAdvertisement>,
 }
 
 impl DapRequestMeta {

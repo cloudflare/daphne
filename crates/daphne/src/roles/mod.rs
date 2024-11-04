@@ -9,7 +9,8 @@ pub mod leader;
 
 use crate::{
     messages::{Base64Encode, Query, TaskId, Time},
-    taskprov, DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
+    taskprov::DapTaskConfigNeedsOptIn,
+    DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
 };
 
 pub use aggregator::{DapAggregator, DapReportInitializer};
@@ -106,11 +107,11 @@ async fn resolve_task_config(
             }
             .into());
         };
-        let task_config = taskprov::resolve_advertised_task_config(
-            taskprov_advertisement,
+        let task_config = DapTaskConfigNeedsOptIn::try_from_taskprov(
             req.version,
-            taskprov_config,
             &req.task_id,
+            taskprov_advertisement.clone(),
+            taskprov_config,
         )?;
         let task_config = agg.taskprov_opt_in(&req.task_id, task_config).await?;
         agg.taskprov_put(&req.task_id, task_config.clone()).await?;
