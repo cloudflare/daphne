@@ -18,7 +18,6 @@ use metrics::DaphneServiceMetrics;
 use roles::BearerTokens;
 use serde::{Deserialize, Serialize};
 use storage_proxy_connection::{kv, Do, Kv};
-use tokio::sync::RwLock;
 use url::Url;
 
 pub mod config;
@@ -87,7 +86,7 @@ mod storage_proxy_connection;
 pub struct App {
     storage_proxy_config: StorageProxyConfig,
     http: reqwest::Client,
-    cache: RwLock<kv::Cache>,
+    kv_state: kv::State,
     metrics: Box<dyn DaphneServiceMetrics>,
     service_config: DaphneServiceConfig,
     audit_log: Box<dyn AuditLog + Send + Sync>,
@@ -194,7 +193,7 @@ impl App {
         Ok(Self {
             storage_proxy_config,
             http: reqwest::Client::new(),
-            cache: Default::default(),
+            kv_state: Default::default(),
             metrics: Box::new(daphne_service_metrics),
             audit_log: Box::new(NoopAuditLog),
             service_config,
@@ -214,10 +213,14 @@ impl App {
     }
 
     pub(crate) fn kv(&self) -> Kv<'_> {
-        Kv::new(&self.storage_proxy_config, &self.http, &self.cache)
+        Kv::new(&self.storage_proxy_config, &self.http, &self.kv_state)
     }
 
     pub(crate) fn bearer_tokens(&self) -> BearerTokens<'_> {
-        BearerTokens::from(Kv::new(&self.storage_proxy_config, &self.http, &self.cache))
+        BearerTokens::from(Kv::new(
+            &self.storage_proxy_config,
+            &self.http,
+            &self.kv_state,
+        ))
     }
 }
