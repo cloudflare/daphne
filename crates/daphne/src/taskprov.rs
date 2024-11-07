@@ -286,7 +286,7 @@ pub struct DapTaskConfigNeedsOptIn {
     pub(crate) method: DapTaskConfigMethod,
 
     /// The time at which the task expires.
-    pub(crate) task_expiration: Time,
+    pub task_expiration: Time,
 }
 
 impl DapTaskConfigNeedsOptIn {

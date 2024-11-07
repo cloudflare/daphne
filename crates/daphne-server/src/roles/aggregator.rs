@@ -185,37 +185,29 @@ impl DapAggregator for crate::App {
         task_id: &TaskId,
         task_config: taskprov::DapTaskConfigNeedsOptIn,
     ) -> Result<DapTaskConfig, DapError> {
-        if let Some(param) = self
+        let param = self
             .kv()
-            .get_cloned::<kv::prefix::TaskprovOptInParam>(task_id, &KvGetOptions::default())
+            .get_or_insert_with::<kv::prefix::TaskprovOptInParam, _, _>(
+                task_id,
+                &KvGetOptions::default(),
+                || async {
+                    let global_config = self.get_global_config().await?;
+                    Ok::<_, DapError>(taskprov::OptInParam {
+                        not_before: self.get_current_time(),
+                        num_agg_span_shards: global_config.default_num_agg_span_shards,
+                    })
+                },
+                Some(task_config.task_expiration),
+            )
             .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to get TaskprovOptInParam from kv"))?
-        {
-            Ok(task_config.into_opted_in(&param))
-        } else {
-            let global_config = self.get_global_config().await?;
-            let param = taskprov::OptInParam {
-                not_before: self.get_current_time(),
-                num_agg_span_shards: global_config.default_num_agg_span_shards,
-            };
+            .map_err(|e| match e {
+                kv::GetOrInsertError::Other(e) => e,
+                kv::GetOrInsertError::StorageProxy(e) => {
+                    fatal_error!(err = ?e, "failed to get TaskprovOptInParam from kv")
+                }
+            })?;
 
-            let task_config = task_config.into_opted_in(&param);
-            let expiration_time = task_config.not_after;
-
-            if let Err(e) = self
-                .kv()
-                .put_with_expiration::<kv::prefix::TaskprovOptInParam>(
-                    task_id,
-                    param,
-                    expiration_time,
-                )
-                .await
-            {
-                tracing::warn!(error = ?e, "failed to store taskprov opt in param");
-            }
-
-            Ok(task_config)
-        }
+        Ok(task_config.into_opted_in(&param))
     }
 
     async fn taskprov_put(
