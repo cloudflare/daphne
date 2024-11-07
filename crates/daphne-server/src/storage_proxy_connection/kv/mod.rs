@@ -3,7 +3,7 @@
 
 mod cache;
 
-use std::{any::Any, fmt::Display};
+use std::{any::Any, fmt::Display, future::Future};
 
 use axum::http::StatusCode;
 use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
@@ -162,6 +162,17 @@ pub(crate) struct KvGetOptions {
     pub(crate) cache_not_found: bool,
 }
 
+pub(crate) enum GetOrInsertError<E> {
+    StorageProxy(Error),
+    Other(E),
+}
+
+impl<E> From<Error> for GetOrInsertError<E> {
+    fn from(error: Error) -> Self {
+        Self::StorageProxy(error)
+    }
+}
+
 impl<'h> Kv<'h> {
     pub fn new(
         config: &'h StorageProxyConfig,
@@ -216,6 +227,26 @@ impl<'h> Kv<'h> {
             .get_internal::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
             .await?
             .flatten())
+    }
+
+    pub async fn get_or_insert_with<P, Fut, E>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+        default: impl FnOnce() -> Fut,
+        expiration: Option<Time>,
+    ) -> Result<Marc<P::Value>, GetOrInsertError<E>>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        Fut: Future<Output = Result<P::Value, E>>,
+    {
+        if let Some(v) = self.get::<P>(key, opt).await? {
+            return Ok(v);
+        }
+        let default = default().await.map_err(GetOrInsertError::Other)?;
+        let cached = self.put_internal::<P>(key, default, expiration).await?;
+        Ok(cached)
     }
 
     pub async fn peek<P, R, F>(
@@ -296,7 +327,7 @@ impl<'h> Kv<'h> {
         key: &P::Key,
         value: P::Value,
         expiration: Option<Time>,
-    ) -> Result<(), Error>
+    ) -> Result<Marc<P::Value>, Error>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
@@ -317,12 +348,13 @@ impl<'h> Kv<'h> {
 
         request.send().await?.error_for_status()?;
 
+        let value = Marc::new(value);
         self.state
             .cache
             .write()
             .await
-            .put::<P>(key, Some(value.into()));
-        Ok(())
+            .put::<P>(key, Some(value.clone()));
+        Ok(value)
     }
 
     pub async fn put_with_expiration<P>(
@@ -330,7 +362,7 @@ impl<'h> Kv<'h> {
         key: &P::Key,
         value: P::Value,
         expiration: Time,
-    ) -> Result<(), Error>
+    ) -> Result<Marc<P::Value>, Error>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
@@ -339,7 +371,7 @@ impl<'h> Kv<'h> {
         self.put_internal::<P>(key, value, Some(expiration)).await
     }
 
-    pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<(), Error>
+    pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<Marc<P::Value>, Error>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,

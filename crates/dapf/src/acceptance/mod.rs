@@ -756,7 +756,10 @@ pub fn now() -> Now {
 /// );
 /// ```
 fn distribute_reports_in_chunks(total: usize, chunk_length: usize) -> impl Iterator<Item = usize> {
-    assert!(total >= chunk_length);
+    assert!(
+        total >= chunk_length,
+        "total: {total} | chunk_length: {chunk_length}"
+    );
     (0..(total / chunk_length))
         .map(move |_| chunk_length)
         .chain(Some(total % chunk_length).filter(|t| *t > 0))
