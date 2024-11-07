@@ -213,7 +213,7 @@ impl<'h> Kv<'h> {
         R: 'static,
     {
         Ok(self
-            .get_impl::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
+            .get_internal::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
             .await?
             .flatten())
     }
@@ -229,11 +229,11 @@ impl<'h> Kv<'h> {
         P::Key: std::fmt::Debug,
         F: FnOnce(&P::Value) -> R,
     {
-        self.get_impl::<P, _, _>(key, opt, |marc| peeker(&marc))
+        self.get_internal::<P, _, _>(key, opt, |marc| peeker(&marc))
             .await
     }
 
-    async fn get_impl<P, R, F>(
+    async fn get_internal<P, R, F>(
         &self,
         key: &P::Key,
         opt: &KvGetOptions,
