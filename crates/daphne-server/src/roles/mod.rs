@@ -128,7 +128,7 @@ mod test_utils {
             self.test_leader_state.lock().await.delete_all();
 
             use daphne_service_utils::durable_requests::PURGE_STORAGE;
-            *self.cache.write().await = Default::default();
+            self.kv_state.reset().await;
 
             self.http
                 .delete(self.storage_proxy_config.url.join(PURGE_STORAGE).unwrap())

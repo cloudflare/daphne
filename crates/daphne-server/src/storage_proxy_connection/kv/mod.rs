@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-pub(super) mod cache;
+mod cache;
 
 use std::{any::Any, fmt::Display};
 
@@ -15,14 +15,27 @@ use tracing::{info_span, Instrument};
 use crate::StorageProxyConfig;
 
 use super::Error;
-pub(crate) use cache::Cache;
+use cache::Cache;
 use daphne::messages::Time;
 use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
+
+#[derive(Default)]
+pub struct State {
+    cache: RwLock<Cache>,
+}
+
+impl State {
+    #[cfg(feature = "test-utils")]
+    pub async fn reset(&self) {
+        let Self { cache } = self;
+        *cache.write().await = Default::default();
+    }
+}
 
 pub(crate) struct Kv<'h> {
     config: &'h StorageProxyConfig,
     http: &'h reqwest::Client,
-    cache: &'h RwLock<Cache>,
+    state: &'h State,
 }
 
 pub trait KvPrefix {
@@ -153,12 +166,12 @@ impl<'h> Kv<'h> {
     pub fn new(
         config: &'h StorageProxyConfig,
         client: &'h reqwest::Client,
-        cache: &'h RwLock<Cache>,
+        state: &'h State,
     ) -> Self {
         Self {
             config,
             http: client,
-            cache,
+            state,
         }
     }
 
@@ -233,7 +246,7 @@ impl<'h> Kv<'h> {
     {
         let key = Self::to_key::<P>(key);
         tracing::debug!(key, "GET");
-        match self.cache.read().await.get::<P>(&key) {
+        match self.state.cache.read().await.get::<P>(&key) {
             cache::CacheResult::Miss => {}
             cache::CacheResult::Hit(t) => return Ok(t.map(mapper)),
             cache::CacheResult::MismatchedType => {
@@ -258,14 +271,14 @@ impl<'h> Kv<'h> {
                 .await?;
             if resp.status() == StatusCode::NOT_FOUND {
                 if opt.cache_not_found {
-                    self.cache.write().await.put::<P>(key, None);
+                    self.state.cache.write().await.put::<P>(key, None);
                 }
                 Ok(None)
             } else {
                 let resp = resp.error_for_status()?;
                 let t = Marc::new(resp.json::<P::Value>().await?);
                 let r = mapper(t.clone());
-                self.cache.write().await.put::<P>(key, Some(t));
+                self.state.cache.write().await.put::<P>(key, Some(t));
                 Ok(Some(r))
             }
         }
@@ -304,7 +317,11 @@ impl<'h> Kv<'h> {
 
         request.send().await?.error_for_status()?;
 
-        self.cache.write().await.put::<P>(key, Some(value.into()));
+        self.state
+            .cache
+            .write()
+            .await
+            .put::<P>(key, Some(value.into()));
         Ok(())
     }
 
@@ -369,7 +386,11 @@ impl<'h> Kv<'h> {
             Ok(Some(value))
         } else {
             response.error_for_status()?;
-            self.cache.write().await.put::<P>(key, Some(value.into()));
+            self.state
+                .cache
+                .write()
+                .await
+                .put::<P>(key, Some(value.into()));
             Ok(None)
         }
     }
@@ -409,7 +430,11 @@ impl<'h> Kv<'h> {
         P::Key: std::fmt::Debug,
     {
         let key = Self::to_key::<P>(key);
-        self.cache.write().await.put::<P>(key, Some(value.into()));
+        self.state
+            .cache
+            .write()
+            .await
+            .put::<P>(key, Some(value.into()));
     }
 
     fn to_key<P: KvPrefix>(key: &P::Key) -> String {
