@@ -8,6 +8,7 @@ use crate::storage_proxy_connection::{
     self,
     kv::{self, Kv, KvGetOptions},
 };
+use mappable_rc::Marc;
 
 mod aggregator;
 mod helper;
@@ -74,7 +75,7 @@ impl BearerTokens<'_> {
         role: DapSender,
         task_id: TaskId,
         token: &BearerToken,
-    ) -> Result<bool, storage_proxy_connection::Error> {
+    ) -> Result<bool, Marc<storage_proxy_connection::Error>> {
         self.kv
             .peek::<kv::prefix::KvBearerToken, _, _>(
                 &(role, task_id).into(),
@@ -91,7 +92,7 @@ impl BearerTokens<'_> {
         &self,
         role: DapSender,
         task_id: TaskId,
-    ) -> Result<Option<BearerToken>, storage_proxy_connection::Error> {
+    ) -> Result<Option<BearerToken>, Marc<storage_proxy_connection::Error>> {
         self.kv
             .get_cloned::<kv::prefix::KvBearerToken>(
                 &(role, task_id).into(),

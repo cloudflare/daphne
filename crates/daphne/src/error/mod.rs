@@ -12,7 +12,7 @@ use prio::codec::CodecError;
 use self::aborts::ProblemDetails;
 
 /// DAP errors.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DapError {
     /// Fatal error. If this triggers an abort, then treat this as an internal error.
     ///

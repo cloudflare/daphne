@@ -200,8 +200,8 @@ impl DapAggregator for crate::App {
                 Some(task_config.task_expiration),
             )
             .await
-            .map_err(|e| match e {
-                kv::GetOrInsertError::Other(e) => e,
+            .map_err(|e| match &*e {
+                kv::GetOrInsertError::Other(e) => e.clone(),
                 kv::GetOrInsertError::StorageProxy(e) => {
                     fatal_error!(err = ?e, "failed to get TaskprovOptInParam from kv")
                 }
