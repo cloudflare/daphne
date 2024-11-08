@@ -18,7 +18,7 @@ use super::FatalDapError;
 // The display implementation of this error is used for metrics, as such, it can't be changed to
 // include field values
 /// DAP aborts.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DapAbort {
     /// Bad request. Sent in response to an HTTP request that couldn't be handled preoprly.
     #[error("bad request")]

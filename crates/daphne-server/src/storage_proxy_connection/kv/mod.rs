@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 mod cache;
+mod request_coalescer;
 
 use std::{any::Any, fmt::Display, future::Future};
 
@@ -22,13 +23,18 @@ use daphne_service_utils::http_headers::STORAGE_PROXY_PUT_KV_EXPIRATION;
 #[derive(Default)]
 pub struct State {
     cache: RwLock<Cache>,
+    coalescer: request_coalescer::RequestCoalescer,
 }
 
 impl State {
     #[cfg(feature = "test-utils")]
     pub async fn reset(&self) {
-        let Self { cache } = self;
-        *cache.write().await = Default::default();
+        let Self { cache, coalescer } = self;
+
+        let clear_cache = async {
+            *cache.write().await = Default::default();
+        };
+        tokio::join!(clear_cache, coalescer.reset());
     }
 }
 
@@ -190,7 +196,7 @@ impl<'h> Kv<'h> {
         &self,
         key: &P::Key,
         opt: &KvGetOptions,
-    ) -> Result<Option<Marc<P::Value>>, Error>
+    ) -> Result<Option<Marc<P::Value>>, Marc<Error>>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
@@ -202,7 +208,7 @@ impl<'h> Kv<'h> {
         &self,
         key: &P::Key,
         opt: &KvGetOptions,
-    ) -> Result<Option<P::Value>, Error>
+    ) -> Result<Option<P::Value>, Marc<Error>>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
@@ -216,17 +222,16 @@ impl<'h> Kv<'h> {
         key: &P::Key,
         opt: &KvGetOptions,
         mapper: F,
-    ) -> Result<Option<Marc<R>>, Error>
+    ) -> Result<Option<Marc<R>>, Marc<Error>>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
         F: for<'s> FnOnce(&'s P::Value) -> Option<&'s R>,
-        R: 'static,
+        R: Send + Sync + 'static,
     {
-        Ok(self
-            .get_internal::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
-            .await?
-            .flatten())
+        self.get_coalesced::<P, _, _>(key, opt, |marc| Marc::try_map(marc, mapper).ok())
+            .await
+            .map(Option::flatten)
     }
 
     pub async fn get_or_insert_with<P, Fut, E>(
@@ -235,18 +240,25 @@ impl<'h> Kv<'h> {
         opt: &KvGetOptions,
         default: impl FnOnce() -> Fut,
         expiration: Option<Time>,
-    ) -> Result<Marc<P::Value>, GetOrInsertError<E>>
+    ) -> Result<Marc<P::Value>, Marc<GetOrInsertError<E>>>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
+        E: Send + Sync + 'static,
         Fut: Future<Output = Result<P::Value, E>>,
     {
-        if let Some(v) = self.get::<P>(key, opt).await? {
-            return Ok(v);
-        }
-        let default = default().await.map_err(GetOrInsertError::Other)?;
-        let cached = self.put_internal::<P>(key, default, expiration).await?;
-        Ok(cached)
+        self.state
+            .coalescer
+            .coalesce(Self::to_key::<P>(key), || async {
+                if let Some(v) = self.get_internal::<P, _, _>(key, opt, |marc| marc).await? {
+                    return Ok(Some(v));
+                }
+                let default = default().await.map_err(GetOrInsertError::Other)?;
+                let cached = self.put_internal::<P>(key, default, expiration).await?;
+                Ok(Some(cached))
+            })
+            .await
+            .map(|v| v.unwrap()) // all paths of the previous closure return Some
     }
 
     pub async fn peek<P, R, F>(
@@ -254,14 +266,36 @@ impl<'h> Kv<'h> {
         key: &P::Key,
         opt: &KvGetOptions,
         peeker: F,
-    ) -> Result<Option<R>, Error>
+    ) -> Result<Option<R>, Marc<Error>>
     where
         P: KvPrefix,
         P::Key: std::fmt::Debug,
         F: FnOnce(&P::Value) -> R,
     {
-        self.get_internal::<P, _, _>(key, opt, |marc| peeker(&marc))
+        self.get_coalesced::<P, _, _>(key, opt, |marc| peeker(&marc))
             .await
+    }
+
+    async fn get_coalesced<P, R, F>(
+        &self,
+        key: &P::Key,
+        opt: &KvGetOptions,
+        mapper: F,
+    ) -> Result<Option<R>, Marc<Error>>
+    where
+        P: KvPrefix,
+        P::Key: std::fmt::Debug,
+        F: FnOnce(Marc<P::Value>) -> R,
+    {
+        self.state
+            .coalescer
+            .coalesce(Self::to_key::<P>(key), || async {
+                self.get_internal::<P, _, _>(key, opt, Some)
+                    .await
+                    .map(Option::flatten)
+            })
+            .await
+            .map(|opt_v| opt_v.map(mapper))
     }
 
     async fn get_internal<P, R, F>(
