@@ -256,10 +256,10 @@ where
     Fut: Future<Output = Result<T, E>>,
 {
     const RETRY_DELAYS: &[Duration] = &[
-        Duration::from_millis(100),
-        Duration::from_millis(500),
         Duration::from_millis(1_000),
-        Duration::from_millis(3_000),
+        Duration::from_millis(2_000),
+        Duration::from_millis(4_000),
+        Duration::from_millis(8_000),
     ];
     let attempts = RETRY_DELAYS.len() + 1;
     let mut attempt = 1;
