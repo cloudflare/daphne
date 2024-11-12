@@ -428,7 +428,7 @@ async fn handle_do_request(
         let uri = &uri;
         let http_request = http_request.clone();
         async move {
-            tracing::warn!(id = obj.to_string(), "Getting DO stub");
+            tracing::debug!(id = obj.to_string(), "Getting DO stub");
 
             let stub = if let Some(loc) = option_env!("DAPHNE_DO_REGION") {
                 obj.get_stub_with_location_hint(loc)
@@ -447,6 +447,7 @@ async fn handle_do_request(
                 }
                 Err(error) => {
                     warn!(
+                        id = obj.to_string(),
                         binding = &binding,
                         path = uri,
                         attempt,
