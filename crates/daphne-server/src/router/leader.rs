@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use axum::{
     body::HttpBody,
-    extract::State,
-    http::StatusCode,
+    extract::{Path, State},
+    http::{Request, StatusCode},
+    middleware::{from_fn, Next},
     response::{IntoResponse, Response},
-    routing::{post, put},
+    routing::{get, post, put},
 };
 use daphne::{
     constants::DapMediaType,
@@ -23,6 +24,28 @@ use super::{
     extractor::dap_sender::FROM_COLLECTOR, AxumDapResponse, DapRequestExtractor, DaphneService,
     UnauthenticatedDapRequestExtractor,
 };
+use futures::{future::BoxFuture, FutureExt};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct PathVersion {
+    #[serde(rename = "version")]
+    presented_version: DapVersion,
+}
+
+fn require_version<B: Send + 'static>(
+    expected_version: DapVersion,
+) -> impl Copy + Fn(Path<PathVersion>, Request<B>, Next<B>) -> BoxFuture<'static, Response> {
+    move |Path(PathVersion { presented_version }), req, next| {
+        async move {
+            if presented_version != expected_version {
+                return StatusCode::METHOD_NOT_ALLOWED.into_response();
+            }
+            next.run(req).await
+        }
+        .boxed()
+    }
+}
 
 pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
 where
@@ -32,11 +55,25 @@ where
     B::Error: Send + Sync,
 {
     router
-        .route("/:version/tasks/:task_id/reports", put(upload_draft09))
-        .route("/:version/tasks/:task_id/reports", post(upload_draft13))
+        .route(
+            "/:version/tasks/:task_id/reports",
+            put(upload).layer(from_fn(require_version(DapVersion::Draft09))),
+        )
+        .route(
+            "/:version/tasks/:task_id/reports",
+            post(upload).layer(from_fn(require_version(DapVersion::Latest))),
+        )
         .route(
             "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
-            put(start_collection_job).post(collect),
+            put(start_collection_job),
+        )
+        .route(
+            "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
+            post(poll_collect).layer(from_fn(require_version(DapVersion::Draft09))),
+        )
+        .route(
+            "/:version/tasks/:task_id/collection_jobs/:collect_job_id",
+            get(poll_collect).layer(from_fn(require_version(DapVersion::Latest))),
         )
 }
 
@@ -47,7 +84,7 @@ where
         version = ?req.version,
     )
 )]
-async fn upload_draft13<A>(
+async fn upload<A>(
     State(app): State<Arc<A>>,
     UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
         messages::Report,
@@ -57,41 +94,12 @@ async fn upload_draft13<A>(
 where
     A: DapLeader + DaphneService + Send + Sync,
 {
-    if req.version == DapVersion::Draft09 {
-        return (
-            StatusCode::METHOD_NOT_ALLOWED,
-            format!("route not implemented for version {}", req.version),
-        )
-            .into_response();
-    }
     match leader::handle_upload_req(&*app, req).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
     }
 }
 
-async fn upload_draft09<A>(
-    State(app): State<Arc<A>>,
-    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
-        messages::Report,
-        resource::None,
-    >,
-) -> Response
-where
-    A: DapLeader + DaphneService + Send + Sync,
-{
-    if req.version != DapVersion::Draft09 {
-        return (
-            StatusCode::METHOD_NOT_ALLOWED,
-            format!("route not implemented for version {}", req.version),
-        )
-            .into_response();
-    }
-    match leader::handle_upload_req(&*app, req).await {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => AxumDapResponse::new_error(e, app.server_metrics()).into_response(),
-    }
-}
 #[tracing::instrument(
     skip_all,
     fields(
@@ -123,7 +131,7 @@ where
         version = ?req.version,
     )
 )]
-async fn collect<A>(
+async fn poll_collect<A>(
     State(app): State<Arc<A>>,
     DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, (), resource::CollectionJobId>,
 ) -> Response

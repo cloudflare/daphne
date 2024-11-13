@@ -840,6 +840,86 @@ async fn leader_collect_abort_unknown_request(version: DapVersion) {
 
 async_test_versions! { leader_collect_abort_unknown_request }
 
+async fn leader_collect_back_compat(version: DapVersion) {
+    let t = TestRunner::default_with_version(version).await;
+    let batch_interval = t.batch_interval();
+
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
+    let path = t.upload_path();
+    let method = match version {
+        DapVersion::Draft09 => &Method::PUT,
+        DapVersion::Latest => &Method::POST,
+    };
+    let expected_status = 405;
+
+    // The reports are uploaded in the background.
+    let mut rng = thread_rng();
+    let mut time_min = u64::MAX;
+    let mut time_max = 0u64;
+    for _ in 0..t.task_config.min_batch_size {
+        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
+        time_min = min(time_min, now);
+        time_max = max(time_max, now);
+        t.leader_request_expect_ok(
+            client,
+            &path,
+            method,
+            DapMediaType::Report,
+            None,
+            t.task_config
+                .vdaf
+                .produce_report(
+                    &hpke_config_list,
+                    now,
+                    &t.task_id,
+                    DapMeasurement::U64(1),
+                    version,
+                )
+                .unwrap()
+                .get_encoded_with_param(&version)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Get the collect URI.
+    let agg_param = DapAggregationParam::Empty;
+    let collect_req = CollectionReq {
+        query: Query::TimeInterval { batch_interval },
+        agg_param: agg_param.get_encoded().unwrap(),
+    };
+    let collect_uri = t
+        .leader_post_collect(
+            client,
+            collect_req.get_encoded_with_param(&t.version).unwrap(),
+        )
+        .await
+        .unwrap();
+    println!("collect_uri: {collect_uri}");
+
+    let builder = match version {
+        DapVersion::Draft09 => client.get(collect_uri.as_str()),
+        DapVersion::Latest => client.post(collect_uri.as_str()),
+    };
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
+        reqwest::header::HeaderValue::from_str(&t.collector_bearer_token)
+            .expect("couldn't parse bearer token"),
+    );
+    let resp = builder
+        .headers(headers)
+        .send()
+        .await
+        .expect("failed to get a response");
+
+    assert_eq!(resp.status(), expected_status);
+}
+
+async_test_versions! { leader_collect_back_compat }
+
 async fn leader_collect_accept_global_config_max_batch_duration(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let client = t.http_client();
