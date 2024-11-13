@@ -669,7 +669,10 @@ impl TestRunner {
         url: &Url,
         token: &str,
     ) -> anyhow::Result<reqwest::Response> {
-        let builder = client.post(url.as_str());
+        let builder = match self.version {
+            DapVersion::Draft09 => client.post(url.as_str()),
+            DapVersion::Latest => client.get(url.as_str()),
+        };
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
