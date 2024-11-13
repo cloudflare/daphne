@@ -383,6 +383,7 @@ impl DapReportInitializer for crate::App {
                             &vdaf_config,
                             &agg_param,
                             consumed_report,
+                            task_config.version,
                         )
                     })
                     .collect::<Result<Vec<EarlyReportStateInitialized>, _>>()

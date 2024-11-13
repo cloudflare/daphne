@@ -21,7 +21,7 @@ mod test {
         messages::{
             AggregationJobInitReq, BatchSelector, Extension, Interval, PartialBatchSelector,
             PrepareInit, Report, ReportId, ReportShare, Transition, TransitionFailure,
-            TransitionVar,
+            TransitionFailureDraft09, TransitionFailureLatest, TransitionVar,
         },
         protocol::aggregator::{
             EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
@@ -87,6 +87,7 @@ mod test {
             &t.task_config.vdaf,
             &DapAggregationParam::Empty,
             early_report_state_consumed,
+            t.task_config.version,
         )
         .unwrap()
         else {
@@ -117,6 +118,7 @@ mod test {
             &t.task_config.vdaf,
             &DapAggregationParam::Empty,
             early_report_state_consumed,
+            t.task_config.version,
         )
         .unwrap()
         else {
@@ -346,10 +348,20 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::HpkeDecryptError
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::HpkeDecryptError
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_hpke_decrypt_err }
@@ -382,10 +394,20 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::ReportDropped)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::ReportDropped
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::ReportDropped
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_skip_time_too_stale }
@@ -418,10 +440,20 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::ReportTooEarly)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::ReportTooEarly
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::ReportTooEarly
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_skip_time_too_early }
@@ -439,10 +471,20 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::HpkeUnknownConfigId
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::HpkeUnknownConfigId
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_hpke_unknown_config_id }
@@ -480,14 +522,34 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
 
         assert_eq!(agg_job_resp.transitions.len(), 2);
-        assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::VdafPrepError)
-        );
-        assert_matches!(
-            agg_job_resp.transitions[1].var,
-            TransitionVar::Failed(TransitionFailure::VdafPrepError)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::VdafPrepError
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[0].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::VdafPrepError
+                ))
+            ),
+        }
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                agg_job_resp.transitions[1].var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::VdafPrepError
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                agg_job_resp.transitions[1].var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::VdafPrepError
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_vdaf_prep_error }

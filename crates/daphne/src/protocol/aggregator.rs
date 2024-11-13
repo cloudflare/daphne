@@ -11,7 +11,8 @@ use crate::{
         encode_u32_bytes, encode_u32_prefixed, AggregationJobInitReq, AggregationJobResp,
         Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
         PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
-        Transition, TransitionFailure, TransitionVar,
+        Transition, TransitionFailure, TransitionFailureDraft09, TransitionFailureLatest,
+        TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
     roles::DapReportInitializer,
@@ -109,7 +110,14 @@ impl EarlyReportStateConsumed {
         if report_share.report_metadata.time >= task_config.not_after {
             return Ok(Self::Rejected {
                 metadata: report_share.report_metadata,
-                failure: TransitionFailure::TaskExpired,
+                failure: match task_config.version {
+                    DapVersion::Draft09 => {
+                        TransitionFailure::Draft09(TransitionFailureDraft09::TaskExpired)
+                    }
+                    DapVersion::Latest => {
+                        TransitionFailure::DraftLatest(TransitionFailureLatest::TaskExpired)
+                    }
+                },
             });
         }
 
@@ -119,7 +127,14 @@ impl EarlyReportStateConsumed {
             // because it's too late.
             return Ok(EarlyReportStateConsumed::Rejected {
                 metadata: report_share.report_metadata,
-                failure: TransitionFailure::ReportDropped,
+                failure: match task_config.version {
+                    DapVersion::Draft09 => {
+                        TransitionFailure::Draft09(TransitionFailureDraft09::ReportDropped)
+                    }
+                    DapVersion::Latest => {
+                        TransitionFailure::DraftLatest(TransitionFailureLatest::ReportDropped)
+                    }
+                },
             });
         }
 
@@ -128,7 +143,14 @@ impl EarlyReportStateConsumed {
             // time skew so we reject it.
             return Ok(EarlyReportStateConsumed::Rejected {
                 metadata: report_share.report_metadata,
-                failure: TransitionFailure::ReportTooEarly,
+                failure: match task_config.version {
+                    DapVersion::Draft09 => {
+                        TransitionFailure::Draft09(TransitionFailureDraft09::ReportTooEarly)
+                    }
+                    DapVersion::Latest => {
+                        TransitionFailure::DraftLatest(TransitionFailureLatest::ReportTooEarly)
+                    }
+                },
             });
         }
 
@@ -172,7 +194,14 @@ impl EarlyReportStateConsumed {
                 Err(..) => {
                     return Ok(Self::Rejected {
                         metadata: report_share.report_metadata,
-                        failure: TransitionFailure::InvalidMessage,
+                        failure: match task_config.version {
+                            DapVersion::Draft09 => {
+                                TransitionFailure::Draft09(TransitionFailureDraft09::InvalidMessage)
+                            }
+                            DapVersion::Latest => TransitionFailure::DraftLatest(
+                                TransitionFailureLatest::InvalidMessage,
+                            ),
+                        },
                     })
                 }
             }
@@ -187,7 +216,14 @@ impl EarlyReportStateConsumed {
                 if !seen.insert(extension.type_code()) {
                     return Ok(Self::Rejected {
                         metadata: report_share.report_metadata,
-                        failure: TransitionFailure::InvalidMessage,
+                        failure: match task_config.version {
+                            DapVersion::Draft09 => {
+                                TransitionFailure::Draft09(TransitionFailureDraft09::InvalidMessage)
+                            }
+                            DapVersion::Latest => TransitionFailure::DraftLatest(
+                                TransitionFailureLatest::InvalidMessage,
+                            ),
+                        },
                     });
                 }
 
@@ -200,7 +236,14 @@ impl EarlyReportStateConsumed {
                     _ => {
                         return Ok(Self::Rejected {
                             metadata: report_share.report_metadata,
-                            failure: TransitionFailure::InvalidMessage,
+                            failure: match task_config.version {
+                                DapVersion::Draft09 => TransitionFailure::Draft09(
+                                    TransitionFailureDraft09::InvalidMessage,
+                                ),
+                                DapVersion::Latest => TransitionFailure::DraftLatest(
+                                    TransitionFailureLatest::InvalidMessage,
+                                ),
+                            },
                         })
                     }
                 }
@@ -211,7 +254,14 @@ impl EarlyReportStateConsumed {
                 // report to indicate support.
                 return Ok(Self::Rejected {
                     metadata: report_share.report_metadata,
-                    failure: TransitionFailure::InvalidMessage,
+                    failure: match task_config.version {
+                        DapVersion::Draft09 => {
+                            TransitionFailure::Draft09(TransitionFailureDraft09::InvalidMessage)
+                        }
+                        DapVersion::Latest => {
+                            TransitionFailure::DraftLatest(TransitionFailureLatest::InvalidMessage)
+                        }
+                    },
                 });
             }
         }
@@ -228,7 +278,14 @@ impl EarlyReportStateConsumed {
                 tracing::warn!(error = ?e, "rejecting report");
                 return Ok(Self::Rejected {
                     metadata: report_share.report_metadata,
-                    failure: TransitionFailure::VdafPrepError,
+                    failure: match task_config.version {
+                        DapVersion::Draft09 => {
+                            TransitionFailure::Draft09(TransitionFailureDraft09::VdafPrepError)
+                        }
+                        DapVersion::Latest => {
+                            TransitionFailure::DraftLatest(TransitionFailureLatest::VdafPrepError)
+                        }
+                    },
                 });
             }
         };
@@ -282,6 +339,7 @@ impl EarlyReportStateInitialized {
         vdaf_config: &VdafConfig,
         agg_param: &DapAggregationParam,
         early_report_state_consumed: EarlyReportStateConsumed,
+        version: DapVersion,
     ) -> Result<Self, DapError> {
         // We need to use this variable for Mastic, which is currently fenced by the "experimental
         // feature".
@@ -351,7 +409,14 @@ impl EarlyReportStateInitialized {
                 tracing::warn!(error = ?e, "rejecting report");
                 Self::Rejected {
                     metadata,
-                    failure: TransitionFailure::VdafPrepError,
+                    failure: match version {
+                        DapVersion::Draft09 => {
+                            TransitionFailure::Draft09(TransitionFailureDraft09::VdafPrepError)
+                        }
+                        DapVersion::Latest => {
+                            TransitionFailure::DraftLatest(TransitionFailureLatest::VdafPrepError)
+                        }
+                    },
                 }
             }
         };
@@ -716,7 +781,18 @@ impl DapTaskConfig {
 
                             Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
                                 tracing::warn!(error = ?e, "rejecting report");
-                                TransitionVar::Failed(TransitionFailure::VdafPrepError)
+                                match self.version {
+                                    DapVersion::Draft09 => {
+                                        TransitionVar::Failed(TransitionFailure::Draft09(
+                                            TransitionFailureDraft09::VdafPrepError,
+                                        ))
+                                    }
+                                    DapVersion::Latest => {
+                                        TransitionVar::Failed(TransitionFailure::DraftLatest(
+                                            TransitionFailureLatest::VdafPrepError,
+                                        ))
+                                    }
+                                }
                             }
 
                             Err(VdafError::Dap(e)) => return Err(e),
@@ -829,8 +905,20 @@ impl DapTaskConfig {
 
                 Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
                     tracing::warn!(error = ?e, "rejecting report");
-                    metrics
-                        .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
+                    match self.version {
+                        DapVersion::Draft09 => metrics.report_inc_by(
+                            ReportStatus::Rejected(TransitionFailure::Draft09(
+                                TransitionFailureDraft09::VdafPrepError,
+                            )),
+                            1,
+                        ),
+                        DapVersion::Latest => metrics.report_inc_by(
+                            ReportStatus::Rejected(TransitionFailure::DraftLatest(
+                                TransitionFailureLatest::VdafPrepError,
+                            )),
+                            1,
+                        ),
+                    }
                 }
 
                 Err(VdafError::Dap(e)) => return Err(e),

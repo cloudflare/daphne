@@ -21,6 +21,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
     io::{Cursor, Read},
+    ops::{Deref, DerefMut},
 };
 
 // Query types
@@ -526,19 +527,26 @@ pub struct Transition {
     pub var: TransitionVar,
 }
 
-impl Encode for Transition {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+impl ParameterizedEncode<DapVersion> for Transition {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         self.report_id.encode(bytes)?;
-        self.var.encode(bytes)?;
+        self.var.encode_with_param(version, bytes)?;
         Ok(())
     }
 }
 
-impl Decode for Transition {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for Transition {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
-            report_id: ReportId::decode(bytes)?,
-            var: TransitionVar::decode(bytes)?,
+            report_id: ReportId::decode_with_param(version, bytes)?,
+            var: TransitionVar::decode_with_param(version, bytes)?,
         })
     }
 }
@@ -551,8 +559,12 @@ pub enum TransitionVar {
     Failed(TransitionFailure),
 }
 
-impl Encode for TransitionVar {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+impl ParameterizedEncode<DapVersion> for TransitionVar {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
         match self {
             TransitionVar::Continued(vdaf_message) => {
                 0_u8.encode(bytes)?;
@@ -560,18 +572,23 @@ impl Encode for TransitionVar {
             }
             TransitionVar::Failed(err) => {
                 2_u8.encode(bytes)?;
-                err.encode(bytes)?;
+                err.encode_with_param(version, bytes)?;
             }
         };
         Ok(())
     }
 }
 
-impl Decode for TransitionVar {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for TransitionVar {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
             0 => Ok(Self::Continued(decode_u32_bytes(bytes)?)),
-            2 => Ok(Self::Failed(TransitionFailure::decode(bytes)?)),
+            2 => Ok(Self::Failed(TransitionFailure::decode_with_param(
+                version, bytes,
+            )?)),
             _ => Err(CodecError::UnexpectedValue),
         }
     }
@@ -581,7 +598,7 @@ impl Decode for TransitionVar {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error, Hash)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum TransitionFailure {
+pub enum TransitionFailureDraft09 {
     BatchCollected = 0,
     ReportReplayed = 1,
     ReportDropped = 2,
@@ -594,7 +611,86 @@ pub enum TransitionFailure {
     ReportTooEarly = 9,
 }
 
-impl TryFrom<u8> for TransitionFailure {
+/// Transition error.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error, Hash)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum TransitionFailureLatest {
+    Reserved = 0,
+    BatchCollected = 1,
+    ReportReplayed = 2,
+    ReportDropped = 3,
+    HpkeUnknownConfigId = 4,
+    HpkeDecryptError = 5,
+    VdafPrepError = 6,
+    TaskExpired = 7,
+    InvalidMessage = 8,
+    ReportTooEarly = 9,
+    TaskNotStarted = 10,
+}
+
+/// Transition error.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error, Hash)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum TransitionFailure {
+    Draft09(TransitionFailureDraft09),
+    DraftLatest(TransitionFailureLatest),
+}
+
+impl ParameterizedDecode<DapVersion> for TransitionFailure {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        match *version {
+            DapVersion::Draft09 => match TransitionFailureDraft09::decode(bytes) {
+                Ok(x) => Ok(Self::Draft09(x)),
+                Err(x) => Err(x),
+            },
+            DapVersion::Latest => match TransitionFailureLatest::decode(bytes) {
+                Ok(x) => Ok(Self::DraftLatest(x)),
+                Err(x) => Err(x),
+            },
+        }
+    }
+}
+
+impl ParameterizedEncode<DapVersion> for TransitionFailure {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        match *version {
+            DapVersion::Draft09 => match u8::decode(&mut Cursor::new(bytes.as_slice())) {
+                Ok(x) => {
+                    self::TransitionFailure::Draft09(x.try_into()?);
+                    Ok(())
+                }
+                Err(x) => Err(x),
+            },
+            DapVersion::Latest => match u8::decode(&mut Cursor::new(bytes.as_slice())) {
+                Ok(x) => {
+                    self::TransitionFailure::DraftLatest(x.try_into()?);
+                    Ok(())
+                }
+                Err(x) => Err(x),
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for TransitionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Draft09(x) => write!(f, "{x}"),
+            Self::DraftLatest(x) => write!(f, "{x}"),
+        }
+    }
+}
+
+impl TryFrom<u8> for TransitionFailureDraft09 {
     type Error = CodecError;
 
     fn try_from(v: u8) -> Result<Self, Self::Error> {
@@ -614,19 +710,19 @@ impl TryFrom<u8> for TransitionFailure {
     }
 }
 
-impl Encode for TransitionFailure {
+impl Encode for TransitionFailureDraft09 {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         (*self as u8).encode(bytes)
     }
 }
 
-impl Decode for TransitionFailure {
+impl Decode for TransitionFailureDraft09 {
     fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         u8::decode(bytes)?.try_into()
     }
 }
 
-impl std::fmt::Display for TransitionFailure {
+impl std::fmt::Display for TransitionFailureDraft09 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::BatchCollected => write!(f, "batch_collected"),
@@ -642,6 +738,56 @@ impl std::fmt::Display for TransitionFailure {
         }
     }
 }
+impl TryFrom<u8> for TransitionFailureLatest {
+    type Error = CodecError;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            b if b == Self::Reserved as u8 => Ok(Self::Reserved),
+            b if b == Self::BatchCollected as u8 => Ok(Self::BatchCollected),
+            b if b == Self::ReportReplayed as u8 => Ok(Self::ReportReplayed),
+            b if b == Self::ReportDropped as u8 => Ok(Self::ReportDropped),
+            b if b == Self::HpkeUnknownConfigId as u8 => Ok(Self::HpkeUnknownConfigId),
+            b if b == Self::HpkeDecryptError as u8 => Ok(Self::HpkeDecryptError),
+            b if b == Self::VdafPrepError as u8 => Ok(Self::VdafPrepError),
+            b if b == Self::TaskExpired as u8 => Ok(Self::TaskExpired),
+            b if b == Self::InvalidMessage as u8 => Ok(Self::InvalidMessage),
+            b if b == Self::ReportTooEarly as u8 => Ok(Self::ReportTooEarly),
+            b if b == Self::TaskNotStarted as u8 => Ok(Self::TaskNotStarted),
+            _ => Err(CodecError::UnexpectedValue),
+        }
+    }
+}
+
+impl Encode for TransitionFailureLatest {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        (*self as u8).encode(bytes)
+    }
+}
+
+impl Decode for TransitionFailureLatest {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        u8::decode(bytes)?.try_into()
+    }
+}
+
+impl std::fmt::Display for TransitionFailureLatest {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Reserved => write!(f, "reserved"),
+            Self::BatchCollected => write!(f, "batch_collected"),
+            Self::ReportReplayed => write!(f, "report_replayed"),
+            Self::ReportDropped => write!(f, "report_dropped"),
+            Self::HpkeUnknownConfigId => write!(f, "hpke_unknown_config_id"),
+            Self::HpkeDecryptError => write!(f, "hpke_decrypt_error"),
+            Self::VdafPrepError => write!(f, "vdaf_prep_error"),
+            Self::TaskExpired => write!(f, "task_expired"),
+            Self::InvalidMessage => write!(f, "invalid_message"),
+            Self::ReportTooEarly => write!(f, "report_too_early"),
+            Self::TaskNotStarted => write!(f, "task_not_started"),
+        }
+    }
+}
 
 /// An aggregate response sent from the Helper to the Leader.
 #[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -649,16 +795,23 @@ pub struct AggregationJobResp {
     pub transitions: Vec<Transition>,
 }
 
-impl Encode for AggregationJobResp {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        encode_u32_items(bytes, &(), &self.transitions)
+impl ParameterizedEncode<DapVersion> for AggregationJobResp {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        encode_u32_items(bytes, version, &self.transitions)
     }
 }
 
-impl Decode for AggregationJobResp {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+impl ParameterizedDecode<DapVersion> for AggregationJobResp {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
         Ok(Self {
-            transitions: decode_u32_items(&(), bytes)?,
+            transitions: decode_u32_items(version, bytes)?,
         })
     }
 }
@@ -1385,13 +1538,19 @@ mod test {
                 },
                 Transition {
                     report_id: ReportId([17; 16]),
-                    var: TransitionVar::Failed(TransitionFailure::TaskExpired),
+                    var: TransitionVar::Failed(TransitionFailure::DraftLatest(
+                        TransitionFailureLatest::TaskExpired,
+                    )),
                 },
             ],
         };
-        println!("want {:?}", want.get_encoded().unwrap());
+        println!(
+            "want {:?}",
+            want.get_encoded_with_param(&DapVersion::Latest).unwrap()
+        );
 
-        let got = AggregationJobResp::get_decoded(TEST_DATA).unwrap();
+        let got =
+            AggregationJobResp::get_decoded_with_param(&DapVersion::Latest, TEST_DATA).unwrap();
         assert_eq!(got, want);
     }
 

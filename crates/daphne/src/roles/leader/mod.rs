@@ -336,8 +336,9 @@ async fn run_agg_job<A: DapLeader>(
         },
     )
     .await?;
-    let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload)
-        .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
+    let agg_job_resp =
+        AggregationJobResp::get_decoded_with_param(&task_config.version, &resp.payload)
+            .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Handle AggregationJobResp.
     let agg_span =

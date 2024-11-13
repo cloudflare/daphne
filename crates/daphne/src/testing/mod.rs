@@ -91,6 +91,7 @@ async fn initialize_reports(
                     &vdaf,
                     &agg_param,
                     consumed,
+                    DapVersion::Latest,
                 )
             })
             .collect()
@@ -117,6 +118,7 @@ async fn initialize_reports(
                 &vdaf,
                 agg_param,
                 consumed,
+                DapVersion::Latest,
             )
         })
         .collect()

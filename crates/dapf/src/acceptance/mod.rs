@@ -727,6 +727,7 @@ impl DapReportInitializer for Test {
                             &vdaf,
                             &agg_param,
                             consumed,
+                            task_config.version,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()

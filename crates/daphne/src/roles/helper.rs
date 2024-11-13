@@ -4,7 +4,8 @@
 use std::{collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
-use prio::codec::{Encode, ParameterizedDecode};
+use futures::sink::Drain;
+use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 
 use super::{check_batch, resolve_task_config, DapAggregator};
 use crate::{
@@ -13,12 +14,12 @@ use crate::{
     messages::{
         constant_time_eq, request::resource, AggregateShare, AggregateShareReq,
         AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure,
-        TransitionVar,
+        TransitionFailureDraft09, TransitionFailureLatest, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::{ReplayProtection, ReportProcessedStatus},
     roles::aggregator::MergeAggShareError,
-    DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig,
+    DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig, DapVersion,
     EarlyReportStateInitialized,
 };
 
@@ -85,7 +86,9 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
     Ok(DapResponse {
         version,
         media_type: DapMediaType::AggregationJobResp,
-        payload: agg_job_resp.get_encoded().map_err(DapError::encoding)?,
+        payload: agg_job_resp
+            .get_encoded_with_param(&version)
+            .map_err(DapError::encoding)?,
     })
 }
 
@@ -250,23 +253,60 @@ async fn finish_agg_job_and_aggregate(
                 }
                 // This bucket had replays.
                 (Err(MergeAggShareError::ReplaysDetected(replays)), _reports) => {
-                    // At least one report was replayed (no change to aggregate storage).
-                    report_status.extend(replays.into_iter().map(|report_id| {
-                        (
-                            report_id,
-                            ReportProcessedStatus::Rejected(TransitionFailure::ReportReplayed),
-                        )
-                    }));
+                    match task_config.version {
+                        // At least one report was replayed (no change to aggregate storage).
+                        DapVersion::Draft09 => {
+                            report_status.extend(replays.into_iter().map(|report_id| {
+                                (
+                                    report_id,
+                                    ReportProcessedStatus::Rejected(TransitionFailure::Draft09(
+                                        TransitionFailureDraft09::ReportReplayed,
+                                    )),
+                                )
+                            }))
+                        }
+                        DapVersion::Latest => {
+                            report_status.extend(replays.into_iter().map(|report_id| {
+                                (
+                                    report_id,
+                                    ReportProcessedStatus::Rejected(
+                                        TransitionFailure::DraftLatest(
+                                            TransitionFailureLatest::ReportReplayed,
+                                        ),
+                                    ),
+                                )
+                            }))
+                        }
+                    };
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }
                 // This bucket is contained by an aggregate share span that has been collected.
                 (Err(MergeAggShareError::AlreadyCollected), reports) => {
-                    report_status.extend(reports.into_iter().map(|(report_id, _)| {
-                        (
-                            report_id,
-                            ReportProcessedStatus::Rejected(TransitionFailure::BatchCollected),
-                        )
-                    }));
+                    match task_config.version {
+                        DapVersion::Draft09 => {
+                            report_status.extend(reports.into_iter().map(|(report_id, _)| {
+                                (
+                                    report_id,
+                                    ReportProcessedStatus::Rejected(TransitionFailure::Draft09(
+                                        TransitionFailureDraft09::BatchCollected,
+                                    )),
+                                )
+                            }));
+                        }
+                        DapVersion::Latest => {
+                            report_status.extend(reports.into_iter().map(|(report_id, _)| {
+                                (
+                                    report_id,
+                                    ReportProcessedStatus::Rejected(
+                                        TransitionFailure::DraftLatest(
+                                            TransitionFailureLatest::BatchCollected,
+                                        ),
+                                    ),
+                                )
+                            }));
+                        }
+                    }
+
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }
                 // If this happens, the leader and helper can possibly have inconsistent state.

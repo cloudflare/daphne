@@ -139,7 +139,7 @@ mod test {
             request::resource, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
             Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
-            TransitionFailure, TransitionVar,
+            TransitionFailure, TransitionFailureDraft09, TransitionFailureLatest, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -149,7 +149,7 @@ mod test {
         DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
-    use prio::codec::{Decode, Encode};
+    use prio::codec::{Decode, Encode, ParameterizedDecode};
     #[cfg(feature = "experimental")]
     use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
@@ -726,7 +726,8 @@ mod test {
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
+        let agg_job_resp = AggregationJobResp::get_decoded_with_param(
+            &version,
             &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
@@ -736,10 +737,20 @@ mod test {
         let transition = &agg_job_resp.transitions[0];
 
         // Expect failure due to invalid ciphertext.
-        assert_matches!(
-            transition.var,
-            TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
-        );
+        match version {
+            DapVersion::Draft09 => assert_matches!(
+                transition.var,
+                TransitionVar::Failed(TransitionFailure::Draft09(
+                    TransitionFailureDraft09::HpkeDecryptError
+                ))
+            ),
+            DapVersion::Latest => assert_matches!(
+                transition.var,
+                TransitionVar::Failed(TransitionFailure::DraftLatest(
+                    TransitionFailureLatest::HpkeDecryptError
+                ))
+            ),
+        }
     }
 
     async_test_versions! { handle_agg_job_req_failure_hpke_decrypt_error }
@@ -754,7 +765,8 @@ mod test {
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
+        let agg_job_resp = AggregationJobResp::get_decoded_with_param(
+            &version,
             &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
