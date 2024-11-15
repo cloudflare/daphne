@@ -5,7 +5,7 @@ pub mod aborts;
 
 use std::fmt::{Debug, Display};
 
-use crate::{messages::TransitionFailure, vdaf::VdafError};
+use crate::{messages::{TransitionFailure, TransitionFailureDraft09, TransitionFailureLatest}, vdaf::VdafError, DapVersion};
 pub use aborts::DapAbort;
 use prio::codec::CodecError;
 
@@ -39,11 +39,14 @@ impl DapError {
         )))
     }
 
-    pub(crate) fn from_vdaf(e: VdafError) -> Self {
+    pub(crate) fn from_vdaf_with_param(version: DapVersion, e: VdafError) -> Self {
         match e {
             VdafError::Codec(..) | VdafError::Vdaf(..) => {
                 tracing::warn!(error = ?e, "rejecting report");
-                Self::Transition(TransitionFailure::VdafPrepError)
+                match version {
+                    DapVersion::Draft09 => Self::Transition(TransitionFailure::DraftLatest(TransitionFailureLatest::VdafPrepError)),
+                    DapVersion::Latest => Self::Transition(TransitionFailure::Draft09(TransitionFailureDraft09::VdafPrepError)),
+                }
             }
             VdafError::Dap(e) => e,
         }

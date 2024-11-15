@@ -436,6 +436,7 @@ impl EarlyReportState for EarlyReportStateInitialized {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum ReportProcessedStatus {
     /// The report should be marked as aggregated. However it has already been committed to
     /// storage, so don't do so again.

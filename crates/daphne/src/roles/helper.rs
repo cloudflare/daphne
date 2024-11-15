@@ -253,59 +253,34 @@ async fn finish_agg_job_and_aggregate(
                 }
                 // This bucket had replays.
                 (Err(MergeAggShareError::ReplaysDetected(replays)), _reports) => {
-                    match task_config.version {
-                        // At least one report was replayed (no change to aggregate storage).
-                        DapVersion::Draft09 => {
-                            report_status.extend(replays.into_iter().map(|report_id| {
-                                (
-                                    report_id,
-                                    ReportProcessedStatus::Rejected(TransitionFailure::Draft09(
-                                        TransitionFailureDraft09::ReportReplayed,
-                                    )),
-                                )
-                            }))
-                        }
-                        DapVersion::Latest => {
-                            report_status.extend(replays.into_iter().map(|report_id| {
-                                (
-                                    report_id,
-                                    ReportProcessedStatus::Rejected(
-                                        TransitionFailure::DraftLatest(
-                                            TransitionFailureLatest::ReportReplayed,
-                                        ),
-                                    ),
-                                )
-                            }))
-                        }
+                    // At least one report was replayed (no change to aggregate storage).
+                    let rejection = match task_config.version {
+                        DapVersion::Draft09 => ReportProcessedStatus::Rejected(
+                            TransitionFailure::Draft09(TransitionFailureDraft09::ReportReplayed),
+                        ),
+                        DapVersion::Latest => ReportProcessedStatus::Rejected(
+                            TransitionFailure::DraftLatest(TransitionFailureLatest::ReportReplayed),
+                        ),
                     };
+                    report_status
+                        .extend(replays.into_iter().map(|report_id| (report_id, rejection)));
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }
                 // This bucket is contained by an aggregate share span that has been collected.
                 (Err(MergeAggShareError::AlreadyCollected), reports) => {
-                    match task_config.version {
-                        DapVersion::Draft09 => {
-                            report_status.extend(reports.into_iter().map(|(report_id, _)| {
-                                (
-                                    report_id,
-                                    ReportProcessedStatus::Rejected(TransitionFailure::Draft09(
-                                        TransitionFailureDraft09::BatchCollected,
-                                    )),
-                                )
-                            }));
-                        }
-                        DapVersion::Latest => {
-                            report_status.extend(reports.into_iter().map(|(report_id, _)| {
-                                (
-                                    report_id,
-                                    ReportProcessedStatus::Rejected(
-                                        TransitionFailure::DraftLatest(
-                                            TransitionFailureLatest::BatchCollected,
-                                        ),
-                                    ),
-                                )
-                            }));
-                        }
-                    }
+                    let rejection = match task_config.version {
+                        DapVersion::Draft09 => ReportProcessedStatus::Rejected(
+                            TransitionFailure::Draft09(TransitionFailureDraft09::BatchCollected),
+                        ),
+                        DapVersion::Latest => ReportProcessedStatus::Rejected(
+                            TransitionFailure::DraftLatest(TransitionFailureLatest::BatchCollected),
+                        ),
+                    };
+                    report_status.extend(
+                        reports
+                            .into_iter()
+                            .map(|(report_id, _)| (report_id, rejection)),
+                    );
 
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
                 }

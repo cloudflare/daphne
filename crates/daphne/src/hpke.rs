@@ -3,6 +3,7 @@
 
 //! Hybrid Public-Key Encryption ([HPKE](https://datatracker.ietf.org/doc/rfc9180/)).
 
+use futures::sink::Drain;
 use hpke_rs::{Hpke, HpkeError, HpkePrivateKey, HpkePublicKey, Mode};
 use hpke_rs_crypto::{
     error::Error,
@@ -13,7 +14,7 @@ use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
 use crate::{
     fatal_error,
-    messages::{HpkeCiphertext, TaskId, TransitionFailure},
+    messages::{HpkeCiphertext, TaskId, Transition, TransitionFailure},
     DapError, DapVersion,
 };
 use async_trait::async_trait;

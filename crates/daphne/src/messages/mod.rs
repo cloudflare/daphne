@@ -21,7 +21,6 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
     io::{Cursor, Read},
-    ops::{Deref, DerefMut},
 };
 
 // Query types
@@ -527,14 +526,13 @@ pub struct Transition {
     pub var: TransitionVar,
 }
 
-impl ParameterizedEncode<DapVersion> for Transition {
-    fn encode_with_param(
+impl Encode for Transition {
+    fn encode(
         &self,
-        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         self.report_id.encode(bytes)?;
-        self.var.encode_with_param(version, bytes)?;
+        self.var.encode(bytes)?;
         Ok(())
     }
 }
@@ -559,10 +557,9 @@ pub enum TransitionVar {
     Failed(TransitionFailure),
 }
 
-impl ParameterizedEncode<DapVersion> for TransitionVar {
-    fn encode_with_param(
+impl Encode for TransitionVar {
+    fn encode(
         &self,
-        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         match self {
@@ -572,7 +569,7 @@ impl ParameterizedEncode<DapVersion> for TransitionVar {
             }
             TransitionVar::Failed(err) => {
                 2_u8.encode(bytes)?;
-                err.encode_with_param(version, bytes)?;
+                err.encode(bytes)?;
             }
         };
         Ok(())
@@ -644,39 +641,20 @@ impl ParameterizedDecode<DapVersion> for TransitionFailure {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match *version {
-            DapVersion::Draft09 => match TransitionFailureDraft09::decode(bytes) {
-                Ok(x) => Ok(Self::Draft09(x)),
-                Err(x) => Err(x),
-            },
-            DapVersion::Latest => match TransitionFailureLatest::decode(bytes) {
-                Ok(x) => Ok(Self::DraftLatest(x)),
-                Err(x) => Err(x),
-            },
+            DapVersion::Draft09 => TransitionFailureDraft09::decode(bytes).map(Self::Draft09),
+            DapVersion::Latest => TransitionFailureLatest::decode(bytes).map(Self::DraftLatest),
         }
     }
 }
 
-impl ParameterizedEncode<DapVersion> for TransitionFailure {
-    fn encode_with_param(
+impl Encode for TransitionFailure {
+    fn encode(
         &self,
-        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        match *version {
-            DapVersion::Draft09 => match u8::decode(&mut Cursor::new(bytes.as_slice())) {
-                Ok(x) => {
-                    self::TransitionFailure::Draft09(x.try_into()?);
-                    Ok(())
-                }
-                Err(x) => Err(x),
-            },
-            DapVersion::Latest => match u8::decode(&mut Cursor::new(bytes.as_slice())) {
-                Ok(x) => {
-                    self::TransitionFailure::DraftLatest(x.try_into()?);
-                    Ok(())
-                }
-                Err(x) => Err(x),
-            },
+        match self {
+            TransitionFailure::Draft09(x) => x.encode(bytes),
+            TransitionFailure::DraftLatest(x) => x.encode(bytes),
         }
     }
 }
@@ -795,13 +773,12 @@ pub struct AggregationJobResp {
     pub transitions: Vec<Transition>,
 }
 
-impl ParameterizedEncode<DapVersion> for AggregationJobResp {
-    fn encode_with_param(
+impl Encode for AggregationJobResp {
+    fn encode(
         &self,
-        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u32_items(bytes, version, &self.transitions)
+        encode_u32_items(bytes, &(), &self.transitions)
     }
 }
 

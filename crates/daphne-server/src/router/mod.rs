@@ -19,7 +19,7 @@ use axum::{
     Json,
 };
 use daphne::{
-    error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequestMeta, DapResponse,
+    error::DapAbort, fatal_error, messages::{TaskId, TransitionFailure}, DapError, DapRequestMeta, DapResponse,
     DapSender,
 };
 use daphne_service_utils::{bearer_token::BearerToken, DapRole};
@@ -166,7 +166,7 @@ impl AxumDapResponse {
     pub fn new_error<E: Into<DapError>>(error: E, metrics: &dyn DaphneServiceMetrics) -> Self {
         // trigger abort if transition failures reach this point.
         let error = match error.into() {
-            DapError::Transition(failure) => DapAbort::report_rejected(failure),
+            DapError::Transition(failure) => DapAbort::report_rejected( failure),
             DapError::Fatal(e) => Err(e),
             DapError::Abort(abort) => Ok(abort),
         };

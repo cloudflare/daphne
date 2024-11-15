@@ -50,7 +50,7 @@ impl VdafConfig {
         let report_id = ReportId(rng.gen());
         let (public_share, input_shares) = self
             .produce_input_shares(measurement, &report_id.0)
-            .map_err(DapError::from_vdaf)?;
+            .map_err(|e| DapError::from_vdaf_with_param(version, e))?;
         Self::produce_report_with_extensions_for_shares(
             public_share,
             input_shares,

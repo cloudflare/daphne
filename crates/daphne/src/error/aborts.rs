@@ -6,7 +6,7 @@
 use crate::{
     constants::DapMediaType,
     fatal_error,
-    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
+    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure, TransitionFailureDraft09, TransitionFailureLatest},
     DapError, DapRequestMeta, DapVersion,
 };
 use prio::codec::CodecError;
@@ -239,23 +239,45 @@ impl DapAbort {
     #[inline]
     pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, FatalDapError> {
         let detail = match failure_reason {
-            TransitionFailure::BatchCollected => {
-                "The report pertains to a batch that has already been collected."
+            TransitionFailure::Draft09(failure) => {
+                match failure {
+                    TransitionFailureDraft09::BatchCollected => {
+                        "The report pertains to a batch that has already been collected."                    
+                    }
+                    TransitionFailureDraft09::ReportReplayed => {
+                        "A report with the same ID was uploaded previously." 
+                    }
+                    _ => {
+                        let DapError::Fatal(fatal) = fatal_error!(
+                            err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
+                            unexpected_transition_failure = ?failure_reason,
+                        ) else {
+                            unreachable!("fatal_error! should always create a DapError::Fatal");
+                        };
+                        return Err(fatal); 
+                    }
+                }
             }
-            TransitionFailure::ReportReplayed => {
-                "A report with the same ID was uploaded previously."
-            }
-            _ => {
-                let DapError::Fatal(fatal) = fatal_error!(
-                    err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
-                    unexpected_transition_failure = ?failure_reason,
-                ) else {
-                    unreachable!("fatal_error! should always create a DapError::Fatal");
-                };
-                return Err(fatal);
+            TransitionFailure::DraftLatest(failure) => {
+                match failure {
+                    TransitionFailureLatest::BatchCollected => {
+                        "The report pertains to a batch that has already been collected."                    
+                    }
+                    TransitionFailureLatest::ReportReplayed => {
+                        "A report with the same ID was uploaded previously." 
+                    }
+                    _ => {
+                        let DapError::Fatal(fatal) = fatal_error!(
+                            err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
+                            unexpected_transition_failure = ?failure_reason,
+                        ) else {
+                            unreachable!("fatal_error! should always create a DapError::Fatal");
+                        };
+                        return Err(fatal); 
+                    }
+                } 
             }
         };
-
         Ok(Self::ReportRejected {
             detail: detail.into(),
         })
