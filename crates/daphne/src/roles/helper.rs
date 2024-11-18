@@ -4,7 +4,7 @@
 use std::{collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
-use prio::codec::{Encode, ParameterizedDecode};
+use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 
 use super::{check_batch, resolve_task_config, DapAggregator};
 use crate::{
@@ -85,7 +85,9 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
     Ok(DapResponse {
         version,
         media_type: DapMediaType::AggregationJobResp,
-        payload: agg_job_resp.get_encoded().map_err(DapError::encoding)?,
+        payload: agg_job_resp
+            .get_encoded_with_param(&version)
+            .map_err(DapError::encoding)?,
     })
 }
 

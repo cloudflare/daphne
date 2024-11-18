@@ -149,7 +149,7 @@ mod test {
         DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
-    use prio::codec::{Decode, Encode};
+    use prio::codec::{Encode, ParameterizedDecode};
     #[cfg(feature = "experimental")]
     use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
@@ -726,7 +726,8 @@ mod test {
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
+        let agg_job_resp = AggregationJobResp::get_decoded_with_param(
+            &version,
             &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
@@ -754,7 +755,8 @@ mod test {
             .await;
 
         // Get AggregationJobResp and then extract the transition data from inside.
-        let agg_job_resp = AggregationJobResp::get_decoded(
+        let agg_job_resp = AggregationJobResp::get_decoded_with_param(
+            &version,
             &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap()
