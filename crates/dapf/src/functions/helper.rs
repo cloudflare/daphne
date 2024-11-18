@@ -12,7 +12,7 @@ use daphne::{
     DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers};
-use prio::codec::{Decode as _, ParameterizedEncode as _};
+use prio::codec::{ParameterizedDecode as _, ParameterizedEncode as _};
 use reqwest::header;
 use url::Url;
 
@@ -58,7 +58,8 @@ impl HttpClient {
         } else if !resp.status().is_success() {
             Err(response_to_anyhow(resp).await).context("while running an AggregationJobInitReq")
         } else {
-            AggregationJobResp::get_decoded(
+            AggregationJobResp::get_decoded_with_param(
+                &version,
                 &resp
                     .bytes()
                     .await
