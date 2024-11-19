@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use axum::{
-    body::HttpBody,
     extract::{Path, Query, State},
     response::{AppendHeaders, IntoResponse},
     routing::get,
@@ -22,12 +21,9 @@ use serde::Deserialize;
 
 use super::{AxumDapResponse, DaphneService};
 
-pub fn add_aggregator_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
+pub fn add_aggregator_routes<A>(router: super::Router<A>) -> super::Router<A>
 where
     A: DapAggregator + DaphneService + Send + Sync + 'static,
-    B: Send + HttpBody + 'static,
-    B::Data: Send,
-    B::Error: Send + Sync,
 {
     router.route("/:version/hpke_config", get(hpke_config))
 }

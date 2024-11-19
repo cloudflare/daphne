@@ -11,8 +11,7 @@ pub mod test_routes;
 use std::sync::Arc;
 
 use axum::{
-    body::HttpBody,
-    extract::State,
+    extract::{Request, State},
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     middleware::Next,
     response::IntoResponse,
@@ -24,12 +23,11 @@ use daphne::{
 };
 use daphne_service_utils::{bearer_token::BearerToken, DapRole};
 use either::Either;
-use http::Request;
 
 use crate::{metrics::DaphneServiceMetrics, App};
 use extractor::{DapRequestExtractor, UnauthenticatedDapRequestExtractor};
 
-type Router<A, B> = axum::Router<Arc<A>, B>;
+type Router<A> = axum::Router<Arc<A>>;
 
 /// Capabilities necessary when running a native daphne service.
 #[axum::async_trait]
@@ -88,12 +86,7 @@ where
     }
 }
 
-pub fn new<B>(role: DapRole, aggregator: App) -> axum::Router<(), B>
-where
-    B: Send + HttpBody + 'static,
-    B::Data: Send,
-    B::Error: Send + Sync + Into<Box<dyn std::error::Error + Send + Sync>>,
-{
+pub fn new(role: DapRole, aggregator: App) -> axum::Router<()> {
     let router = axum::Router::new();
 
     let router = aggregator::add_aggregator_routes(router);
@@ -106,10 +99,10 @@ where
     #[cfg(feature = "test-utils")]
     let router = test_routes::add_test_routes(router, role);
 
-    async fn request_metrics<B>(
+    async fn request_metrics(
         State(app): State<Arc<App>>,
-        req: Request<B>,
-        next: Next<B>,
+        req: Request,
+        next: Next,
     ) -> impl IntoResponse {
         tracing::info!(method = %req.method(), uri = %req.uri(), "received request");
         let resp = next.run(req).await;

@@ -16,14 +16,12 @@ description = "Workers backend for Daphne"
 all-features = true
 
 [dependencies]
-axum = "0.6.0" # held back to use http 0.2
 daphne = { path = "../daphne" }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
 either.workspace = true
 futures.workspace = true
 hex.workspace = true
-http = "0.2" # held back to use http 0.2
-hyper.workspace = true
+http.workspace = true
 mappable-rc.workspace = true
 p256.workspace = true
 prio.workspace = true
@@ -32,12 +30,16 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tower.workspace = true
+tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 url.workspace = true
 
+[dependencies.axum]
+workspace = true
+features = ["query", "json", "tokio", "http1", "http2"]
+
 [dependencies.reqwest]
-version = "0.11" # held back to use http 0.2
+workspace = true
 default-features = false
 features = ["rustls-tls-native-roots", "json"]
 
