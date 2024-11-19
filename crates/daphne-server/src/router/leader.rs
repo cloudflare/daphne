@@ -4,9 +4,8 @@
 use std::sync::Arc;
 
 use axum::{
-    body::HttpBody,
-    extract::{Path, State},
-    http::{Request, StatusCode},
+    extract::{Path, Request, State},
+    http::StatusCode,
     middleware::{from_fn, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -33,9 +32,9 @@ struct PathVersion {
     presented_version: DapVersion,
 }
 
-fn require_version<B: Send + 'static>(
+fn require_version(
     expected_version: DapVersion,
-) -> impl Copy + Fn(Path<PathVersion>, Request<B>, Next<B>) -> BoxFuture<'static, Response> {
+) -> impl Copy + Fn(Path<PathVersion>, Request, Next) -> BoxFuture<'static, Response> {
     move |Path(PathVersion { presented_version }), req, next| {
         async move {
             if presented_version != expected_version {
@@ -47,12 +46,9 @@ fn require_version<B: Send + 'static>(
     }
 }
 
-pub(super) fn add_leader_routes<A, B>(router: super::Router<A, B>) -> super::Router<A, B>
+pub(super) fn add_leader_routes<A>(router: super::Router<A>) -> super::Router<A>
 where
     A: DapLeader + DaphneService + Send + Sync + 'static,
-    B: Send + HttpBody + 'static,
-    B::Data: Send,
-    B::Error: Send + Sync,
 {
     router
         .route(

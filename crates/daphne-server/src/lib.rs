@@ -79,8 +79,6 @@ mod storage_proxy_connection;
 ///
 /// let router = router::new(DapRole::Helper, app);
 ///
-/// # // this is so I don't have to annotate the types of `router::new`
-/// # let router: axum::Router<(), axum::body::Body> = router;
 /// # Ok::<(), daphne::DapError>(())
 /// ```
 pub struct App {

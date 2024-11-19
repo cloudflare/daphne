@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use axum::{
-    body::HttpBody,
     extract::State,
     routing::{post, put},
 };
@@ -20,12 +19,7 @@ use super::{
     extractor::dap_sender::FROM_LEADER, AxumDapResponse, DapRequestExtractor, DaphneService,
 };
 
-pub(super) fn add_helper_routes<B>(router: super::Router<App, B>) -> super::Router<App, B>
-where
-    B: Send + HttpBody + 'static,
-    B::Data: Send,
-    B::Error: Send + Sync,
-{
+pub(super) fn add_helper_routes(router: super::Router<App>) -> super::Router<App> {
     router
         .route(
             "/:version/tasks/:task_id/aggregation_jobs/:agg_job_id",

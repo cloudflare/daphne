@@ -9,6 +9,7 @@ use daphne_server::{
 };
 use daphne_service_utils::DapRole;
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -120,11 +121,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         .init();
 
     // hand the router to axum for it to run
-    let serve = axum::Server::bind(&std::net::SocketAddr::new(
-        "0.0.0.0".parse().unwrap(),
-        config.port,
-    ))
-    .serve(router.into_make_service());
+    let serve = axum::serve(
+        TcpListener::bind(std::net::SocketAddr::new(
+            "0.0.0.0".parse().unwrap(),
+            config.port,
+        ))
+        .await
+        .unwrap(),
+        router,
+    );
 
     let ctrl_c = tokio::signal::ctrl_c();
 
