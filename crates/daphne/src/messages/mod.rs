@@ -681,94 +681,46 @@ impl TryFrom<u8> for TransitionFailureLatest {
     }
 }
 
-impl TryFrom<TransitionFailureDraft09> for TransitionFailure {
-    type Error = CodecError;
-
-    fn try_from(v: TransitionFailureDraft09) -> Result<Self, Self::Error> {
-        match v {
-            TransitionFailureDraft09::BatchCollected => Ok(TransitionFailure::BatchCollected),
-            TransitionFailureDraft09::ReportReplayed => Ok(TransitionFailure::ReportReplayed),
-            TransitionFailureDraft09::ReportDropped => Ok(TransitionFailure::ReportDropped),
-            TransitionFailureDraft09::HpkeUnknownConfigId => {
-                Ok(TransitionFailure::HpkeUnknownConfigId)
+macro_rules! make_try_from {
+    ($e:ident, $y:ident, $t:ty, $($variants:ident),+) => {
+        impl TryFrom<$e> for $y {
+            type Error = $t;
+            fn try_from(value: $e) -> Result<Self, $t> {
+                match value {
+                    $(
+                        $e::$variants => Ok($y::$variants),
+                    )*
+                }
             }
-            TransitionFailureDraft09::HpkeDecryptError => Ok(TransitionFailure::HpkeDecryptError),
-            TransitionFailureDraft09::VdafPrepError => Ok(TransitionFailure::VdafPrepError),
-            TransitionFailureDraft09::BatchSaturated => Ok(TransitionFailure::BatchSaturated),
-            TransitionFailureDraft09::TaskExpired => Ok(TransitionFailure::TaskExpired),
-            TransitionFailureDraft09::InvalidMessage => Ok(TransitionFailure::InvalidMessage),
-            TransitionFailureDraft09::ReportTooEarly => Ok(TransitionFailure::ReportTooEarly),
         }
-    }
+    };
 }
 
-impl TryFrom<&TransitionFailure> for TransitionFailureDraft09 {
-    type Error = CodecError;
-
-    fn try_from(v: &TransitionFailure) -> Result<Self, Self::Error> {
-        match v {
-            TransitionFailure::BatchCollected => Ok(TransitionFailureDraft09::BatchCollected),
-            TransitionFailure::ReportReplayed => Ok(TransitionFailureDraft09::ReportReplayed),
-            TransitionFailure::ReportDropped => Ok(TransitionFailureDraft09::ReportDropped),
-            TransitionFailure::HpkeUnknownConfigId => {
-                Ok(TransitionFailureDraft09::HpkeUnknownConfigId)
+macro_rules! make_try_from_exhaustive {
+    ($e:ident, $y:ident, $t:ty, $($variants:ident),+) => {
+        impl TryFrom<$e> for $y {
+            type Error = $t;
+            fn try_from(value: $e) -> Result<Self, $t> {
+                match value {
+                    $(
+                        $e::$variants => Ok($y::$variants),
+                    )*
+                    _ => Err(CodecError::UnexpectedValue),
+                }
             }
-            TransitionFailure::HpkeDecryptError => Ok(TransitionFailureDraft09::HpkeDecryptError),
-            TransitionFailure::VdafPrepError => Ok(TransitionFailureDraft09::VdafPrepError),
-            TransitionFailure::BatchSaturated => Ok(TransitionFailureDraft09::BatchSaturated),
-            TransitionFailure::TaskExpired => Ok(TransitionFailureDraft09::TaskExpired),
-            TransitionFailure::InvalidMessage => Ok(TransitionFailureDraft09::InvalidMessage),
-            TransitionFailure::ReportTooEarly => Ok(TransitionFailureDraft09::ReportTooEarly),
-            _ => Err(CodecError::UnexpectedValue),
         }
-    }
+    };
 }
 
-impl TryFrom<TransitionFailureLatest> for TransitionFailure {
-    type Error = CodecError;
 
-    fn try_from(v: TransitionFailureLatest) -> Result<Self, Self::Error> {
-        match v {
-            TransitionFailureLatest::Reserved => Ok(TransitionFailure::Reserved),
-            TransitionFailureLatest::BatchCollected => Ok(TransitionFailure::BatchCollected),
-            TransitionFailureLatest::ReportReplayed => Ok(TransitionFailure::ReportReplayed),
-            TransitionFailureLatest::ReportDropped => Ok(TransitionFailure::ReportDropped),
-            TransitionFailureLatest::HpkeUnknownConfigId => {
-                Ok(TransitionFailure::HpkeUnknownConfigId)
-            }
-            TransitionFailureLatest::HpkeDecryptError => Ok(TransitionFailure::HpkeDecryptError),
-            TransitionFailureLatest::VdafPrepError => Ok(TransitionFailure::VdafPrepError),
-            TransitionFailureLatest::TaskExpired => Ok(TransitionFailure::TaskExpired),
-            TransitionFailureLatest::InvalidMessage => Ok(TransitionFailure::InvalidMessage),
-            TransitionFailureLatest::ReportTooEarly => Ok(TransitionFailure::ReportTooEarly),
-            TransitionFailureLatest::TaskNotStarted => Ok(TransitionFailure::TaskNotStarted),
-        }
-    }
-}
+make_try_from!(TransitionFailureDraft09, TransitionFailure, CodecError, BatchCollected, ReportReplayed, ReportDropped, HpkeUnknownConfigId, HpkeDecryptError, VdafPrepError, BatchSaturated, TaskExpired, InvalidMessage, ReportTooEarly);
 
-#[expect(clippy::match_wildcard_for_single_variants)]
-impl TryFrom<&TransitionFailure> for TransitionFailureLatest {
-    type Error = CodecError;
+make_try_from_exhaustive!(TransitionFailure, TransitionFailureDraft09, CodecError, BatchCollected, ReportReplayed, ReportDropped, HpkeUnknownConfigId, HpkeDecryptError, VdafPrepError, BatchSaturated, TaskExpired, InvalidMessage, ReportTooEarly);
+ 
+make_try_from!(TransitionFailureLatest, TransitionFailure, CodecError, Reserved, BatchCollected, ReportReplayed, ReportDropped, HpkeUnknownConfigId, HpkeDecryptError, VdafPrepError, TaskExpired, InvalidMessage, ReportTooEarly, TaskNotStarted);
 
-    fn try_from(v: &TransitionFailure) -> Result<Self, Self::Error> {
-        match v {
-            TransitionFailure::Reserved => Ok(TransitionFailureLatest::Reserved),
-            TransitionFailure::BatchCollected => Ok(TransitionFailureLatest::BatchCollected),
-            TransitionFailure::ReportReplayed => Ok(TransitionFailureLatest::ReportReplayed),
-            TransitionFailure::ReportDropped => Ok(TransitionFailureLatest::ReportDropped),
-            TransitionFailure::HpkeUnknownConfigId => {
-                Ok(TransitionFailureLatest::HpkeUnknownConfigId)
-            }
-            TransitionFailure::HpkeDecryptError => Ok(TransitionFailureLatest::HpkeDecryptError),
-            TransitionFailure::VdafPrepError => Ok(TransitionFailureLatest::VdafPrepError),
-            TransitionFailure::TaskExpired => Ok(TransitionFailureLatest::TaskExpired),
-            TransitionFailure::InvalidMessage => Ok(TransitionFailureLatest::InvalidMessage),
-            TransitionFailure::ReportTooEarly => Ok(TransitionFailureLatest::ReportTooEarly),
-            TransitionFailure::TaskNotStarted => Ok(TransitionFailureLatest::TaskNotStarted),
-            _ => Err(CodecError::UnexpectedValue),
-        }
-    }
-}
+make_try_from_exhaustive!(TransitionFailure, TransitionFailureLatest, CodecError, Reserved, BatchCollected, ReportReplayed, ReportDropped, HpkeUnknownConfigId, HpkeDecryptError, VdafPrepError, TaskExpired, InvalidMessage, ReportTooEarly, TaskNotStarted);
+
 
 impl Encode for TransitionFailureDraft09 {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
@@ -790,11 +742,11 @@ impl ParameterizedEncode<DapVersion> for TransitionFailure {
     ) -> Result<(), CodecError> {
         match version {
             DapVersion::Draft09 => {
-                TransitionFailureDraft09::try_from(self)?.encode(bytes)?;
+                TransitionFailureDraft09::try_from(*self)?.encode(bytes)?;
                 Ok(())
             }
             DapVersion::Latest => {
-                TransitionFailureLatest::try_from(self)?.encode(bytes)?;
+                TransitionFailureLatest::try_from(*self)?.encode(bytes)?;
                 Ok(())
             }
         }
