@@ -365,27 +365,71 @@ impl From<BatchSelector> for PartialBatchSelector {
     }
 }
 
-impl Encode for PartialBatchSelector {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match self {
-            Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes)?,
-            Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                batch_id.encode(bytes)?;
+impl ParameterizedEncode<DapVersion> for PartialBatchSelector {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        match version {
+            DapVersion::Draft09 => {
+                match self {
+                    Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes)?,
+                    Self::FixedSizeByBatchId { batch_id } => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        batch_id.encode(bytes)?;
+                    }
+                };
+                Ok(())
             }
-        };
-        Ok(())
+            DapVersion::Latest => {
+                match self {
+                    Self::TimeInterval => {
+                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        encode_u16_bytes(bytes, &Vec::new())?;
+                    }
+                    Self::FixedSizeByBatchId { batch_id } => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        let config = &mut Vec::new();
+                        batch_id.encode(config)?;
+                        encode_u16_bytes(bytes, config)?;
+                    }
+                };
+                Ok(())
+            }
+        }
     }
 }
 
-impl Decode for PartialBatchSelector {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u8::decode(bytes)? {
-            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
-            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
-                batch_id: BatchId::decode(bytes)?,
-            }),
-            _ => Err(CodecError::UnexpectedValue),
+impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        match version {
+            DapVersion::Draft09 => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
+                QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
+                    batch_id: BatchId::decode(bytes)?,
+                }),
+                _ => Err(CodecError::UnexpectedValue),
+            },
+            DapVersion::Latest => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => {
+                    let config = decode_u16_bytes(bytes)?;
+                    if config.is_empty() {
+                        Ok(Self::TimeInterval)
+                    } else {
+                        Err(CodecError::UnexpectedValue)
+                    }
+                }
+                QUERY_TYPE_FIXED_SIZE => {
+                    let config = decode_u16_bytes(bytes)?;
+                    let batch_id = BatchId::decode(&mut Cursor::new(config.as_slice()))?;
+                    Ok(Self::FixedSizeByBatchId { batch_id })
+                }
+                _ => Err(CodecError::UnexpectedValue),
+            },
         }
     }
 }
@@ -410,36 +454,80 @@ impl std::fmt::Display for BatchSelector {
     }
 }
 
-impl Encode for BatchSelector {
-    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match self {
-            Self::TimeInterval { batch_interval } => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
-                batch_interval.encode(bytes)?;
+impl ParameterizedEncode<DapVersion> for BatchSelector {
+    fn encode_with_param(
+        &self,
+        version: &DapVersion,
+        bytes: &mut Vec<u8>,
+    ) -> Result<(), CodecError> {
+        match version {
+            DapVersion::Draft09 => {
+                match self {
+                    Self::TimeInterval { batch_interval } => {
+                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        batch_interval.encode(bytes)?;
+                    }
+                    Self::FixedSizeByBatchId { batch_id } => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        batch_id.encode(bytes)?;
+                    }
+                };
+                Ok(())
             }
-            Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                batch_id.encode(bytes)?;
+            DapVersion::Latest => {
+                match self {
+                    Self::TimeInterval { batch_interval } => {
+                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        let config = &mut Vec::new();
+                        batch_interval.encode(config)?;
+                        encode_u16_bytes(bytes, config)?;
+                    }
+                    Self::FixedSizeByBatchId { batch_id } => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        let config = &mut Vec::new();
+                        batch_id.encode(config)?;
+                        encode_u16_bytes(bytes, config)?;
+                    }
+                };
+                Ok(())
             }
-        };
-        Ok(())
-    }
-}
-
-impl Decode for BatchSelector {
-    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
-        match u8::decode(bytes)? {
-            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
-                batch_interval: Interval::decode(bytes)?,
-            }),
-            QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
-                batch_id: BatchId::decode(bytes)?,
-            }),
-            _ => Err(CodecError::UnexpectedValue),
         }
     }
 }
 
+impl ParameterizedDecode<DapVersion> for BatchSelector {
+    fn decode_with_param(
+        version: &DapVersion,
+        bytes: &mut Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        match version {
+            DapVersion::Draft09 => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                    batch_interval: Interval::decode(bytes)?,
+                }),
+                QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
+                    batch_id: BatchId::decode(bytes)?,
+                }),
+                _ => Err(CodecError::UnexpectedValue),
+            },
+            DapVersion::Latest => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => {
+                    let config = decode_u16_bytes(bytes)?;
+                    Ok(Self::TimeInterval {
+                        batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
+                    })
+                }
+                QUERY_TYPE_FIXED_SIZE => {
+                    let config = decode_u16_bytes(bytes)?;
+                    Ok(Self::FixedSizeByBatchId {
+                        batch_id: BatchId::decode(&mut Cursor::new(config.as_slice()))?,
+                    })
+                }
+                _ => Err(CodecError::UnexpectedValue),
+            },
+        }
+    }
+}
 impl Default for BatchSelector {
     fn default() -> Self {
         Self::TimeInterval {
@@ -498,7 +586,7 @@ impl ParameterizedEncode<DapVersion> for AggregationJobInitReq {
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         encode_u32_bytes(bytes, &self.agg_param)?;
-        self.part_batch_sel.encode(bytes)?;
+        self.part_batch_sel.encode_with_param(version, bytes)?;
         encode_u32_items(bytes, version, &self.prep_inits)?;
         Ok(())
     }
@@ -511,7 +599,7 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
     ) -> Result<Self, CodecError> {
         Ok(Self {
             agg_param: decode_u32_bytes(bytes)?,
-            part_batch_sel: PartialBatchSelector::decode(bytes)?,
+            part_batch_sel: PartialBatchSelector::decode_with_param(version, bytes)?,
             prep_inits: decode_u32_items(version, bytes)?,
         })
     }
@@ -1052,10 +1140,10 @@ pub struct Collection {
 impl ParameterizedEncode<DapVersion> for Collection {
     fn encode_with_param(
         &self,
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        self.part_batch_sel.encode(bytes)?;
+        self.part_batch_sel.encode_with_param(version, bytes)?;
         self.report_count.encode(bytes)?;
         self.interval.encode(bytes)?;
         self.encrypted_agg_shares[0].encode(bytes)?;
@@ -1066,10 +1154,10 @@ impl ParameterizedEncode<DapVersion> for Collection {
 
 impl ParameterizedDecode<DapVersion> for Collection {
     fn decode_with_param(
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let part_batch_sel = PartialBatchSelector::decode(bytes)?;
+        let part_batch_sel = PartialBatchSelector::decode_with_param(version, bytes)?;
         let report_count = u64::decode(bytes)?;
         let interval = Interval::decode(bytes)?;
         let encrypted_agg_shares = [
@@ -1455,8 +1543,57 @@ mod test {
 
     test_versions! {read_report}
 
+    fn partial_batch_selector_encode_decode(version: DapVersion) {
+        const TEST_DATA_DRAFT09: &[u8] = &[1];
+        const TEST_DATA_LATEST: &[u8] = &[1, 0, 0];
+
+        let test_data = match version {
+            DapVersion::Draft09 => TEST_DATA_DRAFT09,
+            DapVersion::Latest => TEST_DATA_LATEST,
+        };
+
+        let pbs = PartialBatchSelector::TimeInterval;
+        let bytes = &mut Vec::new();
+
+        pbs.encode_with_param(&version, bytes).unwrap();
+        assert_eq!(bytes, test_data);
+
+        let npbs =
+            PartialBatchSelector::decode_with_param(&version, &mut Cursor::new(test_data)).unwrap();
+        assert_eq!(npbs, pbs);
+    }
+
+    test_versions! {partial_batch_selector_encode_decode}
+
+    fn batch_selector_encode_decode(version: DapVersion) {
+        const TEST_DATA_DRAFT09: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 3, 232, 0, 0, 0, 0, 0, 0, 0, 5];
+        const TEST_DATA_LATEST: &[u8] =
+            &[1, 0, 16, 0, 0, 0, 0, 0, 0, 3, 232, 0, 0, 0, 0, 0, 0, 0, 5];
+
+        let test_data = match version {
+            DapVersion::Draft09 => TEST_DATA_DRAFT09,
+            DapVersion::Latest => TEST_DATA_LATEST,
+        };
+
+        let bs = BatchSelector::TimeInterval {
+            batch_interval: Interval {
+                start: 1000,
+                duration: 5,
+            },
+        };
+        let bytes = &mut Vec::new();
+
+        bs.encode_with_param(&version, bytes).unwrap();
+        assert_eq!(bytes, test_data);
+
+        let nbs = BatchSelector::decode_with_param(&version, &mut Cursor::new(test_data)).unwrap();
+        assert_eq!(nbs, bs);
+    }
+
+    test_versions! {batch_selector_encode_decode}
+
     fn read_agg_job_init_req(version: DapVersion) {
-        const TEST_DATA: &[u8] = &[
+        const TEST_DATA_DRAFT09: &[u8] = &[
             0, 0, 0, 32, 116, 104, 105, 115, 32, 105, 115, 32, 97, 110, 32, 97, 103, 103, 114, 101,
             103, 97, 116, 105, 111, 110, 32, 112, 97, 114, 97, 109, 101, 116, 101, 114, 2, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1468,6 +1605,19 @@ mod test {
             17, 17, 17, 17, 17, 0, 0, 0, 0, 9, 194, 107, 103, 0, 0, 0, 12, 112, 117, 98, 108, 105,
             99, 32, 115, 104, 97, 114, 101, 0, 0, 0, 0, 0, 0, 10, 99, 105, 112, 104, 101, 114, 116,
             101, 120, 116, 0, 0, 0, 10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101,
+        ];
+        const TEST_DATA_LATEST: &[u8] = &[
+            0, 0, 0, 32, 116, 104, 105, 115, 32, 105, 115, 32, 97, 110, 32, 97, 103, 103, 114, 101,
+            103, 97, 116, 105, 111, 110, 32, 112, 97, 114, 97, 109, 101, 116, 101, 114, 2, 0, 32,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 158, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+            0, 0, 0, 0, 97, 152, 38, 185, 0, 0, 0, 12, 112, 117, 98, 108, 105, 99, 32, 115, 104,
+            97, 114, 101, 23, 0, 16, 101, 110, 99, 97, 112, 115, 117, 108, 97, 116, 101, 100, 32,
+            107, 101, 121, 0, 0, 0, 10, 99, 105, 112, 104, 101, 114, 116, 101, 120, 116, 0, 0, 0,
+            10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101, 17, 17, 17, 17, 17, 17, 17, 17, 17,
+            17, 17, 17, 17, 17, 17, 17, 0, 0, 0, 0, 9, 194, 107, 103, 0, 0, 0, 12, 112, 117, 98,
+            108, 105, 99, 32, 115, 104, 97, 114, 101, 0, 0, 0, 0, 0, 0, 10, 99, 105, 112, 104, 101,
+            114, 116, 101, 120, 116, 0, 0, 0, 10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101,
         ];
 
         let want = AggregationJobInitReq {
@@ -1510,7 +1660,14 @@ mod test {
         };
         println!("want {:?}", want.get_encoded_with_param(&version).unwrap());
 
-        let got = AggregationJobInitReq::get_decoded_with_param(&version, TEST_DATA).unwrap();
+        let got = match version {
+            DapVersion::Draft09 => {
+                AggregationJobInitReq::get_decoded_with_param(&version, TEST_DATA_DRAFT09).unwrap()
+            }
+            DapVersion::Latest => {
+                AggregationJobInitReq::get_decoded_with_param(&version, TEST_DATA_LATEST).unwrap()
+            }
+        };
         assert_eq!(got, want);
     }
 

@@ -10,7 +10,7 @@ use crate::{
     vdaf::{prio2::prio2_unshard, prio3::prio3_unshard},
     DapAggregateResult, DapAggregationParam, DapError, DapVersion, VdafConfig,
 };
-use prio::codec::Encode;
+use prio::codec::{Encode, ParameterizedEncode};
 
 use super::{CTX_AGG_SHARE_DRAFT09, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER, CTX_ROLE_LEADER};
 
@@ -58,7 +58,9 @@ impl VdafConfig {
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
         encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
             .map_err(DapError::encoding)?;
-        batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
+        batch_sel
+            .encode_with_param(&version, &mut aad)
+            .map_err(DapError::encoding)?;
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {

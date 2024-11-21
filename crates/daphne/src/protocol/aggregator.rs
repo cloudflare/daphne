@@ -916,7 +916,9 @@ fn produce_encrypted_agg_share(
     task_id.encode(&mut aad).map_err(DapError::encoding)?;
     encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
         .map_err(DapError::encoding)?;
-    batch_sel.encode(&mut aad).map_err(DapError::encoding)?;
+    batch_sel
+        .encode_with_param(&version, &mut aad)
+        .map_err(DapError::encoding)?;
 
     hpke_config.encrypt(&info, &aad, &agg_share_data)
 }
