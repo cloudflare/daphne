@@ -1039,48 +1039,87 @@ impl std::fmt::Display for Query {
 impl ParameterizedEncode<DapVersion> for Query {
     fn encode_with_param(
         &self,
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        match self {
-            Self::TimeInterval { batch_interval } => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
-                batch_interval.encode(bytes)?;
+        match version {
+            DapVersion::Draft09 => {
+                match self {
+                    Self::TimeInterval { batch_interval } => {
+                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        batch_interval.encode(bytes)?;
+                    }
+                    Self::FixedSizeByBatchId { batch_id } => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
+                        batch_id.encode(bytes)?;
+                    }
+                    Self::FixedSizeCurrentBatch => {
+                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                        FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
+                    }
+                };
             }
-            Self::FixedSizeByBatchId { batch_id } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
-                batch_id.encode(bytes)?;
-            }
-            Self::FixedSizeCurrentBatch => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
-            }
-        };
+            DapVersion::Latest => match self {
+                Self::TimeInterval { batch_interval } => {
+                    QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                    let config = &mut Vec::new();
+                    batch_interval.encode(config)?;
+                    encode_u16_bytes(bytes, config)?;
+                }
+                Self::FixedSizeByBatchId { batch_id: _ } => {
+                    return Err(CodecError::UnexpectedValue)
+                }
+                Self::FixedSizeCurrentBatch => {
+                    QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                    let config = &mut Vec::new();
+                    encode_u16_bytes(bytes, config)?;
+                }
+            },
+        }
         Ok(())
     }
 }
 
 impl ParameterizedDecode<DapVersion> for Query {
     fn decode_with_param(
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        match u8::decode(bytes)? {
-            QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
-                batch_interval: Interval::decode(bytes)?,
-            }),
-            QUERY_TYPE_FIXED_SIZE => {
-                let subtype = u8::decode(bytes)?;
-                match subtype {
-                    FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID => Ok(Self::FixedSizeByBatchId {
-                        batch_id: BatchId::decode(bytes)?,
-                    }),
-                    FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH => Ok(Self::FixedSizeCurrentBatch),
-                    _ => Err(CodecError::UnexpectedValue),
+        match version {
+            DapVersion::Draft09 => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                    batch_interval: Interval::decode(bytes)?,
+                }),
+                QUERY_TYPE_FIXED_SIZE => {
+                    let subtype = u8::decode(bytes)?;
+                    match subtype {
+                        FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID => Ok(Self::FixedSizeByBatchId {
+                            batch_id: BatchId::decode(bytes)?,
+                        }),
+                        FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH => Ok(Self::FixedSizeCurrentBatch),
+                        _ => Err(CodecError::UnexpectedValue),
+                    }
                 }
-            }
-            _ => Err(CodecError::UnexpectedValue),
+                _ => Err(CodecError::UnexpectedValue),
+            },
+            DapVersion::Latest => match u8::decode(bytes)? {
+                QUERY_TYPE_TIME_INTERVAL => {
+                    let config = decode_u16_bytes(bytes)?;
+                    Ok(Self::TimeInterval {
+                        batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
+                    })
+                }
+                QUERY_TYPE_FIXED_SIZE => {
+                    let config = decode_u16_bytes(bytes)?;
+                    if !config.is_empty() {
+                        Err(CodecError::UnexpectedValue)
+                    } else {
+                        Ok(Self::FixedSizeCurrentBatch)
+                    }
+                }
+                _ => Err(CodecError::UnexpectedValue),
+            },
         }
     }
 }
@@ -1591,6 +1630,26 @@ mod test {
     }
 
     test_versions! {batch_selector_encode_decode}
+
+    fn query_encode_decode(version: DapVersion) {
+        const TEST_DATA_DRAFT09: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        const TEST_DATA_LATEST: &[u8] = &[1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        let test_data = match version {
+            DapVersion::Draft09 => TEST_DATA_DRAFT09,
+            DapVersion::Latest => TEST_DATA_LATEST,
+        };
+        let q = Query::TimeInterval {
+            batch_interval: Interval::default(),
+        };
+        let bytes = &mut Vec::new();
+        q.encode_with_param(&version, bytes).unwrap();
+        assert_eq!(bytes, test_data);
+        let nq = Query::decode_with_param(&version, &mut Cursor::new(bytes)).unwrap();
+        assert_eq!(nq, q);
+    }
+
+    test_versions! {query_encode_decode}
 
     fn read_agg_job_init_req(version: DapVersion) {
         const TEST_DATA_DRAFT09: &[u8] = &[
