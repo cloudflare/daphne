@@ -28,7 +28,6 @@ mappable-rc.workspace = true
 p256.workspace = true
 prio.workspace = true
 prometheus = { workspace = true, optional = true }
-rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

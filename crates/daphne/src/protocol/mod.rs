@@ -23,9 +23,7 @@ mod test {
             PrepareInit, Report, ReportId, ReportShare, Transition, TransitionFailure,
             TransitionVar,
         },
-        protocol::aggregator::{
-            EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
-        },
+        protocol::aggregator::InitializedReport,
         roles::DapReportInitializer,
         test_versions,
         testing::AggregationJobTest,
@@ -63,9 +61,13 @@ mod test {
 
         let [leader_share, helper_share] = report.encrypted_input_shares;
 
-        let early_report_state_consumed = EarlyReportStateConsumed::consume(
+        let InitializedReport::Ready {
+            prep_share: leader_prep_share,
+            prep_state: leader_prep_state,
+            ..
+        } = InitializedReport::new(
             &t.leader_hpke_receiver_config,
-            &t,
+            t.valid_report_time_range(),
             true, // is_leader
             &t.task_id,
             &t.task_config,
@@ -75,27 +77,20 @@ mod test {
                 encrypted_input_share: leader_share,
             },
             None,
-        )
-        .unwrap();
-        let EarlyReportStateInitialized::Ready {
-            prep_share: leader_prep_share,
-            prep_state: leader_prep_state,
-            ..
-        } = EarlyReportStateInitialized::initialize(
-            true,
-            &t.task_config.vdaf_verify_key,
-            &t.task_config.vdaf,
             &DapAggregationParam::Empty,
-            early_report_state_consumed,
         )
         .unwrap()
         else {
             panic!("rejected unexpectedly");
         };
 
-        let early_report_state_consumed = EarlyReportStateConsumed::consume(
+        let InitializedReport::Ready {
+            prep_share: helper_prep_share,
+            prep_state: helper_prep_state,
+            ..
+        } = InitializedReport::new(
             &t.helper_hpke_receiver_config,
-            &t,
+            t.valid_report_time_range(),
             false, // is_helper
             &t.task_id,
             &t.task_config,
@@ -105,18 +100,7 @@ mod test {
                 encrypted_input_share: helper_share,
             },
             None,
-        )
-        .unwrap();
-        let EarlyReportStateInitialized::Ready {
-            prep_share: helper_prep_share,
-            prep_state: helper_prep_state,
-            ..
-        } = EarlyReportStateInitialized::initialize(
-            false,
-            &t.task_config.vdaf_verify_key,
-            &t.task_config.vdaf,
             &DapAggregationParam::Empty,
-            early_report_state_consumed,
         )
         .unwrap()
         else {
@@ -217,7 +201,7 @@ mod test {
             );
         }
 
-        let (agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
         assert_eq!(agg_span.report_count(), 3);
         assert_eq!(agg_job_resp.transitions.len(), 3);
     }
@@ -343,7 +327,7 @@ mod test {
         let (_, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
             .await;
-        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -379,7 +363,7 @@ mod test {
             t.valid_report_range = tmp;
             agg_job_init_req
         };
-        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -415,7 +399,7 @@ mod test {
             t.valid_report_range = tmp;
             agg_job_init_req
         };
-        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -436,7 +420,7 @@ mod test {
         let (_, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
             .await;
-        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
@@ -447,7 +431,7 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_hpke_unknown_config_id }
 
-    async fn handle_agg_job_req_vdaf_prep_error(version: DapVersion) {
+    fn handle_agg_job_req_vdaf_prep_error(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report0 =
             t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version);
@@ -477,7 +461,7 @@ mod test {
             ],
         };
 
-        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 2);
         assert_matches!(
@@ -490,7 +474,7 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_agg_job_req_vdaf_prep_error }
+    test_versions! { handle_agg_job_req_vdaf_prep_error }
 
     async fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -498,7 +482,7 @@ mod test {
         let (leader_state, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports)
             .await;
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sends transitions out of order.
         let tmp = agg_job_resp.transitions[0].clone();
@@ -519,7 +503,7 @@ mod test {
         let (leader_state, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports)
             .await;
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sends a transition twice.
         let repeated_transition = agg_job_resp.transitions[0].clone();
@@ -540,7 +524,7 @@ mod test {
         let (leader_state, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports)
             .await;
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sent a transition with an unrecognized report ID.
         agg_job_resp.transitions.push(Transition {
@@ -562,7 +546,7 @@ mod test {
         let (leader_state, agg_job_init_req) = t
             .produce_agg_job_req(&DapAggregationParam::Empty, reports)
             .await;
-        let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sent a transition with an unrecognized report ID. Simulate this by flipping the
         // first bit of the report ID.
@@ -591,7 +575,7 @@ mod test {
             .await;
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+            let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
             let leader_agg_span = t.consume_agg_job_resp(leader_state, agg_job_resp);
 
             (leader_agg_span, helper_agg_span)
@@ -640,7 +624,7 @@ mod test {
             .iter()
             .map(|r| r.report_share.report_metadata.id)
             .collect::<Vec<_>>();
-        let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req).await;
+        let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(2, helper_agg_span.report_count());
         assert_eq!(3, agg_job_resp.transitions.len());
@@ -721,9 +705,9 @@ mod test {
 
         let [leader_share, _] = report.encrypted_input_shares;
         let report_metadata = report.report_metadata.clone();
-        let consumed_report = EarlyReportStateConsumed::consume(
+        let initialized_report = InitializedReport::new(
             &t.leader_hpke_receiver_config,
-            &t,
+            t.valid_report_time_range(),
             true,
             &t.task_id,
             &t.task_config,
@@ -733,13 +717,14 @@ mod test {
                 encrypted_input_share: leader_share,
             },
             None,
+            &DapAggregationParam::Empty,
         )
         .unwrap();
 
-        assert_eq!(consumed_report.metadata(), &report_metadata);
+        assert_eq!(initialized_report.metadata(), &report_metadata);
 
         // We're meant to reject reports containing unrecognized extensions.
-        assert!(!consumed_report.is_ready());
+        assert_matches!(initialized_report, InitializedReport::Rejected { .. });
     }
 
     test_versions! { handle_unrecognized_report_extensions }
@@ -770,9 +755,9 @@ mod test {
 
         let report_metadata = report.report_metadata.clone();
         let [leader_share, _] = report.encrypted_input_shares;
-        let consumed_report = EarlyReportStateConsumed::consume(
+        let initialized_report = InitializedReport::new(
             &t.leader_hpke_receiver_config,
-            &t,
+            t.valid_report_time_range(),
             true,
             &t.task_id,
             &t.task_config,
@@ -782,11 +767,12 @@ mod test {
                 encrypted_input_share: leader_share,
             },
             None,
+            &DapAggregationParam::Empty,
         )
         .unwrap();
 
-        assert_eq!(consumed_report.metadata(), &report_metadata);
-        assert!(!consumed_report.is_ready());
+        assert_eq!(initialized_report.metadata(), &report_metadata);
+        assert_matches!(initialized_report, InitializedReport::Rejected { .. });
     }
 
     test_versions! { handle_repeated_report_extensions }

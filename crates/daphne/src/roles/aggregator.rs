@@ -13,9 +13,8 @@ use crate::{
     hpke::{HpkeConfig, HpkeProvider},
     messages::{BatchId, BatchSelector, HpkeConfigList, ReportId, TaskId, Time},
     metrics::{DaphneMetrics, DaphneRequestType},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
-    taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapResponse, DapTaskConfig, DapVersion,
+    taskprov, DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapResponse,
+    DapTaskConfig, DapVersion,
 };
 
 /// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
@@ -24,16 +23,6 @@ use crate::{
 pub trait DapReportInitializer {
     /// Return the time range in which a report must appear in order to be considered valid.
     fn valid_report_time_range(&self) -> Range<Time>;
-
-    /// Initialize a sequence of reports that are in the "consumed" state by initializing VDAF
-    /// preparation.
-    async fn initialize_reports(
-        &self,
-        is_leader: bool,
-        task_config: &DapTaskConfig,
-        agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
-    ) -> Result<Vec<EarlyReportStateInitialized>, DapError>;
 }
 
 #[derive(Debug)]

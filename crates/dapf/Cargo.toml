@@ -23,7 +23,6 @@ hex.workspace = true
 prio.workspace = true
 prometheus.workspace = true
 rand.workspace = true
-rayon.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 rustls.workspace = true
 rustls-native-certs.workspace = true

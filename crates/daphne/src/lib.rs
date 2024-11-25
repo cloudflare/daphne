@@ -91,9 +91,7 @@ use url::Url;
 use vdaf::mastic::MasticWeight;
 
 pub use messages::request::{DapRequest, DapRequestMeta, DapResponse};
-pub use protocol::aggregator::{
-    EarlyReportState, EarlyReportStateConsumed, EarlyReportStateInitialized,
-};
+pub use protocol::aggregator::InitializedReport;
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]

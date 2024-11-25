@@ -17,7 +17,6 @@ use daphne::{
     vdaf::{Prio3Config, VdafConfig},
     DapAggregationParam, DapVersion,
 };
-use tokio::runtime::Runtime;
 
 macro_rules! function {
     () => {{
@@ -65,7 +64,7 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
         g.bench_with_input(
             BenchmarkId::new("consume_agg_job_req", vdaf_length),
             &init,
-            |b, init| bench(b, &test, init, &runtime),
+            |b, init| bench(b, &test, init),
         );
     }
 }
@@ -99,22 +98,17 @@ fn consume_reports_vary_num_reports(c: &mut Criterion) {
         g.bench_with_input(
             BenchmarkId::new("consume_agg_job_req", report_counts),
             &init,
-            |b, init| bench(b, &test, init, &runtime),
+            |b, init| bench(b, &test, init),
         );
     }
 }
 
-fn bench(
-    b: &mut Bencher,
-    test: &AggregationJobTest,
-    init: &AggregationJobInitReq,
-    runtime: &Runtime,
-) {
-    b.to_async(runtime).iter_custom(|iters| async move {
+fn bench(b: &mut Bencher, test: &AggregationJobTest, init: &AggregationJobInitReq) {
+    b.iter_custom(|iters| {
         let mut total = Duration::ZERO;
         for init in repeat(init).take(iters as _).cloned() {
             let now = Instant::now();
-            let ret = black_box(test.handle_agg_job_req(init).await);
+            let ret = black_box(test.handle_agg_job_req(init));
             total += now.elapsed();
             drop(ret);
         }
