@@ -13,7 +13,7 @@ use daphne::{
     metrics::DaphneMetrics,
     roles::{
         aggregator::{MergeAggShareError, TaskprovConfig},
-        DapAggregator, DapReportInitializer,
+        DapAggregator,
     },
     taskprov, DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapTaskConfig,
     DapVersion,
@@ -344,10 +344,7 @@ impl DapAggregator for crate::App {
     fn audit_log(&self) -> &dyn AuditLog {
         &*self.audit_log
     }
-}
 
-#[async_trait]
-impl DapReportInitializer for crate::App {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

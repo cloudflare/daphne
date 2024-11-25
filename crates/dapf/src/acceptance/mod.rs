@@ -20,7 +20,6 @@ pub mod load_testing;
 
 use crate::{deduce_dap_version_from_url, functions, test_durations::TestDurations, HttpClient};
 use anyhow::{anyhow, bail, Context, Result};
-use async_trait::async_trait;
 use daphne::{
     hpke::{HpkeConfig, HpkeKemId, HpkeReceiverConfig},
     messages::{
@@ -28,7 +27,6 @@ use daphne::{
         BatchId, BatchSelector, PartialBatchSelector, TaskId,
     },
     metrics::DaphneMetrics,
-    roles::DapReportInitializer,
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapMeasurement, DapQueryConfig,
@@ -42,7 +40,6 @@ use std::{
     convert::TryFrom,
     env,
     num::NonZeroU32,
-    ops::Range,
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant, SystemTime},
@@ -489,7 +486,7 @@ impl Test {
         let (agg_job_state, agg_job_init_req) = task_config
             .test_produce_agg_job_req(
                 fake_leader_hpke_receiver_config,
-                self,
+                messages::Time::MIN..messages::Time::MAX,
                 task_id,
                 part_batch_sel,
                 &DapAggregationParam::Empty,
@@ -694,14 +691,6 @@ impl Test {
                 c(self.bearer_token.is_some()),
             ])
             .set(i64::from(success));
-    }
-}
-
-#[async_trait]
-impl DapReportInitializer for Test {
-    fn valid_report_time_range(&self) -> Range<messages::Time> {
-        // Accept reports with any timestmap.
-        0..u64::MAX
     }
 }
 
