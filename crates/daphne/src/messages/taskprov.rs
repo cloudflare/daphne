@@ -15,6 +15,7 @@ use prio::codec::{
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
+use std::num::NonZeroU32;
 
 use super::{
     decode_base64url_vec, decode_u16_prefixed, encode_base64url, encode_u16_prefixed, TaskId,
@@ -318,7 +319,7 @@ impl Decode for UrlBytes {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum QueryConfigVar {
     TimeInterval,
-    FixedSize { max_batch_size: u32 },
+    FixedSize { max_batch_size: Option<NonZeroU32> },
     NotImplemented { typ: u8, param: Vec<u8> },
 }
 
@@ -363,7 +364,13 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         match &self.var {
             QueryConfigVar::TimeInterval => (),
             QueryConfigVar::FixedSize { max_batch_size } => {
-                max_batch_size.encode(bytes)?;
+                match version {
+                    DapVersion::Draft09 => match max_batch_size {
+                        Some(x) => x.get().encode(bytes)?,
+                        None => 0u32.encode(bytes)?,
+                    },
+                    DapVersion::Latest => (),
+                };
             }
             QueryConfigVar::NotImplemented { typ: _, param } => {
                 bytes.extend_from_slice(param);
@@ -393,7 +400,10 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
             match (bytes_left, query_type) {
                 (.., QUERY_TYPE_TIME_INTERVAL) => QueryConfigVar::TimeInterval,
                 (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
-                    max_batch_size: u32::decode(bytes)?,
+                    max_batch_size: match version {
+                        DapVersion::Draft09 => NonZeroU32::new(u32::decode(bytes)?),
+                        DapVersion::Latest => None,
+                    },
                 },
                 (Some(bytes_left), ..) => {
                     let mut param = vec![0; bytes_left - fixed_size];
@@ -549,7 +559,12 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::FixedSize { max_batch_size: 57 },
+                var: QueryConfigVar::FixedSize {
+                    max_batch_size: match version {
+                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                        DapVersion::Latest => None,
+                    },
+                },
             },
             task_expiration: 23_232_232_232,
             vdaf_config: VdafConfig {
@@ -576,8 +591,8 @@ mod tests {
                 101, 46, 99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47,
                 115, 111, 109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100,
                 102, 108, 97, 114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 0,
-                17, 0, 0, 0, 0, 0, 188, 79, 242, 0, 0, 0, 55, 2, 0, 0, 0, 57, 0, 0, 0, 5, 104, 191,
-                187, 40, 0, 11, 0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
+                13, 0, 0, 0, 0, 0, 188, 79, 242, 0, 0, 0, 55, 2, 0, 0, 0, 5, 104, 191, 187, 40, 0,
+                11, 0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
             ]
             .as_slice(),
         };
@@ -613,7 +628,10 @@ mod tests {
             },
             min_batch_size: 12_345_678,
             var: QueryConfigVar::FixedSize {
-                max_batch_size: 12_345_678,
+                max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(12_345_678).unwrap()),
+                    DapVersion::Latest => None,
+                },
             },
         };
         let encoded = query_config.get_encoded_with_param(&version).unwrap();
@@ -783,7 +801,12 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::FixedSize { max_batch_size: 57 },
+                var: QueryConfigVar::FixedSize {
+                    max_batch_size: match version {
+                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                        DapVersion::Latest => None,
+                    },
+                },
             },
             task_expiration: 23_232_232_232,
             vdaf_config: VdafConfig {

@@ -83,7 +83,7 @@ use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::Debug,
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     str::FromStr,
 };
 use url::Url;
@@ -237,7 +237,7 @@ pub enum DapQueryConfig {
     /// Aggregators are meant to stop aggregating reports when this limit is reached.
     FixedSize {
         #[serde(default)]
-        max_batch_size: Option<u64>,
+        max_batch_size: Option<NonZeroU32>,
     },
 }
 
@@ -730,7 +730,7 @@ impl DapTaskConfig {
             DapQueryConfig::FixedSize {
                 max_batch_size: Some(max_batch_size),
             } => {
-                if report_count > max_batch_size {
+                if report_count > u64::from(max_batch_size.get()) {
                     return Err(DapAbort::InvalidBatchSize {
                         detail: format!(
                             "Report count ({report_count}) exceeds maximum ({max_batch_size})"

@@ -10,6 +10,7 @@ use daphne::{
     vdaf::{Prio3Config, VdafConfig},
 };
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
 use url::Url;
 
 #[derive(Deserialize)]
@@ -86,7 +87,7 @@ pub struct InternalTestAddTask {
     pub query_type: u8,
     pub min_batch_size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_batch_size: Option<u64>,
+    pub max_batch_size: Option<NonZeroU32>,
     pub time_precision: Duration,
     pub collector_hpke_config: String, // base64url
     pub task_expiration: Time,
