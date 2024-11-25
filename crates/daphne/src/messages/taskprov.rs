@@ -351,11 +351,13 @@ impl QueryConfig {
 impl ParameterizedEncode<DapVersion> for QueryConfig {
     fn encode_with_param(
         &self,
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         self.time_precision.encode(bytes)?;
-        self.max_batch_query_count.encode(bytes)?;
+        if *version == DapVersion::Draft09 {
+            self.max_batch_query_count.encode(bytes)?;
+        }
         self.min_batch_size.encode(bytes)?;
         self.encode_query_type(bytes)?;
         match &self.var {
@@ -373,11 +375,18 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
 
 impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
     fn decode_with_param(
-        (_version, bytes_left): &(DapVersion, Option<usize>),
+        (version, bytes_left): &(DapVersion, Option<usize>),
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let time_precision = Duration::decode(bytes)?;
-        let max_batch_query_count = u16::decode(bytes)?;
+        let max_batch_query_count = match version {
+            DapVersion::Draft09 => u16::decode(bytes)?,
+            DapVersion::Latest => 1,
+        };
+        let fixed_size = match version {
+            DapVersion::Draft09 => 15,
+            DapVersion::Latest => 13,
+        };
         let min_batch_size = u32::decode(bytes)?;
         let query_type = u8::decode(bytes)?;
         let var =
@@ -387,7 +396,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
                     max_batch_size: u32::decode(bytes)?,
                 },
                 (Some(bytes_left), ..) => {
-                    let mut param = vec![0; bytes_left - 15];
+                    let mut param = vec![0; bytes_left - fixed_size];
                     bytes.read_exact(&mut param)?;
 
                     QueryConfigVar::NotImplemented {
@@ -535,7 +544,10 @@ mod tests {
             },
             query_config: QueryConfig {
                 time_precision: 12_341_234,
-                max_batch_query_count: 1337,
+                max_batch_query_count: match version {
+                    DapVersion::Draft09 => 1337,
+                    DapVersion::Latest => 1,
+                },
                 min_batch_size: 55,
                 var: QueryConfigVar::FixedSize { max_batch_size: 57 },
             },
@@ -547,17 +559,30 @@ mod tests {
         };
         println!("want {:?}", want.get_encoded_with_param(&version).unwrap());
 
-        let task_config_bytes = [
-            20, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 99, 111, 111, 108, 32, 116, 97, 115,
-            107, 33, 0, 22, 104, 116, 116, 112, 58, 47, 47, 101, 120, 109, 97, 112, 108, 101, 46,
-            99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47, 115, 111,
-            109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100, 102, 108, 97,
-            114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 0, 19, 0, 0, 0, 0, 0,
-            188, 79, 242, 5, 57, 0, 0, 0, 55, 2, 0, 0, 0, 57, 0, 0, 0, 5, 104, 191, 187, 40, 0, 11,
-            0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
-        ];
+        let task_config_bytes = match version {
+            DapVersion::Draft09 => [
+                20, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 99, 111, 111, 108, 32, 116, 97,
+                115, 107, 33, 0, 22, 104, 116, 116, 112, 58, 47, 47, 101, 120, 109, 97, 112, 108,
+                101, 46, 99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47,
+                115, 111, 109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100,
+                102, 108, 97, 114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 0,
+                19, 0, 0, 0, 0, 0, 188, 79, 242, 5, 57, 0, 0, 0, 55, 2, 0, 0, 0, 57, 0, 0, 0, 5,
+                104, 191, 187, 40, 0, 11, 0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
+            ]
+            .as_slice(),
+            DapVersion::Latest => [
+                20, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 99, 111, 111, 108, 32, 116, 97,
+                115, 107, 33, 0, 22, 104, 116, 116, 112, 58, 47, 47, 101, 120, 109, 97, 112, 108,
+                101, 46, 99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47,
+                115, 111, 109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100,
+                102, 108, 97, 114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 0,
+                17, 0, 0, 0, 0, 0, 188, 79, 242, 0, 0, 0, 55, 2, 0, 0, 0, 57, 0, 0, 0, 5, 104, 191,
+                187, 40, 0, 11, 0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
+            ]
+            .as_slice(),
+        };
         let got =
-            TaskprovAdvertisement::get_decoded_with_param(&version, &task_config_bytes).unwrap();
+            TaskprovAdvertisement::get_decoded_with_param(&version, task_config_bytes).unwrap();
         assert_eq!(got, want);
     }
 
@@ -566,7 +591,10 @@ mod tests {
     fn roundtrip_query_config(version: DapVersion) {
         let query_config = QueryConfig {
             time_precision: 12_345_678,
-            max_batch_query_count: 1337,
+            max_batch_query_count: match version {
+                DapVersion::Draft09 => 1337,
+                DapVersion::Latest => 1,
+            },
             min_batch_size: 12_345_678,
             var: QueryConfigVar::TimeInterval,
         };
@@ -579,7 +607,10 @@ mod tests {
 
         let query_config = QueryConfig {
             time_precision: 12_345_678,
-            max_batch_query_count: 1337,
+            max_batch_query_count: match version {
+                DapVersion::Draft09 => 1337,
+                DapVersion::Latest => 1,
+            },
             min_batch_size: 12_345_678,
             var: QueryConfigVar::FixedSize {
                 max_batch_size: 12_345_678,
@@ -598,7 +629,7 @@ mod tests {
     fn roundtrip_query_config_not_implemented(version: DapVersion) {
         let query_config = QueryConfig {
             time_precision: 12_345_678,
-            max_batch_query_count: 1337,
+            max_batch_query_count: 1,
             min_batch_size: 12_345_678,
             var: QueryConfigVar::NotImplemented {
                 typ: 0,
@@ -747,7 +778,10 @@ mod tests {
             },
             query_config: QueryConfig {
                 time_precision: 12_341_234,
-                max_batch_query_count: 1337,
+                max_batch_query_count: match version {
+                    DapVersion::Draft09 => 1337,
+                    DapVersion::Latest => 1,
+                },
                 min_batch_size: 55,
                 var: QueryConfigVar::FixedSize { max_batch_size: 57 },
             },
