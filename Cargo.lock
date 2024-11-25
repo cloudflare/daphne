@@ -924,7 +924,6 @@ dependencies = [
  "hpke-rs-rust-crypto",
  "matchit",
  "paste",
- "pin-project",
  "prio",
  "prometheus",
  "rand",

@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Mutex, OnceLock,
+        mpsc, Mutex, OnceLock,
     },
-    task::Context,
     time::Instant,
 };
 
@@ -19,40 +17,21 @@ use crate::{
     DapError, DapMeasurement, DapVersion,
 };
 use deepsize::DeepSizeOf;
-use futures::Stream;
-use pin_project::pin_project;
 use rand::{
     distributions::{Distribution, Uniform},
     thread_rng,
 };
-use tokio::sync::mpsc;
 
-#[pin_project]
 pub struct ReportGenerator {
     len: usize,
-    #[pin]
     ch: mpsc::Receiver<messages::Report>,
 }
 
-impl Stream for ReportGenerator {
+impl Iterator for ReportGenerator {
     type Item = messages::Report;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        match this.ch.poll_recv(cx) {
-            std::task::Poll::Ready(report) => {
-                *this.len = this.len.saturating_sub(1);
-                std::task::Poll::Ready(report)
-            }
-            poll @ std::task::Poll::Pending => poll,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
+    fn next(&mut self) -> Option<Self::Item> {
+        self.ch.recv().ok()
     }
 }
 
@@ -69,7 +48,7 @@ impl ReportGenerator {
         extensions: Vec<messages::Extension>,
         replay_reports: bool,
     ) -> Self {
-        let (tx, rx) = mpsc::channel(4);
+        let (tx, rx) = mpsc::channel();
         rayon::spawn({
             let hpke_config_list = hpke_config_list.clone();
             let measurement = measurement.clone();
@@ -129,7 +108,7 @@ impl ReportGenerator {
                     }
                     // --
 
-                    tx.blocking_send(report)
+                    tx.send(report)
                         .map_err(|_| fatal_error!(err = "failed to send report, channel closed"))?;
                     Ok::<_, DapError>(())
                 });

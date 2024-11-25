@@ -460,10 +460,9 @@ mod test {
                     task_id,
                     &part_batch_sel,
                     &agg_param,
-                    futures::stream::iter(reports),
+                    reports.into_iter(),
                     self.leader.metrics(),
                 )
-                .await
                 .unwrap();
 
             (

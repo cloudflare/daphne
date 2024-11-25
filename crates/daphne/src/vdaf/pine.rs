@@ -240,13 +240,13 @@ fn prep_init<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usi
 #[cfg(test)]
 mod test {
     use crate::{
-        async_test_versions, hpke::HpkeKemId, pine::PineParam, testing::AggregationJobTest,
+        hpke::HpkeKemId, pine::PineParam, test_versions, testing::AggregationJobTest,
         vdaf::VdafConfig, DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
     use super::PineConfig;
 
-    async fn roundtrip_pine32_hmac_sha256_aes128(version: DapVersion) {
+    fn roundtrip_pine32_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
                 param: PineParam {
@@ -264,17 +264,14 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let DapAggregateResult::F64Vec(got) = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                ],
-            )
-            .await
-        else {
+        let DapAggregateResult::F64Vec(got) = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+            ],
+        ) else {
             panic!("unexpected result type");
         };
         for x in &got {
@@ -285,9 +282,9 @@ mod test {
         }
     }
 
-    async_test_versions! { roundtrip_pine32_hmac_sha256_aes128 }
+    test_versions! { roundtrip_pine32_hmac_sha256_aes128 }
 
-    async fn roundtrip_pine64_hmac_sha256_aes128(version: DapVersion) {
+    fn roundtrip_pine64_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
                 param: PineParam {
@@ -305,17 +302,14 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let DapAggregateResult::F64Vec(got) = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                    DapMeasurement::F64Vec(vec![0.0001; 1_000]),
-                ],
-            )
-            .await
-        else {
+        let DapAggregateResult::F64Vec(got) = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+                DapMeasurement::F64Vec(vec![0.0001; 1_000]),
+            ],
+        ) else {
             panic!("unexpected result type");
         };
         for x in &got {
@@ -326,5 +320,5 @@ mod test {
         }
     }
 
-    async_test_versions! { roundtrip_pine64_hmac_sha256_aes128 }
+    test_versions! { roundtrip_pine64_hmac_sha256_aes128 }
 }

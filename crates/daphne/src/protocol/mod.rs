@@ -15,7 +15,7 @@ const CTX_ROLE_HELPER: u8 = 3;
 #[cfg(test)]
 mod test {
     use crate::{
-        assert_metrics_include, async_test_versions,
+        assert_metrics_include,
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
@@ -180,7 +180,7 @@ mod test {
 
     test_versions! { roundtrip_report_unsupported_hpke_suite }
 
-    async fn produce_agg_job_req(version: DapVersion) {
+    fn produce_agg_job_req(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![
             DapMeasurement::U64(1),
@@ -188,9 +188,8 @@ mod test {
             DapMeasurement::U64(0),
         ]);
 
-        let (agg_job_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
-            .await;
+        let (agg_job_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
         assert_eq!(agg_job_state.report_count(), 3);
         assert_eq!(agg_job_init_req.agg_param.len(), 0);
         assert_eq!(agg_job_init_req.prep_inits.len(), 3);
@@ -206,18 +205,17 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 3);
     }
 
-    async_test_versions! { produce_agg_job_req }
+    test_versions! { produce_agg_job_req }
 
-    async fn produce_agg_job_req_skip_hpke_decrypt_err(version: DapVersion) {
+    fn produce_agg_job_req_skip_hpke_decrypt_err(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
         // Simulate HPKE decryption error of leader's report share.
         reports[0].encrypted_input_shares[0].payload[0] ^= 1;
 
-        let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
 
         assert_metrics_include!(t.leader_registry, {
@@ -225,9 +223,9 @@ mod test {
         });
     }
 
-    async_test_versions! { produce_agg_job_req_skip_hpke_decrypt_err }
+    test_versions! { produce_agg_job_req_skip_hpke_decrypt_err }
 
-    async fn produce_agg_job_req_skip_time_too_stale(version: DapVersion) {
+    fn produce_agg_job_req_skip_time_too_stale(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![t
             .task_config
@@ -241,9 +239,8 @@ mod test {
             )
             .unwrap()];
 
-        let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
 
         assert_metrics_include!(t.leader_registry, {
@@ -251,9 +248,9 @@ mod test {
         });
     }
 
-    async_test_versions! { produce_agg_job_req_skip_time_too_stale }
+    test_versions! { produce_agg_job_req_skip_time_too_stale }
 
-    async fn produce_agg_job_req_skip_time_too_early(version: DapVersion) {
+    fn produce_agg_job_req_skip_time_too_early(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![t
             .task_config
@@ -267,9 +264,8 @@ mod test {
             )
             .unwrap()];
 
-        let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
 
         assert_metrics_include!(t.leader_registry, {
@@ -277,18 +273,17 @@ mod test {
         });
     }
 
-    async_test_versions! { produce_agg_job_req_skip_time_too_early }
+    test_versions! { produce_agg_job_req_skip_time_too_early }
 
-    async fn produce_agg_job_req_skip_hpke_unknown_config_id(version: DapVersion) {
+    fn produce_agg_job_req_skip_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
         // Client tries to send Leader encrypted input with incorrect config ID.
         reports[0].encrypted_input_shares[0].config_id ^= 1;
 
-        let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
 
         assert_metrics_include!(t.leader_registry, {
@@ -296,18 +291,17 @@ mod test {
         });
     }
 
-    async_test_versions! { produce_agg_job_req_skip_hpke_unknown_config_id }
+    test_versions! { produce_agg_job_req_skip_hpke_unknown_config_id }
 
-    async fn produce_agg_job_req_skip_vdaf_prep_error(version: DapVersion) {
+    fn produce_agg_job_req_skip_vdaf_prep_error(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![
             t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version),
             t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version),
         ];
 
-        let (agg_job_state, _agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
 
         assert_metrics_include!(t.leader_registry, {
@@ -315,18 +309,17 @@ mod test {
         });
     }
 
-    async_test_versions! { produce_agg_job_req_skip_vdaf_prep_error }
+    test_versions! { produce_agg_job_req_skip_vdaf_prep_error }
 
-    async fn handle_agg_job_req_hpke_decrypt_err(version: DapVersion) {
+    fn handle_agg_job_req_hpke_decrypt_err(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
         // Simulate HPKE decryption error of helper's report share.
         reports[0].encrypted_input_shares[1].payload[0] ^= 1;
 
-        let (_, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
-            .await;
+        let (_, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
@@ -336,9 +329,9 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_agg_job_req_hpke_decrypt_err }
+    test_versions! { handle_agg_job_req_hpke_decrypt_err }
 
-    async fn handle_agg_job_req_skip_time_too_stale(version: DapVersion) {
+    fn handle_agg_job_req_skip_time_too_stale(version: DapVersion) {
         let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![t
             .task_config
@@ -357,9 +350,8 @@ mod test {
             // out-of-range report and produces the request.
             let tmp = t.valid_report_range.clone();
             t.valid_report_range = 0..u64::MAX;
-            let (_, agg_job_init_req) = t
-                .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
-                .await;
+            let (_, agg_job_init_req) =
+                t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
             t.valid_report_range = tmp;
             agg_job_init_req
         };
@@ -372,9 +364,9 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_agg_job_req_skip_time_too_stale }
+    test_versions! { handle_agg_job_req_skip_time_too_stale }
 
-    async fn handle_agg_job_req_skip_time_too_early(version: DapVersion) {
+    fn handle_agg_job_req_skip_time_too_early(version: DapVersion) {
         let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![t
             .task_config
@@ -393,9 +385,8 @@ mod test {
             // out-of-range report and produces the request.
             let tmp = t.valid_report_range.clone();
             t.valid_report_range = 0..u64::MAX;
-            let (_, agg_job_init_req) = t
-                .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
-                .await;
+            let (_, agg_job_init_req) =
+                t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
             t.valid_report_range = tmp;
             agg_job_init_req
         };
@@ -408,18 +399,17 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_agg_job_req_skip_time_too_early }
+    test_versions! { handle_agg_job_req_skip_time_too_early }
 
-    async fn handle_agg_job_req_hpke_unknown_config_id(version: DapVersion) {
+    fn handle_agg_job_req_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
 
         // Client tries to send Helper encrypted input with incorrect config ID.
         reports[0].encrypted_input_shares[1].config_id ^= 1;
 
-        let (_, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports.clone())
-            .await;
+        let (_, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         assert_eq!(agg_job_resp.transitions.len(), 1);
@@ -429,7 +419,7 @@ mod test {
         );
     }
 
-    async_test_versions! { handle_agg_job_req_hpke_unknown_config_id }
+    test_versions! { handle_agg_job_req_hpke_unknown_config_id }
 
     fn handle_agg_job_req_vdaf_prep_error(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -476,12 +466,11 @@ mod test {
 
     test_versions! { handle_agg_job_req_vdaf_prep_error }
 
-    async fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
+    fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sends transitions out of order.
@@ -495,14 +484,13 @@ mod test {
         );
     }
 
-    async_test_versions! { agg_job_resp_abort_transition_out_of_order }
+    test_versions! { agg_job_resp_abort_transition_out_of_order }
 
-    async fn agg_job_resp_abort_report_id_repeated(version: DapVersion) {
+    fn agg_job_resp_abort_report_id_repeated(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sends a transition twice.
@@ -515,15 +503,14 @@ mod test {
         );
     }
 
-    async_test_versions! { agg_job_resp_abort_report_id_repeated }
+    test_versions! { agg_job_resp_abort_report_id_repeated }
 
-    async fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
+    fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
         let mut rng = thread_rng();
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sent a transition with an unrecognized report ID.
@@ -538,14 +525,13 @@ mod test {
         );
     }
 
-    async_test_versions! { agg_job_resp_abort_unrecognized_report_id }
+    test_versions! { agg_job_resp_abort_unrecognized_report_id }
 
-    async fn agg_job_resp_abort_invalid_transition(version: DapVersion) {
+    fn agg_job_resp_abort_invalid_transition(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         // Helper sent a transition with an unrecognized report ID. Simulate this by flipping the
@@ -558,9 +544,9 @@ mod test {
         );
     }
 
-    async_test_versions! { agg_job_resp_abort_invalid_transition }
+    test_versions! { agg_job_resp_abort_invalid_transition }
 
-    async fn finish_agg_job(version: DapVersion) {
+    fn finish_agg_job(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![
             DapMeasurement::U64(1),
@@ -570,9 +556,8 @@ mod test {
             DapMeasurement::U64(1),
         ]);
 
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
 
         let (leader_agg_span, helper_agg_span) = {
             let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
@@ -604,7 +589,7 @@ mod test {
         );
     }
 
-    async_test_versions! { finish_agg_job }
+    test_versions! { finish_agg_job }
 
     #[tokio::test]
     async fn agg_job_init_req_skip_vdaf_prep_error_draft09() {
@@ -616,9 +601,8 @@ mod test {
             t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Draft09),
         );
 
-        let (leader_state, agg_job_init_req) = t
-            .produce_agg_job_req(&DapAggregationParam::Empty, reports)
-            .await;
+        let (leader_state, agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let prep_init_ids = agg_job_init_req
             .prep_inits
             .iter()

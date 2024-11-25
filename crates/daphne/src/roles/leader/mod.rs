@@ -299,17 +299,15 @@ async fn run_agg_job<A: DapLeader>(
 
     // Prepare AggregationJobInitReq.
     let agg_job_id = AggregationJobId(thread_rng().gen());
-    let (agg_job_state, agg_job_init_req) = task_config
-        .produce_agg_job_req(
-            aggregator.get_receiver_configs(task_config.version).await?,
-            aggregator,
-            task_id,
-            part_batch_sel,
-            agg_param,
-            futures::stream::iter(reports),
-            metrics,
-        )
-        .await?;
+    let (agg_job_state, agg_job_init_req) = task_config.produce_agg_job_req(
+        aggregator.get_receiver_configs(task_config.version).await?,
+        aggregator,
+        task_id,
+        part_batch_sel,
+        agg_param,
+        reports.into_iter(),
+        metrics,
+    )?;
 
     if agg_job_state.report_count() == 0 {
         return Ok(0);
