@@ -4,10 +4,10 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use daphne::constants::DapAggregatorRole;
 use daphne_server::{
     config::DaphneServiceConfig, metrics::DaphnePromServiceMetrics, router, App, StorageProxyConfig,
 };
-use daphne_service_utils::DapRole;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -47,8 +47,8 @@ impl TryFrom<Args> for Config {
                     config::Value::new(
                         Some(&String::from("args.role")),
                         match role {
-                            DapRole::Leader => "leader",
-                            DapRole::Helper => "helper",
+                            DapAggregatorRole::Leader => "leader",
+                            DapAggregatorRole::Helper => "helper",
                         },
                     )
                 }),
@@ -81,7 +81,7 @@ struct Args {
     // --- command line overridable parameters ---
     /// One of `leader` or `helper`.
     #[arg(short, long)]
-    role: Option<DapRole>,
+    role: Option<DapAggregatorRole>,
     /// The port to listen on.
     #[arg(short, long)]
     port: Option<u16>,

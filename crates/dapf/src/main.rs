@@ -14,6 +14,7 @@ use dapf::{
     HttpClient,
 };
 use daphne::{
+    constants::DapAggregatorRole,
     hpke::HpkeReceiverConfig,
     messages::{
         self, encode_base64url, BatchSelector, CollectionReq, PartialBatchSelector, Query, TaskId,
@@ -23,7 +24,6 @@ use daphne::{
 use daphne_service_utils::{
     bearer_token::BearerToken,
     test_route_types::{InternalTestAddTask, InternalTestVdaf},
-    DapRole,
 };
 use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
@@ -236,7 +236,7 @@ enum TestAction {
         #[arg(long)]
         collector_auth_token: Option<String>,
         #[arg(long)]
-        role: Option<DapRole>,
+        role: Option<DapAggregatorRole>,
         #[arg(long)]
         query: Option<CliDapQueryConfig>,
         #[arg(long)]
@@ -866,11 +866,11 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     "leader auth token",
                 )?,
                 collector_authentication_token: match role {
-                    DapRole::Leader => Some(use_or_request_from_user(
+                    DapAggregatorRole::Leader => Some(use_or_request_from_user(
                         collector_auth_token,
                         "collector auth token",
                     )?),
-                    DapRole::Helper => None,
+                    DapAggregatorRole::Helper => None,
                 },
                 role,
                 vdaf_verify_key,

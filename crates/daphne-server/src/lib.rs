@@ -42,7 +42,7 @@ mod storage_proxy_connection;
 /// ```
 /// use std::num::NonZeroUsize;
 /// use url::Url;
-/// use daphne::{DapGlobalConfig, hpke::HpkeKemId, DapVersion};
+/// use daphne::{DapGlobalConfig, constants::DapAggregatorRole, hpke::HpkeKemId, DapVersion};
 /// use daphne_server::{
 ///     App,
 ///     router,
@@ -50,7 +50,6 @@ mod storage_proxy_connection;
 ///     metrics::DaphnePromServiceMetrics,
 ///     config::DaphneServiceConfig,
 /// };
-/// use daphne_service_utils::DapRole;
 ///
 /// let storage_proxy_settings = StorageProxyConfig {
 ///     url: Url::parse("http://example.com").unwrap(),
@@ -66,7 +65,7 @@ mod storage_proxy_connection;
 ///     default_num_agg_span_shards: NonZeroUsize::new(2).unwrap(),
 /// };
 /// let service_config = DaphneServiceConfig {
-///     role: DapRole::Helper,
+///     role: DapAggregatorRole::Helper,
 ///     global,
 ///     base_url: None,
 ///     taskprov: None,
@@ -77,7 +76,7 @@ mod storage_proxy_connection;
 /// };
 /// let app = App::new(storage_proxy_settings, daphne_service_metrics, service_config)?;
 ///
-/// let router = router::new(DapRole::Helper, app);
+/// let router = router::new(DapAggregatorRole::Helper, app);
 ///
 /// # Ok::<(), daphne::DapError>(())
 /// ```

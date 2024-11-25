@@ -4,6 +4,7 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init};
 use crate::{
+    constants::{DapAggregatorRole, DapRole},
     error::DapAbort,
     fatal_error,
     hpke::{HpkeConfig, HpkeDecrypter},
@@ -32,10 +33,7 @@ use std::{
     ops::Range,
 };
 
-use super::{
-    CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_COLLECTOR,
-    CTX_ROLE_HELPER, CTX_ROLE_LEADER,
-};
+use super::{CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT09};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 
 // Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
@@ -94,7 +92,7 @@ impl InitializedReport {
     pub(crate) fn new(
         decrypter: &impl HpkeDecrypter,
         valid_report_range: Range<messages::Time>,
-        is_leader: bool,
+        role: DapAggregatorRole,
         task_id: &TaskId,
         task_config: &DapTaskConfig,
         report_share: ReportShare,
@@ -129,8 +127,8 @@ impl InitializedReport {
             };
             let mut info = Vec::with_capacity(input_share_text.len() + 2);
             info.extend_from_slice(input_share_text);
-            info.push(CTX_ROLE_CLIENT); // Sender role (receiver role set below)
-            info.push([CTX_ROLE_HELPER, CTX_ROLE_LEADER][usize::from(is_leader)]); // Receiver role
+            info.push(DapRole::Client as _); // Sender role
+            info.push(role as _); // Receiver role
 
             let mut aad = Vec::with_capacity(58);
             task_id.encode(&mut aad).map_err(DapError::encoding)?;
@@ -199,7 +197,10 @@ impl InitializedReport {
             }
         };
 
-        let agg_id = usize::from(!is_leader);
+        let agg_id = match role {
+            DapAggregatorRole::Leader => 0,
+            DapAggregatorRole::Helper => 1,
+        };
         let res = match &task_config.vdaf {
             VdafConfig::Prio3(ref prio3_config) => prio3_prep_init(
                 prio3_config,
@@ -354,7 +355,7 @@ impl DapTaskConfig {
             let initialized_report = InitializedReport::new(
                 &decrypter,
                 valid_report_time_range.clone(),
-                true,
+                DapAggregatorRole::Leader,
                 task_id,
                 self,
                 ReportShare {
@@ -489,7 +490,7 @@ impl DapTaskConfig {
                 InitializedReport::new(
                     decrypter,
                     valid_report_time_range.clone(),
-                    false,
+                    DapAggregatorRole::Helper,
                     task_id,
                     self,
                     prep_init.report_share,
@@ -718,7 +719,7 @@ impl DapTaskConfig {
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapError> {
         produce_encrypted_agg_share(
-            true,
+            DapAggregatorRole::Leader,
             hpke_config,
             task_id,
             batch_sel,
@@ -740,7 +741,7 @@ impl DapTaskConfig {
         version: DapVersion,
     ) -> Result<HpkeCiphertext, DapError> {
         produce_encrypted_agg_share(
-            false,
+            DapAggregatorRole::Helper,
             hpke_config,
             task_id,
             batch_sel,
@@ -752,7 +753,7 @@ impl DapTaskConfig {
 }
 
 fn produce_encrypted_agg_share(
-    is_leader: bool,
+    role: DapAggregatorRole,
     hpke_config: &HpkeConfig,
     task_id: &TaskId,
     batch_sel: &BatchSelector,
@@ -771,12 +772,8 @@ fn produce_encrypted_agg_share(
     let n: usize = agg_share_text.len();
     let mut info = Vec::with_capacity(n + 2);
     info.extend_from_slice(agg_share_text);
-    info.push(if is_leader {
-        CTX_ROLE_LEADER
-    } else {
-        CTX_ROLE_HELPER
-    }); // Sender role
-    info.push(CTX_ROLE_COLLECTOR); // Receiver role
+    info.push(role as _); // Sender role
+    info.push(DapRole::Collector as _); // Receiver role
 
     let mut aad = Vec::with_capacity(40);
     task_id.encode(&mut aad).map_err(DapError::encoding)?;

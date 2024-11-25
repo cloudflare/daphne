@@ -4,7 +4,7 @@
 use anyhow::Context;
 use assert_matches::assert_matches;
 use daphne::{
-    constants::DapMediaType,
+    constants::{DapAggregatorRole, DapMediaType},
     hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
     messages::{
         encode_base64url, taskprov::TaskprovAdvertisement, Base64Encode, BatchId, CollectionJobId,
@@ -556,15 +556,14 @@ impl TestRunner {
 
     async fn post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
         &self,
-        is_leader: bool,
+        role: DapAggregatorRole,
         path: &str,
         data: &I,
     ) -> anyhow::Result<O> {
         let client = self.http_client();
-        let mut url = if is_leader {
-            self.leader_url.clone()
-        } else {
-            self.helper_url.clone()
+        let mut url = match role {
+            DapAggregatorRole::Leader => self.leader_url.clone(),
+            DapAggregatorRole::Helper => self.helper_url.clone(),
         };
         url.set_path(path); // Overwrites the version path (i.e., "/v09")
         let resp = client
@@ -602,7 +601,8 @@ impl TestRunner {
         path: &str,
         data: &I,
     ) -> anyhow::Result<O> {
-        self.post_internal(true /* is_leader */, path, data).await
+        self.post_internal(DapAggregatorRole::Leader, path, data)
+            .await
     }
 
     pub async fn helper_post_internal<I: Serialize, O: for<'a> Deserialize<'a> + Any>(
@@ -610,7 +610,8 @@ impl TestRunner {
         path: &str,
         data: &I,
     ) -> anyhow::Result<O> {
-        self.post_internal(false /* is_leader */, path, data).await
+        self.post_internal(DapAggregatorRole::Helper, path, data)
+            .await
     }
 
     pub async fn internal_delete_all(&self, batch_interval: &Interval) -> anyhow::Result<()> {

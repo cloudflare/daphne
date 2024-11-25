@@ -4,6 +4,7 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_unshard;
 use crate::{
+    constants::DapRole,
     fatal_error,
     hpke::HpkeDecrypter,
     messages::{encode_u32_prefixed, BatchSelector, HpkeCiphertext, TaskId},
@@ -12,7 +13,7 @@ use crate::{
 };
 use prio::codec::{Encode, ParameterizedEncode};
 
-use super::{CTX_AGG_SHARE_DRAFT09, CTX_ROLE_COLLECTOR, CTX_ROLE_HELPER, CTX_ROLE_LEADER};
+use super::CTX_AGG_SHARE_DRAFT09;
 
 impl VdafConfig {
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -51,8 +52,8 @@ impl VdafConfig {
         let n: usize = agg_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(agg_share_text);
-        info.push(CTX_ROLE_LEADER); // Sender role placeholder
-        info.push(CTX_ROLE_COLLECTOR); // Receiver role
+        info.push(DapRole::Leader as _); // Sender role placeholder
+        info.push(DapRole::Collector as _); // Receiver role
 
         let mut aad = Vec::with_capacity(40);
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
@@ -65,9 +66,9 @@ impl VdafConfig {
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
             info[n] = if i == 0 {
-                CTX_ROLE_LEADER
+                DapRole::Leader as _
             } else {
-                CTX_ROLE_HELPER
+                DapRole::Helper as _
             };
 
             let agg_share_data = decrypter.hpke_decrypt(&info, &aad, agg_share_ciphertext)?;

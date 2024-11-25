@@ -18,10 +18,10 @@ use axum::{
     Json,
 };
 use daphne::{
-    error::DapAbort, fatal_error, messages::TaskId, DapError, DapRequestMeta, DapResponse,
-    DapSender,
+    constants::DapAggregatorRole, error::DapAbort, fatal_error, messages::TaskId, DapError,
+    DapRequestMeta, DapResponse, DapSender,
 };
-use daphne_service_utils::{bearer_token::BearerToken, DapRole};
+use daphne_service_utils::bearer_token::BearerToken;
 use either::Either;
 
 use crate::{metrics::DaphneServiceMetrics, App};
@@ -86,14 +86,14 @@ where
     }
 }
 
-pub fn new(role: DapRole, aggregator: App) -> axum::Router<()> {
+pub fn new(role: DapAggregatorRole, aggregator: App) -> axum::Router<()> {
     let router = axum::Router::new();
 
     let router = aggregator::add_aggregator_routes(router);
 
     let router = match role {
-        DapRole::Leader => leader::add_leader_routes(router),
-        DapRole::Helper => helper::add_helper_routes(router),
+        DapAggregatorRole::Leader => leader::add_leader_routes(router),
+        DapAggregatorRole::Helper => helper::add_helper_routes(router),
     };
 
     #[cfg(feature = "test-utils")]

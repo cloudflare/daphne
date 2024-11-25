@@ -6,6 +6,7 @@
 //! [interop]: https://divergentdave.github.io/draft-dcook-ppm-dap-interop-test-design/draft-dcook-ppm-dap-interop-test-design.html
 
 use daphne::{
+    constants::DapAggregatorRole,
     messages::{Duration, TaskId, Time},
     vdaf::{Prio3Config, VdafConfig},
 };
@@ -16,7 +17,7 @@ use url::Url;
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct InternalTestEndpointForTask {
-    pub role: super::DapRole,
+    pub role: DapAggregatorRole,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -82,7 +83,7 @@ pub struct InternalTestAddTask {
     pub leader_authentication_token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collector_authentication_token: Option<String>,
-    pub role: super::DapRole,
+    pub role: DapAggregatorRole,
     pub vdaf_verify_key: String, // base64url
     pub query_type: u8,
     pub min_batch_size: u64,

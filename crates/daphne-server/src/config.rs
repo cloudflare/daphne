@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use daphne::{
+    constants::DapAggregatorRole,
     hpke::{HpkeConfig, HpkeReceiverConfig},
     DapGlobalConfig, DapVersion,
 };
-use daphne_service_utils::{bearer_token::BearerToken, DapRole};
+use daphne_service_utils::bearer_token::BearerToken;
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -45,7 +46,7 @@ pub type HpkeRecieverConfigList = Vec<HpkeReceiverConfig>;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DaphneServiceConfig {
     /// Indicates the role the service should play.
-    pub role: DapRole,
+    pub role: DapAggregatorRole,
 
     /// Global DAP configuration.
     #[serde(flatten)]

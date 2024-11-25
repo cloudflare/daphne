@@ -7,15 +7,12 @@ mod collector;
 
 const CTX_INPUT_SHARE_DRAFT09: &[u8] = b"dap-09 input share";
 const CTX_AGG_SHARE_DRAFT09: &[u8] = b"dap-09 aggregate share";
-const CTX_ROLE_COLLECTOR: u8 = 0;
-const CTX_ROLE_CLIENT: u8 = 1;
-const CTX_ROLE_LEADER: u8 = 2;
-const CTX_ROLE_HELPER: u8 = 3;
 
 #[cfg(test)]
 mod test {
     use crate::{
         assert_metrics_include,
+        constants::DapAggregatorRole,
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
@@ -67,7 +64,7 @@ mod test {
         } = InitializedReport::new(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            true, // is_leader
+            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -90,7 +87,7 @@ mod test {
         } = InitializedReport::new(
             &t.helper_hpke_receiver_config,
             t.valid_report_time_range(),
-            false, // is_helper
+            DapAggregatorRole::Helper,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -691,7 +688,7 @@ mod test {
         let initialized_report = InitializedReport::new(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            true,
+            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -741,7 +738,7 @@ mod test {
         let initialized_report = InitializedReport::new(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            true,
+            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
