@@ -17,19 +17,16 @@ use crate::{
         Interval, PartialBatchSelector, Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
-    protocol::aggregator::{EarlyReportStateConsumed, EarlyReportStateInitialized},
     roles::{
         aggregator::{MergeAggShareError, TaskprovConfig},
         helper,
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
         DapAggregator, DapHelper, DapLeader, DapReportInitializer,
     },
-    taskprov,
-    vdaf::VdafVerifyKey,
-    DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapGlobalConfig,
-    DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta, DapResponse, DapTaskConfig,
-    DapVersion, ReplayProtection, VdafConfig,
+    taskprov, DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan,
+    DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError,
+    DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta, DapResponse,
+    DapTaskConfig, DapVersion, ReplayProtection, VdafConfig,
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
@@ -71,78 +68,10 @@ pub struct AggregationJobTest {
     pub(crate) leader_metrics: DaphnePromMetrics,
 }
 
-#[cfg(test)]
-async fn initialize_reports(
-    is_leader: bool,
-    vdaf_verify_key: VdafVerifyKey,
-    vdaf: VdafConfig,
-    agg_param: &DapAggregationParam,
-    consumed_reports: Vec<EarlyReportStateConsumed>,
-) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-    use rayon::iter::{IntoParallelIterator, ParallelIterator};
-    let agg_param = agg_param.clone();
-    tokio::task::spawn_blocking(move || {
-        consumed_reports
-            .into_par_iter()
-            .map(|consumed| {
-                EarlyReportStateInitialized::initialize(
-                    is_leader,
-                    &vdaf_verify_key,
-                    &vdaf,
-                    &agg_param,
-                    consumed,
-                )
-            })
-            .collect()
-    })
-    .await
-    .unwrap()
-}
-
-#[cfg(not(test))]
-#[expect(clippy::unused_async)]
-async fn initialize_reports(
-    is_leader: bool,
-    vdaf_verify_key: VdafVerifyKey,
-    vdaf: VdafConfig,
-    agg_param: &DapAggregationParam,
-    consumed_reports: Vec<EarlyReportStateConsumed>,
-) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-    consumed_reports
-        .into_iter()
-        .map(|consumed| {
-            EarlyReportStateInitialized::initialize(
-                is_leader,
-                &vdaf_verify_key,
-                &vdaf,
-                agg_param,
-                consumed,
-            )
-        })
-        .collect()
-}
-
 #[async_trait]
 impl DapReportInitializer for AggregationJobTest {
     fn valid_report_time_range(&self) -> Range<Time> {
         self.valid_report_range.clone()
-    }
-
-    async fn initialize_reports(
-        &self,
-        is_leader: bool,
-        task_config: &DapTaskConfig,
-        agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
-    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(
-            is_leader,
-            task_config.vdaf_verify_key.clone(),
-            task_config.vdaf,
-            agg_param,
-            consumed_reports,
-        )
-        .await
     }
 }
 
@@ -279,7 +208,7 @@ impl AggregationJobTest {
     /// Helper: Handle `AggregationJobInitReq`, produce first `AggregationJobResp`.
     ///
     /// Panics if the Helper aborts.
-    pub async fn handle_agg_job_req(
+    pub fn handle_agg_job_req(
         &self,
         agg_job_init_req: AggregationJobInitReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
@@ -296,7 +225,6 @@ impl AggregationJobTest {
                         agg_job_init_req,
                         self.replay_protection,
                     )
-                    .await
                     .unwrap(),
             )
             .unwrap()
@@ -412,7 +340,7 @@ impl AggregationJobTest {
         let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports).await;
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req).await;
+            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req);
             let leader_agg_span = self.consume_agg_job_resp(leader_state, agg_job_resp);
             (leader_agg_span, helper_agg_span)
         };
@@ -732,23 +660,6 @@ impl DapReportInitializer for InMemoryAggregator {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
         0..u64::MAX
-    }
-
-    async fn initialize_reports(
-        &self,
-        is_leader: bool,
-        task_config: &DapTaskConfig,
-        agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
-    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        initialize_reports(
-            is_leader,
-            task_config.vdaf_verify_key.clone(),
-            task_config.vdaf,
-            agg_param,
-            consumed_reports,
-        )
-        .await
     }
 }
 

@@ -31,15 +31,13 @@ use daphne::{
     roles::DapReportInitializer,
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
-    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapMeasurement,
-    DapQueryConfig, DapTaskConfig, DapTaskParameters, DapVersion, EarlyReportStateConsumed,
-    EarlyReportStateInitialized, ReplayProtection,
+    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapMeasurement, DapQueryConfig,
+    DapTaskConfig, DapTaskParameters, DapVersion, ReplayProtection,
 };
 use daphne_service_utils::bearer_token::BearerToken;
 use futures::{future::OptionFuture, StreamExt, TryStreamExt};
 use prometheus::{Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder};
 use rand::{rngs, Rng};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::{
     convert::TryFrom,
     env,
@@ -704,36 +702,6 @@ impl DapReportInitializer for Test {
     fn valid_report_time_range(&self) -> Range<messages::Time> {
         // Accept reports with any timestmap.
         0..u64::MAX
-    }
-
-    async fn initialize_reports(
-        &self,
-        is_leader: bool,
-        task_config: &DapTaskConfig,
-        agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
-    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        tokio::task::spawn_blocking({
-            let vdaf_verify_key = task_config.vdaf_verify_key.clone();
-            let vdaf = task_config.vdaf;
-            let agg_param = agg_param.clone();
-            move || {
-                consumed_reports
-                    .into_par_iter()
-                    .map(|consumed| {
-                        EarlyReportStateInitialized::initialize(
-                            is_leader,
-                            &vdaf_verify_key,
-                            &vdaf,
-                            &agg_param,
-                            consumed,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            }
-        })
-        .await
-        .unwrap()
     }
 }
 

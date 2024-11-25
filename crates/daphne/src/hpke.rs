@@ -215,7 +215,7 @@ pub trait HpkeProvider {
     where
         Self: 'a;
 
-    type ReceiverConfigs<'a>: HpkeDecrypter
+    type ReceiverConfigs<'a>: HpkeDecrypter + Sync
     where
         Self: 'a;
 

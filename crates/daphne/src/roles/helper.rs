@@ -16,17 +16,16 @@ use crate::{
         TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
-    protocol::aggregator::{ReplayProtection, ReportProcessedStatus},
+    protocol::aggregator::{InitializedReport, ReplayProtection, ReportProcessedStatus},
     roles::aggregator::MergeAggShareError,
     DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig,
-    EarlyReportStateInitialized,
 };
 
 /// DAP Helper functionality.
 #[async_trait]
 pub trait DapHelper: DapAggregator {}
 
-pub async fn handle_agg_job_init_req<A: DapHelper>(
+pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     aggregator: &A,
     req: DapRequest<AggregationJobInitReq, resource::AggregationJobId>,
     replay_protection: ReplayProtection,
@@ -48,15 +47,13 @@ pub async fn handle_agg_job_init_req<A: DapHelper>(
 
     let part_batch_sel = req.payload.part_batch_sel.clone();
     let version = req.version;
-    let initialized_reports = task_config
-        .consume_agg_job_req(
-            &aggregator.get_receiver_configs(task_config.version).await?,
-            aggregator,
-            &task_id,
-            req.payload,
-            replay_protection,
-        )
-        .await?;
+    let initialized_reports = task_config.consume_agg_job_req(
+        &aggregator.get_receiver_configs(task_config.version).await?,
+        aggregator,
+        &task_id,
+        req.payload,
+        replay_protection,
+    )?;
 
     let agg_job_resp = {
         let agg_job_resp = finish_agg_job_and_aggregate(
@@ -212,7 +209,7 @@ async fn finish_agg_job_and_aggregate(
     task_id: &TaskId,
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,
-    initialized_reports: &[EarlyReportStateInitialized],
+    initialized_reports: &[InitializedReport],
     metrics: &dyn DaphneMetrics,
 ) -> Result<AggregationJobResp, DapError> {
     // This loop is intended to run at most once on the "happy path". The intent is as follows:

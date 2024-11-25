@@ -15,15 +15,14 @@ use daphne::{
         aggregator::{MergeAggShareError, TaskprovConfig},
         DapAggregator, DapReportInitializer,
     },
-    taskprov, DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapError, DapGlobalConfig,
-    DapTaskConfig, DapVersion, EarlyReportStateConsumed, EarlyReportStateInitialized,
+    taskprov, DapAggregateShare, DapAggregateSpan, DapError, DapGlobalConfig, DapTaskConfig,
+    DapVersion,
 };
 use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
 };
 use futures::{future::try_join_all, StreamExt, TryFutureExt, TryStreamExt};
 use mappable_rc::Marc;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use crate::{
     roles::fetch_replay_protection_override,
@@ -359,37 +358,6 @@ impl DapReportInitializer for crate::App {
         let end = now.saturating_add(self.service_config.report_storage_max_future_time_skew);
 
         start..end
-    }
-
-    #[tracing::instrument(skip(self, task_config, agg_param, consumed_reports))]
-    async fn initialize_reports(
-        &self,
-        is_leader: bool,
-        task_config: &DapTaskConfig,
-        agg_param: &DapAggregationParam,
-        consumed_reports: Vec<EarlyReportStateConsumed>,
-    ) -> Result<Vec<EarlyReportStateInitialized>, DapError> {
-        tokio::task::spawn_blocking({
-            let vdaf_config = task_config.vdaf;
-            let vdaf_verify_key = task_config.vdaf_verify_key.clone();
-            let agg_param = agg_param.clone();
-            move || {
-                consumed_reports
-                    .into_par_iter()
-                    .map(|consumed_report| {
-                        EarlyReportStateInitialized::initialize(
-                            is_leader,
-                            &vdaf_verify_key,
-                            &vdaf_config,
-                            &agg_param,
-                            consumed_report,
-                        )
-                    })
-                    .collect::<Result<Vec<EarlyReportStateInitialized>, _>>()
-            }
-        })
-        .await
-        .map_err(|e| fatal_error!(err = ?e, "initialzing reports panicked"))?
     }
 }
 
