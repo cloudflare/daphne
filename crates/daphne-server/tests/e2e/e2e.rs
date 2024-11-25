@@ -471,6 +471,69 @@ async fn leader_upload_taskprov() {
     .unwrap();
 }
 
+async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
+    let wrong_version = match version {
+        DapVersion::Draft09 => DapVersion::Latest,
+        DapVersion::Latest => DapVersion::Draft09,
+    };
+    let method = match version {
+        DapVersion::Draft09 => &http::Method::PUT,
+        DapVersion::Latest => &http::Method::POST,
+    };
+    let t = TestRunner::default_with_version(version).await;
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
+
+    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+        version,
+        min_batch_size: 10,
+        query: DapQueryConfig::TimeInterval,
+        leader_url: t.task_config.leader_url.clone(),
+        helper_url: t.task_config.helper_url.clone(),
+        ..Default::default()
+    }
+    .to_config_with_taskprov(
+        b"cool task".to_vec(),
+        t.now,
+        daphne::roles::aggregator::TaskprovConfig {
+            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
+            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
+        },
+    )
+    .unwrap();
+
+    let report = task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now,
+            &task_id,
+            DapMeasurement::U32Vec(vec![1; 10]),
+            vec![Extension::Taskprov],
+            version,
+        )
+        .unwrap();
+    t.leader_request_expect_abort(
+        client,
+        None,
+        &format!("tasks/{}/reports", task_id.to_base64url()),
+        method,
+        DapMediaType::Report,
+        Some(
+            &taskprov_advertisement
+                .serialize_to_header_value(wrong_version)
+                .unwrap(),
+        ),
+        report.get_encoded_with_param(&version).unwrap(),
+        400,
+        "unrecognizedTask",
+    )
+    .await
+    .unwrap();
+}
+
+async_test_versions!(leader_upload_taskprov_wrong_version);
+
 async fn internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let path = t.upload_path();
