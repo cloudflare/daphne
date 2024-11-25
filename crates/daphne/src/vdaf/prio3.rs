@@ -521,8 +521,8 @@ mod test {
     use prio::vdaf::prio3_test::check_test_vec;
 
     use crate::{
-        async_test_versions,
         hpke::HpkeKemId,
+        test_versions,
         testing::AggregationJobTest,
         vdaf::{
             prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
@@ -530,53 +530,49 @@ mod test {
         DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
-    async fn roundtrip_count(version: DapVersion) {
+    fn roundtrip_count(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Prio3(Prio3Config::Count),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::U64(0),
-                    DapMeasurement::U64(1),
-                    DapMeasurement::U64(1),
-                    DapMeasurement::U64(1),
-                    DapMeasurement::U64(0),
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(0),
+            ],
+        );
         assert_eq!(got, DapAggregateResult::U64(3));
     }
 
-    async_test_versions! { roundtrip_count }
+    test_versions! { roundtrip_count }
 
-    async fn roundtrip_sum(version: DapVersion) {
+    fn roundtrip_sum(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Prio3(Prio3Config::Sum { bits: 23 }),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::U64(0),
-                    DapMeasurement::U64(1),
-                    DapMeasurement::U64(1337),
-                    DapMeasurement::U64(4),
-                    DapMeasurement::U64(0),
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(1337),
+                DapMeasurement::U64(4),
+                DapMeasurement::U64(0),
+            ],
+        );
         assert_eq!(got, DapAggregateResult::U128(1342));
     }
 
-    async_test_versions! { roundtrip_sum }
+    test_versions! { roundtrip_sum }
 
-    async fn roundtrip_sum_vec(version: DapVersion) {
+    fn roundtrip_sum_vec(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Prio3(Prio3Config::SumVec {
                 bits: 23,
@@ -586,22 +582,20 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::U128Vec(vec![1337, 0]),
-                    DapMeasurement::U128Vec(vec![0, 1337]),
-                    DapMeasurement::U128Vec(vec![1, 1]),
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::U128Vec(vec![1337, 0]),
+                DapMeasurement::U128Vec(vec![0, 1337]),
+                DapMeasurement::U128Vec(vec![1, 1]),
+            ],
+        );
         assert_eq!(got, DapAggregateResult::U128Vec(vec![1338, 1338]));
     }
 
-    async_test_versions! { roundtrip_sum_vec }
+    test_versions! { roundtrip_sum_vec }
 
-    async fn roundtrip_histogram(version: DapVersion) {
+    fn roundtrip_histogram(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Prio3(Prio3Config::Histogram {
                 length: 3,
@@ -610,24 +604,22 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::U64(0),
-                    DapMeasurement::U64(1),
-                    DapMeasurement::U64(2),
-                    DapMeasurement::U64(2),
-                    DapMeasurement::U64(2),
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::U64(0),
+                DapMeasurement::U64(1),
+                DapMeasurement::U64(2),
+                DapMeasurement::U64(2),
+                DapMeasurement::U64(2),
+            ],
+        );
         assert_eq!(got, DapAggregateResult::U128Vec(vec![1, 1, 3]));
     }
 
-    async_test_versions! { roundtrip_histogram }
+    test_versions! { roundtrip_histogram }
 
-    async fn roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
+    fn roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 23,
@@ -638,20 +630,18 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Empty,
-                vec![
-                    DapMeasurement::U64Vec(vec![1337, 0]),
-                    DapMeasurement::U64Vec(vec![0, 1337]),
-                    DapMeasurement::U64Vec(vec![1, 1]),
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Empty,
+            vec![
+                DapMeasurement::U64Vec(vec![1337, 0]),
+                DapMeasurement::U64Vec(vec![0, 1337]),
+                DapMeasurement::U64Vec(vec![1, 1]),
+            ],
+        );
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1338, 1338]));
     }
 
-    async_test_versions! { roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128 }
+    test_versions! { roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
     #[test]
     fn test_vec_sum_vec_field64_multiproof_hmac_sha256_aes128() {

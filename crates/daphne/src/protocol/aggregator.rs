@@ -23,7 +23,6 @@ use crate::{
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
 };
-use futures::{Stream, StreamExt};
 use prio::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
@@ -32,7 +31,6 @@ use std::{
     io::Cursor,
     iter::zip,
     ops::Range,
-    pin::pin,
 };
 
 use super::{
@@ -293,7 +291,7 @@ impl DapTaskConfig {
     /// Leader -> Helper: Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the outbound `AggregationJobInitReq` message.
     #[expect(clippy::too_many_arguments)]
-    pub async fn produce_agg_job_req<S>(
+    pub fn produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
@@ -304,7 +302,7 @@ impl DapTaskConfig {
         metrics: &dyn DaphneMetrics,
     ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
     where
-        S: Stream<Item = Report>,
+        S: Iterator<Item = Report>,
     {
         self.produce_agg_job_req_impl(
             decrypter,
@@ -316,11 +314,10 @@ impl DapTaskConfig {
             metrics,
             ReplayProtection::Enabled,
         )
-        .await
     }
 
     #[expect(clippy::too_many_arguments)]
-    async fn produce_agg_job_req_impl<S>(
+    fn produce_agg_job_req_impl<S>(
         &self,
         decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
@@ -332,7 +329,7 @@ impl DapTaskConfig {
         replay_protection: ReplayProtection,
     ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
     where
-        S: Stream<Item = Report>,
+        S: Iterator<Item = Report>,
     {
         let (report_count_hint, _upper_bound) = reports.size_hint();
 
@@ -342,8 +339,7 @@ impl DapTaskConfig {
         let mut processed = replay_protection
             .enabled()
             .then(|| HashSet::with_capacity(report_count_hint));
-        let mut reports = pin!(reports);
-        while let Some(report) = reports.next().await {
+        for report in reports {
             if let Some(processed) = &mut processed {
                 if processed.contains(&report.report_metadata.id) {
                     return Err(fatal_error!(
@@ -431,7 +427,7 @@ impl DapTaskConfig {
 
     #[expect(clippy::too_many_arguments)]
     #[cfg(any(test, feature = "test-utils"))]
-    pub async fn test_produce_agg_job_req<S>(
+    pub fn test_produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
         initializer: &impl DapReportInitializer,
@@ -443,7 +439,7 @@ impl DapTaskConfig {
         replay_protection: ReplayProtection,
     ) -> Result<(DapAggregationJobState, AggregationJobInitReq), DapError>
     where
-        S: Stream<Item = Report>,
+        S: Iterator<Item = Report>,
     {
         self.produce_agg_job_req_impl(
             decrypter,
@@ -455,7 +451,6 @@ impl DapTaskConfig {
             metrics,
             replay_protection,
         )
-        .await
     }
 
     /// Helper: Consume the `AggregationJobInitReq` sent by the Leader and return the initialized

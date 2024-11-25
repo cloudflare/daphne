@@ -500,7 +500,6 @@ impl Test {
                     ReplayProtection::Enabled
                 },
             )
-            .await
             .context("producing agg job init request")?;
 
         // Send AggregationJobInitReq.

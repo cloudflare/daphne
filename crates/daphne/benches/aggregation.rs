@@ -41,9 +41,6 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
     );
     test.disable_replay_protection();
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let mut g = c.benchmark_group(function!());
     for vdaf_length in vdaf_lengths {
         let vdaf = VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
@@ -57,8 +54,7 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
             .produce_repeated_reports(vdaf.gen_measurement().unwrap())
             .take(NUM_REPORTS as _);
 
-        let (_, init) =
-            runtime.block_on(test.produce_agg_job_req(&DapAggregationParam::Empty, reports));
+        let (_, init) = test.produce_agg_job_req(&DapAggregationParam::Empty, reports);
 
         g.throughput(Throughput::Bytes(vdaf_length as _));
         g.bench_with_input(
@@ -81,18 +77,13 @@ fn consume_reports_vary_num_reports(c: &mut Criterion) {
     let mut test = AggregationJobTest::new(&VDAF, HpkeKemId::P256HkdfSha256, DapVersion::Latest);
     test.disable_replay_protection();
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-
     let mut g = c.benchmark_group(function!());
     for report_counts in [10, 100, 1_000, 10_000] {
         let reports = test
             .produce_repeated_reports(VDAF.gen_measurement().unwrap())
             .take(report_counts);
 
-        let (_, init) =
-            runtime.block_on(test.produce_agg_job_req(&DapAggregationParam::Empty, reports));
+        let (_, init) = test.produce_agg_job_req(&DapAggregationParam::Empty, reports);
 
         g.throughput(Throughput::Elements(report_counts as _));
         g.bench_with_input(

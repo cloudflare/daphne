@@ -185,7 +185,7 @@ impl AggregationJobTest {
     /// Leader: Produce `AggregationJobInitReq`.
     ///
     /// Panics if the Leader aborts.
-    pub async fn produce_agg_job_req(
+    pub fn produce_agg_job_req(
         &self,
         agg_param: &DapAggregationParam,
         reports: impl IntoIterator<Item = Report>,
@@ -197,11 +197,10 @@ impl AggregationJobTest {
                 &self.task_id,
                 &PartialBatchSelector::TimeInterval,
                 agg_param,
-                futures::stream::iter(reports),
+                reports.into_iter(),
                 &self.leader_metrics,
                 self.replay_protection,
             )
-            .await
             .unwrap()
     }
 
@@ -321,7 +320,7 @@ impl AggregationJobTest {
     }
 
     /// Generate a set of reports, aggregate them, and unshard the result.
-    pub async fn roundtrip(
+    pub fn roundtrip(
         &mut self,
         agg_param: DapAggregationParam,
         measurements: Vec<DapMeasurement>,
@@ -337,7 +336,7 @@ impl AggregationJobTest {
         let reports = self.produce_reports(measurements);
 
         // Aggregators: Preparation
-        let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports).await;
+        let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports);
 
         let (leader_agg_span, helper_agg_span) = {
             let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req);

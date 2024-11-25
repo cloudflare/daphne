@@ -232,11 +232,11 @@ mod test {
 
     use super::*;
     use crate::{
-        async_test_version, hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig,
+        hpke::HpkeKemId, test_versions, testing::AggregationJobTest, vdaf::VdafConfig,
         DapAggregateResult, DapMeasurement, DapVersion,
     };
 
-    async fn roundtrip_count(version: DapVersion) {
+    fn roundtrip_count(version: DapVersion) {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Mastic {
                 input_size: 4,
@@ -245,43 +245,40 @@ mod test {
             HpkeKemId::X25519HkdfSha256,
             version,
         );
-        let got = t
-            .roundtrip(
-                DapAggregationParam::Mastic(
-                    Poplar1AggregationParam::try_from_prefixes(vec![
-                        IdpfInput::from_bytes(b"cool"),
-                        IdpfInput::from_bytes(b"trip"),
-                    ])
-                    .unwrap(),
-                ),
-                vec![
-                    DapMeasurement::Mastic {
-                        input: b"cool".to_vec(),
-                        weight: MasticWeight::Bool(false),
-                    },
-                    DapMeasurement::Mastic {
-                        input: b"cool".to_vec(),
-                        weight: MasticWeight::Bool(true),
-                    },
-                    DapMeasurement::Mastic {
-                        input: b"trip".to_vec(),
-                        weight: MasticWeight::Bool(true),
-                    },
-                    DapMeasurement::Mastic {
-                        input: b"trip".to_vec(),
-                        weight: MasticWeight::Bool(true),
-                    },
-                    DapMeasurement::Mastic {
-                        input: b"cool".to_vec(),
-                        weight: MasticWeight::Bool(false),
-                    },
-                ],
-            )
-            .await;
+        let got = t.roundtrip(
+            DapAggregationParam::Mastic(
+                Poplar1AggregationParam::try_from_prefixes(vec![
+                    IdpfInput::from_bytes(b"cool"),
+                    IdpfInput::from_bytes(b"trip"),
+                ])
+                .unwrap(),
+            ),
+            vec![
+                DapMeasurement::Mastic {
+                    input: b"cool".to_vec(),
+                    weight: MasticWeight::Bool(false),
+                },
+                DapMeasurement::Mastic {
+                    input: b"cool".to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: b"trip".to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: b"trip".to_vec(),
+                    weight: MasticWeight::Bool(true),
+                },
+                DapMeasurement::Mastic {
+                    input: b"cool".to_vec(),
+                    weight: MasticWeight::Bool(false),
+                },
+            ],
+        );
 
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1, 2]));
     }
 
-    async_test_version! { roundtrip_count, Draft09 }
-    async_test_version! { roundtrip_count, Latest }
+    test_versions! { roundtrip_count }
 }
