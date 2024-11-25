@@ -41,6 +41,7 @@ use rand::{rngs, Rng};
 use std::{
     convert::TryFrom,
     env,
+    num::NonZeroU32,
     ops::Range,
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
@@ -383,7 +384,7 @@ impl Test {
             lifetime: 60,
             min_batch_size: reports_per_batch.try_into().unwrap(),
             query: DapQueryConfig::FixedSize {
-                max_batch_size: Some(reports_per_batch.try_into().unwrap()),
+                max_batch_size: NonZeroU32::new(reports_per_batch.try_into().unwrap()),
             },
             vdaf: self.vdaf_config,
             ..Default::default()

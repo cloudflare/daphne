@@ -122,12 +122,9 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
 impl DapQueryConfig {
     fn try_from_taskprov(task_id: &TaskId, var: QueryConfigVar) -> Result<Self, DapAbort> {
         match var {
-            QueryConfigVar::FixedSize { max_batch_size: 0 } => Ok(DapQueryConfig::FixedSize {
-                max_batch_size: None,
-            }),
-            QueryConfigVar::FixedSize { max_batch_size } => Ok(DapQueryConfig::FixedSize {
-                max_batch_size: Some(max_batch_size.into()),
-            }),
+            QueryConfigVar::FixedSize { max_batch_size } => {
+                Ok(DapQueryConfig::FixedSize { max_batch_size })
+            }
             QueryConfigVar::TimeInterval => Ok(DapQueryConfig::TimeInterval),
             QueryConfigVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented query type ({typ})"),
@@ -359,9 +356,7 @@ impl TryFrom<&DapQueryConfig> for messages::taskprov::QueryConfigVar {
             DapQueryConfig::TimeInterval => messages::taskprov::QueryConfigVar::TimeInterval,
             DapQueryConfig::FixedSize { max_batch_size } => {
                 messages::taskprov::QueryConfigVar::FixedSize {
-                    max_batch_size: max_batch_size.unwrap_or(0).try_into().map_err(|_| {
-                        fatal_error!(err = "task max batch size is too large for taskprov")
-                    })?,
+                    max_batch_size: *max_batch_size,
                 }
             }
         })
@@ -448,7 +443,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
+    use std::num::{NonZeroU32, NonZeroUsize};
 
     use prio::codec::ParameterizedEncode;
 
@@ -477,7 +472,9 @@ mod test {
                 time_precision: 3600,
                 max_batch_query_count: 1,
                 min_batch_size: 1,
-                var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                var: messages::taskprov::QueryConfigVar::FixedSize {
+                    max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                },
             },
             task_expiration: 1337,
             vdaf_config: messages::taskprov::VdafConfig {
@@ -557,7 +554,9 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                    var: messages::taskprov::QueryConfigVar::FixedSize {
+                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                    },
                 },
                 task_expiration: 0,
                 vdaf_config: messages::taskprov::VdafConfig {
@@ -622,7 +621,9 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::FixedSize { max_batch_size: 2 },
+                    var: messages::taskprov::QueryConfigVar::FixedSize {
+                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                    },
                 },
                 task_expiration: 0,
                 vdaf_config: messages::taskprov::VdafConfig {

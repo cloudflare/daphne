@@ -153,7 +153,13 @@ mod test {
     #[cfg(feature = "experimental")]
     use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
-    use std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::SystemTime, vec};
+    use std::{
+        collections::HashMap,
+        num::{NonZeroU32, NonZeroUsize},
+        sync::Arc,
+        time::SystemTime,
+        vec,
+    };
     use url::Url;
 
     pub(super) struct TestData {
@@ -235,7 +241,7 @@ mod test {
                     not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapQueryConfig::FixedSize {
-                        max_batch_size: Some(2),
+                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
@@ -1416,7 +1422,7 @@ mod test {
             version,
             min_batch_size: 1,
             query: DapQueryConfig::FixedSize {
-                max_batch_size: Some(2),
+                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
             },
             vdaf: vdaf_config,
             ..Default::default()

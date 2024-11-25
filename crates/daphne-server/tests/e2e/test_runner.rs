@@ -23,7 +23,7 @@ use serde_json::json;
 use std::time::SystemTime;
 use std::{
     any::{self, Any},
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     ops::Range,
 };
 use tokio::time::timeout;
@@ -31,7 +31,7 @@ use url::Url;
 
 const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
 pub(crate) const MIN_BATCH_SIZE: u64 = 10;
-pub(crate) const MAX_BATCH_SIZE: u64 = 12;
+pub(crate) const MAX_BATCH_SIZE: u32 = 12;
 pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
 
 #[derive(Deserialize)]
@@ -66,7 +66,7 @@ impl TestRunner {
         Self::with(
             version,
             &DapQueryConfig::FixedSize {
-                max_batch_size: Some(MAX_BATCH_SIZE),
+                max_batch_size: Some(NonZeroU32::new(MAX_BATCH_SIZE).unwrap()),
             },
         )
         .await
