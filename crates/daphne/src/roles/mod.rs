@@ -13,7 +13,7 @@ use crate::{
     DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
 };
 
-pub use aggregator::{DapAggregator, DapReportInitializer};
+pub use aggregator::DapAggregator;
 pub use helper::DapHelper;
 pub use leader::DapLeader;
 
@@ -459,7 +459,7 @@ mod test {
             let (leader_state, agg_job_init_req) = task_config
                 .produce_agg_job_req(
                     &*self.leader.hpke_receiver_config_list,
-                    &*self.leader,
+                    self.leader.valid_report_time_range(),
                     task_id,
                     &part_batch_sel,
                     &agg_param,

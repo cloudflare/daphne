@@ -48,7 +48,7 @@ pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     let version = req.version;
     let initialized_reports = task_config.consume_agg_job_req(
         &aggregator.get_receiver_configs(task_config.version).await?,
-        aggregator,
+        aggregator.valid_report_time_range(),
         &task_id,
         req.payload,
         replay_protection,

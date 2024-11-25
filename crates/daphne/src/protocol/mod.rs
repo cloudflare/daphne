@@ -24,7 +24,6 @@ mod test {
             TransitionVar,
         },
         protocol::aggregator::InitializedReport,
-        roles::DapReportInitializer,
         test_versions,
         testing::AggregationJobTest,
         vdaf::{Prio3Config, VdafConfig},

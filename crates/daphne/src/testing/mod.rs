@@ -21,7 +21,7 @@ use crate::{
         aggregator::{MergeAggShareError, TaskprovConfig},
         helper,
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
-        DapAggregator, DapHelper, DapLeader, DapReportInitializer,
+        DapAggregator, DapHelper, DapLeader,
     },
     taskprov, DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan,
     DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError,
@@ -68,14 +68,11 @@ pub struct AggregationJobTest {
     pub(crate) leader_metrics: DaphnePromMetrics,
 }
 
-#[async_trait]
-impl DapReportInitializer for AggregationJobTest {
-    fn valid_report_time_range(&self) -> Range<Time> {
+impl AggregationJobTest {
+    pub fn valid_report_time_range(&self) -> Range<Time> {
         self.valid_report_range.clone()
     }
-}
 
-impl AggregationJobTest {
     /// Create an aggregation job test with the given VDAF config, HPKE KEM algorithm, DAP protocol
     /// version. The KEM algorithm is used to generate an HPKE config for each party.
     pub fn new(vdaf: &VdafConfig, kem_id: HpkeKemId, version: DapVersion) -> Self {
@@ -193,7 +190,7 @@ impl AggregationJobTest {
         self.task_config
             .test_produce_agg_job_req(
                 &self.leader_hpke_receiver_config,
-                self,
+                self.valid_report_time_range(),
                 &self.task_id,
                 &PartialBatchSelector::TimeInterval,
                 agg_param,
@@ -219,7 +216,7 @@ impl AggregationJobTest {
                     .task_config
                     .consume_agg_job_req(
                         &self.helper_hpke_receiver_config,
-                        self,
+                        self.valid_report_time_range(),
                         &self.task_id,
                         agg_job_init_req,
                         self.replay_protection,
@@ -655,14 +652,6 @@ impl HpkeProvider for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapReportInitializer for InMemoryAggregator {
-    fn valid_report_time_range(&self) -> Range<messages::Time> {
-        // Accept reports with any timestmap.
-        0..u64::MAX
-    }
-}
-
-#[async_trait]
 impl DapAggregator for InMemoryAggregator {
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
         Ok(self.global_config.clone())
@@ -865,6 +854,11 @@ impl DapAggregator for InMemoryAggregator {
 
     fn audit_log(&self) -> &dyn AuditLog {
         &self.audit_log
+    }
+
+    fn valid_report_time_range(&self) -> Range<messages::Time> {
+        // Accept reports with any timestmap.
+        messages::Time::MIN..messages::Time::MAX
     }
 }
 

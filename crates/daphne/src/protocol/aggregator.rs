@@ -14,7 +14,6 @@ use crate::{
         Transition, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
-    roles::DapReportInitializer,
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
         prio3::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init},
@@ -294,7 +293,7 @@ impl DapTaskConfig {
     pub fn produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
-        initializer: &impl DapReportInitializer,
+        valid_report_time_range: Range<messages::Time>,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
@@ -306,7 +305,7 @@ impl DapTaskConfig {
     {
         self.produce_agg_job_req_impl(
             decrypter,
-            initializer,
+            valid_report_time_range,
             task_id,
             part_batch_sel,
             agg_param,
@@ -320,7 +319,7 @@ impl DapTaskConfig {
     fn produce_agg_job_req_impl<S>(
         &self,
         decrypter: impl HpkeDecrypter,
-        initializer: &impl DapReportInitializer,
+        valid_report_time_range: Range<messages::Time>,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
@@ -354,7 +353,7 @@ impl DapTaskConfig {
 
             let initialized_report = InitializedReport::new(
                 &decrypter,
-                initializer.valid_report_time_range(),
+                valid_report_time_range.clone(),
                 true,
                 task_id,
                 self,
@@ -430,7 +429,7 @@ impl DapTaskConfig {
     pub fn test_produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
-        initializer: &impl DapReportInitializer,
+        valid_report_time_range: Range<messages::Time>,
         task_id: &TaskId,
         part_batch_sel: &PartialBatchSelector,
         agg_param: &DapAggregationParam,
@@ -443,7 +442,7 @@ impl DapTaskConfig {
     {
         self.produce_agg_job_req_impl(
             decrypter,
-            initializer,
+            valid_report_time_range,
             task_id,
             part_batch_sel,
             agg_param,
@@ -456,17 +455,16 @@ impl DapTaskConfig {
     /// Helper: Consume the `AggregationJobInitReq` sent by the Leader and return the initialized
     /// reports.
     #[tracing::instrument(skip_all)]
-    pub fn consume_agg_job_req<H, I>(
+    pub fn consume_agg_job_req<H>(
         &self,
         decrypter: &H,
-        initializer: &I,
+        valid_report_time_range: Range<messages::Time>,
         task_id: &TaskId,
         agg_job_init_req: AggregationJobInitReq,
         replay_protection: ReplayProtection,
     ) -> Result<Vec<InitializedReport>, DapError>
     where
         H: HpkeDecrypter + Sync,
-        I: DapReportInitializer + Sync,
     {
         let agg_param =
             DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_job_init_req.agg_param)
@@ -490,7 +488,7 @@ impl DapTaskConfig {
             .map(|prep_init| {
                 InitializedReport::new(
                     decrypter,
-                    initializer.valid_report_time_range(),
+                    valid_report_time_range.clone(),
                     false,
                     task_id,
                     self,

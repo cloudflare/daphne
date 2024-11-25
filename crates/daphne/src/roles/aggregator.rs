@@ -17,14 +17,6 @@ use crate::{
     DapTaskConfig, DapVersion,
 };
 
-/// Report initializer. Used by a DAP Aggregator [`DapAggregator`] when initializing an aggregation
-/// job.
-#[async_trait]
-pub trait DapReportInitializer {
-    /// Return the time range in which a report must appear in order to be considered valid.
-    fn valid_report_time_range(&self) -> Range<Time>;
-}
-
 #[derive(Debug)]
 pub enum MergeAggShareError {
     AlreadyCollected,
@@ -42,7 +34,7 @@ pub struct TaskprovConfig<'s> {
 
 /// DAP Aggregator functionality.
 #[async_trait]
-pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
+pub trait DapAggregator: HpkeProvider + Sized {
     /// Look up the DAP global configuration.
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError>;
 
@@ -137,6 +129,9 @@ pub trait DapAggregator: HpkeProvider + DapReportInitializer + Sized {
 
     /// Access the audit log.
     fn audit_log(&self) -> &dyn AuditLog;
+
+    /// Return the time range in which a report must appear in order to be considered valid.
+    fn valid_report_time_range(&self) -> Range<Time>;
 }
 
 /// Handle request for the Aggregator's HPKE configuration.

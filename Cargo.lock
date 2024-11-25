@@ -846,7 +846,6 @@ name = "dapf"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "chrono",
  "clap",
  "daphne",
