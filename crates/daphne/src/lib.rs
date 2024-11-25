@@ -105,7 +105,7 @@ pub enum DapVersion {
     #[default]
     Draft09,
 
-    #[serde(rename = "v10")]
+    #[serde(rename = "v13")]
     Latest,
 }
 
@@ -114,7 +114,7 @@ impl FromStr for DapVersion {
     fn from_str(version: &str) -> Result<Self, Self::Err> {
         match version {
             "v09" => Ok(DapVersion::Draft09),
-            "v10" => Ok(DapVersion::Latest),
+            "v13" => Ok(DapVersion::Latest),
             _ => Err(DapAbort::version_unknown()),
         }
     }
@@ -124,7 +124,7 @@ impl AsRef<str> for DapVersion {
     fn as_ref(&self) -> &str {
         match self {
             DapVersion::Draft09 => "v09",
-            DapVersion::Latest => "v10",
+            DapVersion::Latest => "v13",
         }
     }
 }
