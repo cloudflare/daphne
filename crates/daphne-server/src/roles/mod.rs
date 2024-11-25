@@ -107,6 +107,7 @@ impl BearerTokens<'_> {
 #[cfg(feature = "test-utils")]
 mod test_utils {
     use daphne::{
+        constants::DapAggregatorRole,
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
@@ -117,7 +118,6 @@ mod test_utils {
     use daphne_service_utils::{
         bearer_token::BearerToken,
         test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
-        DapRole,
     };
     use prio::codec::Decode;
     use std::num::NonZeroUsize;
@@ -248,7 +248,7 @@ mod test_utils {
 
             // Collector authentication token.
             match (cmd.role, cmd.collector_authentication_token) {
-                (DapRole::Leader, Some(token_string)) => {
+                (DapAggregatorRole::Leader, Some(token_string)) => {
                     let token = BearerToken::from(token_string);
                     if self
                         .bearer_tokens()
@@ -262,13 +262,13 @@ mod test_utils {
                         )));
                     }
                 }
-                (DapRole::Leader, None) => {
+                (DapAggregatorRole::Leader, None) => {
                     return Err(fatal_error!(
                         err = "command failed: missing collector authentication token",
                     ))
                 }
-                (DapRole::Helper, None) => (),
-                (DapRole::Helper, Some(..)) => {
+                (DapAggregatorRole::Helper, None) => (),
+                (DapAggregatorRole::Helper, Some(..)) => {
                     return Err(fatal_error!(
                         err = "command failed: unexpected collector authentication token",
                     ));

@@ -4,6 +4,8 @@
 //! Constants used in the DAP protocol.
 
 use crate::DapVersion;
+use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 
 // Media types for HTTP requests.
 const MEDIA_TYPE_AGG_JOB_INIT_REQ: &str = "application/dap-aggregation-job-init-req";
@@ -59,6 +61,101 @@ impl DapMediaType {
             Self::Collection => Some(MEDIA_TYPE_COLLECTION),
             Self::HpkeConfigList => Some(MEDIA_TYPE_HPKE_CONFIG_LIST),
             Self::Report => Some(MEDIA_TYPE_REPORT),
+        }
+    }
+}
+
+/// A role in the DAP aggregation protocol. The numeric value associated with each variant is the
+/// numeric value used when serializing the sender and receiver roles in hpke encryption.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DapRole {
+    Collector = 0,
+    Client = 1,
+    Leader = 2,
+    Helper = 3,
+}
+
+impl DapRole {
+    pub fn is_leader(self) -> bool {
+        self == Self::Leader
+    }
+
+    pub fn is_helper(self) -> bool {
+        self == Self::Helper
+    }
+}
+
+impl FromStr for DapRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "leader" => Ok(Self::Leader),
+            "helper" => Ok(Self::Helper),
+            "collector" => Ok(Self::Collector),
+            "client" => Ok(Self::Client),
+            _ => Err(s.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for DapRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Client => "client",
+            Self::Collector => "collector",
+            Self::Helper => "helper",
+            Self::Leader => "leader",
+        })
+    }
+}
+
+/// A role in the DAP aggregation protocol. See [`DapRole`] for an explanation of the numeric values
+/// associated with each variant.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DapAggregatorRole {
+    Leader = 2,
+    Helper = 3,
+}
+
+impl DapAggregatorRole {
+    pub fn is_leader(self) -> bool {
+        self == Self::Leader
+    }
+
+    pub fn is_helper(self) -> bool {
+        self == Self::Helper
+    }
+}
+
+impl FromStr for DapAggregatorRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "leader" => Ok(Self::Leader),
+            "helper" => Ok(Self::Helper),
+            _ => Err(s.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for DapAggregatorRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Helper => "helper",
+            Self::Leader => "leader",
+        })
+    }
+}
+
+impl From<DapAggregatorRole> for DapRole {
+    fn from(value: DapAggregatorRole) -> Self {
+        match value {
+            DapAggregatorRole::Leader => DapRole::Leader,
+            DapAggregatorRole::Helper => DapRole::Helper,
         }
     }
 }

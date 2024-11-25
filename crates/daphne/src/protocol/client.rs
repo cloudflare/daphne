@@ -4,6 +4,7 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_shard;
 use crate::{
+    constants::DapRole,
     hpke::HpkeConfig,
     messages::{
         encode_u32_bytes, Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId,
@@ -15,7 +16,7 @@ use crate::{
 use prio::codec::{Encode, ParameterizedEncode};
 use rand::prelude::*;
 
-use super::{CTX_INPUT_SHARE_DRAFT09, CTX_ROLE_CLIENT, CTX_ROLE_HELPER, CTX_ROLE_LEADER};
+use super::CTX_INPUT_SHARE_DRAFT09;
 
 impl VdafConfig {
     /// Generate a report for a measurement. This method is run by the Client.
@@ -94,8 +95,8 @@ impl VdafConfig {
         let n: usize = input_share_text.len();
         let mut info = Vec::with_capacity(n + 2);
         info.extend_from_slice(input_share_text);
-        info.push(CTX_ROLE_CLIENT); // Sender role
-        info.push(CTX_ROLE_LEADER); // Receiver role placeholder; updated below.
+        info.push(DapRole::Client as _); // Sender role
+        info.push(DapRole::Leader as _); // Receiver role placeholder; updated below.
 
         let mut aad = Vec::with_capacity(58);
         task_id.encode(&mut aad).map_err(DapError::encoding)?;
@@ -109,9 +110,9 @@ impl VdafConfig {
             hpke_configs.iter().zip(encoded_input_shares).enumerate()
         {
             info[n + 1] = if i == 0 {
-                CTX_ROLE_LEADER
+                DapRole::Leader as _
             } else {
-                CTX_ROLE_HELPER
+                DapRole::Helper as _
             }; // Receiver role
             let ciphertext = hpke_config.encrypt(
                 &info,

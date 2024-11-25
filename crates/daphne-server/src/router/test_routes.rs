@@ -11,23 +11,21 @@ use axum::{
     Json,
 };
 use daphne::{
+    constants::DapAggregatorRole,
     hpke::HpkeReceiverConfig,
     messages::{Base64Encode, TaskId},
     roles::{leader, DapLeader},
     DapVersion,
 };
-use daphne_service_utils::{
-    test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
-    DapRole,
-};
+use daphne_service_utils::test_route_types::{InternalTestAddTask, InternalTestEndpointForTask};
 use serde::Deserialize;
 
 use crate::App;
 
 use super::{AxumDapResponse, DaphneService};
 
-pub fn add_test_routes(router: super::Router<App>, role: DapRole) -> super::Router<App> {
-    let router = if role == DapRole::Leader {
+pub fn add_test_routes(router: super::Router<App>, role: DapAggregatorRole) -> super::Router<App> {
+    let router = if role == DapAggregatorRole::Leader {
         router
             .route("/internal/process", post(leader_process))
             .route(
