@@ -1,15 +1,69 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use prio::codec::{CodecError, Decode as _};
+use std::{collections::HashSet, io::Cursor};
+
 pub(crate) mod aggregator;
 mod client;
 mod collector;
+pub(crate) mod report_init;
+
+/// checks if an iterator has no duplicate items, returns the ok if there are no dups or an error
+/// with the first offending item.
+fn no_duplicates<I>(iterator: I) -> Result<(), I::Item>
+where
+    I: Iterator,
+    I::Item: Eq + std::hash::Hash,
+{
+    let (lower, upper) = iterator.size_hint();
+    let mut seen = HashSet::with_capacity(upper.unwrap_or(lower));
+
+    for item in iterator {
+        if let Some(repeat) = seen.replace(item) {
+            return Err(repeat);
+        }
+    }
+    Ok(())
+}
+
+// Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
+// implement the "continue" message type because we only support 1-round VDAFs.
+enum PingPongMessageType {
+    Initialize = 0,
+    Finish = 2,
+}
+
+// This is essentially a re-implementation of a method in the `messages` module. However the goal
+// here is to make it zero-copy. See https://github.com/cloudflare/daphne/issues/15.
+fn decode_ping_pong_framed(
+    bytes: &[u8],
+    expected_type: PingPongMessageType,
+) -> Result<&[u8], CodecError> {
+    let mut r = Cursor::new(bytes);
+
+    let message_type = u8::decode(&mut r)?;
+    if message_type != expected_type as u8 {
+        return Err(CodecError::UnexpectedValue);
+    }
+
+    let message_len = u32::decode(&mut r)?.try_into().unwrap();
+    let message_start = usize::try_from(r.position()).unwrap();
+    if bytes.len() - message_start < message_len {
+        return Err(CodecError::LengthPrefixTooBig(message_len));
+    }
+    if bytes.len() - message_start > message_len {
+        return Err(CodecError::BytesLeftOver(message_len));
+    }
+
+    Ok(&bytes[message_start..])
+}
 
 #[cfg(test)]
 mod test {
+    use super::{report_init::InitializedReport, PingPongMessageType};
     use crate::{
         assert_metrics_include,
-        constants::DapAggregatorRole,
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
@@ -17,7 +71,6 @@ mod test {
             PrepareInit, Report, ReportId, ReportShare, Transition, TransitionFailure,
             TransitionVar,
         },
-        protocol::aggregator::InitializedReport,
         test_versions,
         testing::AggregationJobTest,
         vdaf::{Prio3Config, VdafConfig},
@@ -27,6 +80,7 @@ mod test {
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;
     use prio::{
+        codec::encode_u32_items,
         field::Field64,
         vdaf::{
             prio3::Prio3, AggregateShare, Aggregator as VdafAggregator, Collector as VdafCollector,
@@ -58,10 +112,9 @@ mod test {
             prep_share: leader_prep_share,
             prep_state: leader_prep_state,
             ..
-        } = InitializedReport::new(
+        } = InitializedReport::from_client(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -69,7 +122,6 @@ mod test {
                 public_share: report.public_share.clone(),
                 encrypted_input_share: leader_share,
             },
-            None,
             &DapAggregationParam::Empty,
         )
         .unwrap()
@@ -81,10 +133,9 @@ mod test {
             prep_share: helper_prep_share,
             prep_state: helper_prep_state,
             ..
-        } = InitializedReport::new(
+        } = InitializedReport::from_leader(
             &t.helper_hpke_receiver_config,
             t.valid_report_time_range(),
-            DapAggregatorRole::Helper,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -92,7 +143,12 @@ mod test {
                 public_share: report.public_share,
                 encrypted_input_share: helper_share,
             },
-            None,
+            {
+                let mut outbound = Vec::new();
+                outbound.push(PingPongMessageType::Initialize as u8);
+                encode_u32_items(&mut outbound, &version, &[leader_prep_share.clone()]).unwrap();
+                outbound
+            },
             &DapAggregationParam::Empty,
         )
         .unwrap()
@@ -682,10 +738,9 @@ mod test {
 
         let [leader_share, _] = report.encrypted_input_shares;
         let report_metadata = report.report_metadata.clone();
-        let initialized_report = InitializedReport::new(
+        let initialized_report = InitializedReport::from_client(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -693,7 +748,6 @@ mod test {
                 public_share: report.public_share,
                 encrypted_input_share: leader_share,
             },
-            None,
             &DapAggregationParam::Empty,
         )
         .unwrap();
@@ -732,10 +786,9 @@ mod test {
 
         let report_metadata = report.report_metadata.clone();
         let [leader_share, _] = report.encrypted_input_shares;
-        let initialized_report = InitializedReport::new(
+        let initialized_report = InitializedReport::from_client(
             &t.leader_hpke_receiver_config,
             t.valid_report_time_range(),
-            DapAggregatorRole::Leader,
             &t.task_id,
             &t.task_config,
             ReportShare {
@@ -743,7 +796,6 @@ mod test {
                 public_share: report.public_share,
                 encrypted_input_share: leader_share,
             },
-            None,
             &DapAggregationParam::Empty,
         )
         .unwrap();

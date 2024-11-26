@@ -15,7 +15,10 @@ use crate::{
         AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
-    protocol::aggregator::{InitializedReport, ReplayProtection, ReportProcessedStatus},
+    protocol::{
+        aggregator::{ReplayProtection, ReportProcessedStatus},
+        report_init::{InitializedReport, WithPeerPrepShare},
+    },
     roles::aggregator::MergeAggShareError,
     DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig,
 };
@@ -208,7 +211,7 @@ async fn finish_agg_job_and_aggregate(
     task_id: &TaskId,
     task_config: &DapTaskConfig,
     part_batch_sel: &PartialBatchSelector,
-    initialized_reports: &[InitializedReport],
+    initialized_reports: &[InitializedReport<WithPeerPrepShare>],
     metrics: &dyn DaphneMetrics,
 ) -> Result<AggregationJobResp, DapError> {
     // This loop is intended to run at most once on the "happy path". The intent is as follows:
