@@ -4,15 +4,15 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares, mastic_prep_init};
 use crate::{
-    constants::{DapAggregatorRole, DapRole},
+    constants::DapAggregatorRole,
     error::DapAbort,
     fatal_error,
-    hpke::{HpkeConfig, HpkeDecrypter},
+    hpke::{info_and_aad, HpkeConfig, HpkeDecrypter},
     messages::{
-        self, encode_u32_bytes, encode_u32_prefixed, AggregationJobInitReq, AggregationJobResp,
-        Base64Encode, BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector,
-        PlaintextInputShare, PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId,
-        Transition, TransitionFailure, TransitionVar,
+        self, encode_u32_bytes, AggregationJobInitReq, AggregationJobResp, Base64Encode,
+        BatchSelector, Extension, HpkeCiphertext, PartialBatchSelector, PlaintextInputShare,
+        PrepareInit, Report, ReportId, ReportMetadata, ReportShare, TaskId, Transition,
+        TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
     vdaf::{
@@ -33,7 +33,6 @@ use std::{
     ops::Range,
 };
 
-use super::{CTX_AGG_SHARE_DRAFT09, CTX_INPUT_SHARE_DRAFT09};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 
 // Ping-pong message framing as defined in draft-irtf-cfrg-vdaf-08, Section 5.8. We do not
@@ -122,24 +121,16 @@ impl InitializedReport {
             extensions,
             payload: input_share,
         } = {
-            let input_share_text = match task_config.version {
-                DapVersion::Draft09 | DapVersion::Latest => CTX_INPUT_SHARE_DRAFT09,
+            let info = info_and_aad::InputShare {
+                version: task_config.version,
+                receiver: role,
+                task_id,
+                report_metadata: &report_share.report_metadata,
+                public_share: &report_share.public_share,
             };
-            let mut info = Vec::with_capacity(input_share_text.len() + 2);
-            info.extend_from_slice(input_share_text);
-            info.push(DapRole::Client as _); // Sender role
-            info.push(role as _); // Receiver role
-
-            let mut aad = Vec::with_capacity(58);
-            task_id.encode(&mut aad).map_err(DapError::encoding)?;
-            report_share
-                .report_metadata
-                .encode_with_param(&task_config.version, &mut aad)
-                .map_err(DapError::encoding)?;
-            encode_u32_bytes(&mut aad, &report_share.public_share).map_err(DapError::encoding)?;
 
             let encoded_input_share =
-                match decrypter.hpke_decrypt(&info, &aad, &report_share.encrypted_input_share) {
+                match decrypter.hpke_decrypt(info, &report_share.encrypted_input_share) {
                     Ok(encoded_input_share) => encoded_input_share,
                     Err(DapError::Transition(failure)) => {
                         return Ok(Self::Rejected {
@@ -768,22 +759,15 @@ fn produce_encrypted_agg_share(
         .get_encoded()
         .map_err(DapError::encoding)?;
 
-    let agg_share_text = CTX_AGG_SHARE_DRAFT09;
-    let n: usize = agg_share_text.len();
-    let mut info = Vec::with_capacity(n + 2);
-    info.extend_from_slice(agg_share_text);
-    info.push(role as _); // Sender role
-    info.push(DapRole::Collector as _); // Receiver role
+    let info = info_and_aad::AggregateShare {
+        version,
+        sender: role,
+        task_id,
+        agg_param,
+        batch_selector: batch_sel,
+    };
 
-    let mut aad = Vec::with_capacity(40);
-    task_id.encode(&mut aad).map_err(DapError::encoding)?;
-    encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
-        .map_err(DapError::encoding)?;
-    batch_sel
-        .encode_with_param(&version, &mut aad)
-        .map_err(DapError::encoding)?;
-
-    hpke_config.encrypt(&info, &aad, &agg_share_data)
+    hpke_config.encrypt(info, &agg_share_data)
 }
 
 /// checks if an iterator has no duplicate items, returns the ok if there are no dups or an error

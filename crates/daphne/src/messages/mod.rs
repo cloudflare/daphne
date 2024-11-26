@@ -71,6 +71,10 @@ macro_rules! id_struct {
                 bytes.extend_from_slice(&self.0);
                 Ok(())
             }
+
+            fn encoded_len(&self) -> Option<usize> {
+                Some(self.0.len())
+            }
         }
 
         impl Decode for $sname {

@@ -5,9 +5,6 @@ pub(crate) mod aggregator;
 mod client;
 mod collector;
 
-const CTX_INPUT_SHARE_DRAFT09: &[u8] = b"dap-09 input share";
-const CTX_AGG_SHARE_DRAFT09: &[u8] = b"dap-09 aggregate share";
-
 #[cfg(test)]
 mod test {
     use crate::{

@@ -8,7 +8,7 @@ use daphne::{
     audit_log::AuditLog,
     error::DapAbort,
     fatal_error,
-    hpke::{self, HpkeConfig, HpkeProvider, HpkeReceiverConfig},
+    hpke::{self, info_and_aad, HpkeConfig, HpkeProvider, HpkeReceiverConfig},
     messages::{self, BatchId, BatchSelector, HpkeCiphertext, TaskId, Time},
     metrics::DaphneMetrics,
     roles::{
@@ -363,11 +363,10 @@ pub struct HpkeDecrypter(Marc<Vec<HpkeReceiverConfig>>);
 impl hpke::HpkeDecrypter for HpkeDecrypter {
     fn hpke_decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl info_and_aad::InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        self.0.hpke_decrypt(info, aad, ciphertext)
+        self.0.hpke_decrypt(info, ciphertext)
     }
 }
 
