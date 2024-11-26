@@ -4,16 +4,13 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_unshard;
 use crate::{
-    constants::DapRole,
+    constants::DapAggregatorRole,
     fatal_error,
-    hpke::HpkeDecrypter,
-    messages::{encode_u32_prefixed, BatchSelector, HpkeCiphertext, TaskId},
+    hpke::{info_and_aad, HpkeDecrypter},
+    messages::{BatchSelector, HpkeCiphertext, TaskId},
     vdaf::{prio2::prio2_unshard, prio3::prio3_unshard},
     DapAggregateResult, DapAggregationParam, DapError, DapVersion, VdafConfig,
 };
-use prio::codec::{Encode, ParameterizedEncode};
-
-use super::CTX_AGG_SHARE_DRAFT09;
 
 impl VdafConfig {
     /// Decrypt and unshard a sequence of aggregate shares. This method is run by the Collector
@@ -48,30 +45,23 @@ impl VdafConfig {
             ));
         }
 
-        let agg_share_text = CTX_AGG_SHARE_DRAFT09;
-        let n: usize = agg_share_text.len();
-        let mut info = Vec::with_capacity(n + 2);
-        info.extend_from_slice(agg_share_text);
-        info.push(DapRole::Leader as _); // Sender role placeholder
-        info.push(DapRole::Collector as _); // Receiver role
-
-        let mut aad = Vec::with_capacity(40);
-        task_id.encode(&mut aad).map_err(DapError::encoding)?;
-        encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
-            .map_err(DapError::encoding)?;
-        batch_sel
-            .encode_with_param(&version, &mut aad)
-            .map_err(DapError::encoding)?;
+        let mut info = info_and_aad::AggregateShare {
+            version,
+            sender: DapAggregatorRole::Leader, // placeholder
+            task_id,
+            agg_param,
+            batch_selector: batch_sel,
+        };
 
         let mut agg_shares = Vec::with_capacity(encrypted_agg_shares.len());
         for (i, agg_share_ciphertext) in encrypted_agg_shares.iter().enumerate() {
-            info[n] = if i == 0 {
-                DapRole::Leader as _
+            info.sender = if i == 0 {
+                DapAggregatorRole::Leader
             } else {
-                DapRole::Helper as _
+                DapAggregatorRole::Helper
             };
 
-            let agg_share_data = decrypter.hpke_decrypt(&info, &aad, agg_share_ciphertext)?;
+            let agg_share_data = decrypter.hpke_decrypt(info, agg_share_ciphertext)?;
             agg_shares.push(agg_share_data);
         }
 

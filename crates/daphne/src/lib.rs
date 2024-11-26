@@ -818,6 +818,14 @@ impl Encode for DapAggregationParam {
             Self::Mastic(agg_param) => agg_param.encode(bytes),
         }
     }
+
+    fn encoded_len(&self) -> Option<usize> {
+        match self {
+            Self::Empty => Some(0),
+            #[cfg(feature = "experimental")]
+            Self::Mastic(agg_param) => agg_param.encoded_len(),
+        }
+    }
 }
 
 impl ParameterizedDecode<VdafConfig> for DapAggregationParam {

@@ -4,19 +4,14 @@
 #[cfg(feature = "experimental")]
 use crate::vdaf::mastic::mastic_shard;
 use crate::{
-    constants::DapRole,
-    hpke::HpkeConfig,
-    messages::{
-        encode_u32_bytes, Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId,
-        Time,
-    },
+    constants::DapAggregatorRole,
+    hpke::{info_and_aad, HpkeConfig},
+    messages::{Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId, Time},
     vdaf::{prio2::prio2_shard, prio3::prio3_shard, VdafError},
     DapError, DapMeasurement, DapVersion, VdafConfig,
 };
-use prio::codec::{Encode, ParameterizedEncode};
+use prio::codec::ParameterizedEncode;
 use rand::prelude::*;
-
-use super::CTX_INPUT_SHARE_DRAFT09;
 
 impl VdafConfig {
     /// Generate a report for a measurement. This method is run by the Client.
@@ -91,34 +86,25 @@ impl VdafConfig {
             plaintext_input_share.get_encoded_with_param(&version)
         });
 
-        let input_share_text = CTX_INPUT_SHARE_DRAFT09;
-        let n: usize = input_share_text.len();
-        let mut info = Vec::with_capacity(n + 2);
-        info.extend_from_slice(input_share_text);
-        info.push(DapRole::Client as _); // Sender role
-        info.push(DapRole::Leader as _); // Receiver role placeholder; updated below.
-
-        let mut aad = Vec::with_capacity(58);
-        task_id.encode(&mut aad).map_err(DapError::encoding)?;
-        metadata
-            .encode_with_param(&version, &mut aad)
-            .map_err(DapError::encoding)?;
-        encode_u32_bytes(&mut aad, &public_share).map_err(DapError::encoding)?;
+        let mut info = info_and_aad::InputShare {
+            version,
+            receiver: DapAggregatorRole::Leader, //placeholder; updated below.
+            task_id,
+            report_metadata: &metadata,
+            public_share: &public_share,
+        };
 
         let mut encrypted_input_shares = Vec::with_capacity(2);
         for (i, (hpke_config, encoded_input_share)) in
             hpke_configs.iter().zip(encoded_input_shares).enumerate()
         {
-            info[n + 1] = if i == 0 {
-                DapRole::Leader as _
+            info.receiver = if i == 0 {
+                DapAggregatorRole::Leader
             } else {
-                DapRole::Helper as _
+                DapAggregatorRole::Helper
             }; // Receiver role
-            let ciphertext = hpke_config.encrypt(
-                &info,
-                &aad,
-                &encoded_input_share.map_err(DapError::encoding)?,
-            )?;
+            let ciphertext =
+                hpke_config.encrypt(info, &encoded_input_share.map_err(DapError::encoding)?)?;
 
             encrypted_input_shares.push(ciphertext);
         }

@@ -65,15 +65,14 @@ impl DapMediaType {
     }
 }
 
-/// A role in the DAP aggregation protocol. The numeric value associated with each variant is the
-/// numeric value used when serializing the sender and receiver roles in hpke encryption.
+/// A role in the DAP aggregation protocol.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DapRole {
-    Collector = 0,
-    Client = 1,
-    Leader = 2,
-    Helper = 3,
+    Collector,
+    Client,
+    Leader,
+    Helper,
 }
 
 impl DapRole {
@@ -116,8 +115,8 @@ impl fmt::Display for DapRole {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DapAggregatorRole {
-    Leader = 2,
-    Helper = 3,
+    Leader,
+    Helper,
 }
 
 impl DapAggregatorRole {

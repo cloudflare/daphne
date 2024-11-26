@@ -17,6 +17,7 @@ use crate::{
     DapError, DapVersion,
 };
 use async_trait::async_trait;
+use info_and_aad::InfoAndAad;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, ops::Deref};
 
@@ -176,13 +177,13 @@ impl HpkeConfig {
     /// configuration. The return values are the encapsulated key and the ciphertext.
     pub fn encrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         plaintext: &[u8],
     ) -> Result<HpkeCiphertext, DapError> {
         let mut sender: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
-        let (enc, mut ctx) = sender.setup_sender(&self.public_key, info, None, None, None)?;
-        let ciphertext = ctx.seal(aad, plaintext)?;
+        let (enc, mut ctx) =
+            sender.setup_sender(&self.public_key, &info.info_bytes(), None, None, None)?;
+        let ciphertext = ctx.seal(&info.aad_bytes().map_err(DapError::encoding)?, plaintext)?;
         Ok(HpkeCiphertext {
             config_id: self.id,
             enc,
@@ -193,17 +194,25 @@ impl HpkeConfig {
     pub(crate) fn decrypt(
         &self,
         private_key: &HpkePrivateKey,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         if self.id != ciphertext.config_id {
             return Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId));
         }
         let receiver: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
-        let mut ctx =
-            receiver.setup_receiver(&ciphertext.enc, private_key, info, None, None, None)?;
-        let plaintext = ctx.open(aad, &ciphertext.payload)?;
+        let mut ctx = receiver.setup_receiver(
+            &ciphertext.enc,
+            private_key,
+            &info.info_bytes(),
+            None,
+            None,
+            None,
+        )?;
+        let plaintext = ctx.open(
+            &info.aad_bytes().map_err(DapError::encoding)?,
+            &ciphertext.payload,
+        )?;
         Ok(plaintext)
     }
 }
@@ -240,8 +249,7 @@ pub trait HpkeDecrypter {
     /// Decrypt the given HPKE ciphertext using the given info and AAD string.
     fn hpke_decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError>;
 }
@@ -252,11 +260,10 @@ where
 {
     fn hpke_decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        <T as HpkeDecrypter>::hpke_decrypt(self, info, aad, ciphertext)
+        <T as HpkeDecrypter>::hpke_decrypt(self, info, ciphertext)
     }
 }
 
@@ -266,11 +273,10 @@ macro_rules! impl_decrypter_for_slice_types {
             impl$(<const $n: usize>)* HpkeDecrypter for $ty {
                 fn hpke_decrypt(
                     &self,
-                    info: &[u8],
-                    aad: &[u8],
+                    info: impl InfoAndAad,
                     ciphertext: &HpkeCiphertext,
                 ) -> Result<Vec<u8>, DapError> {
-                    self.iter().hpke_decrypt(info, aad, ciphertext)
+                    self.iter().hpke_decrypt(info, ciphertext)
                 }
             }
         )*
@@ -291,15 +297,14 @@ where
 {
     fn hpke_decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         self.clone()
             .map(|c| c.borrow())
             .find(|c| c.config.id == ciphertext.config_id)
             .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
-            .decrypt(info, aad, ciphertext)
+            .decrypt(info, ciphertext)
     }
 }
 
@@ -308,11 +313,10 @@ where
 impl HpkeDecrypter for HpkeReceiverConfig {
     fn hpke_decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        [self].hpke_decrypt(info, aad, ciphertext)
+        [self].hpke_decrypt(info, ciphertext)
     }
 }
 
@@ -335,23 +339,20 @@ impl deepsize::DeepSizeOf for HpkeReceiverConfig {
 impl HpkeReceiverConfig {
     pub fn encrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         plaintext: &[u8],
     ) -> Result<HpkeCiphertext, DapError> {
-        self.config.encrypt(info, aad, plaintext)
+        self.config.encrypt(info, plaintext)
     }
 
     /// Decrypt `ciphertext` with info string `info` and associated data `aad` using this HPKE
     /// configuration and corresponding secret key. The return value is the plaintext.
     pub fn decrypt(
         &self,
-        info: &[u8],
-        aad: &[u8],
+        info: impl InfoAndAad,
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
-        self.config
-            .decrypt(&self.private_key, info, aad, ciphertext)
+        self.config.decrypt(&self.private_key, info, ciphertext)
     }
 
     /// Generate and return a new HPKE receiver context given a HPKE config ID and HPKE KEM.
@@ -437,6 +438,135 @@ impl From<HpkePublicKeySerde> for HpkePublicKey {
     }
 }
 
+pub mod info_and_aad {
+    use crate::{
+        constants::{DapAggregatorRole, DapRole},
+        messages::{encode_u32_bytes, encode_u32_prefixed, BatchSelector, ReportMetadata, TaskId},
+        DapAggregationParam, DapVersion,
+    };
+    use prio::codec::{CodecError, Encode, ParameterizedEncode};
+
+    const CTX_INPUT_SHARE_DRAFT09: &[u8] = b"dap-09 input share";
+    const CTX_INPUT_SHARE_DRAFT13: &[u8] = b"dap-13 input share";
+    const CTX_AGG_SHARE_DRAFT09: &[u8] = b"dap-09 aggregate share";
+    const CTX_AGG_SHARE_DRAFT13: &[u8] = b"dap-13 aggregate share";
+
+    pub trait InfoAndAad {
+        // this could return a fixed size array, if GCE (generic constant expressions) was
+        // stabilized
+        //
+        // const LEN: usize;
+        //
+        // fn info_bytes(self) -> [u8; Self::LEN];
+
+        fn info_bytes(&self) -> Vec<u8>;
+
+        fn aad_bytes(&self) -> Result<Vec<u8>, CodecError>;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct InputShare<'s> {
+        // info
+        pub version: DapVersion,
+        pub receiver: DapAggregatorRole,
+        // aad
+        pub task_id: &'s TaskId,
+        pub report_metadata: &'s ReportMetadata,
+        pub public_share: &'s [u8],
+    }
+
+    // https://ietf-wg-ppm.github.io/draft-ietf-ppm-dap/draft-ietf-ppm-dap.html#section-4.5.2-14
+    impl InfoAndAad for InputShare<'_> {
+        fn info_bytes(&self) -> Vec<u8> {
+            into_bytes(
+                match self.version {
+                    DapVersion::Draft09 => CTX_INPUT_SHARE_DRAFT09,
+                    DapVersion::Latest => CTX_INPUT_SHARE_DRAFT13,
+                },
+                DapRole::Client,
+                self.receiver.into(),
+            )
+        }
+
+        fn aad_bytes(&self) -> Result<Vec<u8>, CodecError> {
+            let mut aad = Vec::with_capacity(
+                self.task_id.encoded_len().unwrap_or_default()
+                    + self
+                        .report_metadata
+                        .encoded_len_with_param(&self.version)
+                        .unwrap_or_default()
+                    + self.public_share.len(),
+            );
+            self.task_id.encode(&mut aad)?;
+            self.report_metadata
+                .encode_with_param(&self.version, &mut aad)?;
+            encode_u32_bytes(&mut aad, self.public_share)?;
+            Ok(aad)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AggregateShare<'s> {
+        // info
+        pub version: DapVersion,
+        pub sender: DapAggregatorRole,
+        // aad
+        pub task_id: &'s TaskId,
+        pub agg_param: &'s DapAggregationParam,
+        pub batch_selector: &'s BatchSelector,
+    }
+
+    // https://ietf-wg-ppm.github.io/draft-ietf-ppm-dap/draft-ietf-ppm-dap.html#section-4.7.4-2
+    impl InfoAndAad for AggregateShare<'_> {
+        fn info_bytes(&self) -> Vec<u8> {
+            into_bytes(
+                match self.version {
+                    DapVersion::Draft09 => CTX_AGG_SHARE_DRAFT09,
+                    DapVersion::Latest => CTX_AGG_SHARE_DRAFT13,
+                },
+                self.sender.into(),
+                DapRole::Collector,
+            )
+        }
+
+        fn aad_bytes(&self) -> Result<Vec<u8>, CodecError> {
+            let mut aad = Vec::with_capacity(
+                self.task_id.encoded_len().unwrap_or_default()
+                    + self.agg_param.encoded_len().unwrap_or_default()
+                    + self
+                        .batch_selector
+                        .encoded_len_with_param(&self.version)
+                        .unwrap_or_default(),
+            );
+            self.task_id.encode(&mut aad)?;
+            encode_u32_prefixed(self.version, &mut aad, |_version, bytes| {
+                self.agg_param.encode(bytes)
+            })?;
+            self.batch_selector
+                .encode_with_param(&self.version, &mut aad)?;
+
+            Ok(aad)
+        }
+    }
+
+    fn into_bytes(constant: &'static [u8], sender: DapRole, receiver: DapRole) -> Vec<u8> {
+        fn role_to_id(role: DapRole) -> u8 {
+            match role {
+                DapRole::Collector => 0,
+                DapRole::Client => 1,
+                DapRole::Leader => 2,
+                DapRole::Helper => 3,
+            }
+        }
+
+        let len = constant.len() + 2;
+        let mut v = Vec::with_capacity(len);
+        v.extend_from_slice(constant);
+        v.extend([role_to_id(sender), role_to_id(receiver)]);
+        v
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "HpkePrivateKey")]
 struct HpkePrivateKeySerde(#[serde(getter = "HpkePrivateKeySerde::to_vec", with = "hex")] Vec<u8>);
@@ -455,32 +585,54 @@ impl From<HpkePrivateKeySerde> for HpkePrivateKey {
 
 #[cfg(test)]
 mod test {
-    use crate::hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig};
+    use crate::{
+        constants::DapAggregatorRole,
+        hpke::{info_and_aad, HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
+        messages::ReportMetadata,
+        test_versions, DapVersion,
+    };
     use hpke_rs::{Hpke, HpkePrivateKey, HpkePublicKey, Mode};
     use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
     use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
-    #[test]
-    fn encrypt_roundtrip_x25519_hkdf_sha256() {
-        let info = b"info string";
-        let aad = b"associated data";
+    fn encrypt_roundtrip_x25519_hkdf_sha256(version: DapVersion) {
+        let info = info_and_aad::InputShare {
+            version,
+            receiver: DapAggregatorRole::Helper,
+            task_id: &crate::messages::TaskId(rand::random()),
+            public_share: &[],
+            report_metadata: &ReportMetadata {
+                id: crate::messages::ReportId(rand::random()),
+                time: rand::random(),
+            },
+        };
         let plaintext = b"plaintext";
         let config = HpkeReceiverConfig::gen(23, HpkeKemId::X25519HkdfSha256).unwrap();
         println!("{}", serde_json::to_string(&config).unwrap());
-        let ciphertext = config.encrypt(info, aad, plaintext).unwrap();
-        assert_eq!(config.decrypt(info, aad, &ciphertext).unwrap(), plaintext);
+        let ciphertext = config.encrypt(info, plaintext).unwrap();
+        assert_eq!(config.decrypt(info, &ciphertext).unwrap(), plaintext);
     }
 
-    #[test]
-    fn encrypt_roundtrip_p256_hkdf_sha256() {
-        let info = b"info string";
-        let aad = b"associated data";
+    test_versions! { encrypt_roundtrip_x25519_hkdf_sha256 }
+
+    fn encrypt_roundtrip_p256_hkdf_sha256(version: DapVersion) {
+        let info = info_and_aad::AggregateShare {
+            version,
+            sender: DapAggregatorRole::Leader,
+            task_id: &crate::messages::TaskId(rand::random()),
+            agg_param: &crate::DapAggregationParam::Empty,
+            batch_selector: &crate::messages::BatchSelector::FixedSizeByBatchId {
+                batch_id: crate::messages::BatchId(rand::random()),
+            },
+        };
         let plaintext = b"plaintext";
         let config = HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256).unwrap();
         println!("{}", serde_json::to_string(&config).unwrap());
-        let ciphertext = config.encrypt(info, aad, plaintext).unwrap();
-        assert_eq!(config.decrypt(info, aad, &ciphertext).unwrap(), plaintext);
+        let ciphertext = config.encrypt(info, plaintext).unwrap();
+        assert_eq!(config.decrypt(info, &ciphertext).unwrap(), plaintext);
     }
+
+    test_versions! { encrypt_roundtrip_p256_hkdf_sha256 }
 
     #[test]
     fn hpke_receiver_config_try_from() {
