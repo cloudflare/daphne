@@ -13,8 +13,9 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::resource, taskprov::TaskprovAdvertisement, AggregateShareReq,
-        AggregationJobInitReq, CollectionReq, Report, TaskId,
+        request::{CollectionPollReq, RequestBody},
+        taskprov::TaskprovAdvertisement,
+        AggregateShareReq, AggregationJobInitReq, CollectionReq, Report, TaskId,
     },
     DapError, DapRequest, DapRequestMeta, DapVersion,
 };
@@ -28,7 +29,7 @@ use crate::metrics;
 use super::{AxumDapResponse, DaphneService};
 
 /// Trait used to decode a DAP http body.
-pub trait DecodeFromDapHttpBody: Sized {
+pub trait DecodeFromDapHttpBody: RequestBody + Sized {
     fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort>;
 }
 
@@ -60,6 +61,12 @@ impl_decode_from_dap_http_body!(
 );
 
 /// Using `()` ignores the body of a request.
+impl DecodeFromDapHttpBody for CollectionPollReq {
+    fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        Ok(Self)
+    }
+}
+/// Using `()` ignores the body of a request.
 impl DecodeFromDapHttpBody for () {
     fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
         Ok(())
@@ -70,7 +77,7 @@ impl DecodeFromDapHttpBody for () {
 /// in through the `R` type parameter in [`DapRequestExtractor`] and
 /// [`UnauthenticatedDapRequestExtractor`].
 mod resource_parsers {
-    use daphne::messages::request::resource;
+    use daphne::messages::{AggregationJobId, CollectionJobId};
     use serde::{de::DeserializeOwned, Deserialize};
 
     #[derive(Deserialize)]
@@ -78,7 +85,7 @@ mod resource_parsers {
         /// This field name defines the parameter name in the route matcher because we use
         /// `#[serde(flatten)]` in the
         /// `UnauthenticatedDapRequestExtractor::from_request::PathParams::resource_parser` field.
-        agg_job_id: resource::AggregationJobId,
+        agg_job_id: AggregationJobId,
     }
 
     #[derive(Deserialize)]
@@ -86,7 +93,7 @@ mod resource_parsers {
         /// This field name defines the parameter name in the route matcher because we use
         /// `#[serde(flatten)]` in the
         /// `UnauthenticatedDapRequestExtractor::from_request::PathParams::resource_parser` field.
-        collect_job_id: resource::CollectionJobId,
+        collect_job_id: CollectionJobId,
     }
 
     /// This parser has no fields, so `#[serde(flatten)]` correctly omits this field from the
@@ -113,22 +120,21 @@ mod resource_parsers {
         };
     }
 
-    impl_parser!(AggregationJobIdParser => resource::AggregationJobId |value| value.agg_job_id);
-    impl_parser!(CollectionJobIdParser  => resource::CollectionJobId  |value| value.collect_job_id);
-    impl_parser!(NoneParser             => resource::None             |_| resource::None);
+    impl_parser!(AggregationJobIdParser => AggregationJobId |value| value.agg_job_id);
+    impl_parser!(CollectionJobIdParser  => CollectionJobId  |value| value.collect_job_id);
+    impl_parser!(NoneParser             => ()               |_| ());
 }
 
 /// An axum extractor capable of parsing a [`DapRequest`]. See [`DapRequest`] for an explanation on
 /// the type parameters.
-#[derive(Debug)]
-pub(super) struct UnauthenticatedDapRequestExtractor<P, R>(pub DapRequest<P, R>);
+pub(super) struct UnauthenticatedDapRequestExtractor<B: RequestBody>(pub DapRequest<B>);
 
 #[async_trait]
-impl<S, P, R> FromRequest<S, P> for UnauthenticatedDapRequestExtractor<P, R>
+impl<S, B> FromRequest<S> for UnauthenticatedDapRequestExtractor<B>
 where
-    P: DecodeFromDapHttpBody,
+    B: DecodeFromDapHttpBody,
+    B::ResourceId: resource_parsers::Resource,
     S: DaphneService + Send + Sync,
-    R: resource_parsers::Resource,
 {
     type Rejection = AxumDapResponse;
 
@@ -143,7 +149,7 @@ where
         }
 
         let (mut parts, body) = req.into_parts();
-        let Path(PathParams::<R> {
+        let Path(PathParams::<B::ResourceId> {
             version,
             task_id,
             resource_parser,
@@ -197,7 +203,7 @@ where
             media_type,
         };
 
-        let payload = P::decode_from_http_body(payload, &meta)
+        let payload = B::decode_from_http_body(payload, &meta)
             .map_err(|e| AxumDapResponse::new_error(e, state.server_metrics()))?;
 
         let request = DapRequest {
@@ -236,18 +242,16 @@ pub mod dap_sender {
 /// # Type and const parameters
 /// - `SENDER`: The role that is expected to send this request. See [`dap_sender`] for possible values.
 /// - `P` and `R`: See [`DapRequest`] for an explanation these type parameters.
-#[derive(Debug)]
-pub(super) struct DapRequestExtractor<const SENDER: dap_sender::DapSender, P, R = resource::None>(
-    pub DapRequest<P, R>,
+pub(super) struct DapRequestExtractor<const SENDER: dap_sender::DapSender, B: RequestBody>(
+    pub DapRequest<B>,
 );
 
 #[async_trait]
-impl<const SENDER: dap_sender::DapSender, S, P, R> FromRequest<S, P>
-    for DapRequestExtractor<SENDER, P, R>
+impl<const SENDER: dap_sender::DapSender, S, B> FromRequest<S> for DapRequestExtractor<SENDER, B>
 where
-    P: DecodeFromDapHttpBody + Send + Sync,
+    B: DecodeFromDapHttpBody + Send + Sync,
+    B::ResourceId: resource_parsers::Resource,
     S: DaphneService + Send + Sync,
-    R: resource_parsers::Resource,
 {
     type Rejection = AxumDapResponse;
 
@@ -342,10 +346,12 @@ mod test {
         async_test_versions,
         constants::DapMediaType,
         messages::{
-            request::resource, taskprov::TaskprovAdvertisement, AggregationJobId, Base64Encode,
-            CollectionJobId, TaskId,
+            request::{CollectionPollReq, RequestBody},
+            taskprov::TaskprovAdvertisement,
+            AggregationJobId, AggregationJobInitReq, Base64Encode, CollectionJobId, CollectionReq,
+            TaskId,
         },
-        DapError, DapRequestMeta, DapSender, DapVersion,
+        DapError, DapRequest, DapRequestMeta, DapSender, DapVersion,
     };
     use daphne_service_utils::{bearer_token::BearerToken, http_headers};
     use either::Either::{self, Left};
@@ -357,18 +363,18 @@ mod test {
     };
     use tower::ServiceExt;
 
-    use crate::metrics::{DaphnePromServiceMetrics, DaphneServiceMetrics};
+    use crate::{
+        metrics::{DaphnePromServiceMetrics, DaphneServiceMetrics},
+        router::extractor::UnauthenticatedDapRequestExtractor,
+    };
 
-    use super::{dap_sender::FROM_LEADER, resource_parsers};
+    use super::{dap_sender::FROM_LEADER, resource_parsers, DecodeFromDapHttpBody};
     use http::{header, StatusCode};
+    use prio::codec::ParameterizedEncode;
 
     const BEARER_TOKEN: &str = "test-token";
 
-    // In these tests we don't care about the body, so we can type alias it away.
-    type DapRequest<R = resource::None> = daphne::DapRequest<(), R>;
-    type UnauthenticatedDapRequestExtractor<R = resource::None> =
-        super::UnauthenticatedDapRequestExtractor<(), R>;
-    type DapRequestExtractor<R = resource::None> = super::DapRequestExtractor<FROM_LEADER, (), R>;
+    type DapRequestExtractor<B> = super::DapRequestExtractor<FROM_LEADER, B>;
 
     /// Return a function that will parse a request using the [`DapRequestExtractor`] or
     /// [`UnauthenticatedDapRequestExtractor`] and return the parsed request.
@@ -378,14 +384,15 @@ mod test {
     ///  - `/:version/:task_id/parse-mandatory-fields` uses the [`UnauthenticatedDapRequestExtractor`]
     ///  - `/:version/:agg_job_id/parse-agg-job-id` uses the [`UnauthenticatedDapRequestExtractor`]
     ///  - `/:version/:collect_job_id/parse-collect-job-id` uses the [`UnauthenticatedDapRequestExtractor`]
-    async fn test<R>(req: Request) -> Result<DapRequest<R>, StatusCode>
+    async fn test<B>(req: Request) -> Result<DapRequest<B>, StatusCode>
     where
-        R: resource_parsers::Resource + 'static,
+        B: DecodeFromDapHttpBody + Send + Sync + 'static,
+        B::ResourceId: resource_parsers::Resource + Send,
     {
-        type Channel<R> = Sender<DapRequest<R>>;
+        type Channel<B> = Sender<DapRequest<B>>;
 
         #[axum::async_trait]
-        impl<R: Send> super::DaphneService for Channel<R> {
+        impl<R: Send + Sync + RequestBody<ResourceId: Send + Sync>> super::DaphneService for Channel<R> {
             fn server_metrics(&self) -> &dyn DaphneServiceMetrics {
                 // These tests don't care about metrics so we just store a static instance here so I
                 // can implement the DaphneService trait for Channel.
@@ -421,33 +428,33 @@ mod test {
 
         // create a router that takes the send end of the channel as state
         let router = Router::new()
-            .route("/:version/:task_id/auth", get(auth_handler::<R>))
+            .route("/:version/:task_id/auth", get(auth_handler::<B>))
             .route(
                 "/:version/:task_id/parse-mandatory-fields",
-                get(handler::<R>),
+                get(handler::<B>),
             )
             .route(
                 "/:version/:task_id/:agg_job_id/parse-agg-job-id",
-                get(handler::<R>),
+                get(handler::<B>),
             )
             .route(
                 "/:version/:task_id/:collect_job_id/parse-collect-job-id",
-                get(handler::<R>),
+                get(handler::<B>),
             )
             .with_state(Arc::new(tx));
 
         // unauthenticated handler that simply sends the received request through the channel
-        async fn handler<R>(
-            State(ch): State<Arc<Channel<R>>>,
-            req: UnauthenticatedDapRequestExtractor<R>,
+        async fn handler<B: RequestBody>(
+            State(ch): State<Arc<Channel<B>>>,
+            req: UnauthenticatedDapRequestExtractor<B>,
         ) -> impl IntoResponse {
             ch.send(req.0).await.unwrap();
         }
 
         // unauthenticated handler that simply sends the received request through the channel
-        async fn auth_handler<R>(
-            State(ch): State<Arc<Channel<R>>>,
-            req: DapRequestExtractor<R>,
+        async fn auth_handler<B: RequestBody>(
+            State(ch): State<Arc<Channel<B>>>,
+            req: DapRequestExtractor<B>,
         ) -> impl IntoResponse {
             ch.send(req.0).await.unwrap();
         }
@@ -483,7 +490,7 @@ mod test {
 
     async fn parse_mandatory_fields(version: DapVersion) {
         let task_id = mk_task_id();
-        let req = test::<resource::None>(
+        let req = test::<()>(
             Request::builder()
                 .uri(format!(
                     "/{version}/{}/parse-mandatory-fields",
@@ -512,7 +519,7 @@ mod test {
         let task_id = mk_task_id();
         let agg_job_id = AggregationJobId(thread_rng().gen());
 
-        let req = test::<resource::AggregationJobId>(
+        let req = test::<AggregationJobInitReq>(
             Request::builder()
                 .uri(format!(
                     "/{version}/{}/{}/parse-agg-job-id",
@@ -520,7 +527,21 @@ mod test {
                     agg_job_id.to_base64url(),
                 ))
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
-                .body(Body::empty())
+                .header(
+                    header::CONTENT_TYPE,
+                    DapMediaType::AggregationJobInitReq
+                        .as_str_for_version(version)
+                        .unwrap(),
+                )
+                .body(Body::from(
+                    AggregationJobInitReq {
+                        agg_param: vec![],
+                        part_batch_sel: daphne::messages::PartialBatchSelector::TimeInterval,
+                        prep_inits: vec![],
+                    }
+                    .get_encoded_with_param(&version)
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -536,7 +557,49 @@ mod test {
         let task_id = mk_task_id();
         let collect_job_id = CollectionJobId(thread_rng().gen());
 
-        let req = test::<resource::CollectionJobId>(
+        let req = test::<CollectionReq>(
+            Request::builder()
+                .uri(format!(
+                    "/{version}/{}/{}/parse-collect-job-id",
+                    task_id.to_base64url(),
+                    collect_job_id.to_base64url(),
+                ))
+                .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)
+                .header(
+                    header::CONTENT_TYPE,
+                    DapMediaType::CollectionReq
+                        .as_str_for_version(version)
+                        .unwrap(),
+                )
+                .body(Body::from(
+                    CollectionReq {
+                        query: daphne::messages::Query::TimeInterval {
+                            batch_interval: daphne::messages::Interval {
+                                start: 1,
+                                duration: 1,
+                            },
+                        },
+                        agg_param: vec![],
+                    }
+                    .get_encoded_with_param(&version)
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(req.resource_id, collect_job_id);
+        assert_eq!(req.task_id, task_id);
+    }
+
+    async_test_versions! { parse_collect_job_id }
+
+    async fn parse_collect_job_id_from_poll_request(version: DapVersion) {
+        let task_id = mk_task_id();
+        let collect_job_id = CollectionJobId(thread_rng().gen());
+
+        let req = test::<CollectionPollReq>(
             Request::builder()
                 .uri(format!(
                     "/{version}/{}/{}/parse-collect-job-id",
@@ -554,10 +617,10 @@ mod test {
         assert_eq!(req.task_id, task_id);
     }
 
-    async_test_versions! { parse_collect_job_id }
+    async_test_versions! { parse_collect_job_id_from_poll_request }
 
     async fn incorrect_bearer_tokens_are_rejected(version: DapVersion) {
-        let status_code = test::<resource::None>(
+        let status_code = test::<()>(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
@@ -573,7 +636,7 @@ mod test {
     async_test_versions! { incorrect_bearer_tokens_are_rejected }
 
     async fn missing_auth_is_rejected(version: DapVersion) {
-        let status_code = test::<resource::None>(
+        let status_code = test::<()>(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
                 .body(Body::empty())
@@ -609,7 +672,7 @@ mod test {
             },
         };
 
-        let req = test::<resource::None>(
+        let req = test::<()>(
             Request::builder()
                 .uri(format!(
                     "/{version}/{}/auth",
@@ -635,7 +698,7 @@ mod test {
     async_test_versions! { mtls_auth_is_enough }
 
     async fn incorrect_bearer_tokens_are_rejected_even_with_mtls_auth(version: DapVersion) {
-        let code = test::<resource::None>(
+        let code = test::<()>(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
                 .header(http_headers::DAP_AUTH_TOKEN, "something incorrect")
@@ -652,7 +715,7 @@ mod test {
     async_test_versions! { incorrect_bearer_tokens_are_rejected_even_with_mtls_auth }
 
     async fn invalid_mtls_auth_is_rejected_despite_correct_bearer_token(version: DapVersion) {
-        let code = test::<resource::None>(
+        let code = test::<()>(
             Request::builder()
                 .uri(format!("/{version}/{}/auth", mk_task_id().to_base64url()))
                 .header(http_headers::DAP_AUTH_TOKEN, BEARER_TOKEN)

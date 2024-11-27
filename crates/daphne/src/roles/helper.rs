@@ -11,9 +11,8 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, request::resource, AggregateShare, AggregateShareReq,
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure,
-        TransitionVar,
+        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobInitReq,
+        AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::aggregator::{InitializedReport, ReplayProtection, ReportProcessedStatus},
@@ -27,7 +26,7 @@ pub trait DapHelper: DapAggregator {}
 
 pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     aggregator: &A,
-    req: DapRequest<AggregationJobInitReq, resource::AggregationJobId>,
+    req: DapRequest<AggregationJobInitReq>,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let task_id = req.task_id;
