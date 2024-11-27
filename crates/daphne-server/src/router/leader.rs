@@ -13,7 +13,7 @@ use axum::{
 use daphne::{
     constants::DapMediaType,
     error::DapAbort,
-    messages::{self, request::resource},
+    messages::{self, request::CollectionPollReq},
     roles::leader::{self, DapLeader},
     DapError, DapVersion,
 };
@@ -82,10 +82,7 @@ where
 )]
 async fn upload<A>(
     State(app): State<Arc<A>>,
-    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<
-        messages::Report,
-        resource::None,
-    >,
+    UnauthenticatedDapRequestExtractor(req): UnauthenticatedDapRequestExtractor<messages::Report>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -105,11 +102,7 @@ where
 )]
 async fn start_collection_job<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<
-        FROM_COLLECTOR,
-        messages::CollectionReq,
-        resource::CollectionJobId,
-    >,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, messages::CollectionReq>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,
@@ -129,7 +122,7 @@ where
 )]
 async fn poll_collect<A>(
     State(app): State<Arc<A>>,
-    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, (), resource::CollectionJobId>,
+    DapRequestExtractor(req): DapRequestExtractor<FROM_COLLECTOR, CollectionPollReq>,
 ) -> Response
 where
     A: DapLeader + DaphneService + Send + Sync,

@@ -18,9 +18,9 @@ use crate::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::resource, taskprov::TaskprovAdvertisement, AggregateShare, AggregateShareReq,
-        AggregationJobId, AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection,
-        CollectionJobId, CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
+        taskprov::TaskprovAdvertisement, AggregateShare, AggregateShareReq, AggregationJobId,
+        AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
+        CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     roles::resolve_task_config,
@@ -236,7 +236,7 @@ pub async fn handle_upload_req<A: DapLeader>(
 /// poll later on to get the collection.
 pub async fn handle_coll_job_req<A: DapLeader>(
     aggregator: &A,
-    req: &DapRequest<CollectionReq, resource::CollectionJobId>,
+    req: &DapRequest<CollectionReq>,
 ) -> Result<(), DapError> {
     let global_config = aggregator.get_global_config().await?;
     let now = aggregator.get_current_time();

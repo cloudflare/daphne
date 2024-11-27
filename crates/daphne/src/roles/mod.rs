@@ -136,7 +136,7 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
-            request::resource, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
+            request::RequestBody, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
             Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
             TransitionFailure, TransitionVar,
@@ -389,7 +389,7 @@ mod test {
             &self,
             report: Report,
             task_id: &TaskId,
-        ) -> DapRequest<Report, resource::None> {
+        ) -> DapRequest<Report> {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let version = task_config.version;
 
@@ -400,7 +400,7 @@ mod test {
                     task_id: *task_id,
                     ..Default::default()
                 },
-                resource_id: resource::None,
+                resource_id: Default::default(),
                 payload: report,
             }
         }
@@ -409,7 +409,7 @@ mod test {
             &self,
             query: Query,
             task_id: &TaskId,
-        ) -> DapRequest<CollectionReq, resource::CollectionJobId> {
+        ) -> DapRequest<CollectionReq> {
             self.gen_test_coll_job_req_for_collection(query, DapAggregationParam::Empty, task_id)
                 .await
         }
@@ -419,7 +419,7 @@ mod test {
             query: Query,
             agg_param: DapAggregationParam,
             task_id: &TaskId,
-        ) -> DapRequest<CollectionReq, resource::CollectionJobId> {
+        ) -> DapRequest<CollectionReq> {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
 
             Self::collector_req(
@@ -438,10 +438,7 @@ mod test {
             task_id: &TaskId,
             agg_param: DapAggregationParam,
             reports: Vec<Report>,
-        ) -> (
-            DapAggregationJobState,
-            DapRequest<AggregationJobInitReq, resource::AggregationJobId>,
-        ) {
+        ) -> (DapAggregationJobState, DapRequest<AggregationJobInitReq>) {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
@@ -520,13 +517,13 @@ mod test {
                 .unwrap()
         }
 
-        pub fn leader_req<P, R>(
+        pub fn leader_req<B: RequestBody>(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
-            agg_job_id: R,
+            agg_job_id: B::ResourceId,
             media_type: DapMediaType,
-            payload: P,
-        ) -> DapRequest<P, R> {
+            payload: B,
+        ) -> DapRequest<B> {
             DapRequest {
                 meta: DapRequestMeta {
                     version: task_config.version,
@@ -539,12 +536,12 @@ mod test {
             }
         }
 
-        pub fn collector_req<C>(
+        pub fn collector_req(
             task_id: &TaskId,
             task_config: &DapTaskConfig,
             media_type: DapMediaType,
-            payload: C,
-        ) -> DapRequest<C, resource::CollectionJobId> {
+            payload: CollectionReq,
+        ) -> DapRequest<CollectionReq> {
             let mut rng = thread_rng();
             let coll_job_id = CollectionJobId(rng.gen());
 
@@ -667,7 +664,7 @@ mod test {
         let req = Test::leader_req(
             &t.time_interval_task_id,
             &task_config,
-            resource::None,
+            (),
             DapMediaType::AggregateShareReq,
             AggregateShareReq {
                 batch_sel: BatchSelector::FixedSizeByBatchId {
@@ -693,7 +690,7 @@ mod test {
         let req = Test::leader_req(
             &t.fixed_size_task_id,
             &task_config,
-            resource::None,
+            (),
             DapMediaType::AggregateShareReq,
             AggregateShareReq {
                 batch_sel: BatchSelector::FixedSizeByBatchId {
@@ -875,7 +872,7 @@ mod test {
                 task_id: TaskId([0; 32]),
                 ..Default::default()
             },
-            resource_id: resource::None,
+            resource_id: (),
             payload: report_invalid_task_id,
         };
 
@@ -904,7 +901,7 @@ mod test {
                 task_id: *task_id,
                 ..Default::default()
             },
-            resource_id: resource::None,
+            resource_id: (),
             payload: report.clone(),
         };
 
@@ -1464,7 +1461,7 @@ mod test {
                     task_id,
                     taskprov_advertisement: Some(taskprov_advertisement.clone()),
                 },
-                resource_id: resource::None,
+                resource_id: (),
                 payload: report,
             };
             leader::handle_upload_req(&*t.leader, req).await.unwrap();

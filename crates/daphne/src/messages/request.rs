@@ -3,24 +3,36 @@
 
 use std::ops::Deref;
 
-use super::taskprov::TaskprovAdvertisement;
+use super::{
+    taskprov::TaskprovAdvertisement, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
+    CollectionJobId, CollectionReq, Report,
+};
 use crate::{constants::DapMediaType, error::DapAbort, messages::TaskId, DapVersion};
 
-pub mod resource {
-    /// Aggregation job resource.
-    pub use crate::messages::AggregationJobId;
-    /// Collection job resource.
-    pub use crate::messages::CollectionJobId;
+pub trait RequestBody {
+    type ResourceId;
+}
 
-    /// Undefined (or undetermined) resource.
-    ///
-    /// The resource of a DAP request is undefined if there is not a unique object (in the context
-    /// of a DAP task) that the request pertains to. For example:
-    ///
-    ///   * The Client->Aggregator request for the HPKE config or to upload a report
-    ///   * The Leader->Helper request for an aggregate share
-    #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
-    pub struct None;
+/// A poll request has no body, but requires a `CollectionJobId`.
+pub struct CollectionPollReq;
+
+macro_rules! impl_req_body {
+    ($($body:tt | $id:tt)*) => {
+        $(impl RequestBody for $body {
+                type ResourceId = $id;
+        })*
+    };
+}
+
+impl_req_body! {
+//  body type             | id type
+//  --------------------- | ----------------
+    Report                | ()
+    AggregationJobInitReq | AggregationJobId
+    AggregateShareReq     | ()
+    CollectionReq         | CollectionJobId
+    CollectionPollReq     | CollectionJobId
+    ()                    | ()
 }
 
 /// Fields common to all DAP requests.
@@ -50,32 +62,25 @@ impl DapRequestMeta {
 }
 
 /// DAP request.
-///
-/// # Type parameters
-/// - `P`: is the payload of the request.
-/// - `R`: is the resource id this request points to. Possible values of this are:
-///     - [`AggregationJobId`](resource::AggregationJobId)
-///     - [`CollectionJobId`](resource::CollectionJobId)
-///     - [`None`](resource::None)
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
-pub struct DapRequest<P, R = resource::None> {
+pub struct DapRequest<B: RequestBody> {
     pub meta: DapRequestMeta,
 
     /// The resource with which this request is associated.
-    pub resource_id: R,
+    pub resource_id: B::ResourceId,
 
     /// Request payload.
-    pub payload: P,
+    pub payload: B,
 }
 
-impl<P, R> AsRef<DapRequestMeta> for DapRequest<P, R> {
+impl<B: RequestBody> AsRef<DapRequestMeta> for DapRequest<B> {
     fn as_ref(&self) -> &DapRequestMeta {
         &self.meta
     }
 }
 
-impl<P, R> Deref for DapRequest<P, R> {
+impl<B: RequestBody> Deref for DapRequest<B> {
     type Target = DapRequestMeta;
     fn deref(&self) -> &Self::Target {
         &self.meta

@@ -12,9 +12,9 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
-        self, request::resource, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
-        Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, HpkeCiphertext,
-        Interval, PartialBatchSelector, Report, ReportId, TaskId, Time,
+        self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, Base64Encode, BatchId,
+        BatchSelector, Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector,
+        Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::{
@@ -972,7 +972,7 @@ impl DapLeader for InMemoryAggregator {
                 &**self.peer.as_ref().expect("peer not configured"),
                 DapRequest {
                     payload: re_encode(&meta, payload),
-                    resource_id: resource::AggregationJobId::try_from_base64url(
+                    resource_id: AggregationJobId::try_from_base64url(
                         url.path().split('/').last().unwrap(),
                     )
                     .unwrap(),
@@ -986,7 +986,7 @@ impl DapLeader for InMemoryAggregator {
                 &**self.peer.as_ref().expect("peer not configured"),
                 DapRequest {
                     payload: re_encode(&meta, payload),
-                    resource_id: resource::None,
+                    resource_id: (),
                     meta,
                 },
             )
@@ -1010,7 +1010,7 @@ impl DapLeader for InMemoryAggregator {
                 &**self.peer.as_ref().expect("peer not configured"),
                 DapRequest {
                     payload: re_encode(&meta, payload),
-                    resource_id: resource::AggregationJobId::try_from_base64url(
+                    resource_id: AggregationJobId::try_from_base64url(
                         url.path().split('/').last().unwrap(),
                     )
                     .unwrap(),
