@@ -224,12 +224,12 @@ pub mod dap_sender {
     pub const FROM_HELPER: DapSender = 1 << 2;
     pub const FROM_LEADER: DapSender = 1 << 3;
 
-    pub const fn to_enum(id: DapSender) -> daphne::DapSender {
+    pub const fn to_enum(id: DapSender) -> daphne::constants::DapRole {
         match id {
-            FROM_CLIENT => daphne::DapSender::Client,
-            FROM_COLLECTOR => daphne::DapSender::Collector,
-            FROM_HELPER => daphne::DapSender::Helper,
-            FROM_LEADER => daphne::DapSender::Leader,
+            FROM_CLIENT => daphne::constants::DapRole::Client,
+            FROM_COLLECTOR => daphne::constants::DapRole::Collector,
+            FROM_HELPER => daphne::constants::DapRole::Helper,
+            FROM_LEADER => daphne::constants::DapRole::Leader,
             _ => panic!("invalid dap sender. Please specify a valid dap_sender from the crate::extractor::dap_sender module"),
         }
     }
@@ -344,14 +344,14 @@ mod test {
     };
     use daphne::{
         async_test_versions,
-        constants::DapMediaType,
+        constants::{DapMediaType, DapRole},
         messages::{
             request::{CollectionPollReq, RequestBody},
             taskprov::TaskprovAdvertisement,
             AggregationJobId, AggregationJobInitReq, Base64Encode, CollectionJobId, CollectionReq,
             TaskId,
         },
-        DapError, DapRequest, DapRequestMeta, DapSender, DapVersion,
+        DapError, DapRequest, DapRequestMeta, DapVersion,
     };
     use daphne_service_utils::{bearer_token::BearerToken, http_headers};
     use either::Either::{self, Left};
@@ -409,7 +409,7 @@ mod test {
             async fn check_bearer_token(
                 &self,
                 token: &BearerToken,
-                _sender: DapSender,
+                _sender: DapRole,
                 _task_id: TaskId,
                 _is_taskprov: bool,
             ) -> Result<(), Either<String, DapError>> {

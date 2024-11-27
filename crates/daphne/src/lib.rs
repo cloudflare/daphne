@@ -963,15 +963,6 @@ impl DapAggregateShare {
     }
 }
 
-/// DAP sender role.
-#[derive(Clone, Copy, Debug)]
-pub enum DapSender {
-    Client,
-    Collector,
-    Helper,
-    Leader,
-}
-
 /// Status of a collect job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

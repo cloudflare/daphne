@@ -6,10 +6,11 @@ use std::sync::Arc;
 use config::{DaphneServiceConfig, PeerBearerToken};
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
+    constants::DapRole,
     fatal_error,
     messages::{Base64Encode, TaskId},
     roles::{leader::in_memory_leader::InMemoryLeaderState, DapAggregator},
-    DapError, DapSender,
+    DapError,
 };
 use daphne_service_utils::bearer_token::BearerToken;
 use either::Either::{self, Left, Right};
@@ -113,7 +114,7 @@ impl router::DaphneService for App {
     async fn check_bearer_token(
         &self,
         presented_token: &BearerToken,
-        sender: DapSender,
+        sender: DapRole,
         task_id: TaskId,
         is_taskprov: bool,
     ) -> Result<(), Either<String, DapError>> {
@@ -130,16 +131,16 @@ impl router::DaphneService for App {
             .filter(|_| self.service_config.taskprov.is_some() && is_taskprov)
         {
             match (&taskprov.peer_auth, sender) {
-                (PeerBearerToken::Leader { expected_token }, DapSender::Leader)
-                | (PeerBearerToken::Collector { expected_token }, DapSender::Collector)
+                (PeerBearerToken::Leader { expected_token }, DapRole::Leader)
+                | (PeerBearerToken::Collector { expected_token }, DapRole::Collector)
                     if expected_token == presented_token =>
                 {
                     Ok(())
                 }
-                (PeerBearerToken::Leader { .. }, DapSender::Collector) => Err(Right(fatal_error!(
+                (PeerBearerToken::Leader { .. }, DapRole::Collector) => Err(Right(fatal_error!(
                     err = "expected a leader sender but got a collector sender"
                 ))),
-                (PeerBearerToken::Collector { .. }, DapSender::Leader) => Err(Right(fatal_error!(
+                (PeerBearerToken::Collector { .. }, DapRole::Leader) => Err(Right(fatal_error!(
                     err = "expected a collector sender but got a leader sender"
                 ))),
                 _ => reject(format_args!("using taskprov")),

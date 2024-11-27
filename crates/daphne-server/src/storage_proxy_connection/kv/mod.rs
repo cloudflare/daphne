@@ -58,8 +58,9 @@ pub mod prefix {
     };
 
     use daphne::{
+        constants::DapRole,
         messages::{Base64Encode, TaskId},
-        taskprov, DapSender, DapTaskConfig, DapVersion,
+        taskprov, DapTaskConfig, DapVersion,
     };
     use daphne_service_utils::bearer_token::BearerToken;
     use serde::{de::DeserializeOwned, Serialize};
@@ -134,9 +135,9 @@ pub mod prefix {
     }
 
     #[derive(Debug)]
-    pub struct KvBearerTokenKey(DapSender, TaskId);
-    impl From<(DapSender, TaskId)> for KvBearerTokenKey {
-        fn from((s, t): (DapSender, TaskId)) -> Self {
+    pub struct KvBearerTokenKey(DapRole, TaskId);
+    impl From<(DapRole, TaskId)> for KvBearerTokenKey {
+        fn from((s, t): (DapRole, TaskId)) -> Self {
             Self(s, t)
         }
     }
@@ -145,10 +146,10 @@ pub mod prefix {
             let Self(sender, task_id) = self;
             let task_id = task_id.to_base64url();
             match sender {
-                DapSender::Client => write!(f, "client/task/{task_id}"),
-                DapSender::Collector => write!(f, "collector/task/{task_id}"),
-                DapSender::Helper => write!(f, "helper/task/{task_id}"),
-                DapSender::Leader => write!(f, "leader/task/{task_id}"),
+                DapRole::Client => write!(f, "client/task/{task_id}"),
+                DapRole::Collector => write!(f, "collector/task/{task_id}"),
+                DapRole::Helper => write!(f, "helper/task/{task_id}"),
+                DapRole::Leader => write!(f, "leader/task/{task_id}"),
             }
         }
     }
