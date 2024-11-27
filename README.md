@@ -31,6 +31,19 @@ The remaining crates are not intended for general use:
   deployments. Some of its features are specific to Cloudflare's own
   deployment.
 
+
+## Requirements
+
+[Cap'n Proto](https://capnproto.org/) is required to build DAP.
+
+```sh
+# debian
+apt install capnproto
+
+# macos
+brew install capnp
+```
+
 ## Testing
 
 The `daphne` crate relies on unit tests. To test integration with Cloudflare's
