@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne::{messages::TaskId, DapSender, ReplayProtection};
+use daphne::{constants::DapRole, messages::TaskId, ReplayProtection};
 use daphne_service_utils::bearer_token::BearerToken;
 
 use crate::storage_proxy_connection::{
@@ -54,12 +54,12 @@ impl BearerTokens<'_> {
     #[cfg(feature = "test-utils")]
     pub async fn put_if_not_exists(
         &self,
-        role: DapSender,
+        sender: DapRole,
         task_id: TaskId,
         token: BearerToken,
     ) -> Result<Option<BearerToken>, storage_proxy_connection::Error> {
         self.kv
-            .put_if_not_exists::<kv::prefix::KvBearerToken>(&(role, task_id).into(), token)
+            .put_if_not_exists::<kv::prefix::KvBearerToken>(&(sender, task_id).into(), token)
             .await
     }
 
@@ -72,13 +72,13 @@ impl BearerTokens<'_> {
     /// - `Err(error)` if any io error occurs while fetching
     pub async fn matches(
         &self,
-        role: DapSender,
+        sender: DapRole,
         task_id: TaskId,
         token: &BearerToken,
     ) -> Result<bool, Marc<storage_proxy_connection::Error>> {
         self.kv
             .peek::<kv::prefix::KvBearerToken, _, _>(
-                &(role, task_id).into(),
+                &(sender, task_id).into(),
                 &kv::KvGetOptions {
                     cache_not_found: false,
                 },
@@ -90,12 +90,12 @@ impl BearerTokens<'_> {
 
     pub async fn get(
         &self,
-        role: DapSender,
+        sender: DapRole,
         task_id: TaskId,
     ) -> Result<Option<BearerToken>, Marc<storage_proxy_connection::Error>> {
         self.kv
             .get_cloned::<kv::prefix::KvBearerToken>(
-                &(role, task_id).into(),
+                &(sender, task_id).into(),
                 &kv::KvGetOptions {
                     cache_not_found: false,
                 },
@@ -107,13 +107,13 @@ impl BearerTokens<'_> {
 #[cfg(feature = "test-utils")]
 mod test_utils {
     use daphne::{
-        constants::DapAggregatorRole,
+        constants::{DapAggregatorRole, DapRole},
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
         roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
-        DapError, DapQueryConfig, DapSender, DapTaskConfig, DapVersion,
+        DapError, DapQueryConfig, DapTaskConfig, DapVersion,
     };
     use daphne_service_utils::{
         bearer_token::BearerToken,
@@ -236,7 +236,7 @@ mod test_utils {
             let token = BearerToken::from(cmd.leader_authentication_token);
             if self
                 .bearer_tokens()
-                .put_if_not_exists(DapSender::Leader, cmd.task_id, token)
+                .put_if_not_exists(DapRole::Leader, cmd.task_id, token)
                 .await
                 .is_err()
             {
@@ -252,7 +252,7 @@ mod test_utils {
                     let token = BearerToken::from(token_string);
                     if self
                         .bearer_tokens()
-                        .put_if_not_exists(DapSender::Collector, cmd.task_id, token)
+                        .put_if_not_exists(DapRole::Collector, cmd.task_id, token)
                         .await
                         .is_err()
                     {

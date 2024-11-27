@@ -18,8 +18,11 @@ use axum::{
     Json,
 };
 use daphne::{
-    constants::DapAggregatorRole, error::DapAbort, fatal_error, messages::TaskId, DapError,
-    DapRequestMeta, DapResponse, DapSender,
+    constants::{DapAggregatorRole, DapRole},
+    error::DapAbort,
+    fatal_error,
+    messages::TaskId,
+    DapError, DapRequestMeta, DapResponse,
 };
 use daphne_service_utils::bearer_token::BearerToken;
 use either::Either;
@@ -49,7 +52,7 @@ pub trait DaphneService {
     async fn check_bearer_token(
         &self,
         presented_token: &BearerToken,
-        sender: DapSender,
+        sender: DapRole,
         task_id: TaskId,
         is_taskprov: bool,
     ) -> Result<(), Either<String, DapError>>;
@@ -74,7 +77,7 @@ where
     async fn check_bearer_token(
         &self,
         presented_token: &BearerToken,
-        sender: DapSender,
+        sender: DapRole,
         task_id: TaskId,
         is_taskprov: bool,
     ) -> Result<(), Either<String, DapError>> {

@@ -5,7 +5,7 @@ use std::{borrow::Cow, time::Instant};
 
 use axum::{async_trait, http::Method};
 use daphne::{
-    constants::DapMediaType,
+    constants::{DapMediaType, DapRole},
     error::DapAbort,
     fatal_error,
     messages::{BatchId, BatchSelector, Collection, CollectionJobId, Report, TaskId},
@@ -171,7 +171,7 @@ impl crate::App {
             }
         } else if let Some(bearer_token) = self
             .bearer_tokens()
-            .get(daphne::DapSender::Leader, meta.task_id)
+            .get(DapRole::Leader, meta.task_id)
             .await
             .map_err(|e| fatal_error!(err = ?e, "failed to get leader bearer token"))?
         {
