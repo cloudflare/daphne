@@ -26,6 +26,7 @@ use std::{
     num::NonZeroUsize,
     ops::Range,
 };
+use tokio::time::timeout;
 use url::Url;
 
 const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
@@ -198,14 +199,17 @@ impl TestRunner {
                         Err(e) => Some(format!("connection to {url} failed: {e:?}")),
                     }
                 })
-                .collect::<Vec<_>>()
-                .await;
-            match failed_connections.first() {
-                Some(failure) if attempt == MAX_ATTEMPTS => {
+                .collect::<Vec<_>>();
+            match timeout(std::time::Duration::from_secs(5), failed_connections)
+                .await
+                .map(|f| f.first().cloned())
+            {
+                Ok(Some(failure)) if attempt == MAX_ATTEMPTS => {
                     panic!("One of the aggregators was not ready in time: {failure}")
                 }
-                Some(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
-                None => break,
+                Ok(Some(_)) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+                Err(_elapsed) => {}
+                Ok(None) => break,
             }
         }
 
