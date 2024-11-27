@@ -587,13 +587,21 @@ impl From<HpkePrivateKeySerde> for HpkePrivateKey {
 mod test {
     use crate::{
         constants::DapAggregatorRole,
-        hpke::{info_and_aad, HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig},
-        messages::ReportMetadata,
-        test_versions, DapVersion,
+        hpke::{
+            info_and_aad::{self, InfoAndAad},
+            HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId, HpkeReceiverConfig,
+        },
+        messages::{
+            encode_u32_bytes, encode_u32_prefixed, BatchId, BatchSelector, Interval, ReportId,
+            ReportMetadata, TaskId,
+        },
+        test_versions, DapAggregationParam, DapVersion,
     };
     use hpke_rs::{Hpke, HpkePrivateKey, HpkePublicKey, Mode};
     use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
     use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
+    use prio::codec::{Encode as _, ParameterizedEncode as _};
+    use rand::seq::IteratorRandom;
 
     fn encrypt_roundtrip_x25519_hkdf_sha256(version: DapVersion) {
         let info = info_and_aad::InputShare {
@@ -602,7 +610,7 @@ mod test {
             task_id: &crate::messages::TaskId(rand::random()),
             public_share: &[],
             report_metadata: &ReportMetadata {
-                id: crate::messages::ReportId(rand::random()),
+                id: ReportId(rand::random()),
                 time: rand::random(),
             },
         };
@@ -622,7 +630,7 @@ mod test {
             task_id: &crate::messages::TaskId(rand::random()),
             agg_param: &crate::DapAggregationParam::Empty,
             batch_selector: &crate::messages::BatchSelector::FixedSizeByBatchId {
-                batch_id: crate::messages::BatchId(rand::random()),
+                batch_id: BatchId(rand::random()),
             },
         };
         let plaintext = b"plaintext";
@@ -664,4 +672,124 @@ mod test {
         let bad_private_key = HpkePrivateKey::from(vec![0; 20]);
         assert!(HpkeReceiverConfig::try_from((config, bad_private_key)).is_err());
     }
+
+    // This code compares the old way to serializing info and aad parameters with the new
+    // abstracted way to ensure they don't differ.
+    fn manual_info_and_aad_equals_abstracted_one(version: DapVersion) {
+        const CTX_INPUT_SHARE_DRAFT09: &str = "dap-09 input share";
+        const CTX_AGG_SHARE_DRAFT09: &str = "dap-09 aggregate share";
+        // these were actually missing
+        const CTX_INPUT_SHARE_DRAFT13: &str = "dap-13 input share";
+        const CTX_AGG_SHARE_DRAFT13: &str = "dap-13 aggregate share";
+
+        const CTX_ROLE_COLLECTOR: u8 = 0;
+        const CTX_ROLE_CLIENT: u8 = 1;
+        const CTX_ROLE_LEADER: u8 = 2;
+        const CTX_ROLE_HELPER: u8 = 3;
+
+        let task_id = &TaskId(rand::random());
+        let agg_param = &DapAggregationParam::Empty;
+        let batch_selectors = &[
+            BatchSelector::TimeInterval {
+                batch_interval: Interval {
+                    start: rand::random(),
+                    duration: rand::random(),
+                },
+            },
+            BatchSelector::FixedSizeByBatchId {
+                batch_id: BatchId(rand::random()),
+            },
+        ];
+        let report_metadata = &ReportMetadata {
+            id: ReportId(rand::random()),
+            time: rand::random(),
+        };
+        let public_share = &vec![rand::random(); (0..100).choose(&mut rand::thread_rng()).unwrap()];
+
+        let input_share = |role, prefix: &str| {
+            let mut info = Vec::with_capacity(prefix.len() + 2);
+            info.extend_from_slice(prefix.as_bytes());
+            info.push(CTX_ROLE_CLIENT); // client
+            info.push(match role {
+                DapAggregatorRole::Leader => CTX_ROLE_LEADER,
+                DapAggregatorRole::Helper => CTX_ROLE_HELPER,
+            }); // Receiver role
+
+            let mut aad = Vec::with_capacity(58);
+            task_id.encode(&mut aad).unwrap();
+
+            report_metadata
+                .encode_with_param(&version, &mut aad)
+                .unwrap();
+            encode_u32_bytes(&mut aad, public_share).unwrap();
+
+            (info, aad)
+        };
+
+        let aggregate_share = |role, prefix: &str, batch_selector: &BatchSelector| {
+            let mut info = Vec::with_capacity(prefix.len() + 2);
+            info.extend_from_slice(prefix.as_bytes());
+            info.push(match role {
+                DapAggregatorRole::Leader => CTX_ROLE_LEADER,
+                DapAggregatorRole::Helper => CTX_ROLE_HELPER,
+            });
+            info.push(CTX_ROLE_COLLECTOR); // collector
+
+            let mut aad = Vec::with_capacity(40);
+            task_id.encode(&mut aad).unwrap();
+            encode_u32_prefixed(version, &mut aad, |_version, bytes| agg_param.encode(bytes))
+                .unwrap();
+            batch_selector
+                .encode_with_param(&version, &mut aad)
+                .unwrap();
+
+            (info, aad)
+        };
+
+        let (is, ag) = match version {
+            DapVersion::Draft09 => (CTX_INPUT_SHARE_DRAFT09, CTX_AGG_SHARE_DRAFT09),
+            DapVersion::Latest => (CTX_INPUT_SHARE_DRAFT13, CTX_AGG_SHARE_DRAFT13),
+        };
+
+        for role in [DapAggregatorRole::Leader, DapAggregatorRole::Helper] {
+            let new = info_and_aad::InputShare {
+                version,
+                receiver: role,
+                task_id,
+                report_metadata,
+                public_share,
+            };
+            let (info, aad) = input_share(role, is);
+            assert_eq!(info, new.info_bytes(), "info for ({role}, {is:?}) differs");
+            assert_eq!(
+                aad,
+                new.aad_bytes().unwrap(),
+                "aad for ({role}, {is:?}) differs"
+            );
+
+            for b in batch_selectors {
+                let new = info_and_aad::AggregateShare {
+                    version,
+                    sender: role,
+                    task_id,
+                    batch_selector: b,
+                    agg_param,
+                };
+
+                let (info, aad) = aggregate_share(role, ag, b);
+                assert_eq!(
+                    info,
+                    new.info_bytes(),
+                    "info for ({role}, {ag:?}, {b}) differs"
+                );
+                assert_eq!(
+                    aad,
+                    new.aad_bytes().unwrap(),
+                    "aad for ({role}, {ag:?}, {b}) differs"
+                );
+            }
+        }
+    }
+
+    test_versions! { manual_info_and_aad_equals_abstracted_one }
 }
