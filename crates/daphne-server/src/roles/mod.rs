@@ -283,7 +283,7 @@ mod test_utils {
                         err = "command failed: unexpected max batch size"
                     ))
                 }
-                (2, max_batch_size) => DapQueryConfig::FixedSize { max_batch_size },
+                (2, max_batch_size) => DapQueryConfig::LeaderSelected { max_batch_size },
                 _ => {
                     return Err(fatal_error!(
                         err = "command failed: unrecognized query type"

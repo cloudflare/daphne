@@ -380,7 +380,7 @@ impl Test {
             time_precision: 3600,
             lifetime: 60,
             min_batch_size: reports_per_batch.try_into().unwrap(),
-            query: DapQueryConfig::FixedSize {
+            query: DapQueryConfig::LeaderSelected {
                 max_batch_size: NonZeroU32::new(reports_per_batch.try_into().unwrap()),
             },
             vdaf: self.vdaf_config,
@@ -554,7 +554,7 @@ impl Test {
     ) -> Result<Duration> {
         // Prepare AggregateShareReq.
         let agg_share_req = AggregateShareReq {
-            batch_sel: BatchSelector::FixedSizeByBatchId { batch_id },
+            batch_sel: BatchSelector::LeaderSelectedByBatchId { batch_id },
             agg_param: Vec::new(),
             report_count: leader_agg_share.report_count,
             checksum: leader_agg_share.checksum,
@@ -636,7 +636,7 @@ impl Test {
         ////
 
         let batch_id = BatchId(rngs::OsRng.gen());
-        let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
+        let part_batch_sel = PartialBatchSelector::LeaderSelectedByBatchId { batch_id };
 
         let (leader_agg_share, agg_job_duration) = self
             .run_agg_jobs(

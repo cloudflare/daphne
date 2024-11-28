@@ -85,7 +85,7 @@ pub trait DapAggregator: HpkeProvider + Sized {
     ) -> Result<bool, DapError>;
 
     /// Check whether the given batch ID has been observed before. This is called by the Leader
-    /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for fixed-size tasks.
+    /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for leader-selected tasks.
     async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError>;
 
     /// Store a set of output shares and mark the corresponding reports as aggregated.

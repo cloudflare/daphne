@@ -25,11 +25,13 @@ use std::{
 
 // Query types
 const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
-const QUERY_TYPE_FIXED_SIZE: u8 = 0x02;
+const QUERY_TYPE_LEADER_SELECTED: u8 = 0x02;
 
-// FixedSize query subtypes
-const FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID: u8 = 0x00;
-const FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
+// LeaderSelected query subtypes
+// This is a slight misnomer, as these code points only exist in draft-09
+// where "leader selected" queries were still called fixed size.
+const LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID: u8 = 0x00;
+const LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
 
 // Known extension types.
 const EXTENSION_TASKPROV: u16 = 0xff00;
@@ -348,14 +350,14 @@ impl ParameterizedDecode<DapVersion> for ReportShare {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum PartialBatchSelector {
     TimeInterval,
-    FixedSizeByBatchId { batch_id: BatchId },
+    LeaderSelectedByBatchId { batch_id: BatchId },
 }
 
 impl std::fmt::Display for PartialBatchSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval => write!(f, "time_interval"),
-            Self::FixedSizeByBatchId { .. } => write!(f, "fixed_size"),
+            Self::LeaderSelectedByBatchId { .. } => write!(f, "leader_selected"),
         }
     }
 }
@@ -364,7 +366,9 @@ impl From<BatchSelector> for PartialBatchSelector {
     fn from(batch_sel: BatchSelector) -> Self {
         match batch_sel {
             BatchSelector::TimeInterval { .. } => Self::TimeInterval,
-            BatchSelector::FixedSizeByBatchId { batch_id } => Self::FixedSizeByBatchId { batch_id },
+            BatchSelector::LeaderSelectedByBatchId { batch_id } => {
+                Self::LeaderSelectedByBatchId { batch_id }
+            }
         }
     }
 }
@@ -379,8 +383,8 @@ impl ParameterizedEncode<DapVersion> for PartialBatchSelector {
             DapVersion::Draft09 => {
                 match self {
                     Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes)?,
-                    Self::FixedSizeByBatchId { batch_id } => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                    Self::LeaderSelectedByBatchId { batch_id } => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
                 };
@@ -392,8 +396,8 @@ impl ParameterizedEncode<DapVersion> for PartialBatchSelector {
                         QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
                         encode_u16_bytes(bytes, &Vec::new())?;
                     }
-                    Self::FixedSizeByBatchId { batch_id } => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                    Self::LeaderSelectedByBatchId { batch_id } => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
                         let config = &mut Vec::new();
                         batch_id.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
@@ -413,7 +417,7 @@ impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
         match version {
             DapVersion::Draft09 => match u8::decode(bytes)? {
                 QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
-                QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
+                QUERY_TYPE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
                     batch_id: BatchId::decode(bytes)?,
                 }),
                 _ => Err(CodecError::UnexpectedValue),
@@ -427,10 +431,10 @@ impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
                         Err(CodecError::UnexpectedValue)
                     }
                 }
-                QUERY_TYPE_FIXED_SIZE => {
+                QUERY_TYPE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
                     let batch_id = BatchId::decode(&mut Cursor::new(config.as_slice()))?;
-                    Ok(Self::FixedSizeByBatchId { batch_id })
+                    Ok(Self::LeaderSelectedByBatchId { batch_id })
                 }
                 _ => Err(CodecError::UnexpectedValue),
             },
@@ -444,15 +448,19 @@ impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum BatchSelector {
     TimeInterval { batch_interval: Interval },
-    FixedSizeByBatchId { batch_id: BatchId },
+    LeaderSelectedByBatchId { batch_id: BatchId },
 }
 
 impl std::fmt::Display for BatchSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval { .. } => write!(f, "time_interval"),
-            Self::FixedSizeByBatchId { batch_id } => {
-                write!(f, "fixed_size_by_batch_id({})", batch_id.to_base64url())
+            Self::LeaderSelectedByBatchId { batch_id } => {
+                write!(
+                    f,
+                    "leader_selected_by_batch_id({})",
+                    batch_id.to_base64url()
+                )
             }
         }
     }
@@ -471,8 +479,8 @@ impl ParameterizedEncode<DapVersion> for BatchSelector {
                         QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
                         batch_interval.encode(bytes)?;
                     }
-                    Self::FixedSizeByBatchId { batch_id } => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                    Self::LeaderSelectedByBatchId { batch_id } => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
                 };
@@ -486,8 +494,8 @@ impl ParameterizedEncode<DapVersion> for BatchSelector {
                         batch_interval.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
                     }
-                    Self::FixedSizeByBatchId { batch_id } => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                    Self::LeaderSelectedByBatchId { batch_id } => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
                         let config = &mut Vec::new();
                         batch_id.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
@@ -509,7 +517,7 @@ impl ParameterizedDecode<DapVersion> for BatchSelector {
                 QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
                     batch_interval: Interval::decode(bytes)?,
                 }),
-                QUERY_TYPE_FIXED_SIZE => Ok(Self::FixedSizeByBatchId {
+                QUERY_TYPE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
                     batch_id: BatchId::decode(bytes)?,
                 }),
                 _ => Err(CodecError::UnexpectedValue),
@@ -521,9 +529,9 @@ impl ParameterizedDecode<DapVersion> for BatchSelector {
                         batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
                     })
                 }
-                QUERY_TYPE_FIXED_SIZE => {
+                QUERY_TYPE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
-                    Ok(Self::FixedSizeByBatchId {
+                    Ok(Self::LeaderSelectedByBatchId {
                         batch_id: BatchId::decode(&mut Cursor::new(config.as_slice()))?,
                     })
                 }
@@ -1001,8 +1009,8 @@ impl Decode for Interval {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum Query {
     TimeInterval { batch_interval: Interval },
-    FixedSizeByBatchId { batch_id: BatchId },
-    FixedSizeCurrentBatch,
+    LeaderSelectedByBatchId { batch_id: BatchId },
+    LeaderSelectedCurrentBatch,
 }
 
 impl Query {
@@ -1011,10 +1019,10 @@ impl Query {
             Self::TimeInterval { batch_interval } => {
                 Some(BatchSelector::TimeInterval { batch_interval })
             }
-            Self::FixedSizeByBatchId { batch_id } => {
-                Some(BatchSelector::FixedSizeByBatchId { batch_id })
+            Self::LeaderSelectedByBatchId { batch_id } => {
+                Some(BatchSelector::LeaderSelectedByBatchId { batch_id })
             }
-            Self::FixedSizeCurrentBatch => None,
+            Self::LeaderSelectedCurrentBatch => None,
         }
     }
 }
@@ -1023,7 +1031,9 @@ impl From<BatchSelector> for Query {
     fn from(batch_sel: BatchSelector) -> Self {
         match batch_sel {
             BatchSelector::TimeInterval { batch_interval } => Self::TimeInterval { batch_interval },
-            BatchSelector::FixedSizeByBatchId { batch_id } => Self::FixedSizeByBatchId { batch_id },
+            BatchSelector::LeaderSelectedByBatchId { batch_id } => {
+                Self::LeaderSelectedByBatchId { batch_id }
+            }
         }
     }
 }
@@ -1032,10 +1042,14 @@ impl std::fmt::Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval { .. } => write!(f, "time_interval"),
-            Self::FixedSizeByBatchId { batch_id } => {
-                write!(f, "fixed_size_by_batch_id({})", batch_id.to_base64url())
+            Self::LeaderSelectedByBatchId { batch_id } => {
+                write!(
+                    f,
+                    "leader_selected_by_batch_id({})",
+                    batch_id.to_base64url()
+                )
             }
-            Self::FixedSizeCurrentBatch => write!(f, "fixed_size_current_batch"),
+            Self::LeaderSelectedCurrentBatch => write!(f, "leader_selected_current_batch"),
         }
     }
 }
@@ -1053,14 +1067,14 @@ impl ParameterizedEncode<DapVersion> for Query {
                         QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
                         batch_interval.encode(bytes)?;
                     }
-                    Self::FixedSizeByBatchId { batch_id } => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                        FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
+                    Self::LeaderSelectedByBatchId { batch_id } => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
-                    Self::FixedSizeCurrentBatch => {
-                        QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
-                        FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
+                    Self::LeaderSelectedCurrentBatch => {
+                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
                     }
                 };
             }
@@ -1071,11 +1085,11 @@ impl ParameterizedEncode<DapVersion> for Query {
                     batch_interval.encode(config)?;
                     encode_u16_bytes(bytes, config)?;
                 }
-                Self::FixedSizeByBatchId { batch_id: _ } => {
+                Self::LeaderSelectedByBatchId { batch_id: _ } => {
                     return Err(CodecError::UnexpectedValue)
                 }
-                Self::FixedSizeCurrentBatch => {
-                    QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+                Self::LeaderSelectedCurrentBatch => {
+                    QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
                     let config = &mut Vec::new();
                     encode_u16_bytes(bytes, config)?;
                 }
@@ -1095,13 +1109,17 @@ impl ParameterizedDecode<DapVersion> for Query {
                 QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
                     batch_interval: Interval::decode(bytes)?,
                 }),
-                QUERY_TYPE_FIXED_SIZE => {
+                QUERY_TYPE_LEADER_SELECTED => {
                     let subtype = u8::decode(bytes)?;
                     match subtype {
-                        FIXED_SIZE_QUERY_TYPE_BY_BATCH_ID => Ok(Self::FixedSizeByBatchId {
-                            batch_id: BatchId::decode(bytes)?,
-                        }),
-                        FIXED_SIZE_QUERY_TYPE_CURRENT_BATCH => Ok(Self::FixedSizeCurrentBatch),
+                        LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID => {
+                            Ok(Self::LeaderSelectedByBatchId {
+                                batch_id: BatchId::decode(bytes)?,
+                            })
+                        }
+                        LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH => {
+                            Ok(Self::LeaderSelectedCurrentBatch)
+                        }
                         _ => Err(CodecError::UnexpectedValue),
                     }
                 }
@@ -1114,12 +1132,12 @@ impl ParameterizedDecode<DapVersion> for Query {
                         batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
                     })
                 }
-                QUERY_TYPE_FIXED_SIZE => {
+                QUERY_TYPE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
                     if !config.is_empty() {
                         Err(CodecError::UnexpectedValue)
                     } else {
-                        Ok(Self::FixedSizeCurrentBatch)
+                        Ok(Self::LeaderSelectedCurrentBatch)
                     }
                 }
                 _ => Err(CodecError::UnexpectedValue),
@@ -1685,7 +1703,7 @@ mod test {
 
         let want = AggregationJobInitReq {
             agg_param: b"this is an aggregation parameter".to_vec(),
-            part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+            part_batch_sel: PartialBatchSelector::LeaderSelectedByBatchId {
                 batch_id: BatchId([0; 32]),
             },
             prep_inits: vec![
@@ -1739,7 +1757,7 @@ mod test {
     fn roundtrip_agg_job_init_req(version: DapVersion) {
         let want = AggregationJobInitReq {
             agg_param: b"this is an aggregation parameter".to_vec(),
-            part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+            part_batch_sel: PartialBatchSelector::LeaderSelectedByBatchId {
                 batch_id: BatchId([0; 32]),
             },
             prep_inits: vec![
@@ -1830,7 +1848,7 @@ mod test {
     #[test]
     fn read_agg_share_req() {
         let want = AggregateShareReq {
-            batch_sel: BatchSelector::FixedSizeByBatchId {
+            batch_sel: BatchSelector::LeaderSelectedByBatchId {
                 batch_id: BatchId([23; 32]),
             },
             agg_param: b"this is an aggregation parameter".to_vec(),

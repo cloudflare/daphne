@@ -740,9 +740,11 @@ impl DapAggregator for InMemoryAggregator {
                 .lock()
                 .map_err(|_| fatal_error!(err = "agg_store poisoned"))?;
             let mut aggregated = false;
-            for bucket in task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
-                batch_id: *batch_id,
-            })? {
+            for bucket in
+                task_config.batch_span_for_sel(&BatchSelector::LeaderSelectedByBatchId {
+                    batch_id: *batch_id,
+                })?
+            {
                 if !agg_store.for_bucket(task_id, &bucket).agg_share.empty() {
                     aggregated = true;
                     break;

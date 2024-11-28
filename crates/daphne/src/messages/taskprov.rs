@@ -4,7 +4,7 @@
 //! draft-wang-ppm-dap-taskprov: Messages for the taskrpov extension for DAP.
 
 use crate::messages::{
-    decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_FIXED_SIZE,
+    decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_LEADER_SELECTED,
     QUERY_TYPE_TIME_INTERVAL,
 };
 use crate::pine::PineParam;
@@ -319,7 +319,7 @@ impl Decode for UrlBytes {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum QueryConfigVar {
     TimeInterval,
-    FixedSize { max_batch_size: Option<NonZeroU32> },
+    LeaderSelected { max_batch_size: Option<NonZeroU32> },
     NotImplemented { typ: u8, param: Vec<u8> },
 }
 
@@ -338,8 +338,8 @@ impl QueryConfig {
             QueryConfigVar::TimeInterval => {
                 QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
             }
-            QueryConfigVar::FixedSize { .. } => {
-                QUERY_TYPE_FIXED_SIZE.encode(bytes)?;
+            QueryConfigVar::LeaderSelected { .. } => {
+                QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
             }
             QueryConfigVar::NotImplemented { typ, .. } => {
                 typ.encode(bytes)?;
@@ -363,7 +363,7 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         self.encode_query_type(bytes)?;
         match &self.var {
             QueryConfigVar::TimeInterval => (),
-            QueryConfigVar::FixedSize { max_batch_size } => {
+            QueryConfigVar::LeaderSelected { max_batch_size } => {
                 match version {
                     DapVersion::Draft09 => match max_batch_size {
                         Some(x) => x.get().encode(bytes)?,
@@ -399,7 +399,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
         let var =
             match (bytes_left, query_type) {
                 (.., QUERY_TYPE_TIME_INTERVAL) => QueryConfigVar::TimeInterval,
-                (.., QUERY_TYPE_FIXED_SIZE) => QueryConfigVar::FixedSize {
+                (.., QUERY_TYPE_LEADER_SELECTED) => QueryConfigVar::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => NonZeroU32::new(u32::decode(bytes)?),
                         DapVersion::Latest => None,
@@ -559,7 +559,7 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::FixedSize {
+                var: QueryConfigVar::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
                         DapVersion::Latest => None,
@@ -627,7 +627,7 @@ mod tests {
                 DapVersion::Latest => 1,
             },
             min_batch_size: 12_345_678,
-            var: QueryConfigVar::FixedSize {
+            var: QueryConfigVar::LeaderSelected {
                 max_batch_size: match version {
                     DapVersion::Draft09 => Some(NonZeroU32::new(12_345_678).unwrap()),
                     DapVersion::Latest => None,
@@ -801,7 +801,7 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::FixedSize {
+                var: QueryConfigVar::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
                         DapVersion::Latest => None,

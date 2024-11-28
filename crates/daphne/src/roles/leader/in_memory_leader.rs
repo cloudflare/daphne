@@ -81,9 +81,9 @@ impl InMemoryLeaderState {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
     ) -> std::result::Result<BatchId, DapError> {
-        if !matches!(task_config.query, DapQueryConfig::FixedSize { .. }) {
+        if !matches!(task_config.query, DapQueryConfig::LeaderSelected { .. }) {
             return Err(DapError::Abort(DapAbort::BadRequest(
-                "tried to get current batch from non fixed-size task".into(),
+                "tried to get current batch from non leader-selected task".into(),
             )));
         }
 
@@ -151,7 +151,7 @@ impl InMemoryLeaderState {
             }
 
             // The batch will be collected, so remove it from the batch queue.
-            if let DapBatchBucket::FixedSize {
+            if let DapBatchBucket::LeaderSelected {
                 ref batch_id,
                 shard: _,
             } = bucket
@@ -249,13 +249,13 @@ impl MockLeaderMemoryPerTask {
             .shard(NonZeroUsize::new(1).unwrap());
 
         match task_config.query {
-            // For fixed-size queries, the bucket corresponds to a single batch.
-            DapQueryConfig::FixedSize { .. } => {
+            // For leader-selected queries, the bucket corresponds to a single batch.
+            DapQueryConfig::LeaderSelected { .. } => {
                 // Assign the report to the first unsaturated batch.
                 for (batch_id, report_count) in &mut self.batch_queue {
                     if *report_count < task_config.min_batch_size {
                         *report_count += 1;
-                        return DapBatchBucket::FixedSize {
+                        return DapBatchBucket::LeaderSelected {
                             batch_id: *batch_id,
                             shard,
                         };
@@ -265,7 +265,7 @@ impl MockLeaderMemoryPerTask {
                 // No unsaturated batch exists, so create a new batch.
                 let batch_id = BatchId(rng.gen());
                 self.batch_queue.push_back((batch_id, 1));
-                DapBatchBucket::FixedSize { batch_id, shard }
+                DapBatchBucket::LeaderSelected { batch_id, shard }
             }
 
             // For time-interval queries, the bucket is the batch window computed by truncating the

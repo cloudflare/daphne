@@ -153,8 +153,8 @@ impl FromStr for CliDapQueryConfig {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if s == "time-interval" {
             Ok(Self(DapQueryConfig::TimeInterval))
-        } else if let Some(size) = s.strip_prefix("fixed-size") {
-            Ok(Self(DapQueryConfig::FixedSize {
+        } else if let Some(size) = s.strip_prefix("leader-selected") {
+            Ok(Self(DapQueryConfig::LeaderSelected {
                 max_batch_size: if let Some(size) = size.strip_prefix("-") {
                     Some(
                         size.parse()
@@ -163,7 +163,9 @@ impl FromStr for CliDapQueryConfig {
                 } else if size.is_empty() {
                     None
                 } else {
-                    return Err(format!("{size} is an invalid fixed size max batch size"));
+                    return Err(format!(
+                        "{size} is an invalid leader selected max batch size"
+                    ));
                 },
             }))
         } else {

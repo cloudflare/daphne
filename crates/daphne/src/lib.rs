@@ -232,10 +232,10 @@ pub enum DapQueryConfig {
     /// specified by the query.
     TimeInterval,
 
-    /// The "fixed-size" query type where by the Leader assigns reports to arbitrary batches
-    /// identified by batch IDs. This type includes an optional maximum batch size: if set, then
+    /// The "leader-selected" query type where by the Leader assigns reports to arbitrary batches
+    /// identified by batch IDs. In draft-09 this type includes an optional maximum batch size: if set, then
     /// Aggregators are meant to stop aggregating reports when this limit is reached.
-    FixedSize {
+    LeaderSelected {
         #[serde(default)]
         max_batch_size: Option<NonZeroU32>,
     },
@@ -249,8 +249,8 @@ impl DapQueryConfig {
                 Self::TimeInterval { .. },
                 PartialBatchSelector::TimeInterval
             ) | (
-                Self::FixedSize { .. },
-                PartialBatchSelector::FixedSizeByBatchId { .. }
+                Self::LeaderSelected { .. },
+                PartialBatchSelector::LeaderSelectedByBatchId { .. }
             )
         )
     }
@@ -262,8 +262,8 @@ impl DapQueryConfig {
                 Self::TimeInterval { .. },
                 BatchSelector::TimeInterval { .. }
             ) | (
-                Self::FixedSize { .. },
-                BatchSelector::FixedSizeByBatchId { .. }
+                Self::LeaderSelected { .. },
+                BatchSelector::LeaderSelectedByBatchId { .. }
             )
         )
     }
@@ -273,7 +273,7 @@ impl std::fmt::Display for DapQueryConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval => write!(f, "time_interval"),
-            Self::FixedSize { .. } => write!(f, "fixed_size"),
+            Self::LeaderSelected { .. } => write!(f, "leader_selected"),
         }
     }
 }
@@ -282,12 +282,12 @@ impl std::fmt::Display for DapQueryConfig {
 ///
 /// A bucket is the smallest, disjoint set of reports that can be queried: For time-interval
 /// queries, the bucket to which a report is assigned is determined by truncating its timestamp by
-/// the task's `time_precision` parameter; for fixed-size queries, the span consists of a single
+/// the task's `time_precision` parameter; for `leader_selected` queries, the span consists of a single
 /// bucket, which is the batch determined by the batch ID (i.e., the partial batch selector).
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum DapBatchBucket {
-    FixedSize { batch_id: BatchId, shard: usize },
+    LeaderSelected { batch_id: BatchId, shard: usize },
     TimeInterval { batch_window: Time, shard: usize },
 }
 
@@ -298,7 +298,7 @@ impl DapBatchBucket {
                 batch_window: _,
                 shard,
             }
-            | Self::FixedSize { batch_id: _, shard } => *shard,
+            | Self::LeaderSelected { batch_id: _, shard } => *shard,
         }
     }
 }
@@ -307,7 +307,7 @@ impl std::fmt::Display for DapBatchBucket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval { batch_window, .. } => write!(f, "window/{batch_window}")?,
-            Self::FixedSize { batch_id, .. } => write!(f, "batch/{batch_id}")?,
+            Self::LeaderSelected { batch_id, .. } => write!(f, "batch/{batch_id}")?,
         };
 
         let shard = self.shard();
@@ -389,10 +389,12 @@ impl DapAggregateSpan<DapAggregateShare> {
                 batch_window: task_config.quantized_time_lower_bound(time),
                 shard,
             },
-            PartialBatchSelector::FixedSizeByBatchId { batch_id } => DapBatchBucket::FixedSize {
-                batch_id: *batch_id,
-                shard,
-            },
+            PartialBatchSelector::LeaderSelectedByBatchId { batch_id } => {
+                DapBatchBucket::LeaderSelected {
+                    batch_id: *batch_id,
+                    shard,
+                }
+            }
         };
 
         let (agg_share, reports) = self.span.entry(bucket).or_default();
@@ -707,10 +709,10 @@ impl DapTaskConfig {
                 }
                 Ok(span)
             }
-            BatchSelector::FixedSizeByBatchId { batch_id } => {
+            BatchSelector::LeaderSelectedByBatchId { batch_id } => {
                 let mut span = HashSet::with_capacity(num_agg_span_shards);
                 for shard in 0..num_agg_span_shards {
-                    span.insert(DapBatchBucket::FixedSize {
+                    span.insert(DapBatchBucket::LeaderSelected {
                         batch_id: *batch_id,
                         shard,
                     });
@@ -727,7 +729,7 @@ impl DapTaskConfig {
         report_count: u64,
     ) -> Result<bool, DapAbort> {
         match self.query {
-            DapQueryConfig::FixedSize {
+            DapQueryConfig::LeaderSelected {
                 max_batch_size: Some(max_batch_size),
             } => {
                 if report_count > u64::from(max_batch_size.get()) {
@@ -740,7 +742,7 @@ impl DapTaskConfig {
                 }
             }
             DapQueryConfig::TimeInterval
-            | DapQueryConfig::FixedSize {
+            | DapQueryConfig::LeaderSelected {
                 max_batch_size: None,
             } => (),
         };

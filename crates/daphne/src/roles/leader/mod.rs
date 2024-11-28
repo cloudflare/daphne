@@ -114,7 +114,7 @@ pub trait DapLeader: DapAggregator {
     /// Store a report for use later on.
     async fn put_report(&self, report: &Report, task_id: &TaskId) -> Result<(), DapError>;
 
-    /// Fixed-size tasks: Return the ID of the batch currently being filled.
+    /// Leader selected tasks: Return the ID of the batch currently being filled.
     //
     // TODO draft02 cleanup: Consider removing this.
     async fn current_batch(&self, task_id: &TaskId) -> Result<BatchId, DapError>;
@@ -269,8 +269,10 @@ pub async fn handle_coll_job_req<A: DapLeader>(
 
     let batch_sel = match coll_job_req.query {
         Query::TimeInterval { batch_interval } => BatchSelector::TimeInterval { batch_interval },
-        Query::FixedSizeByBatchId { batch_id } => BatchSelector::FixedSizeByBatchId { batch_id },
-        Query::FixedSizeCurrentBatch => BatchSelector::FixedSizeByBatchId {
+        Query::LeaderSelectedByBatchId { batch_id } => {
+            BatchSelector::LeaderSelectedByBatchId { batch_id }
+        }
+        Query::LeaderSelectedCurrentBatch => BatchSelector::LeaderSelectedByBatchId {
             batch_id: aggregator.current_batch(&task_id).await?,
         },
     };

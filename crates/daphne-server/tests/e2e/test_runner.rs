@@ -62,10 +62,10 @@ impl TestRunner {
         Self::with(version, &DapQueryConfig::TimeInterval).await
     }
 
-    pub async fn fixed_size(version: DapVersion) -> Self {
+    pub async fn leader_selected(version: DapVersion) -> Self {
         Self::with(
             version,
-            &DapQueryConfig::FixedSize {
+            &DapQueryConfig::LeaderSelected {
                 max_batch_size: Some(NonZeroU32::new(MAX_BATCH_SIZE).unwrap()),
             },
         )
@@ -176,7 +176,7 @@ impl TestRunner {
 
         let (query_type, max_batch_size) = match t.task_config.query {
             DapQueryConfig::TimeInterval => (1, None),
-            DapQueryConfig::FixedSize { max_batch_size } => (2, Some(max_batch_size)),
+            DapQueryConfig::LeaderSelected { max_batch_size } => (2, Some(max_batch_size)),
         };
 
         const MAX_ATTEMPTS: usize = 10;

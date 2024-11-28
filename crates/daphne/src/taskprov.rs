@@ -122,8 +122,8 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
 impl DapQueryConfig {
     fn try_from_taskprov(task_id: &TaskId, var: QueryConfigVar) -> Result<Self, DapAbort> {
         match var {
-            QueryConfigVar::FixedSize { max_batch_size } => {
-                Ok(DapQueryConfig::FixedSize { max_batch_size })
+            QueryConfigVar::LeaderSelected { max_batch_size } => {
+                Ok(DapQueryConfig::LeaderSelected { max_batch_size })
             }
             QueryConfigVar::TimeInterval => Ok(DapQueryConfig::TimeInterval),
             QueryConfigVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
@@ -354,8 +354,8 @@ impl TryFrom<&DapQueryConfig> for messages::taskprov::QueryConfigVar {
     fn try_from(query_config: &DapQueryConfig) -> Result<Self, DapError> {
         Ok(match query_config {
             DapQueryConfig::TimeInterval => messages::taskprov::QueryConfigVar::TimeInterval,
-            DapQueryConfig::FixedSize { max_batch_size } => {
-                messages::taskprov::QueryConfigVar::FixedSize {
+            DapQueryConfig::LeaderSelected { max_batch_size } => {
+                messages::taskprov::QueryConfigVar::LeaderSelected {
                     max_batch_size: *max_batch_size,
                 }
             }
@@ -472,7 +472,7 @@ mod test {
                 time_precision: 3600,
                 max_batch_query_count: 1,
                 min_batch_size: 1,
-                var: messages::taskprov::QueryConfigVar::FixedSize {
+                var: messages::taskprov::QueryConfigVar::LeaderSelected {
                     max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                 },
             },
@@ -554,7 +554,7 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::FixedSize {
+                    var: messages::taskprov::QueryConfigVar::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                 },
@@ -621,7 +621,7 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::FixedSize {
+                    var: messages::taskprov::QueryConfigVar::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                 },
