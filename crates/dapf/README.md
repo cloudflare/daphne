@@ -90,7 +90,7 @@ issue requests to `internal/test/add_task`
   "leader_authentication_token": "I-am-the-leader",
   "role": "helper",
   "vdaf_verify_key": "dJXXtUfRAdIJ7z87revcZpqXZ16nbF9HB9OyZ1CMHxM",
-  "query_type": 2,
+  "batch_mode": 2,
   "min_batch_size": 10,
   "time_precision": 3600,
   "collector_hpke_config": "gwAgAAEAAQAgPMw62iLcCzNn0DHqSwKHanelnvMrWhwGEJVSpRpzmhM",

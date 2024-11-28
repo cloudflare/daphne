@@ -55,7 +55,7 @@ pub enum DapAbort {
     /// Query mismatch. Sent in response to a [`CollectionReq`](crate::messages::CollectionReq) or
     /// [`AggregateShareReq`](crate::messages::AggregateShareReq).
     #[error("queryMismatch")]
-    QueryMismatch { detail: String, task_id: TaskId },
+    BatchModeMismatch { detail: String, task_id: TaskId },
 
     /// Report rejected. Sent in response to an upload request containing a Report that the Leader
     /// would reject during the aggregation sub-protocol.
@@ -114,7 +114,7 @@ impl DapAbort {
             | Self::BatchMismatch { detail, task_id }
             | Self::BatchOverlap { detail, task_id }
             | Self::InvalidBatchSize { detail, task_id }
-            | Self::QueryMismatch { detail, task_id }
+            | Self::BatchModeMismatch { detail, task_id }
             | Self::UnauthorizedRequest { detail, task_id }
             | Self::InvalidMessage { detail, task_id } => (
                 Some(task_id),
@@ -225,13 +225,13 @@ impl DapAbort {
     }
 
     #[inline]
-    pub(crate) fn query_mismatch(
+    pub(crate) fn batch_mode_mismatch(
         task_id: &TaskId,
-        query_type_for_task: impl std::fmt::Display,
-        query_type_for_request: impl std::fmt::Display,
+        batch_mode_for_task: impl std::fmt::Display,
+        batch_mode_for_request: impl std::fmt::Display,
     ) -> Self {
-        Self::QueryMismatch {
-            detail: format!("The task's query type is \"{query_type_for_task}\", but the request indicates \"{query_type_for_request}\"."),
+        Self::BatchModeMismatch {
+            detail: format!("The task's batch mode is \"{batch_mode_for_task}\", but the request indicates \"{batch_mode_for_request}\"."),
             task_id: *task_id,
         }
     }
@@ -274,8 +274,8 @@ impl DapAbort {
             ),
             Self::InvalidBatchSize { .. } => ("Batch size is invalid", Some(self.to_string())),
             Self::InvalidTask { .. } => ("Opted out of Taskprov task", Some(self.to_string())),
-            Self::QueryMismatch { .. } => {
-                ("Query type does not match the task", Some(self.to_string()))
+            Self::BatchModeMismatch { .. } => {
+                ("Batch Mode does not match the task", Some(self.to_string()))
             }
             Self::RoundMismatch { .. } => (
                 "Aggregation round indicated by peer does not match host",
@@ -377,7 +377,7 @@ mod test {
                 task_id,
             },
             DapAbort::MissingTaskId,
-            DapAbort::QueryMismatch {
+            DapAbort::BatchModeMismatch {
                 detail: detail.clone(),
                 task_id,
             },

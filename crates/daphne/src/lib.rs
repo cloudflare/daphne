@@ -158,7 +158,7 @@ pub struct DapGlobalConfig {
     ///
     /// At the end of an aggregation job, each Aggregator produces a [`DapAggregateSpan`] that maps
     /// buckets to aggregate shares. A bucket consists of a batch window (either the batch ID or a
-    /// window of time, depending on the DAP query type) and a shard. Sharding is intended to allow
+    /// window of time, depending on the DAP batch mode) and a shard. Sharding is intended to allow
     /// an implementation to spread transactions across multiple instances of the backend storage
     /// mechanism (e.g., durable objects in the case of Cloudflare Workers).
     ///
@@ -227,13 +227,13 @@ impl DapGlobalConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum DapQueryConfig {
-    /// The "time-interval" query type. Each report in the batch must fall into the time interval
+pub enum DapBatchMode {
+    /// The "time-interval" batch mode. Each report in the batch must fall into the time interval
     /// specified by the query.
     TimeInterval,
 
-    /// The "leader-selected" query type where by the Leader assigns reports to arbitrary batches
-    /// identified by batch IDs. In draft-09 this type includes an optional maximum batch size: if set, then
+    /// The "leader-selected" batch mode where by the Leader assigns reports to arbitrary batches
+    /// identified by batch IDs. In draft-09 this mode includes an optional maximum batch size: if set, then
     /// Aggregators are meant to stop aggregating reports when this limit is reached.
     LeaderSelected {
         #[serde(default)]
@@ -241,7 +241,7 @@ pub enum DapQueryConfig {
     },
 }
 
-impl DapQueryConfig {
+impl DapBatchMode {
     pub(crate) fn is_valid_part_batch_sel(&self, part_batch_sel: &PartialBatchSelector) -> bool {
         matches!(
             (&self, part_batch_sel),
@@ -269,7 +269,7 @@ impl DapQueryConfig {
     }
 }
 
-impl std::fmt::Display for DapQueryConfig {
+impl std::fmt::Display for DapBatchMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimeInterval => write!(f, "time_interval"),
@@ -528,7 +528,7 @@ pub struct DapTaskParameters {
     pub min_batch_size: u64,
 
     /// The query configuration for this task.
-    pub query: DapQueryConfig,
+    pub query: DapBatchMode,
 
     /// The VDAF configuration for this task.
     pub vdaf: VdafConfig,
@@ -559,7 +559,7 @@ impl DapTaskParameters {
                 time_precision: self.time_precision,
                 max_batch_query_count: 1,
                 min_batch_size: self.min_batch_size.try_into().unwrap(),
-                var: (&self.query).try_into()?,
+                batch_mode: (&self.query).try_into()?,
             },
             task_expiration: now + 86400 * 14, // expires in two weeks
             vdaf_config: messages::taskprov::VdafConfig {
@@ -597,7 +597,7 @@ impl Default for DapTaskParameters {
             time_precision: 3600, // 1 hour
             lifetime: 86400 * 14, // two weeks
             min_batch_size: 10,
-            query: DapQueryConfig::TimeInterval,
+            query: DapBatchMode::TimeInterval,
             vdaf: VdafConfig::Prio2 { dimension: 10 },
             num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         }
@@ -614,7 +614,7 @@ pub struct DapTaskConfig {
     pub helper_url: Url,
     pub time_precision: Duration,
     pub min_batch_size: u64,
-    pub query: DapQueryConfig,
+    pub query: DapBatchMode,
     pub vdaf: VdafConfig,
 
     /// The time at which the task first became valid.
@@ -729,7 +729,7 @@ impl DapTaskConfig {
         report_count: u64,
     ) -> Result<bool, DapAbort> {
         match self.query {
-            DapQueryConfig::LeaderSelected {
+            DapBatchMode::LeaderSelected {
                 max_batch_size: Some(max_batch_size),
             } => {
                 if report_count > u64::from(max_batch_size.get()) {
@@ -741,8 +741,8 @@ impl DapTaskConfig {
                     });
                 }
             }
-            DapQueryConfig::TimeInterval
-            | DapQueryConfig::LeaderSelected {
+            DapBatchMode::TimeInterval
+            | DapBatchMode::LeaderSelected {
                 max_batch_size: None,
             } => (),
         };

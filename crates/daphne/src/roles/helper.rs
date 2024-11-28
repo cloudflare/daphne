@@ -184,7 +184,7 @@ fn check_part_batch(
     agg_param: &[u8],
 ) -> Result<(), DapAbort> {
     if !task_config.query.is_valid_part_batch_sel(part_batch_sel) {
-        return Err(DapAbort::query_mismatch(
+        return Err(DapAbort::batch_mode_mismatch(
             task_id,
             &task_config.query,
             part_batch_sel,

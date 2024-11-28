@@ -10,7 +10,7 @@ pub mod leader;
 use crate::{
     messages::{Base64Encode, Query, TaskId, Time},
     taskprov::DapTaskConfigNeedsOptIn,
-    DapAbort, DapError, DapGlobalConfig, DapQueryConfig, DapRequestMeta, DapTaskConfig,
+    DapAbort, DapBatchMode, DapError, DapGlobalConfig, DapRequestMeta, DapTaskConfig,
 };
 
 pub use aggregator::DapAggregator;
@@ -38,7 +38,7 @@ async fn check_batch(
 
     // Check that the batch boundaries are valid.
     match (&task_config.query, query) {
-        (DapQueryConfig::TimeInterval { .. }, Query::TimeInterval { batch_interval }) => {
+        (DapBatchMode::TimeInterval { .. }, Query::TimeInterval { batch_interval }) => {
             if batch_interval.start % task_config.time_precision != 0
                 || batch_interval.duration % task_config.time_precision != 0
                 || batch_interval.duration < task_config.time_precision
@@ -65,8 +65,8 @@ async fn check_batch(
                 );
             }
         }
-        (DapQueryConfig::LeaderSelected { .. }, Query::LeaderSelectedCurrentBatch) => (), // nothing to do
-        (DapQueryConfig::LeaderSelected { .. }, Query::LeaderSelectedByBatchId { batch_id }) => {
+        (DapBatchMode::LeaderSelected { .. }, Query::LeaderSelectedCurrentBatch) => (), // nothing to do
+        (DapBatchMode::LeaderSelected { .. }, Query::LeaderSelectedByBatchId { batch_id }) => {
             if !agg.batch_exists(task_id, batch_id).await? {
                 return Err(DapAbort::BatchInvalid {
                     detail: format!(
@@ -78,7 +78,7 @@ async fn check_batch(
                 .into());
             }
         }
-        _ => return Err(DapAbort::query_mismatch(task_id, &task_config.query, query).into()),
+        _ => return Err(DapAbort::batch_mode_mismatch(task_id, &task_config.query, query).into()),
     };
 
     // Check that the batch does not overlap with any previously collected batch.
@@ -144,8 +144,8 @@ mod test {
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
         vdaf::{Prio3Config, VdafConfig},
-        DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob,
-        DapError, DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta,
+        DapAbort, DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapBatchMode,
+        DapCollectionJob, DapError, DapGlobalConfig, DapMeasurement, DapRequest, DapRequestMeta,
         DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
@@ -222,7 +222,7 @@ mod test {
                     not_before: now,
                     not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
-                    query: DapQueryConfig::TimeInterval,
+                    query: DapBatchMode::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
@@ -240,7 +240,7 @@ mod test {
                     not_before: now,
                     not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
-                    query: DapQueryConfig::LeaderSelected {
+                    query: DapBatchMode::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                     vdaf: vdaf_config,
@@ -260,7 +260,7 @@ mod test {
                     not_before: now,
                     not_after: now, // Expires this second
                     min_batch_size: 1,
-                    query: DapQueryConfig::TimeInterval,
+                    query: DapBatchMode::TimeInterval,
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
                     method: Default::default(),
@@ -285,7 +285,7 @@ mod test {
                         not_before: now,
                         not_after: now + Self::TASK_TIME_PRECISION,
                         min_batch_size: 10,
-                        query: DapQueryConfig::TimeInterval,
+                        query: DapBatchMode::TimeInterval,
                         vdaf: mastic,
                         vdaf_verify_key: mastic.gen_verify_key(),
                         method: Default::default(),
@@ -448,8 +448,8 @@ mod test {
             let mut rng = thread_rng();
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
-                DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
-                DapQueryConfig::LeaderSelected { .. } => {
+                DapBatchMode::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
+                DapBatchMode::LeaderSelected { .. } => {
                     PartialBatchSelector::LeaderSelectedByBatchId {
                         batch_id: BatchId(rng.gen()),
                     }
@@ -592,7 +592,7 @@ mod test {
             helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
                 .await
                 .unwrap_err(),
-            DapError::Abort(DapAbort::QueryMismatch { .. })
+            DapError::Abort(DapAbort::BatchModeMismatch { .. })
         );
 
         assert_eq!(t.helper.audit_log.invocations(), 0);
@@ -687,7 +687,7 @@ mod test {
             helper::handle_agg_share_req(&*t.helper, req)
                 .await
                 .unwrap_err(),
-            DapError::Abort(DapAbort::QueryMismatch { .. })
+            DapError::Abort(DapAbort::BatchModeMismatch { .. })
         );
 
         // Leader sends aggregate share request for unrecognized batch ID.
@@ -1294,7 +1294,7 @@ mod test {
             leader::handle_coll_job_req(&*t.leader, &req)
                 .await
                 .unwrap_err(),
-            DapError::Abort(DapAbort::QueryMismatch { .. })
+            DapError::Abort(DapAbort::BatchModeMismatch { .. })
         );
 
         // Collector indicates unrecognized batch ID.
@@ -1423,7 +1423,7 @@ mod test {
         let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
             version,
             min_batch_size: 1,
-            query: DapQueryConfig::LeaderSelected {
+            query: DapBatchMode::LeaderSelected {
                 max_batch_size: Some(NonZeroU32::new(2).unwrap()),
             },
             vdaf: vdaf_config,

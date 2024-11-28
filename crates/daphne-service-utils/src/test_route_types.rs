@@ -85,7 +85,7 @@ pub struct InternalTestAddTask {
     pub collector_authentication_token: Option<String>,
     pub role: DapAggregatorRole,
     pub vdaf_verify_key: String, // base64url
-    pub query_type: u8,
+    pub batch_mode: u8,
     pub min_batch_size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_batch_size: Option<NonZeroU32>,

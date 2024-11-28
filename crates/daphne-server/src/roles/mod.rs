@@ -113,7 +113,7 @@ mod test_utils {
         messages::decode_base64url_vec,
         roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
-        DapError, DapQueryConfig, DapTaskConfig, DapVersion,
+        DapBatchMode, DapError, DapTaskConfig, DapVersion,
     };
     use daphne_service_utils::{
         bearer_token::BearerToken,
@@ -276,17 +276,17 @@ mod test_utils {
             };
 
             // Query configuraiton.
-            let query = match (cmd.query_type, cmd.max_batch_size) {
-                (1, None) => DapQueryConfig::TimeInterval,
+            let query = match (cmd.batch_mode, cmd.max_batch_size) {
+                (1, None) => DapBatchMode::TimeInterval,
                 (1, Some(..)) => {
                     return Err(fatal_error!(
                         err = "command failed: unexpected max batch size"
                     ))
                 }
-                (2, max_batch_size) => DapQueryConfig::LeaderSelected { max_batch_size },
+                (2, max_batch_size) => DapBatchMode::LeaderSelected { max_batch_size },
                 _ => {
                     return Err(fatal_error!(
-                        err = "command failed: unrecognized query type"
+                        err = "command failed: unrecognized batch mode"
                     ))
                 }
             };

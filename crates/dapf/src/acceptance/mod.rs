@@ -29,7 +29,7 @@ use daphne::{
     metrics::DaphneMetrics,
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
-    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapMeasurement, DapQueryConfig,
+    DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchMode, DapMeasurement,
     DapTaskConfig, DapTaskParameters, DapVersion, ReplayProtection,
 };
 use daphne_service_utils::bearer_token::BearerToken;
@@ -380,7 +380,7 @@ impl Test {
             time_precision: 3600,
             lifetime: 60,
             min_batch_size: reports_per_batch.try_into().unwrap(),
-            query: DapQueryConfig::LeaderSelected {
+            query: DapBatchMode::LeaderSelected {
                 max_batch_size: NonZeroU32::new(reports_per_batch.try_into().unwrap()),
             },
             vdaf: self.vdaf_config,

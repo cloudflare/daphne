@@ -16,7 +16,7 @@ use daphne::{
     hpke::HpkeKemId,
     messages::{Base64Encode, CollectionJobId, TaskId},
     vdaf::{Prio3Config, VdafConfig},
-    DapQueryConfig,
+    DapBatchMode,
 };
 
 /// Some defaults for ease of use from the CLI. Instead of specifying the entire vdaf config json
@@ -128,37 +128,37 @@ impl CliVdafConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct CliDapQueryConfig(pub DapQueryConfig);
+pub struct CliDapBatchMode(pub DapBatchMode);
 
-impl fmt::Display for CliDapQueryConfig {
+impl fmt::Display for CliDapBatchMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <DapQueryConfig as fmt::Display>::fmt(&self.0, f)
+        <DapBatchMode as fmt::Display>::fmt(&self.0, f)
     }
 }
 
-impl From<CliDapQueryConfig> for DapQueryConfig {
-    fn from(CliDapQueryConfig(val): CliDapQueryConfig) -> Self {
+impl From<CliDapBatchMode> for DapBatchMode {
+    fn from(CliDapBatchMode(val): CliDapBatchMode) -> Self {
         val
     }
 }
 
-impl From<DapQueryConfig> for CliDapQueryConfig {
-    fn from(value: DapQueryConfig) -> Self {
+impl From<DapBatchMode> for CliDapBatchMode {
+    fn from(value: DapBatchMode) -> Self {
         Self(value)
     }
 }
 
-impl FromStr for CliDapQueryConfig {
+impl FromStr for CliDapBatchMode {
     type Err = String;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if s == "time-interval" {
-            Ok(Self(DapQueryConfig::TimeInterval))
+            Ok(Self(DapBatchMode::TimeInterval))
         } else if let Some(size) = s.strip_prefix("leader-selected") {
-            Ok(Self(DapQueryConfig::LeaderSelected {
+            Ok(Self(DapBatchMode::LeaderSelected {
                 max_batch_size: if let Some(size) = size.strip_prefix("-") {
                     Some(
                         size.parse()
-                            .map_err(|e| format!("{s} is an invalid query config: {e:?}"))?,
+                            .map_err(|e| format!("{s} is an invalid max batch size: {e:?}"))?,
                     )
                 } else if size.is_empty() {
                     None
