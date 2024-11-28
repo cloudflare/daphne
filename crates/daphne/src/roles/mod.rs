@@ -65,8 +65,8 @@ async fn check_batch(
                 );
             }
         }
-        (DapQueryConfig::FixedSize { .. }, Query::FixedSizeCurrentBatch) => (), // nothing to do
-        (DapQueryConfig::FixedSize { .. }, Query::FixedSizeByBatchId { batch_id }) => {
+        (DapQueryConfig::LeaderSelected { .. }, Query::LeaderSelectedCurrentBatch) => (), // nothing to do
+        (DapQueryConfig::LeaderSelected { .. }, Query::LeaderSelectedByBatchId { batch_id }) => {
             if !agg.batch_exists(task_id, batch_id).await? {
                 return Err(DapAbort::BatchInvalid {
                     detail: format!(
@@ -166,7 +166,7 @@ mod test {
         pub now: Time,
         global_config: DapGlobalConfig,
         pub time_interval_task_id: TaskId,
-        pub fixed_size_task_id: TaskId,
+        pub leader_selected_task_id: TaskId,
         pub expired_task_id: TaskId,
         #[cfg(feature = "experimental")]
         pub mastic_task_id: TaskId,
@@ -206,7 +206,7 @@ mod test {
 
             // Create the task list.
             let time_interval_task_id = TaskId(rng.gen());
-            let fixed_size_task_id = TaskId(rng.gen());
+            let leader_selected_task_id = TaskId(rng.gen());
             let expired_task_id = TaskId(rng.gen());
             #[cfg(feature = "experimental")]
             let mastic_task_id = TaskId(rng.gen());
@@ -230,7 +230,7 @@ mod test {
                 },
             );
             tasks.insert(
-                fixed_size_task_id,
+                leader_selected_task_id,
                 DapTaskConfig {
                     version,
                     collector_hpke_config: collector_hpke_receiver_config.config.clone(),
@@ -240,7 +240,7 @@ mod test {
                     not_before: now,
                     not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
-                    query: DapQueryConfig::FixedSize {
+                    query: DapQueryConfig::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                     vdaf: vdaf_config,
@@ -318,7 +318,7 @@ mod test {
                 now,
                 global_config,
                 time_interval_task_id,
-                fixed_size_task_id,
+                leader_selected_task_id,
                 expired_task_id,
                 #[cfg(feature = "experimental")]
                 mastic_task_id,
@@ -361,7 +361,7 @@ mod test {
                 leader,
                 helper,
                 time_interval_task_id: self.time_interval_task_id,
-                fixed_size_task_id: self.fixed_size_task_id,
+                leader_selected_task_id: self.leader_selected_task_id,
                 expired_task_id: self.expired_task_id,
                 #[cfg(feature = "experimental")]
                 mastic_task_id: self.mastic_task_id,
@@ -376,7 +376,7 @@ mod test {
         leader: Arc<InMemoryAggregator>,
         helper: Arc<InMemoryAggregator>,
         time_interval_task_id: TaskId,
-        fixed_size_task_id: TaskId,
+        leader_selected_task_id: TaskId,
         expired_task_id: TaskId,
         #[cfg(feature = "experimental")]
         mastic_task_id: TaskId,
@@ -449,9 +449,11 @@ mod test {
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
             let part_batch_sel = match task_config.query {
                 DapQueryConfig::TimeInterval { .. } => PartialBatchSelector::TimeInterval,
-                DapQueryConfig::FixedSize { .. } => PartialBatchSelector::FixedSizeByBatchId {
-                    batch_id: BatchId(rng.gen()),
-                },
+                DapQueryConfig::LeaderSelected { .. } => {
+                    PartialBatchSelector::LeaderSelectedByBatchId {
+                        batch_id: BatchId(rng.gen()),
+                    }
+                }
             };
 
             let agg_job_id = AggregationJobId(rng.gen());
@@ -572,7 +574,7 @@ mod test {
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
         let agg_job_id = AggregationJobId(rng.gen());
 
-        // Helper expects "time_interval" query, but Leader indicates "fixed_size".
+        // Helper expects "time_interval" query, but Leader indicates "leader_selected".
         let req = Test::leader_req(
             task_id,
             &task_config,
@@ -580,7 +582,7 @@ mod test {
             DapMediaType::AggregationJobInitReq,
             AggregationJobInitReq {
                 agg_param: Vec::default(),
-                part_batch_sel: PartialBatchSelector::FixedSizeByBatchId {
+                part_batch_sel: PartialBatchSelector::LeaderSelectedByBatchId {
                     batch_id: BatchId(rng.gen()),
                 },
                 prep_inits: Vec::default(),
@@ -662,7 +664,7 @@ mod test {
         let mut rng = thread_rng();
         let t = Test::new(version);
 
-        // Helper expects "time_interval" query, but Leader sent "fixed_size".
+        // Helper expects "time_interval" query, but Leader sent "leader_selected".
         let task_config = t
             .leader
             .unchecked_get_task_config(&t.time_interval_task_id)
@@ -673,7 +675,7 @@ mod test {
             (),
             DapMediaType::AggregateShareReq,
             AggregateShareReq {
-                batch_sel: BatchSelector::FixedSizeByBatchId {
+                batch_sel: BatchSelector::LeaderSelectedByBatchId {
                     batch_id: BatchId(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -691,15 +693,15 @@ mod test {
         // Leader sends aggregate share request for unrecognized batch ID.
         let task_config = t
             .leader
-            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .unchecked_get_task_config(&t.leader_selected_task_id)
             .await;
         let req = Test::leader_req(
-            &t.fixed_size_task_id,
+            &t.leader_selected_task_id,
             &task_config,
             (),
             DapMediaType::AggregateShareReq,
             AggregateShareReq {
-                batch_sel: BatchSelector::FixedSizeByBatchId {
+                batch_sel: BatchSelector::LeaderSelectedByBatchId {
                     batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -1204,11 +1206,11 @@ mod test {
 
     async fn handle_coll_job_req_fail_unrecongized_batch(version: DapVersion) {
         let t = Test::new(version);
-        let task_id = &t.fixed_size_task_id;
+        let task_id = &t.leader_selected_task_id;
 
         let req = t
             .gen_test_coll_job_req(
-                Query::FixedSizeByBatchId {
+                Query::LeaderSelectedByBatchId {
                     batch_id: BatchId(thread_rng().gen()),
                 },
                 task_id,
@@ -1272,7 +1274,7 @@ mod test {
         let mut rng = thread_rng();
         let t = Test::new(version);
 
-        // Leader expects "time_interval" query, but Collector sent "fixed_size".
+        // Leader expects "time_interval" query, but Collector sent "leader_selected".
         let task_config = t
             .leader
             .unchecked_get_task_config(&t.time_interval_task_id)
@@ -1282,7 +1284,7 @@ mod test {
             &task_config,
             DapMediaType::CollectionReq,
             CollectionReq {
-                query: Query::FixedSizeByBatchId {
+                query: Query::LeaderSelectedByBatchId {
                     batch_id: BatchId(rng.gen()),
                 },
                 agg_param: Vec::default(),
@@ -1298,14 +1300,14 @@ mod test {
         // Collector indicates unrecognized batch ID.
         let task_config = t
             .leader
-            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .unchecked_get_task_config(&t.leader_selected_task_id)
             .await;
         let req = Test::collector_req(
-            &t.fixed_size_task_id,
+            &t.leader_selected_task_id,
             &task_config,
             DapMediaType::CollectionReq,
             CollectionReq {
-                query: Query::FixedSizeByBatchId {
+                query: Query::LeaderSelectedByBatchId {
                     batch_id: BatchId(rng.gen()), // Unrecognized batch ID
                 },
                 agg_param: Vec::default(),
@@ -1340,7 +1342,7 @@ mod test {
         let task_id = &t.time_interval_task_id;
         let task_config = t
             .leader
-            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .unchecked_get_task_config(&t.leader_selected_task_id)
             .await;
 
         // Client: Send upload request to Leader.
@@ -1375,9 +1377,9 @@ mod test {
 
     async_test_versions! { e2e_time_interval }
 
-    async fn e2e_fixed_size(version: DapVersion) {
+    async fn e2e_leader_selected(version: DapVersion) {
         let t = Test::new(version);
-        let task_id = &t.fixed_size_task_id;
+        let task_id = &t.leader_selected_task_id;
 
         // Client: Send upload request to Leader.
         let report = t.gen_test_report(task_id).await;
@@ -1386,7 +1388,7 @@ mod test {
             .unwrap();
 
         // Collector: Request result from the Leader.
-        let query = Query::FixedSizeCurrentBatch;
+        let query = Query::LeaderSelectedCurrentBatch;
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
             .await
             .unwrap();
@@ -1409,7 +1411,7 @@ mod test {
         });
     }
 
-    async_test_versions! { e2e_fixed_size }
+    async_test_versions! { e2e_leader_selected }
 
     async fn e2e_taskprov(
         version: DapVersion,
@@ -1421,7 +1423,7 @@ mod test {
         let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
             version,
             min_batch_size: 1,
-            query: DapQueryConfig::FixedSize {
+            query: DapQueryConfig::LeaderSelected {
                 max_batch_size: Some(NonZeroU32::new(2).unwrap()),
             },
             vdaf: vdaf_config,
@@ -1474,7 +1476,7 @@ mod test {
         }
 
         // Collector: Request result from the Leader.
-        let query = Query::FixedSizeCurrentBatch;
+        let query = Query::LeaderSelectedCurrentBatch;
         leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
             .await
             .unwrap();
@@ -1581,7 +1583,7 @@ mod test {
             let task_id = &t.time_interval_task_id;
             let task_config = t
                 .leader
-                .unchecked_get_task_config(&t.fixed_size_task_id)
+                .unchecked_get_task_config(&t.leader_selected_task_id)
                 .await;
 
             let report = t.gen_test_report(task_id).await;
@@ -1597,7 +1599,7 @@ mod test {
 
         // Requests for the fixed-length task.
         {
-            let task_id = &t.fixed_size_task_id;
+            let task_id = &t.leader_selected_task_id;
 
             let report = t.gen_test_report(task_id).await;
             leader::handle_upload_req(&*t.leader, t.gen_test_upload_req(report, task_id).await)
@@ -1605,7 +1607,7 @@ mod test {
                 .unwrap();
 
             // Collector: Request result from the Leader.
-            let query = Query::FixedSizeCurrentBatch;
+            let query = Query::LeaderSelectedCurrentBatch;
             leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, task_id).await)
                 .await
                 .unwrap();
@@ -1638,7 +1640,7 @@ mod test {
         let task_id = &t.mastic_task_id;
         let task_config = t
             .leader
-            .unchecked_get_task_config(&t.fixed_size_task_id)
+            .unchecked_get_task_config(&t.leader_selected_task_id)
             .await;
 
         for i in 0..10 {

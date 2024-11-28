@@ -294,7 +294,7 @@ impl DapAggregator for crate::App {
             }))?;
         let version = task_config.as_ref().version;
 
-        let agg_span = task_config.batch_span_for_sel(&BatchSelector::FixedSizeByBatchId {
+        let agg_span = task_config.batch_span_for_sel(&BatchSelector::LeaderSelectedByBatchId {
             batch_id: *batch_id,
         })?;
 

@@ -771,8 +771,8 @@ async fn handle_decode_actions(action: DecodeAction) -> anyhow::Result<()> {
                     let batch_selector = batch_selector.unwrap_or_else(||
                         match message.part_batch_sel {
                             PartialBatchSelector::TimeInterval => panic!("can't deduce the time interval, please provide a batch selector"),
-                            PartialBatchSelector::FixedSizeByBatchId { batch_id } => {
-                                BatchSelector::FixedSizeByBatchId { batch_id }
+                            PartialBatchSelector::LeaderSelectedByBatchId { batch_id } => {
+                                BatchSelector::LeaderSelectedByBatchId { batch_id }
                             }
                         }
                     );
@@ -844,7 +844,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key());
             let CliDapQueryConfig(query) = use_or_request_from_user_or_default(
                 query,
-                || DapQueryConfig::FixedSize {
+                || DapQueryConfig::LeaderSelected {
                     max_batch_size: None,
                 },
                 "query",
@@ -876,7 +876,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 vdaf_verify_key,
                 query_type: match query {
                     DapQueryConfig::TimeInterval => 1,
-                    DapQueryConfig::FixedSize { .. } => 2,
+                    DapQueryConfig::LeaderSelected { .. } => 2,
                 },
                 min_batch_size: use_or_request_from_user_or_default(
                     min_batch_size,
@@ -885,7 +885,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 )?,
                 max_batch_size: match query {
                     DapQueryConfig::TimeInterval => None,
-                    DapQueryConfig::FixedSize { max_batch_size } => max_batch_size,
+                    DapQueryConfig::LeaderSelected { max_batch_size } => max_batch_size,
                 },
                 time_precision: use_or_request_from_user_or_default(
                     time_precision,

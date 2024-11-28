@@ -1162,9 +1162,9 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
 async_test_versions! { leader_collect_abort_overlapping_batch_interval }
 
 #[tokio::test]
-async fn fixed_size() {
+async fn leader_selected() {
     let version = DapVersion::Draft09;
-    let t = TestRunner::fixed_size(version).await;
+    let t = TestRunner::leader_selected(version).await;
     let path = t.upload_path();
     let client = t.http_client();
     let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
@@ -1204,7 +1204,7 @@ async fn fixed_size() {
     // Collector: Get the collect URI.
     let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
-        query: Query::FixedSizeCurrentBatch,
+        query: Query::LeaderSelectedCurrentBatch,
         agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
@@ -1247,7 +1247,7 @@ async fn fixed_size() {
         .consume_encrypted_agg_shares(
             &t.collector_hpke_receiver,
             &t.task_id,
-            &BatchSelector::FixedSizeByBatchId { batch_id },
+            &BatchSelector::LeaderSelectedByBatchId { batch_id },
             collection.report_count,
             &agg_param,
             collection.encrypted_agg_shares.to_vec(),
@@ -1302,7 +1302,7 @@ async fn fixed_size() {
     // Collector: Get the collect URI.
     let agg_param = DapAggregationParam::Empty;
     let collect_req = CollectionReq {
-        query: Query::FixedSizeCurrentBatch,
+        query: Query::LeaderSelectedCurrentBatch,
         agg_param: agg_param.get_encoded().unwrap(),
     };
     let collect_uri = t
@@ -1329,7 +1329,7 @@ async fn fixed_size() {
         DapMediaType::CollectionReq,
         None,
         CollectionReq {
-            query: Query::FixedSizeByBatchId {
+            query: Query::LeaderSelectedByBatchId {
                 batch_id: prev_batch_id,
             },
             agg_param: Vec::new(),

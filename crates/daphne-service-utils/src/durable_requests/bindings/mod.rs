@@ -144,7 +144,7 @@ mod tests {
             "batch/IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
             format!(
                 "{}",
-                DapBatchBucket::FixedSize {
+                DapBatchBucket::LeaderSelected {
                     batch_id: BatchId([34; 32]),
                     shard: 0,
                 }
@@ -164,7 +164,7 @@ mod tests {
             "batch/IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI/shard/2323",
             format!(
                 "{}",
-                DapBatchBucket::FixedSize {
+                DapBatchBucket::LeaderSelected {
                     batch_id: BatchId([34; 32]),
                     shard: 2323,
                 }

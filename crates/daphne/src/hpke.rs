@@ -629,7 +629,7 @@ mod test {
             sender: DapAggregatorRole::Leader,
             task_id: &crate::messages::TaskId(rand::random()),
             agg_param: &crate::DapAggregationParam::Empty,
-            batch_selector: &crate::messages::BatchSelector::FixedSizeByBatchId {
+            batch_selector: &crate::messages::BatchSelector::LeaderSelectedByBatchId {
                 batch_id: BatchId(rand::random()),
             },
         };
@@ -696,7 +696,7 @@ mod test {
                     duration: rand::random(),
                 },
             },
-            BatchSelector::FixedSizeByBatchId {
+            BatchSelector::LeaderSelectedByBatchId {
                 batch_id: BatchId(rand::random()),
             },
         ];

@@ -424,7 +424,7 @@ pub async fn execute_single_combination_from_env(
         println!("\t- load_control:        {load_control:?}");
 
         let batch_id = BatchId(thread_rng().gen());
-        let part_batch_sel = PartialBatchSelector::FixedSizeByBatchId { batch_id };
+        let part_batch_sel = PartialBatchSelector::LeaderSelectedByBatchId { batch_id };
 
         let run = async {
             let (test_task_config, hpke_config_fetch_time) = t
