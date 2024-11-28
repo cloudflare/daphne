@@ -663,7 +663,7 @@ mod test {
                 time_precision: 1,
                 max_batch_query_count: 1,
                 min_batch_size: 1,
-                var: daphne::messages::taskprov::QueryConfigVar::TimeInterval,
+                batch_mode: daphne::messages::taskprov::BatchMode::TimeInterval,
             },
             task_expiration: 1,
             vdaf_config: daphne::messages::taskprov::VdafConfig {

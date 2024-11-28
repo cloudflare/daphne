@@ -24,8 +24,8 @@ use crate::{
         DapAggregator, DapHelper, DapLeader,
     },
     taskprov, DapAbort, DapAggregateResult, DapAggregateShare, DapAggregateSpan,
-    DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError,
-    DapGlobalConfig, DapMeasurement, DapQueryConfig, DapRequest, DapRequestMeta, DapResponse,
+    DapAggregationJobState, DapAggregationParam, DapBatchBucket, DapBatchMode, DapCollectionJob,
+    DapError, DapGlobalConfig, DapMeasurement, DapRequest, DapRequestMeta, DapResponse,
     DapTaskConfig, DapVersion, ReplayProtection, VdafConfig,
 };
 use async_trait::async_trait;
@@ -116,7 +116,7 @@ impl AggregationJobTest {
                 not_before: now,
                 not_after: now + 500,
                 min_batch_size: 10,
-                query: DapQueryConfig::TimeInterval,
+                query: DapBatchMode::TimeInterval,
                 vdaf: *vdaf,
                 vdaf_verify_key,
                 collector_hpke_config,

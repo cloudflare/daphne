@@ -23,15 +23,15 @@ use std::{
     io::{Cursor, Read},
 };
 
-// Query types
-const QUERY_TYPE_TIME_INTERVAL: u8 = 0x01;
-const QUERY_TYPE_LEADER_SELECTED: u8 = 0x02;
+// Batch modes
+const BATCH_MODE_TIME_INTERVAL: u8 = 0x01;
+const BATCH_MODE_LEADER_SELECTED: u8 = 0x02;
 
-// LeaderSelected query subtypes
+// LeaderSelected batch submodes
 // This is a slight misnomer, as these code points only exist in draft-09
-// where "leader selected" queries were still called fixed size.
-const LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID: u8 = 0x00;
-const LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH: u8 = 0x01;
+// where "leader selected" batches were still called fixed size queries.
+const LEADER_SELECTED_BATCH_MODE_BY_BATCH_ID: u8 = 0x00;
+const LEADER_SELECTED_BATCH_MODE_CURRENT_BATCH: u8 = 0x01;
 
 // Known extension types.
 const EXTENSION_TASKPROV: u16 = 0xff00;
@@ -382,9 +382,9 @@ impl ParameterizedEncode<DapVersion> for PartialBatchSelector {
         match version {
             DapVersion::Draft09 => {
                 match self {
-                    Self::TimeInterval => QUERY_TYPE_TIME_INTERVAL.encode(bytes)?,
+                    Self::TimeInterval => BATCH_MODE_TIME_INTERVAL.encode(bytes)?,
                     Self::LeaderSelectedByBatchId { batch_id } => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
                 };
@@ -393,11 +393,11 @@ impl ParameterizedEncode<DapVersion> for PartialBatchSelector {
             DapVersion::Latest => {
                 match self {
                     Self::TimeInterval => {
-                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
                         encode_u16_bytes(bytes, &Vec::new())?;
                     }
                     Self::LeaderSelectedByBatchId { batch_id } => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
                         let config = &mut Vec::new();
                         batch_id.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
@@ -416,14 +416,14 @@ impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
     ) -> Result<Self, CodecError> {
         match version {
             DapVersion::Draft09 => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval),
-                QUERY_TYPE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
+                BATCH_MODE_TIME_INTERVAL => Ok(Self::TimeInterval),
+                BATCH_MODE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
                     batch_id: BatchId::decode(bytes)?,
                 }),
                 _ => Err(CodecError::UnexpectedValue),
             },
             DapVersion::Latest => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => {
+                BATCH_MODE_TIME_INTERVAL => {
                     let config = decode_u16_bytes(bytes)?;
                     if config.is_empty() {
                         Ok(Self::TimeInterval)
@@ -431,7 +431,7 @@ impl ParameterizedDecode<DapVersion> for PartialBatchSelector {
                         Err(CodecError::UnexpectedValue)
                     }
                 }
-                QUERY_TYPE_LEADER_SELECTED => {
+                BATCH_MODE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
                     let batch_id = BatchId::decode(&mut Cursor::new(config.as_slice()))?;
                     Ok(Self::LeaderSelectedByBatchId { batch_id })
@@ -476,11 +476,11 @@ impl ParameterizedEncode<DapVersion> for BatchSelector {
             DapVersion::Draft09 => {
                 match self {
                     Self::TimeInterval { batch_interval } => {
-                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
                         batch_interval.encode(bytes)?;
                     }
                     Self::LeaderSelectedByBatchId { batch_id } => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
                 };
@@ -489,13 +489,13 @@ impl ParameterizedEncode<DapVersion> for BatchSelector {
             DapVersion::Latest => {
                 match self {
                     Self::TimeInterval { batch_interval } => {
-                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
                         let config = &mut Vec::new();
                         batch_interval.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
                     }
                     Self::LeaderSelectedByBatchId { batch_id } => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
                         let config = &mut Vec::new();
                         batch_id.encode(config)?;
                         encode_u16_bytes(bytes, config)?;
@@ -514,22 +514,22 @@ impl ParameterizedDecode<DapVersion> for BatchSelector {
     ) -> Result<Self, CodecError> {
         match version {
             DapVersion::Draft09 => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                BATCH_MODE_TIME_INTERVAL => Ok(Self::TimeInterval {
                     batch_interval: Interval::decode(bytes)?,
                 }),
-                QUERY_TYPE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
+                BATCH_MODE_LEADER_SELECTED => Ok(Self::LeaderSelectedByBatchId {
                     batch_id: BatchId::decode(bytes)?,
                 }),
                 _ => Err(CodecError::UnexpectedValue),
             },
             DapVersion::Latest => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => {
+                BATCH_MODE_TIME_INTERVAL => {
                     let config = decode_u16_bytes(bytes)?;
                     Ok(Self::TimeInterval {
                         batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
                     })
                 }
-                QUERY_TYPE_LEADER_SELECTED => {
+                BATCH_MODE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
                     Ok(Self::LeaderSelectedByBatchId {
                         batch_id: BatchId::decode(&mut Cursor::new(config.as_slice()))?,
@@ -1064,23 +1064,23 @@ impl ParameterizedEncode<DapVersion> for Query {
             DapVersion::Draft09 => {
                 match self {
                     Self::TimeInterval { batch_interval } => {
-                        QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                        BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
                         batch_interval.encode(bytes)?;
                     }
                     Self::LeaderSelectedByBatchId { batch_id } => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
-                        LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
+                        LEADER_SELECTED_BATCH_MODE_BY_BATCH_ID.encode(bytes)?;
                         batch_id.encode(bytes)?;
                     }
                     Self::LeaderSelectedCurrentBatch => {
-                        QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
-                        LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH.encode(bytes)?;
+                        BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
+                        LEADER_SELECTED_BATCH_MODE_CURRENT_BATCH.encode(bytes)?;
                     }
                 };
             }
             DapVersion::Latest => match self {
                 Self::TimeInterval { batch_interval } => {
-                    QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+                    BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
                     let config = &mut Vec::new();
                     batch_interval.encode(config)?;
                     encode_u16_bytes(bytes, config)?;
@@ -1089,7 +1089,7 @@ impl ParameterizedEncode<DapVersion> for Query {
                     return Err(CodecError::UnexpectedValue)
                 }
                 Self::LeaderSelectedCurrentBatch => {
-                    QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+                    BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
                     let config = &mut Vec::new();
                     encode_u16_bytes(bytes, config)?;
                 }
@@ -1106,18 +1106,18 @@ impl ParameterizedDecode<DapVersion> for Query {
     ) -> Result<Self, CodecError> {
         match version {
             DapVersion::Draft09 => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => Ok(Self::TimeInterval {
+                BATCH_MODE_TIME_INTERVAL => Ok(Self::TimeInterval {
                     batch_interval: Interval::decode(bytes)?,
                 }),
-                QUERY_TYPE_LEADER_SELECTED => {
+                BATCH_MODE_LEADER_SELECTED => {
                     let subtype = u8::decode(bytes)?;
                     match subtype {
-                        LEADER_SELECTED_QUERY_TYPE_BY_BATCH_ID => {
+                        LEADER_SELECTED_BATCH_MODE_BY_BATCH_ID => {
                             Ok(Self::LeaderSelectedByBatchId {
                                 batch_id: BatchId::decode(bytes)?,
                             })
                         }
-                        LEADER_SELECTED_QUERY_TYPE_CURRENT_BATCH => {
+                        LEADER_SELECTED_BATCH_MODE_CURRENT_BATCH => {
                             Ok(Self::LeaderSelectedCurrentBatch)
                         }
                         _ => Err(CodecError::UnexpectedValue),
@@ -1126,13 +1126,13 @@ impl ParameterizedDecode<DapVersion> for Query {
                 _ => Err(CodecError::UnexpectedValue),
             },
             DapVersion::Latest => match u8::decode(bytes)? {
-                QUERY_TYPE_TIME_INTERVAL => {
+                BATCH_MODE_TIME_INTERVAL => {
                     let config = decode_u16_bytes(bytes)?;
                     Ok(Self::TimeInterval {
                         batch_interval: Interval::decode(&mut Cursor::new(config.as_slice()))?,
                     })
                 }
-                QUERY_TYPE_LEADER_SELECTED => {
+                BATCH_MODE_LEADER_SELECTED => {
                     let config = decode_u16_bytes(bytes)?;
                     if !config.is_empty() {
                         Err(CodecError::UnexpectedValue)

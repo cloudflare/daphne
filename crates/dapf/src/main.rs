@@ -7,7 +7,7 @@ use dapf::{
     acceptance::{load_testing, LoadControlParams, LoadControlStride, TestOptions},
     cli_parsers::{
         self, use_or_request_from_user, use_or_request_from_user_or_default, CliCollectionJobId,
-        CliDapQueryConfig, CliHpkeKemId, CliTaskId, CliVdafConfig,
+        CliDapBatchMode, CliHpkeKemId, CliTaskId, CliVdafConfig,
     },
     deduce_dap_version_from_url,
     functions::decrypt,
@@ -19,7 +19,7 @@ use daphne::{
     messages::{
         self, encode_base64url, BatchSelector, CollectionReq, PartialBatchSelector, Query, TaskId,
     },
-    DapMeasurement, DapQueryConfig, DapVersion,
+    DapBatchMode, DapMeasurement, DapVersion,
 };
 use daphne_service_utils::{
     bearer_token::BearerToken,
@@ -238,7 +238,7 @@ enum TestAction {
         #[arg(long)]
         role: Option<DapAggregatorRole>,
         #[arg(long)]
-        query: Option<CliDapQueryConfig>,
+        query: Option<CliDapBatchMode>,
         #[arg(long)]
         min_batch_size: Option<u64>,
         #[arg(long)]
@@ -842,9 +842,9 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             let vdaf = use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf")?
                 .into_vdaf_config();
             let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key());
-            let CliDapQueryConfig(query) = use_or_request_from_user_or_default(
+            let CliDapBatchMode(query) = use_or_request_from_user_or_default(
                 query,
-                || DapQueryConfig::LeaderSelected {
+                || DapBatchMode::LeaderSelected {
                     max_batch_size: None,
                 },
                 "query",
@@ -874,9 +874,9 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 },
                 role,
                 vdaf_verify_key,
-                query_type: match query {
-                    DapQueryConfig::TimeInterval => 1,
-                    DapQueryConfig::LeaderSelected { .. } => 2,
+                batch_mode: match query {
+                    DapBatchMode::TimeInterval => 1,
+                    DapBatchMode::LeaderSelected { .. } => 2,
                 },
                 min_batch_size: use_or_request_from_user_or_default(
                     min_batch_size,
@@ -884,8 +884,8 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     "min batch size",
                 )?,
                 max_batch_size: match query {
-                    DapQueryConfig::TimeInterval => None,
-                    DapQueryConfig::LeaderSelected { max_batch_size } => max_batch_size,
+                    DapBatchMode::TimeInterval => None,
+                    DapBatchMode::LeaderSelected { max_batch_size } => max_batch_size,
                 },
                 time_precision: use_or_request_from_user_or_default(
                     time_precision,

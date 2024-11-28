@@ -10,7 +10,7 @@ use daphne::{
         decode_base64url_vec, Base64Encode, BatchSelector, Collection, CollectionReq, Extension,
         HpkeCiphertext, Interval, Query, Report, ReportId, ReportMetadata, TaskId,
     },
-    DapAggregateResult, DapAggregationParam, DapMeasurement, DapQueryConfig, DapTaskParameters,
+    DapAggregateResult, DapAggregationParam, DapBatchMode, DapMeasurement, DapTaskParameters,
     DapVersion,
 };
 use daphne_service_utils::http_headers;
@@ -395,7 +395,7 @@ async fn leader_upload_taskprov() {
     let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
         version,
         min_batch_size: 10,
-        query: DapQueryConfig::TimeInterval,
+        query: DapBatchMode::TimeInterval,
         leader_url: t.task_config.leader_url.clone(),
         helper_url: t.task_config.helper_url.clone(),
         ..Default::default()
@@ -487,7 +487,7 @@ async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
     let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
         version,
         min_batch_size: 10,
-        query: DapQueryConfig::TimeInterval,
+        query: DapBatchMode::TimeInterval,
         leader_url: t.task_config.leader_url.clone(),
         helper_url: t.task_config.helper_url.clone(),
         ..Default::default()
@@ -1354,7 +1354,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
         version,
         min_batch_size: 10,
-        query: DapQueryConfig::TimeInterval,
+        query: DapBatchMode::TimeInterval,
         leader_url: t.task_config.leader_url.clone(),
         helper_url: t.task_config.helper_url.clone(),
         ..Default::default()

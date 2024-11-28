@@ -11,7 +11,7 @@ use daphne::{
         Duration, HpkeConfigList, Interval, TaskId,
     },
     vdaf::{Prio3Config, VdafConfig},
-    DapGlobalConfig, DapLeaderProcessTelemetry, DapQueryConfig, DapTaskConfig, DapVersion,
+    DapBatchMode, DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, DapVersion,
 };
 use daphne_service_utils::http_headers;
 use futures::StreamExt;
@@ -59,20 +59,20 @@ pub struct TestRunner {
 
 impl TestRunner {
     pub async fn default_with_version(version: DapVersion) -> Self {
-        Self::with(version, &DapQueryConfig::TimeInterval).await
+        Self::with(version, &DapBatchMode::TimeInterval).await
     }
 
     pub async fn leader_selected(version: DapVersion) -> Self {
         Self::with(
             version,
-            &DapQueryConfig::LeaderSelected {
+            &DapBatchMode::LeaderSelected {
                 max_batch_size: Some(NonZeroU32::new(MAX_BATCH_SIZE).unwrap()),
             },
         )
         .await
     }
 
-    async fn with(version: DapVersion, query_config: &DapQueryConfig) -> Self {
+    async fn with(version: DapVersion, query_config: &DapBatchMode) -> Self {
         println!("\n############ starting test prep ############");
         let mut rng = thread_rng();
         let now = SystemTime::now()
@@ -174,9 +174,9 @@ impl TestRunner {
             ),
         });
 
-        let (query_type, max_batch_size) = match t.task_config.query {
-            DapQueryConfig::TimeInterval => (1, None),
-            DapQueryConfig::LeaderSelected { max_batch_size } => (2, Some(max_batch_size)),
+        let (batch_mode, max_batch_size) = match t.task_config.query {
+            DapBatchMode::TimeInterval => (1, None),
+            DapBatchMode::LeaderSelected { max_batch_size } => (2, Some(max_batch_size)),
         };
 
         const MAX_ATTEMPTS: usize = 10;
@@ -228,7 +228,7 @@ impl TestRunner {
             "collector_authentication_token": t.collector_bearer_token.clone(),
             "role": "leader",
             "vdaf_verify_key": vdaf_verify_key_base64url,
-            "query_type": query_type,
+            "batch_mode": batch_mode,
             "min_batch_size": t.task_config.min_batch_size,
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,
@@ -255,7 +255,7 @@ impl TestRunner {
             "leader_authentication_token": t.leader_bearer_token.clone(),
             "role": "helper",
             "vdaf_verify_key": vdaf_verify_key_base64url,
-            "query_type": query_type,
+            "batch_mode": batch_mode,
             "min_batch_size": t.task_config.min_batch_size,
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,

@@ -4,8 +4,8 @@
 //! draft-wang-ppm-dap-taskprov: Messages for the taskrpov extension for DAP.
 
 use crate::messages::{
-    decode_u16_bytes, encode_u16_bytes, Duration, Time, QUERY_TYPE_LEADER_SELECTED,
-    QUERY_TYPE_TIME_INTERVAL,
+    decode_u16_bytes, encode_u16_bytes, Duration, Time, BATCH_MODE_LEADER_SELECTED,
+    BATCH_MODE_TIME_INTERVAL,
 };
 use crate::pine::PineParam;
 use crate::{DapError, DapVersion};
@@ -317,10 +317,10 @@ impl Decode for UrlBytes {
 
 /// A `QueryConfig` type and its associated task configuration data.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum QueryConfigVar {
+pub enum BatchMode {
     TimeInterval,
     LeaderSelected { max_batch_size: Option<NonZeroU32> },
-    NotImplemented { typ: u8, param: Vec<u8> },
+    NotImplemented { mode: u8, param: Vec<u8> },
 }
 
 /// A query configuration.
@@ -329,20 +329,20 @@ pub struct QueryConfig {
     pub time_precision: Duration,
     pub max_batch_query_count: u16,
     pub min_batch_size: u32,
-    pub var: QueryConfigVar,
+    pub batch_mode: BatchMode,
 }
 
 impl QueryConfig {
-    fn encode_query_type(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match &self.var {
-            QueryConfigVar::TimeInterval => {
-                QUERY_TYPE_TIME_INTERVAL.encode(bytes)?;
+    fn encode_batch_mode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        match &self.batch_mode {
+            BatchMode::TimeInterval => {
+                BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
             }
-            QueryConfigVar::LeaderSelected { .. } => {
-                QUERY_TYPE_LEADER_SELECTED.encode(bytes)?;
+            BatchMode::LeaderSelected { .. } => {
+                BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
             }
-            QueryConfigVar::NotImplemented { typ, .. } => {
-                typ.encode(bytes)?;
+            BatchMode::NotImplemented { mode, .. } => {
+                mode.encode(bytes)?;
             }
         };
         Ok(())
@@ -360,10 +360,10 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
             self.max_batch_query_count.encode(bytes)?;
         }
         self.min_batch_size.encode(bytes)?;
-        self.encode_query_type(bytes)?;
-        match &self.var {
-            QueryConfigVar::TimeInterval => (),
-            QueryConfigVar::LeaderSelected { max_batch_size } => {
+        self.encode_batch_mode(bytes)?;
+        match &self.batch_mode {
+            BatchMode::TimeInterval => (),
+            BatchMode::LeaderSelected { max_batch_size } => {
                 match version {
                     DapVersion::Draft09 => match max_batch_size {
                         Some(x) => x.get().encode(bytes)?,
@@ -372,7 +372,7 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
                     DapVersion::Latest => (),
                 };
             }
-            QueryConfigVar::NotImplemented { typ: _, param } => {
+            BatchMode::NotImplemented { mode: _, param } => {
                 bytes.extend_from_slice(param);
             }
         };
@@ -395,11 +395,11 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
             DapVersion::Latest => 13,
         };
         let min_batch_size = u32::decode(bytes)?;
-        let query_type = u8::decode(bytes)?;
-        let var =
-            match (bytes_left, query_type) {
-                (.., QUERY_TYPE_TIME_INTERVAL) => QueryConfigVar::TimeInterval,
-                (.., QUERY_TYPE_LEADER_SELECTED) => QueryConfigVar::LeaderSelected {
+        let batch_mode_number = u8::decode(bytes)?;
+        let batch_mode =
+            match (bytes_left, batch_mode_number) {
+                (.., BATCH_MODE_TIME_INTERVAL) => BatchMode::TimeInterval,
+                (.., BATCH_MODE_LEADER_SELECTED) => BatchMode::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => NonZeroU32::new(u32::decode(bytes)?),
                         DapVersion::Latest => None,
@@ -409,8 +409,8 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
                     let mut param = vec![0; bytes_left - fixed_size];
                     bytes.read_exact(&mut param)?;
 
-                    QueryConfigVar::NotImplemented {
-                        typ: query_type,
+                    BatchMode::NotImplemented {
+                        mode: batch_mode_number,
                         param,
                     }
                 }
@@ -424,7 +424,7 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
             time_precision,
             max_batch_query_count,
             min_batch_size,
-            var,
+            batch_mode,
         })
     }
 }
@@ -559,7 +559,7 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::LeaderSelected {
+                batch_mode: BatchMode::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
                         DapVersion::Latest => None,
@@ -611,7 +611,7 @@ mod tests {
                 DapVersion::Latest => 1,
             },
             min_batch_size: 12_345_678,
-            var: QueryConfigVar::TimeInterval,
+            batch_mode: BatchMode::TimeInterval,
         };
         let encoded = query_config.get_encoded_with_param(&version).unwrap();
 
@@ -627,7 +627,7 @@ mod tests {
                 DapVersion::Latest => 1,
             },
             min_batch_size: 12_345_678,
-            var: QueryConfigVar::LeaderSelected {
+            batch_mode: BatchMode::LeaderSelected {
                 max_batch_size: match version {
                     DapVersion::Draft09 => Some(NonZeroU32::new(12_345_678).unwrap()),
                     DapVersion::Latest => None,
@@ -649,8 +649,8 @@ mod tests {
             time_precision: 12_345_678,
             max_batch_query_count: 1,
             min_batch_size: 12_345_678,
-            var: QueryConfigVar::NotImplemented {
-                typ: 0,
+            batch_mode: BatchMode::NotImplemented {
+                mode: 0,
                 param: b"query config param".to_vec(),
             },
         };
@@ -801,7 +801,7 @@ mod tests {
                     DapVersion::Latest => 1,
                 },
                 min_batch_size: 55,
-                var: QueryConfigVar::LeaderSelected {
+                batch_mode: BatchMode::LeaderSelected {
                     max_batch_size: match version {
                         DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
                         DapVersion::Latest => None,

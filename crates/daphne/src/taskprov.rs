@@ -13,12 +13,12 @@ use crate::{
     hpke::HpkeConfig,
     messages::{
         self,
-        taskprov::{QueryConfigVar, TaskprovAdvertisement, VdafTypeVar},
+        taskprov::{BatchMode, TaskprovAdvertisement, VdafTypeVar},
         Duration, TaskId, Time,
     },
     roles::aggregator::TaskprovConfig,
     vdaf::VdafVerifyKey,
-    DapError, DapQueryConfig, DapTaskConfig, DapTaskConfigMethod, DapVersion, VdafConfig,
+    DapBatchMode, DapError, DapTaskConfig, DapTaskConfigMethod, DapVersion, VdafConfig,
 };
 use crate::{
     pine::PineParam,
@@ -119,15 +119,15 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
     })
 }
 
-impl DapQueryConfig {
-    fn try_from_taskprov(task_id: &TaskId, var: QueryConfigVar) -> Result<Self, DapAbort> {
+impl DapBatchMode {
+    fn try_from_taskprov(task_id: &TaskId, var: BatchMode) -> Result<Self, DapAbort> {
         match var {
-            QueryConfigVar::LeaderSelected { max_batch_size } => {
-                Ok(DapQueryConfig::LeaderSelected { max_batch_size })
+            BatchMode::LeaderSelected { max_batch_size } => {
+                Ok(DapBatchMode::LeaderSelected { max_batch_size })
             }
-            QueryConfigVar::TimeInterval => Ok(DapQueryConfig::TimeInterval),
-            QueryConfigVar::NotImplemented { typ, .. } => Err(DapAbort::InvalidTask {
-                detail: format!("unimplemented query type ({typ})"),
+            BatchMode::TimeInterval => Ok(DapBatchMode::TimeInterval),
+            BatchMode::NotImplemented { mode, .. } => Err(DapAbort::InvalidTask {
+                detail: format!("unimplemented batch mode ({mode})"),
                 task_id: *task_id,
             }),
         }
@@ -276,7 +276,7 @@ pub struct DapTaskConfigNeedsOptIn {
     pub(crate) helper_url: Url,
     pub(crate) time_precision: Duration,
     pub(crate) min_batch_size: u64,
-    pub(crate) query: DapQueryConfig,
+    pub(crate) query: DapBatchMode,
     pub(crate) vdaf: VdafConfig,
     pub(crate) vdaf_verify_key: VdafVerifyKey,
     pub(crate) collector_hpke_config: HpkeConfig,
@@ -318,7 +318,7 @@ impl DapTaskConfigNeedsOptIn {
             time_precision: task_config.query_config.time_precision,
             task_expiration: task_config.task_expiration,
             min_batch_size: task_config.query_config.min_batch_size.into(),
-            query: DapQueryConfig::try_from_taskprov(task_id, task_config.query_config.var)?,
+            query: DapBatchMode::try_from_taskprov(task_id, task_config.query_config.batch_mode)?,
             vdaf,
             vdaf_verify_key,
             collector_hpke_config: taskprov_config.hpke_collector_config.clone(),
@@ -348,14 +348,14 @@ impl DapTaskConfigNeedsOptIn {
     }
 }
 
-impl TryFrom<&DapQueryConfig> for messages::taskprov::QueryConfigVar {
+impl TryFrom<&DapBatchMode> for messages::taskprov::BatchMode {
     type Error = DapError;
 
-    fn try_from(query_config: &DapQueryConfig) -> Result<Self, DapError> {
+    fn try_from(query_config: &DapBatchMode) -> Result<Self, DapError> {
         Ok(match query_config {
-            DapQueryConfig::TimeInterval => messages::taskprov::QueryConfigVar::TimeInterval,
-            DapQueryConfig::LeaderSelected { max_batch_size } => {
-                messages::taskprov::QueryConfigVar::LeaderSelected {
+            DapBatchMode::TimeInterval => messages::taskprov::BatchMode::TimeInterval,
+            DapBatchMode::LeaderSelected { max_batch_size } => {
+                messages::taskprov::BatchMode::LeaderSelected {
                     max_batch_size: *max_batch_size,
                 }
             }
@@ -430,7 +430,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
                     fatal_error!(err = "task min batch size is too large for taskprov")
                 })?,
                 max_batch_query_count: 1,
-                var: (&task_config.query).try_into()?,
+                batch_mode: (&task_config.query).try_into()?,
             },
             task_expiration: task_config.not_after,
             vdaf_config: messages::taskprov::VdafConfig {
@@ -472,7 +472,7 @@ mod test {
                 time_precision: 3600,
                 max_batch_query_count: 1,
                 min_batch_size: 1,
-                var: messages::taskprov::QueryConfigVar::LeaderSelected {
+                batch_mode: messages::taskprov::BatchMode::LeaderSelected {
                     max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                 },
             },
@@ -554,7 +554,7 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::LeaderSelected {
+                    batch_mode: messages::taskprov::BatchMode::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                 },
@@ -621,7 +621,7 @@ mod test {
                     time_precision: 3600,
                     max_batch_query_count: 1,
                     min_batch_size: 1,
-                    var: messages::taskprov::QueryConfigVar::LeaderSelected {
+                    batch_mode: messages::taskprov::BatchMode::LeaderSelected {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                 },

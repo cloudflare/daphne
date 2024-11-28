@@ -17,7 +17,7 @@ use crate::{
     fatal_error,
     messages::{Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId, Report, TaskId},
     roles::leader::WorkItem,
-    DapAggregationParam, DapBatchBucket, DapCollectionJob, DapError, DapQueryConfig, DapTaskConfig,
+    DapAggregationParam, DapBatchBucket, DapBatchMode, DapCollectionJob, DapError, DapTaskConfig,
 };
 
 #[derive(Default)]
@@ -81,7 +81,7 @@ impl InMemoryLeaderState {
         task_id: &TaskId,
         task_config: &DapTaskConfig,
     ) -> std::result::Result<BatchId, DapError> {
-        if !matches!(task_config.query, DapQueryConfig::LeaderSelected { .. }) {
+        if !matches!(task_config.query, DapBatchMode::LeaderSelected { .. }) {
             return Err(DapError::Abort(DapAbort::BadRequest(
                 "tried to get current batch from non leader-selected task".into(),
             )));
@@ -250,7 +250,7 @@ impl MockLeaderMemoryPerTask {
 
         match task_config.query {
             // For leader-selected queries, the bucket corresponds to a single batch.
-            DapQueryConfig::LeaderSelected { .. } => {
+            DapBatchMode::LeaderSelected { .. } => {
                 // Assign the report to the first unsaturated batch.
                 for (batch_id, report_count) in &mut self.batch_queue {
                     if *report_count < task_config.min_batch_size {
@@ -270,7 +270,7 @@ impl MockLeaderMemoryPerTask {
 
             // For time-interval queries, the bucket is the batch window computed by truncating the
             // report timestamp.
-            DapQueryConfig::TimeInterval => DapBatchBucket::TimeInterval {
+            DapBatchMode::TimeInterval => DapBatchBucket::TimeInterval {
                 batch_window: task_config.quantized_time_lower_bound(report.report_metadata.time),
                 shard,
             },
