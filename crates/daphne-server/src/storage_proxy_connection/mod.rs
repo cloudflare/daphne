@@ -108,7 +108,7 @@ impl<'d, B: DurableMethod> RequestBuilder<'d, B, [u8; 0]> {
     }
 }
 
-impl<'w> Do<'w> {
+impl Do<'_> {
     pub fn request<B: DurableMethod + Copy>(
         &self,
         path: B,

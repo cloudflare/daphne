@@ -24,7 +24,7 @@ pub type JsonFields = HashMap<String, serde_json::Value>;
 
 pub struct JsonVisitor<'a>(&'a mut JsonFields);
 
-impl<'a> Visit for JsonVisitor<'a> {
+impl Visit for JsonVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
         if let Ok(value) = serde_json::to_value(value) {
             self.0.insert(field.name().to_string(), value);
