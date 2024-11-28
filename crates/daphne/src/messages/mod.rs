@@ -142,7 +142,7 @@ mod base64url_bytes {
         O: From<[u8; N]>,
     {
         struct Visitor<const N: usize, O>(std::marker::PhantomData<[O; N]>);
-        impl<'de, const N: usize, O> de::Visitor<'de> for Visitor<N, O>
+        impl<const N: usize, O> de::Visitor<'_> for Visitor<N, O>
         where
             O: From<[u8; N]>,
         {

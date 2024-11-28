@@ -322,10 +322,12 @@ impl std::fmt::Display for DapBatchBucket {
     }
 }
 
+type TimestampedReportList = Vec<(ReportId, Time)>;
+
 /// A set of values related to reports in the same bucket.
 #[derive(Debug)]
 pub struct DapAggregateSpan<T> {
-    span: HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)>,
+    span: HashMap<DapBatchBucket, (T, TimestampedReportList)>,
 }
 
 // We can't derive default because it will require T to be Default, which we don't need.
@@ -338,7 +340,7 @@ impl<T> Default for DapAggregateSpan<T> {
 }
 
 impl<T> IntoIterator for DapAggregateSpan<T> {
-    type IntoIter = <HashMap<DapBatchBucket, (T, Vec<(ReportId, Time)>)> as IntoIterator>::IntoIter;
+    type IntoIter = <HashMap<DapBatchBucket, (T, TimestampedReportList)> as IntoIterator>::IntoIter;
 
     type Item = <Self::IntoIter as Iterator>::Item;
 
@@ -440,15 +442,15 @@ impl<T> DapAggregateSpan<T> {
     }
 
     /// Return an iterator over the aggregate span.
-    pub fn iter(&self) -> impl Iterator<Item = (&DapBatchBucket, &(T, Vec<(ReportId, Time)>))> {
+    pub fn iter(&self) -> impl Iterator<Item = (&DapBatchBucket, &(T, TimestampedReportList))> {
         self.span.iter()
     }
 }
 
-impl<T> FromIterator<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpan<T> {
+impl<T> FromIterator<(DapBatchBucket, (T, TimestampedReportList))> for DapAggregateSpan<T> {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = (DapBatchBucket, (T, Vec<(ReportId, Time)>))>,
+        I: IntoIterator<Item = (DapBatchBucket, (T, TimestampedReportList))>,
     {
         Self {
             span: iter.into_iter().collect(),
@@ -456,10 +458,10 @@ impl<T> FromIterator<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggreg
     }
 }
 
-impl<T> Extend<(DapBatchBucket, (T, Vec<(ReportId, Time)>))> for DapAggregateSpan<T> {
+impl<T> Extend<(DapBatchBucket, (T, TimestampedReportList))> for DapAggregateSpan<T> {
     fn extend<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = (DapBatchBucket, (T, Vec<(ReportId, Time)>))>,
+        I: IntoIterator<Item = (DapBatchBucket, (T, TimestampedReportList))>,
     {
         self.span.extend(iter);
     }

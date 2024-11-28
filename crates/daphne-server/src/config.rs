@@ -109,7 +109,7 @@ mod signing_key_serializer {
         D::Error: serde::de::Error,
     {
         struct Visitor;
-        impl<'de> de::Visitor<'de> for Visitor {
+        impl de::Visitor<'_> for Visitor {
             type Value = SigningKey;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a sec1 pem key")

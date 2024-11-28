@@ -359,7 +359,7 @@ fn bits(x: u64) -> usize {
 }
 
 fn chunk_count(chunk_length: usize, length: usize) -> usize {
-    (length + chunk_length - 1) / chunk_length
+    length.div_ceil(chunk_length)
 }
 
 fn dst(algorithm_id: u32, usage: u16) -> [u8; DST_SIZE] {
