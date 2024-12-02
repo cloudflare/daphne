@@ -380,6 +380,7 @@ impl HpkeProvider for crate::App {
         version: DapVersion,
         _task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig<'static>, DapError> {
+        // TODO(draft-09) Remove `_task_id` parameter, as task id is no longer passed from draft-12.
         self.kv()
             .get_mapped::<kv::prefix::HpkeReceiverConfigSet, _, _>(
                 &version,

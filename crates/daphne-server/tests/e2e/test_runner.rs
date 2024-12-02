@@ -352,14 +352,28 @@ impl TestRunner {
         &self,
         client: &reqwest::Client,
     ) -> anyhow::Result<Vec<u8>> {
-        get_raw_hpke_config(client, self.task_id.as_ref(), &self.leader_url, "leader").await
+        get_raw_hpke_config(
+            client,
+            self.task_id.as_ref(),
+            &self.leader_url,
+            "leader",
+            &self.version,
+        )
+        .await
     }
 
     pub async fn helper_get_raw_hpke_config(
         &self,
         client: &reqwest::Client,
     ) -> anyhow::Result<Vec<u8>> {
-        get_raw_hpke_config(client, self.task_id.as_ref(), &self.helper_url, "helper").await
+        get_raw_hpke_config(
+            client,
+            self.task_id.as_ref(),
+            &self.helper_url,
+            "helper",
+            &self.version,
+        )
+        .await
     }
 
     pub async fn leader_request_expect_ok(
@@ -692,6 +706,7 @@ async fn get_raw_hpke_config(
     task_id: &[u8],
     base_url: &Url,
     svc: &str,
+    version: &DapVersion,
 ) -> anyhow::Result<Vec<u8>> {
     let time_to_wait = std::time::Duration::from_secs(15);
     let max_time_to_wait = std::time::Duration::from_secs(60 * 3);
@@ -699,7 +714,10 @@ async fn get_raw_hpke_config(
     let url = base_url.join("hpke_config")?;
     let query = [("task_id", encode_base64url(task_id))];
     while elapsed_time < max_time_to_wait {
-        let req = client.get(url.as_str()).query(&query);
+        let req = match version {
+            DapVersion::Draft09 => client.get(url.as_str()).query(&query),
+            DapVersion::Latest => client.get(url.as_str()),
+        };
         match req.send().await {
             Ok(resp) => {
                 if resp.status() == 200 {
