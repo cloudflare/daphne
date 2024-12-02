@@ -629,21 +629,35 @@ mod test {
     //    }
     //
     //    async_test_versions! { handle_agg_job_req_init_expired_task }
-
-    async fn handle_hpke_config_req_unrecognized_task(version: DapVersion) {
-        let t = Test::new(version);
+    #[tokio::test]
+    async fn handle_hpke_config_req_unrecognized_task_draft09() {
+        let t = Test::new(DapVersion::Draft09);
         let mut rng = thread_rng();
         let task_id = TaskId(rng.gen());
 
         assert_eq!(
-            aggregator::handle_hpke_config_req(&*t.leader, version, Some(task_id))
+            aggregator::handle_hpke_config_req(&*t.leader, DapVersion::Draft09, Some(task_id))
                 .await
                 .unwrap_err(),
             DapError::Abort(DapAbort::UnrecognizedTask { task_id })
         );
     }
 
-    async_test_versions! { handle_hpke_config_req_unrecognized_task }
+    #[tokio::test]
+    async fn handle_hpke_config_req_task_latest() {
+        let t = Test::new(DapVersion::Latest);
+        let mut rng = thread_rng();
+        let task_id = TaskId(rng.gen());
+
+        assert_eq!(
+            aggregator::handle_hpke_config_req(&*t.leader, DapVersion::Latest, Some(task_id))
+                .await
+                .unwrap_err(),
+            DapError::Abort(DapAbort::BadRequest(
+                "Task ID may not be specified in draft 12 or later".to_string()
+            ))
+        );
+    }
 
     async fn handle_hpke_config_req_missing_task_id(version: DapVersion) {
         let t = Test::new(version);

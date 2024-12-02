@@ -145,6 +145,13 @@ where
 {
     let metrics = aggregator.metrics();
 
+    if version == DapVersion::Latest && task_id.is_some() {
+        return Err(DapAbort::BadRequest(
+            "Task ID may not be specified in draft 12 or later".to_string(),
+        )
+        .into());
+    }
+
     let hpke_config = aggregator
         .get_hpke_config_for(version, task_id.as_ref())
         .await?;
