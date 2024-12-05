@@ -5,7 +5,7 @@
 //!
 //! [interop]: https://divergentdave.github.io/draft-dcook-ppm-dap-interop-test-design/draft-dcook-ppm-dap-interop-test-design.html
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use daphne::{
     hpke::{HpkeKemId, HpkeReceiverConfig},
     messages::HpkeConfigList,
@@ -53,12 +53,18 @@ impl HttpClient {
     }
 
     pub async fn delete_all_storage(&self, aggregator_url: &Url) -> anyhow::Result<()> {
-        self.post(aggregator_url.join("/internal/delete_all").unwrap())
+        let resp = self
+            .post(aggregator_url.join("/internal/delete_all").unwrap())
             .send()
             .await
-            .context("deleting storage")?
-            .error_for_status()
             .context("deleting storage")?;
-        Ok(())
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        bail!(
+            "delete storage request failed. {} {}",
+            resp.status(),
+            resp.text().await?
+        );
     }
 }
