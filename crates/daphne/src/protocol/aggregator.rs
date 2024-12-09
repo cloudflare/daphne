@@ -22,11 +22,13 @@ use crate::{
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares},
         prio3::{prio3_prep_finish, prio3_prep_finish_from_shares},
+        prio3_draft09::{prio3_draft09_prep_finish, prio3_draft09_prep_finish_from_shares},
         VdafError,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
 };
+
 use prio::codec::{encode_u32_items, Encode, ParameterizedDecode, ParameterizedEncode};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use std::{
@@ -277,6 +279,7 @@ impl DapTaskConfig {
     #[tracing::instrument(skip_all, fields(report_count = report_status.len()))]
     pub(crate) fn produce_agg_job_resp(
         &self,
+        task_id: TaskId,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport<WithPeerPrepShare>],
@@ -298,9 +301,19 @@ impl DapTaskConfig {
                         prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
+                            VdafConfig::Prio3Draft09(prio3_config) => {
+                                prio3_draft09_prep_finish_from_shares(
+                                    prio3_config,
+                                    1,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                )
+                            }
                             VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
                                 prio3_config,
                                 1,
+                                task_id,
                                 helper_prep_state.clone(),
                                 helper_prep_share.clone(),
                                 leader_prep_share,
@@ -352,7 +365,12 @@ impl DapTaskConfig {
                                 TransitionVar::Continued(outbound)
                             }
 
-                            Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
+                            Err(
+                                e @ (VdafError::CodecDraft09(..)
+                                | VdafError::VdafDraft09(..)
+                                | VdafError::Codec(..)
+                                | VdafError::Vdaf(..)),
+                            ) => {
                                 tracing::warn!(error = ?e, "rejecting report");
                                 TransitionVar::Failed(TransitionFailure::VdafPrepError)
                             }
@@ -438,8 +456,11 @@ impl DapTaskConfig {
             };
 
             let res = match &self.vdaf {
+                VdafConfig::Prio3Draft09(prio3_config) => {
+                    prio3_draft09_prep_finish(prio3_config, leader.prep_state, prep_msg)
+                }
                 VdafConfig::Prio3(prio3_config) => {
-                    prio3_prep_finish(prio3_config, leader.prep_state, prep_msg)
+                    prio3_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
                 }
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
@@ -460,12 +481,16 @@ impl DapTaskConfig {
                     )?;
                 }
 
-                Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
+                Err(
+                    e @ (VdafError::CodecDraft09(..)
+                    | VdafError::VdafDraft09(..)
+                    | VdafError::Codec(..)
+                    | VdafError::Vdaf(..)),
+                ) => {
                     tracing::warn!(error = ?e, "rejecting report");
                     metrics
                         .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
                 }
-
                 Err(VdafError::Dap(e)) => return Err(e),
             }
         }

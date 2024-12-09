@@ -33,7 +33,7 @@
 
 use std::marker::PhantomData;
 
-use prio::{
+use prio_draft09::{
     field::FftFriendlyFieldElement,
     flp::{
         gadgets::{Mul, ParallelSum, ParallelSumGadget, PolyEval},
@@ -617,7 +617,7 @@ fn range_checked<F: FftFriendlyFieldElement>(x: F, lower_bound: F, upper_bound: 
 
 #[cfg(test)]
 mod tests {
-    use prio::{
+    use prio_draft09::{
         field::{Field128, FieldElement, FieldElementWithInteger},
         flp::{test_utils::FlpTest, Type},
         vdaf::xof::XofTurboShake128,

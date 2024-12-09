@@ -35,10 +35,13 @@ struct DapAggregateShare @0xb34ce529a4a66aed {
     maxTime @2 :UInt64;
     checksum @3 :Data;
     data :union {
-        field64 @4 :Data;
-        field128 @5 :Data;
-        fieldPrio2 @6 :Data;
+        field64Draft09@4 :Data;
+        field128Draft09@5 :Data;
+        fieldPrio2Draft09@6 :Data;
         none @7 :Void;
+        field64 @8 :Data;
+        field128 @9 :Data;
+        fieldPrio2 @10 :Data;
     }
 }
 

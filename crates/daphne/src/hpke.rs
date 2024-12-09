@@ -600,7 +600,7 @@ mod test {
     use hpke_rs::{Hpke, HpkePrivateKey, HpkePublicKey, Mode};
     use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
     use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
-    use prio::codec::{Encode as _, ParameterizedEncode as _};
+    use prio::codec::{Encode, ParameterizedEncode};
     use rand::seq::IteratorRandom;
 
     fn encrypt_roundtrip_x25519_hkdf_sha256(version: DapVersion) {

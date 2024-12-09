@@ -35,6 +35,30 @@ pub struct InternalTestVdaf {
 impl From<VdafConfig> for InternalTestVdaf {
     fn from(vdaf: VdafConfig) -> Self {
         let (typ, bits, length, chunk_length) = match vdaf {
+            VdafConfig::Prio3Draft09(prio3) => match prio3 {
+                Prio3Config::Count => ("Prio3Count", None, None, None),
+                Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
+                Prio3Config::Histogram {
+                    length,
+                    chunk_length,
+                } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
+                Prio3Config::SumVec {
+                    bits,
+                    length,
+                    chunk_length,
+                } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
+                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits,
+                    length,
+                    chunk_length,
+                    num_proofs: _unimplemented,
+                } => (
+                    "Prio3SumVecField64MultiproofHmacSha256Aes128",
+                    Some(bits),
+                    Some(length),
+                    Some(chunk_length),
+                ),
+            },
             VdafConfig::Prio3(prio3) => match prio3 {
                 Prio3Config::Count => ("Prio3Count", None, None, None),
                 Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),

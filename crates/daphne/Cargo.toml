@@ -24,6 +24,7 @@ hex.workspace = true
 hpke-rs = { workspace = true, features = ["hazmat", "serialization"] }
 hpke-rs-crypto.workspace = true
 hpke-rs-rust-crypto.workspace = true
+prio_draft09 = { workspace = true, features = ["experimental"] }
 prio = { workspace = true, features = ["experimental"] }
 prometheus = { workspace = true, optional = true }
 rand.workspace = true
@@ -43,6 +44,7 @@ criterion.workspace = true
 deepsize.workspace = true
 matchit.workspace = true
 paste.workspace = true
+prio_draft09 = { workspace = true, features = ["test-util"] }
 prio = { workspace = true, features = ["test-util"] }
 prometheus.workspace = true
 rayon.workspace = true

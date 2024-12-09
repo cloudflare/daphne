@@ -59,7 +59,7 @@ fn jobs_per_batch() -> impl Iterator<Item = usize> {
 fn vdaf_config_params() -> impl Iterator<Item = VdafConfig> {
     [
         VdafConfig::Prio2 { dimension: 99_992 },
-        VdafConfig::Prio3(
+        VdafConfig::Prio3Draft09(
             daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 1,
                 length: 100_000,
@@ -67,7 +67,7 @@ fn vdaf_config_params() -> impl Iterator<Item = VdafConfig> {
                 num_proofs: 2,
             },
         ),
-        VdafConfig::Prio3(
+        VdafConfig::Prio3Draft09(
             daphne::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 1,
                 length: 100_000,

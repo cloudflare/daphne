@@ -210,6 +210,7 @@ impl AggregationJobTest {
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
         self.task_config
             .produce_agg_job_resp(
+                self.task_id,
                 &HashMap::default(),
                 &agg_job_init_req.part_batch_sel.clone(),
                 &self
@@ -1112,10 +1113,11 @@ impl VdafConfig {
     pub fn gen_measurement(&self) -> Result<DapMeasurement, DapError> {
         match self {
             Self::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
-            Self::Prio3(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                length,
-                ..
-            }) => Ok(DapMeasurement::U64Vec(vec![0; *length])),
+            Self::Prio3Draft09(
+                crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    length, ..
+                },
+            ) => Ok(DapMeasurement::U64Vec(vec![0; *length])),
             _ => Err(fatal_error!(
                 err = format!("gen_measurement_for currently does not support {self:?}")
             )),
