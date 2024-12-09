@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
-use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
+use prio_09::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use tracing::debug;
 use url::Url;

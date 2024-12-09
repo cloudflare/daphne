@@ -15,7 +15,7 @@ use super::{
     decode_field_vec, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
 
-use prio::{
+use prio_09::{
     codec::Decode,
     field::{Field64, FieldElement},
     vdaf::AggregateShare,
@@ -86,13 +86,13 @@ pub(crate) fn mastic_prep_init(
             // Simulate Mastic, insecurely. The public share encodes the plaintext input; the input
             // share encodes the plaintext weight.
             if public_share_bytes.len() != input_size {
-                return Err(VdafError::Codec(prio::codec::CodecError::Other(
+                return Err(VdafError::Codec(prio_09::codec::CodecError::Other(
                     "mastic: malformed public share".into(),
                 )));
             }
 
             if input_share_bytes.len() != 1 {
-                return Err(VdafError::Codec(prio::codec::CodecError::Other(
+                return Err(VdafError::Codec(prio_09::codec::CodecError::Other(
                     "mastic: malformed input share".into(),
                 )));
             }
@@ -104,7 +104,7 @@ pub(crate) fn mastic_prep_init(
                 .map(|prefix| {
                     let prefix_bytes = prefix.to_bytes();
                     if prefix_bytes.len() > input_size {
-                        return Err(VdafError::Codec(prio::codec::CodecError::Other(
+                        return Err(VdafError::Codec(prio_09::codec::CodecError::Other(
                             "mastic: malformed agg param: path with invalid length".into(),
                         )));
                     }
@@ -149,13 +149,13 @@ pub(crate) fn mastic_prep_finish_from_shares(
             // valid. This is not secure because the weight is revealed to the caller.
             let peer_weight = Field64::get_decoded(peer_share_bytes)?;
             if peer_weight != host_weight {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
+                return Err(VdafError::Vdaf(prio_09::vdaf::VdafError::Uncategorized(
                     "mastic: weights do not match".into(),
                 )));
             }
 
             if peer_weight != Field64::one() && peer_weight != Field64::zero() {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
+                return Err(VdafError::Vdaf(prio_09::vdaf::VdafError::Uncategorized(
                     "mastic: weight is out of range".into(),
                 )));
             }
@@ -180,7 +180,7 @@ pub(crate) fn mastic_prep_finish(
         VdafPrepState::Mastic { out_share } => {
             // Simulate Mastic: If the prep message is empty, then accept the output share.
             if !peer_message_bytes.is_empty() {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
+                return Err(VdafError::Vdaf(prio_09::vdaf::VdafError::Uncategorized(
                     "mastic: invalid prep message".into(),
                 )));
             }
@@ -228,7 +228,7 @@ pub(crate) fn mastic_unshard<M: IntoIterator<Item = Vec<u8>>>(
 
 #[cfg(test)]
 mod test {
-    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
+    use prio_09::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
 
     use super::*;
     use crate::{

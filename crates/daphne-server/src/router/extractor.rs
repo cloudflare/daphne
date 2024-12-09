@@ -21,7 +21,7 @@ use daphne::{
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers};
 use http::{header::CONTENT_TYPE, HeaderMap};
-use prio::codec::ParameterizedDecode;
+use prio_09::codec::ParameterizedDecode;
 use serde::Deserialize;
 
 use crate::metrics;
@@ -370,7 +370,7 @@ mod test {
 
     use super::{dap_sender::FROM_LEADER, resource_parsers, DecodeFromDapHttpBody};
     use http::{header, StatusCode};
-    use prio::codec::ParameterizedEncode;
+    use prio_09::codec::ParameterizedEncode;
 
     const BEARER_TOKEN: &str = "test-token";
 

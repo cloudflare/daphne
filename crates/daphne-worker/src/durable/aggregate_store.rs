@@ -35,7 +35,7 @@ use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
     DurableMethod,
 };
-use prio::{
+use prio_09::{
     codec::{Decode, Encode},
     field::FieldElement,
     vdaf::AggregateShare,

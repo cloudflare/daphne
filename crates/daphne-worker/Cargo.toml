@@ -29,7 +29,7 @@ getrandom = { workspace = true, features = ["js"] }
 headers.workspace = true
 hex.workspace = true
 http.workspace = true
-prio.workspace = true
+prio_09.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 serde-wasm-bindgen.workspace = true

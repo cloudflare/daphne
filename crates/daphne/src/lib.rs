@@ -70,10 +70,10 @@ use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::taskprov::TaskprovAdvertisement;
 #[cfg(feature = "experimental")]
-use prio::codec::Decode;
+use prio_09::codec::Decode;
 #[cfg(feature = "experimental")]
-use prio::vdaf::poplar1::Poplar1AggregationParam;
-use prio::{
+use prio_09::vdaf::poplar1::Poplar1AggregationParam;
+use prio_09::{
     codec::{CodecError, Encode, ParameterizedDecode},
     vdaf::Aggregatable as AggregatableTrait,
 };

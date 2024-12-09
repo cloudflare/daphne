@@ -4,7 +4,7 @@
 use std::{collections::HashSet, ops::Range};
 
 use async_trait::async_trait;
-use prio::codec::Encode;
+use prio_09::codec::Encode;
 
 use crate::{
     audit_log::AuditLog,

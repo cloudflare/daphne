@@ -4,7 +4,7 @@
 use std::{collections::HashMap, sync::Once};
 
 use async_trait::async_trait;
-use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
+use prio_09::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 
 use super::{check_batch, resolve_task_config, DapAggregator};
 use crate::{

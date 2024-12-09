@@ -15,7 +15,7 @@ use daphne::{
 };
 use daphne_service_utils::http_headers;
 use http::Method;
-use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
+use prio_09::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
 use rand::prelude::*;
 use serde::Deserialize;
 use serde_json::json;

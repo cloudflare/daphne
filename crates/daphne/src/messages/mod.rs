@@ -12,7 +12,7 @@ use crate::{
 };
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use hpke_rs::HpkePublicKey;
-use prio::codec::{
+use prio_09::codec::{
     decode_u16_items, decode_u32_items, encode_u16_items, encode_u32_items, CodecError, Decode,
     Encode, ParameterizedDecode, ParameterizedEncode,
 };
@@ -1569,7 +1569,7 @@ mod test {
 
     use crate::test_versions;
     use hpke_rs::HpkePublicKey;
-    use prio::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
+    use prio_09::codec::{Decode, ParameterizedDecode, ParameterizedEncode};
     use rand::prelude::*;
 
     fn read_report(version: DapVersion) {

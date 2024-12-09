@@ -119,7 +119,7 @@ mod test_utils {
         bearer_token::BearerToken,
         test_route_types::{InternalTestAddTask, InternalTestEndpointForTask},
     };
-    use prio::codec::Decode;
+    use prio_09::codec::Decode;
     use std::num::NonZeroUsize;
 
     use crate::storage_proxy_connection::kv;
@@ -187,25 +187,25 @@ mod test_utils {
                 cmd.vdaf.length,
                 cmd.vdaf.chunk_length,
             ) {
-                ("Prio3Count", None, None, None) => VdafConfig::Prio3(Prio3Config::Count),
-                ("Prio3Sum", Some(bits), None, None) => VdafConfig::Prio3(Prio3Config::Sum {
+                ("Prio3Count", None, None, None) => VdafConfig::Prio3Draft09(Prio3Config::Count),
+                ("Prio3Sum", Some(bits), None, None) => VdafConfig::Prio3Draft09(Prio3Config::Sum {
                     bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::Sum"))?,
                 }),
                 ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)) => {
-                    VdafConfig::Prio3(Prio3Config::SumVec {
+                    VdafConfig::Prio3Draft09(Prio3Config::SumVec {
                         bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::SumVec"))?,
                         length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::SumVec"))?,
                         chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::SumVec"))?,
                     })
                 }
                 ("Prio3Histogram", None, Some(length), Some(chunk_length)) => {
-                    VdafConfig::Prio3(Prio3Config::Histogram {
+                    VdafConfig::Prio3Draft09(Prio3Config::Histogram {
                         length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::Histogram"))?,
                         chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::Histogram"))?,
                     })
                 }
                 ("Prio3SumVecField64MultiproofHmacSha256Aes128", Some(bits), Some(length), Some(chunk_length)) => {
-                    VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                         bits: bits.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse bits for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,
                         length: length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse length for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,
                         chunk_length: chunk_length.parse().map_err(|e| fatal_error!(err = ?e, "failed to parse chunk_length for Prio3Config::SumVecField64MultiproofHmacSha256Aes128"))?,

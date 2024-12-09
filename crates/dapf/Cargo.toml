@@ -19,7 +19,7 @@ daphne = { path = "../daphne", features = ["report-generator", "prometheus"] }
 daphne-service-utils = { path = "../daphne-service-utils", features = ["test-utils"] }
 futures.workspace = true
 hex.workspace = true
-prio.workspace = true
+prio_09.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["json"] }

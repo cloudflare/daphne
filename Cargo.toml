@@ -60,7 +60,8 @@ mappable-rc = "0.1.1"
 matchit = "0.7.3"
 p256 = { version = "0.13.2", features = ["ecdsa-core", "ecdsa", "pem"] }
 paste = "1.0.15"
-prio = "0.16.7"
+prio_09 = { package = "prio", version = "0.16.7" }
+prio_latest = { package = "prio", git = "https://github.com/divviup/libprio-rs.git", branch = "main" }
 prometheus = "0.13.4"
 rand = "0.8.5"
 rayon = "1.10.0"

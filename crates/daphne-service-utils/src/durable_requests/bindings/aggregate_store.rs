@@ -225,7 +225,7 @@ pub enum AggregateStoreMergeResp {
 
 #[cfg(test)]
 mod test {
-    use prio::{
+    use prio_09::{
         codec::Decode,
         field::{Field128, Field64, FieldElement, FieldPrio2},
         vdaf::AggregateShare,

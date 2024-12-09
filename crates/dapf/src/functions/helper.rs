@@ -12,7 +12,7 @@ use daphne::{
     DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers};
-use prio::codec::{ParameterizedDecode as _, ParameterizedEncode as _};
+use prio_09::codec::{ParameterizedDecode as _, ParameterizedEncode as _};
 use reqwest::header;
 use url::Url;
 

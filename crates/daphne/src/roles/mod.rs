@@ -149,9 +149,9 @@ mod test {
         DapTaskConfig, DapTaskParameters, DapVersion,
     };
     use assert_matches::assert_matches;
-    use prio::codec::{Encode, ParameterizedDecode};
+    use prio_09::codec::{Encode, ParameterizedDecode};
     #[cfg(feature = "experimental")]
-    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
+    use prio_09::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
     use rand::{thread_rng, Rng};
     use std::{
         collections::HashMap,
@@ -198,7 +198,7 @@ mod test {
             };
 
             // Task Parameters that the Leader and Helper must agree on.
-            let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
+            let vdaf_config = VdafConfig::Prio3Draft09(Prio3Config::Count);
             let leader_url = Url::parse("https://leader.com/v02/").unwrap();
             let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
             let collector_hpke_receiver_config =
@@ -486,7 +486,7 @@ mod test {
             // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
             // measurement to generate. However, we could extend the code to support more VDAFs.
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
-            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
+            assert_matches!(task_config.vdaf, VdafConfig::Prio3Draft09(Prio3Config::Count));
 
             self.gen_test_report_for_measurement(task_id, DapMeasurement::U64(1))
                 .await
@@ -1527,7 +1527,7 @@ mod test {
     async fn e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
         e2e_taskprov(
             version,
-            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 1,
                 length: 10,
                 chunk_length: 2,

@@ -30,7 +30,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use deepsize::DeepSizeOf;
-use prio::codec::{ParameterizedDecode, ParameterizedEncode};
+use prio_09::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1112,7 +1112,7 @@ impl VdafConfig {
     pub fn gen_measurement(&self) -> Result<DapMeasurement, DapError> {
         match self {
             Self::Prio2 { dimension } => Ok(DapMeasurement::U32Vec(vec![1; *dimension])),
-            Self::Prio3(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            Self::Prio3Draft09(crate::vdaf::Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 length,
                 ..
             }) => Ok(DapMeasurement::U64Vec(vec![0; *length])),

@@ -444,7 +444,7 @@ pub mod info_and_aad {
         messages::{encode_u32_bytes, encode_u32_prefixed, BatchSelector, ReportMetadata, TaskId},
         DapAggregationParam, DapVersion,
     };
-    use prio::codec::{CodecError, Encode, ParameterizedEncode};
+    use prio_09::codec::{CodecError, Encode, ParameterizedEncode};
 
     const CTX_INPUT_SHARE_DRAFT09: &[u8] = b"dap-09 input share";
     const CTX_INPUT_SHARE_DRAFT13: &[u8] = b"dap-13 input share";
@@ -600,7 +600,7 @@ mod test {
     use hpke_rs::{Hpke, HpkePrivateKey, HpkePublicKey, Mode};
     use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
     use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
-    use prio::codec::{Encode as _, ParameterizedEncode as _};
+    use prio_09::codec::{Encode as _, ParameterizedEncode as _};
     use rand::seq::IteratorRandom;
 
     fn encrypt_roundtrip_x25519_hkdf_sha256(version: DapVersion) {

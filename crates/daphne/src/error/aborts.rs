@@ -9,7 +9,7 @@ use crate::{
     messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
     DapError, DapRequestMeta, DapVersion,
 };
-use prio::codec::CodecError;
+use prio_09::codec::CodecError;
 use serde::{Deserialize, Serialize};
 
 use super::FatalDapError;

@@ -6,7 +6,7 @@ use std::{io::Cursor, path::Path};
 use anyhow::{anyhow, Context as _};
 use daphne::messages::{decode_base64url_vec, HpkeConfigList};
 use daphne_service_utils::http_headers;
-use prio::codec::Decode as _;
+use prio_09::codec::Decode as _;
 use url::Url;
 use webpki::{EndEntityCert, ECDSA_P256_SHA256};
 use x509_parser::pem::Pem;

@@ -14,7 +14,7 @@ repository.workspace = true
 [dependencies]
 capnp = { workspace = true, optional = true }
 daphne = { path = "../daphne", default-features = false }
-prio = { workspace = true, optional = true }
+prio_09 = { workspace = true, optional = true }
 serde.workspace = true
 url = { workspace = true, optional = true }
 
@@ -27,7 +27,7 @@ capnpc = { workspace = true, optional = true }
 
 [features]
 test-utils = ["dep:url", "daphne/prometheus", "daphne/test-utils"]
-durable_requests = ["dep:capnp", "dep:capnpc", "dep:prio"]
+durable_requests = ["dep:capnp", "dep:capnpc", "dep:prio_09"]
 experimental = ["daphne/experimental"]
 
 [lints]

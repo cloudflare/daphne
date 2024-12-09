@@ -17,7 +17,7 @@ use daphne::{
     roles::leader::{self, DapLeader},
     DapError, DapVersion,
 };
-use prio::codec::ParameterizedEncode;
+use prio_09::codec::ParameterizedEncode;
 
 use super::{
     extractor::dap_sender::FROM_COLLECTOR, AxumDapResponse, DapRequestExtractor, DaphneService,

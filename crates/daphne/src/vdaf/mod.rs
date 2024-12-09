@@ -8,14 +8,15 @@
 pub(crate) mod mastic;
 pub(crate) mod pine;
 pub(crate) mod prio2;
-pub(crate) mod prio3;
+pub(crate) mod prio3_draft09;
+pub(crate) mod prio3_latest;
 
 use crate::pine::vdaf::PinePrepState;
 use crate::{fatal_error, DapError};
 use pine::PineConfig;
 #[cfg(any(test, feature = "test-utils", feature = "experimental"))]
-use prio::field::FieldElement;
-use prio::{
+use prio_09::field::FieldElement;
+use prio_09::{
     codec::{CodecError, Encode, ParameterizedDecode},
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
@@ -38,7 +39,7 @@ pub(crate) enum VdafError {
     #[error("{0}")]
     Codec(#[from] CodecError),
     #[error("{0}")]
-    Vdaf(#[from] prio::vdaf::VdafError),
+    Vdaf(#[from] prio_09::vdaf::VdafError),
     #[error("{0}")]
     Dap(DapError),
 }
@@ -48,7 +49,7 @@ pub(crate) enum VdafError {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
-    Prio3(Prio3Config),
+    Prio3Draft09(Prio3Config),
     Prio2 {
         dimension: usize,
     },
@@ -74,7 +75,7 @@ impl std::str::FromStr for VdafConfig {
 impl std::fmt::Display for VdafConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
+            VdafConfig::Prio3Draft09(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
@@ -315,9 +316,9 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VdafAggregateShare {
-    Field32(prio::vdaf::AggregateShare<FieldPrio2>),
-    Field64(prio::vdaf::AggregateShare<Field64>),
-    Field128(prio::vdaf::AggregateShare<Field128>),
+    Field32(prio_09::vdaf::AggregateShare<FieldPrio2>),
+    Field64(prio_09::vdaf::AggregateShare<Field64>),
+    Field128(prio_09::vdaf::AggregateShare<Field128>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -344,9 +345,9 @@ impl Encode for VdafAggregateShare {
 impl VdafConfig {
     pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
         match self {
-            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
+            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
             | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
-            Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
+            Self::Prio3Draft09(..) => VdafVerifyKey::L16([0; 16]),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
             Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
@@ -356,11 +357,11 @@ impl VdafConfig {
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
         match self {
-            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
+            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
             | Self::Prio2 { .. } => Ok(VdafVerifyKey::L32(
                 <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
-            Self::Prio3(..) => Ok(VdafVerifyKey::L16(
+            Self::Prio3Draft09(..) => Ok(VdafVerifyKey::L16(
                 <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
             #[cfg(feature = "experimental")]
@@ -385,7 +386,7 @@ impl VdafConfig {
     /// executed.
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
-            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
+            Self::Prio3Draft09(..) | Self::Prio2 { .. } => agg_param.is_empty(),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => true,
             Self::Pine(..) => agg_param.is_empty(),

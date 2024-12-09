@@ -17,13 +17,13 @@ use crate::{
     metrics::{DaphneMetrics, ReportStatus},
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
-        prio3::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init},
+        prio3_draft09::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init},
         VdafError, VdafPrepShare, VdafPrepState,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
 };
-use prio::codec::{
+use prio_09::codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
 };
 use std::{

@@ -9,7 +9,7 @@ use crate::messages::{
 };
 use crate::pine::PineParam;
 use crate::{DapError, DapVersion};
-use prio::codec::{
+use prio_09::codec::{
     decode_u8_items, encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode,
     ParameterizedEncode,
 };

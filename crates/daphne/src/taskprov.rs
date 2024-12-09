@@ -197,7 +197,7 @@ impl VdafConfig {
                         task_id: *task_id,
                     });
                 }
-                Ok(VdafConfig::Prio3(
+                Ok(VdafConfig::Prio3Draft09(
                     Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                         bits: bits.into(),
                         length: length.try_into().map_err(|_| DapAbort::InvalidTask {
@@ -373,7 +373,7 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
                     fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
                 })?,
             }),
-            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits,
                 length,
                 chunk_length,
@@ -391,7 +391,7 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
                 })?,
                 num_proofs: *num_proofs,
             }),
-            VdafConfig::Prio3(..) => Err(fatal_error!(
+            VdafConfig::Prio3Draft09(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
             #[cfg(feature = "experimental")]
@@ -445,7 +445,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
 mod test {
     use std::num::{NonZeroU32, NonZeroUsize};
 
-    use prio::codec::ParameterizedEncode;
+    use prio_09::codec::ParameterizedEncode;
 
     use super::{compute_task_id, compute_vdaf_verify_key};
     use crate::{

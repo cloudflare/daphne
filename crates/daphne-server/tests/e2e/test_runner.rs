@@ -16,7 +16,7 @@ use daphne::{
 use daphne_service_utils::http_headers;
 use futures::StreamExt;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
-use prio::codec::{Decode, Encode};
+use prio_09::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -29,7 +29,7 @@ use std::{
 use tokio::time::timeout;
 use url::Url;
 
-const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
+const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Sum { bits: 10 });
 pub(crate) const MIN_BATCH_SIZE: u64 = 10;
 pub(crate) const MAX_BATCH_SIZE: u32 = 12;
 pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
@@ -170,7 +170,7 @@ impl TestRunner {
             "type": "Prio3Sum",
             "bits": assert_matches!(
                 t.task_config.vdaf,
-                VdafConfig::Prio3(Prio3Config::Sum{ bits }) => format!("{bits}")
+                VdafConfig::Prio3Draft09(Prio3Config::Sum{ bits }) => format!("{bits}")
             ),
         });
 

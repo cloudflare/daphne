@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use prio::{
+use prio_09::{
     field::Field64,
     flp::{
         gadgets::{Mul, ParallelSum},

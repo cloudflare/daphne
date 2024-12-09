@@ -26,7 +26,7 @@ mod test {
     };
     use assert_matches::assert_matches;
     use hpke_rs::HpkePublicKey;
-    use prio::{
+    use prio_09::{
         field::Field64,
         vdaf::{
             prio3::Prio3, AggregateShare, Aggregator as VdafAggregator, Collector as VdafCollector,
@@ -36,7 +36,7 @@ mod test {
     use rand::prelude::*;
     use std::iter::zip;
 
-    const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
+    const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Count);
 
     fn roundtrip_report(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);

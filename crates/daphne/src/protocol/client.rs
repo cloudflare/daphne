@@ -7,10 +7,10 @@ use crate::{
     constants::DapAggregatorRole,
     hpke::{info_and_aad, HpkeConfig},
     messages::{Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId, Time},
-    vdaf::{prio2::prio2_shard, prio3::prio3_shard, VdafError},
+    vdaf::{prio2::prio2_shard, prio3_draft09::prio3_shard, VdafError},
     DapError, DapMeasurement, DapVersion, VdafConfig,
 };
-use prio::codec::ParameterizedEncode;
+use prio_09::codec::ParameterizedEncode;
 use rand::prelude::*;
 
 impl VdafConfig {
@@ -123,7 +123,7 @@ impl VdafConfig {
         nonce: &[u8; 16],
     ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
         match self {
-            Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
+            Self::Prio3Draft09(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
             Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {

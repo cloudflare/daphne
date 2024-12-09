@@ -6,7 +6,7 @@
 use std::{borrow::Cow, iter};
 
 use crate::pine::{dst, USAGE_QUERY_RAND};
-use prio::{
+use prio_09::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode},
     field::FftFriendlyFieldElement,
     flp::Type,
@@ -667,7 +667,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Coll
 #[cfg(test)]
 mod tests {
 
-    use prio::{
+    use prio_09::{
         codec::Decode,
         field::{Field128, Field64},
         vdaf::{

@@ -25,7 +25,7 @@ use daphne_service_utils::{
     bearer_token::BearerToken,
     test_route_types::{InternalTestAddTask, InternalTestVdaf},
 };
-use prio::codec::{ParameterizedDecode, ParameterizedEncode};
+use prio_09::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use serde::Serialize;
 use std::{

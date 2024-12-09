@@ -7,7 +7,7 @@ use std::fmt::{Debug, Display};
 
 use crate::{messages::TransitionFailure, vdaf::VdafError};
 pub use aborts::DapAbort;
-use prio::codec::CodecError;
+use prio_09::codec::CodecError;
 
 use self::aborts::ProblemDetails;
 

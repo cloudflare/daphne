@@ -3,7 +3,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use daphne::pine::Pine;
-use prio::{
+use prio_09::{
     field::random_vector,
     flp::Type,
     vdaf::{

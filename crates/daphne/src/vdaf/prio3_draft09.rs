@@ -10,7 +10,7 @@ use crate::{
     DapAggregateResult, DapMeasurement, Prio3Config, VdafAggregateShare, VdafPrepShare,
     VdafPrepState,
 };
-use prio::{
+use prio_09::{
     codec::ParameterizedDecode,
     field::Field64,
     flp::{
@@ -23,6 +23,7 @@ use prio::{
         Aggregator,
     },
 };
+
 
 use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
 
@@ -254,8 +255,8 @@ pub(crate) fn prio3_prep_init(
     };
 
     type Prio3Prepared<T, const SEED_SIZE: usize> = (
-        Prio3PrepareState<<T as prio::flp::Type>::Field, SEED_SIZE>,
-        Prio3PrepareShare<<T as prio::flp::Type>::Field, SEED_SIZE>,
+        Prio3PrepareState<<T as prio_09::flp::Type>::Field, SEED_SIZE>,
+        Prio3PrepareShare<<T as prio_09::flp::Type>::Field, SEED_SIZE>,
     );
 
     fn prep_init<T, P, const SEED_SIZE: usize>(
@@ -267,8 +268,8 @@ pub(crate) fn prio3_prep_init(
         input_share_data: &[u8],
     ) -> Result<Prio3Prepared<T, SEED_SIZE>, VdafError>
     where
-        T: prio::flp::Type,
-        P: prio::vdaf::xof::Xof<SEED_SIZE>,
+        T: prio_09::flp::Type,
+        P: prio_09::vdaf::xof::Xof<SEED_SIZE>,
     {
         // Parse the public share.
         let public_share = Prio3PublicShare::get_decoded_with_param(&vdaf, public_share_data)?;
@@ -518,21 +519,21 @@ pub(crate) fn prio3_unshard<M: IntoIterator<Item = Vec<u8>>>(
 #[cfg(test)]
 mod test {
 
-    use prio::vdaf::prio3_test::check_test_vec;
+    use prio_09::vdaf::prio3_test::check_test_vec;
 
     use crate::{
         hpke::HpkeKemId,
         test_versions,
         testing::AggregationJobTest,
         vdaf::{
-            prio3::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
+            prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
         },
         DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
     fn roundtrip_count(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3(Prio3Config::Count),
+            &VdafConfig::Prio3Draft09(Prio3Config::Count),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
@@ -553,7 +554,7 @@ mod test {
 
     fn roundtrip_sum(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3(Prio3Config::Sum { bits: 23 }),
+            &VdafConfig::Prio3Draft09(Prio3Config::Sum { bits: 23 }),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
@@ -574,7 +575,7 @@ mod test {
 
     fn roundtrip_sum_vec(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3(Prio3Config::SumVec {
+            &VdafConfig::Prio3Draft09(Prio3Config::SumVec {
                 bits: 23,
                 length: 2,
                 chunk_length: 1,
@@ -597,7 +598,7 @@ mod test {
 
     fn roundtrip_histogram(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3(Prio3Config::Histogram {
+            &VdafConfig::Prio3Draft09(Prio3Config::Histogram {
                 length: 3,
                 chunk_length: 1,
             }),
@@ -621,7 +622,7 @@ mod test {
 
     fn roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            &VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 23,
                 length: 2,
                 chunk_length: 1,

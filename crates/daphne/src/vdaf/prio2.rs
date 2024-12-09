@@ -8,7 +8,7 @@ use crate::{
     fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
     VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
-use prio::{
+use prio_09::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{

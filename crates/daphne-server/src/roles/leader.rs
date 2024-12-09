@@ -14,7 +14,7 @@ use daphne::{
 };
 use daphne_service_utils::http_headers;
 use http::StatusCode;
-use prio::codec::ParameterizedEncode;
+use prio_09::codec::ParameterizedEncode;
 use tracing::{error, info};
 use url::Url;
 
