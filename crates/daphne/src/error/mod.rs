@@ -46,6 +46,10 @@ impl DapError {
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
             VdafError::Dap(e) => e,
+            VdafError::CodecLatest(..) | VdafError::VdafLatest(..) => {
+                tracing::warn!(error = ?e, "rejecting report - latest");
+                Self::Transition(TransitionFailure::VdafPrepError)
+            } 
         }
     }
 }

@@ -17,7 +17,7 @@ use crate::{
     metrics::{DaphneMetrics, ReportStatus},
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
-        prio3_draft09::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_prep_init},
+        prio3_draft09::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_draft09_prep_init},
         VdafError, VdafPrepShare, VdafPrepState,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
@@ -193,7 +193,7 @@ impl InitializedReport {
             DapAggregatorRole::Helper => 1,
         };
         let res = match &task_config.vdaf {
-            VdafConfig::Prio3(ref prio3_config) => prio3_prep_init(
+            VdafConfig::Prio3Draft09(ref prio3_config) => prio3_draft09_prep_init(
                 prio3_config,
                 &task_config.vdaf_verify_key,
                 agg_id,
@@ -518,7 +518,7 @@ impl DapTaskConfig {
                         prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
-                            VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
+                            VdafConfig::Prio3Draft09(prio3_config) => prio3_prep_finish_from_shares(
                                 prio3_config,
                                 1,
                                 helper_prep_state.clone(),
@@ -574,6 +574,11 @@ impl DapTaskConfig {
 
                             Err(e @ (VdafError::Codec(..) | VdafError::Vdaf(..))) => {
                                 tracing::warn!(error = ?e, "rejecting report");
+                                TransitionVar::Failed(TransitionFailure::VdafPrepError)
+                            }
+
+                            Err(e @( VdafError::CodecLatest(..) | VdafError::VdafLatest(..))) => {
+                                tracing::warn!(error = ?e, "rejecting report - latest");
                                 TransitionVar::Failed(TransitionFailure::VdafPrepError)
                             }
 
@@ -663,7 +668,7 @@ impl DapTaskConfig {
             };
 
             let res = match &self.vdaf {
-                VdafConfig::Prio3(prio3_config) => {
+                VdafConfig::Prio3Draft09(prio3_config) => {
                     prio3_prep_finish(prio3_config, leader.prep_state, prep_msg)
                 }
                 VdafConfig::Prio2 { dimension } => {
@@ -691,6 +696,11 @@ impl DapTaskConfig {
                         .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
                 }
 
+                Err(e @ (VdafError::CodecLatest(..) | VdafError::VdafLatest(..))) => {
+                    tracing::warn!(error = ?e, "rejecting report - latest");
+                    metrics
+                        .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
+                }
                 Err(VdafError::Dap(e)) => return Err(e),
             }
         }

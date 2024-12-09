@@ -25,8 +25,11 @@ use prio_09::{
         Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
+use prio_latest::codec::{CodecError as CodecErrorLatest, Encode as EncodeLatest, ParameterizedDecode as ParameterizedDecodeLatest};
+use prio_latest::vdaf::prio3::Prio3PrepareShare as Prio3LatestPrepareShare;
 use rand::prelude::*;
 use ring::hkdf::KeyType;
+use serde::de::{value, Unexpected};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "experimental")]
 use std::io::Read;
@@ -37,9 +40,13 @@ pub use self::mastic::MasticWeightConfig;
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VdafError {
     #[error("{0}")]
-    Codec(#[from] CodecError),
+    Codec(#[from] prio_09::codec::CodecError),
     #[error("{0}")]
     Vdaf(#[from] prio_09::vdaf::VdafError),
+    #[error("{0}")]
+    CodecLatest(#[from] prio_latest::codec::CodecError),
+    #[error("{0}")]
+    VdafLatest(#[from] prio_latest::vdaf::VdafError),
     #[error("{0}")]
     Dap(DapError),
 }
@@ -69,6 +76,18 @@ impl std::str::FromStr for VdafConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(s)
+    }
+}
+
+fn from_codec_error(c: CodecErrorLatest) -> CodecError {
+    match c {
+        CodecErrorLatest::Io(x) => CodecError::Io(x),
+        CodecErrorLatest::BytesLeftOver(u) => CodecError::BytesLeftOver(u),
+        CodecErrorLatest::LengthPrefixTooBig(u) => CodecError::LengthPrefixTooBig(u),
+        CodecErrorLatest::LengthPrefixOverflow => CodecError::LengthPrefixOverflow,
+        CodecErrorLatest::Other(x) => CodecError::Other(x),
+        CodecErrorLatest::UnexpectedValue => CodecError::UnexpectedValue,
+        _ => CodecError::UnexpectedValue,
     }
 }
 
@@ -196,6 +215,9 @@ pub enum VdafPrepState {
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
+    Prio3LatestField64(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 16>),
+    Prio3LatestField64HmacSha256Aes128(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 32>),
+    Prio3LatestField128(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field128, 16>),
     #[cfg(feature = "experimental")]
     Mastic {
         out_share: Vec<Field64>,
@@ -216,6 +238,9 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             | Self::Prio3Field64(_)
             | Self::Prio3Field64HmacSha256Aes128(_)
             | Self::Prio3Field128(_)
+            | Self::Prio3LatestField64(_)
+            | Self::Prio3LatestField64HmacSha256Aes128(_)
+            | Self::Prio3LatestField128(_)
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
             #[cfg(feature = "experimental")]
@@ -232,6 +257,10 @@ pub enum VdafPrepShare {
     Prio3Field64(Prio3PrepareShare<Field64, 16>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3Field128(Prio3PrepareShare<Field128, 16>),
+
+    Prio3LatestField64(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 16>),
+    Prio3LatestField64HmacSha256Aes128(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 32>),
+    Prio3LatestField128(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field128, 16>),
     #[cfg(feature = "experimental")]
     Mastic(Field64),
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64, 32>),
@@ -252,6 +281,9 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
             Self::Prio3Field64(..)
             | Self::Prio3Field64HmacSha256Aes128(..)
             | Self::Prio3Field128(..)
+            | Self::Prio3LatestField64(..)
+            | Self::Prio3LatestField64HmacSha256Aes128(..)
+            | Self::Prio3LatestField128(..)
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
             #[cfg(feature = "experimental")]
@@ -266,6 +298,9 @@ impl Encode for VdafPrepShare {
             Self::Prio3Field64(share) => share.encode(bytes),
             Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3Field128(share) => share.encode(bytes),
+            Self::Prio3LatestField64(share) => share.encode(bytes).map_err(from_codec_error),
+            Self::Prio3LatestField64HmacSha256Aes128(share) => share.encode(bytes).map_err(from_codec_error),
+            Self::Prio3LatestField128(share) => share.encode(bytes).map_err(from_codec_error),
             Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
             Self::Mastic(share) => share.encode(bytes),
@@ -291,6 +326,15 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
             }
             VdafPrepState::Prio3Field128(state) => Ok(VdafPrepShare::Prio3Field128(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
+            )),
+            VdafPrepState::Prio3LatestField64(state) => Ok(VdafPrepShare::Prio3LatestField64(Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?)),
+            VdafPrepState::Prio3LatestField64HmacSha256Aes128(state) => {
+                Ok(VdafPrepShare::Prio3LatestField64HmacSha256Aes128(
+                    Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?,
+                ))
+            },
+            VdafPrepState::Prio3LatestField128(state) => Ok(VdafPrepShare::Prio3LatestField128(
+                Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?,
             )),
             VdafPrepState::Prio2(state) => Ok(VdafPrepShare::Prio2(
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
@@ -319,6 +363,9 @@ pub enum VdafAggregateShare {
     Field32(prio_09::vdaf::AggregateShare<FieldPrio2>),
     Field64(prio_09::vdaf::AggregateShare<Field64>),
     Field128(prio_09::vdaf::AggregateShare<Field128>),
+    Field32Latest(prio_latest::vdaf::AggregateShare<prio_latest::field::FieldPrio2>),
+    Field64Latest(prio_latest::vdaf::AggregateShare<prio_latest::field::Field64>),
+    Field128Latest(prio_latest::vdaf::AggregateShare<prio_latest::field::Field128>),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -328,6 +375,9 @@ impl deepsize::DeepSizeOf for VdafAggregateShare {
             VdafAggregateShare::Field32(s) => std::mem::size_of_val(s.as_ref()),
             VdafAggregateShare::Field64(s) => std::mem::size_of_val(s.as_ref()),
             VdafAggregateShare::Field128(s) => std::mem::size_of_val(s.as_ref()),
+            VdafAggregateShare::Field32Latest(s) => std::mem::size_of_val(s.as_ref()),
+            VdafAggregateShare::Field64Latest(s) => std::mem::size_of_val(s.as_ref()),
+            VdafAggregateShare::Field128Latest(s) => std::mem::size_of_val(s.as_ref()),
         }
     }
 }
@@ -338,6 +388,9 @@ impl Encode for VdafAggregateShare {
             VdafAggregateShare::Field32(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
+            VdafAggregateShare::Field32Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
+            VdafAggregateShare::Field64Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
+            VdafAggregateShare::Field128Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
         }
     }
 }
