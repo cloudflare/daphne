@@ -25,7 +25,10 @@ use prio_09::{
         Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
-use prio_latest::codec::{CodecError as CodecErrorLatest, Encode as EncodeLatest, ParameterizedDecode as ParameterizedDecodeLatest};
+use prio_latest::codec::{
+    CodecError as CodecErrorLatest, Encode as EncodeLatest,
+    ParameterizedDecode as ParameterizedDecodeLatest,
+};
 use prio_latest::vdaf::prio3::Prio3PrepareShare as Prio3LatestPrepareShare;
 use rand::prelude::*;
 use ring::hkdf::KeyType;
@@ -57,6 +60,7 @@ pub(crate) enum VdafError {
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
     Prio3Draft09(Prio3Config),
+    Prio3Latest(Prio3Config),
     Prio2 {
         dimension: usize,
     },
@@ -95,6 +99,7 @@ impl std::fmt::Display for VdafConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VdafConfig::Prio3Draft09(prio3_config) => write!(f, "Prio3({prio3_config})"),
+            VdafConfig::Prio3Latest(prio3_config) => write!(f, "Prio3Latest({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
@@ -215,9 +220,15 @@ pub enum VdafPrepState {
     Prio3Field64(Prio3PrepareState<Field64, 16>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 16>),
-    Prio3LatestField64(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 16>),
-    Prio3LatestField64HmacSha256Aes128(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 32>),
-    Prio3LatestField128(prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field128, 16>),
+    Prio3LatestField64(
+        prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 16>,
+    ),
+    Prio3LatestField64HmacSha256Aes128(
+        prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field64, 32>,
+    ),
+    Prio3LatestField128(
+        prio_latest::vdaf::prio3::Prio3PrepareState<prio_latest::field::Field128, 16>,
+    ),
     #[cfg(feature = "experimental")]
     Mastic {
         out_share: Vec<Field64>,
@@ -258,9 +269,15 @@ pub enum VdafPrepShare {
     Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3Field128(Prio3PrepareShare<Field128, 16>),
 
-    Prio3LatestField64(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 16>),
-    Prio3LatestField64HmacSha256Aes128(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 32>),
-    Prio3LatestField128(prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field128, 16>),
+    Prio3LatestField64(
+        prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 16>,
+    ),
+    Prio3LatestField64HmacSha256Aes128(
+        prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field64, 32>,
+    ),
+    Prio3LatestField128(
+        prio_latest::vdaf::prio3::Prio3PrepareShare<prio_latest::field::Field128, 16>,
+    ),
     #[cfg(feature = "experimental")]
     Mastic(Field64),
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64, 32>),
@@ -299,7 +316,9 @@ impl Encode for VdafPrepShare {
             Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3Field128(share) => share.encode(bytes),
             Self::Prio3LatestField64(share) => share.encode(bytes).map_err(from_codec_error),
-            Self::Prio3LatestField64HmacSha256Aes128(share) => share.encode(bytes).map_err(from_codec_error),
+            Self::Prio3LatestField64HmacSha256Aes128(share) => {
+                share.encode(bytes).map_err(from_codec_error)
+            }
             Self::Prio3LatestField128(share) => share.encode(bytes).map_err(from_codec_error),
             Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
@@ -327,14 +346,19 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
             VdafPrepState::Prio3Field128(state) => Ok(VdafPrepShare::Prio3Field128(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
-            VdafPrepState::Prio3LatestField64(state) => Ok(VdafPrepShare::Prio3LatestField64(Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?)),
+            VdafPrepState::Prio3LatestField64(state) => Ok(VdafPrepShare::Prio3LatestField64(
+                Prio3LatestPrepareShare::decode_with_param(state, bytes)
+                    .map_err(from_codec_error)?,
+            )),
             VdafPrepState::Prio3LatestField64HmacSha256Aes128(state) => {
                 Ok(VdafPrepShare::Prio3LatestField64HmacSha256Aes128(
-                    Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?,
+                    Prio3LatestPrepareShare::decode_with_param(state, bytes)
+                        .map_err(from_codec_error)?,
                 ))
-            },
+            }
             VdafPrepState::Prio3LatestField128(state) => Ok(VdafPrepShare::Prio3LatestField128(
-                Prio3LatestPrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?,
+                Prio3LatestPrepareShare::decode_with_param(state, bytes)
+                    .map_err(from_codec_error)?,
             )),
             VdafPrepState::Prio2(state) => Ok(VdafPrepShare::Prio2(
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
@@ -388,9 +412,15 @@ impl Encode for VdafAggregateShare {
             VdafAggregateShare::Field32(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
-            VdafAggregateShare::Field32Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
-            VdafAggregateShare::Field64Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
-            VdafAggregateShare::Field128Latest(agg_share) => agg_share.encode(bytes).map_err(from_codec_error),
+            VdafAggregateShare::Field32Latest(agg_share) => {
+                agg_share.encode(bytes).map_err(from_codec_error)
+            }
+            VdafAggregateShare::Field64Latest(agg_share) => {
+                agg_share.encode(bytes).map_err(from_codec_error)
+            }
+            VdafAggregateShare::Field128Latest(agg_share) => {
+                agg_share.encode(bytes).map_err(from_codec_error)
+            }
         }
     }
 }
@@ -401,6 +431,10 @@ impl VdafConfig {
             Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
             | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
             Self::Prio3Draft09(..) => VdafVerifyKey::L16([0; 16]),
+            Self::Prio3Latest(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
+                VdafVerifyKey::L32([0; 32])
+            }
+            Self::Prio3Latest(..) => VdafVerifyKey::L16([0; 16]),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
             Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
@@ -415,6 +449,14 @@ impl VdafConfig {
                 <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
             Self::Prio3Draft09(..) => Ok(VdafVerifyKey::L16(
+                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+            )),
+            Self::Prio3Latest(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
+                Ok(VdafVerifyKey::L32(
+                    <[u8; 32]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
+                ))
+            }
+            Self::Prio3Latest(..) => Ok(VdafVerifyKey::L16(
                 <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
             #[cfg(feature = "experimental")]
@@ -440,6 +482,7 @@ impl VdafConfig {
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
             Self::Prio3Draft09(..) | Self::Prio2 { .. } => agg_param.is_empty(),
+            Self::Prio3Latest(..) => agg_param.is_empty(),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => true,
             Self::Pine(..) => agg_param.is_empty(),

@@ -40,6 +40,7 @@ use prio_09::{
     field::FieldElement,
     vdaf::AggregateShare,
 };
+use prio_latest::field::FieldElement as FieldElementLatest;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use worker::{
     js_sys, wasm_bindgen::JsValue, Env, Error, Request, Response, Result, ScheduledTime, State,
@@ -69,6 +70,9 @@ enum VdafKind {
     Field32,
     Field64,
     Field128,
+    Field32Latest,
+    Field64Latest,
+    Field128Latest,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,6 +95,9 @@ impl DapAggregateShareMetadata {
                 daphne::vdaf::VdafAggregateShare::Field32(_) => VdafKind::Field32,
                 daphne::vdaf::VdafAggregateShare::Field64(_) => VdafKind::Field64,
                 daphne::vdaf::VdafAggregateShare::Field128(_) => VdafKind::Field128,
+                daphne::vdaf::VdafAggregateShare::Field32Latest(_) => VdafKind::Field32Latest,
+                daphne::vdaf::VdafAggregateShare::Field64Latest(_) => VdafKind::Field64Latest,
+                daphne::vdaf::VdafAggregateShare::Field128Latest(_) => VdafKind::Field128Latest,
             }),
         }
     }
@@ -308,10 +315,54 @@ impl AggregateStore {
                         Ok(AggregateShare::from(share))
                     }
 
+                    fn from_slices_latest<F, I>(
+                        chunks: I,
+                    ) -> Result<prio_latest::vdaf::AggregateShare<F>>
+                    where
+                        F: FieldElementLatest,
+                        I: Iterator<Item = Vec<u8>>,
+                    {
+                        let mut share = Vec::new();
+                        for chunk in chunks {
+                            let len = u64::try_from(chunk.len()).unwrap();
+                            let mut bytes = Cursor::new(chunk.as_slice());
+                            while bytes.position() < len {
+                                let x = F::decode(&mut bytes).map_err(|e| {
+                                    worker::Error::Internal(
+                                        serde_wasm_bindgen::to_value(&format!(
+                                            "failed to decode aggregate share: {e}"
+                                        ))
+                                        .expect("string never fails to convert to JsValue"),
+                                    )
+                                })?;
+                                share.push(x);
+                            }
+                            if bytes.position() < len {
+                                return Err(worker::Error::Internal(
+                                serde_wasm_bindgen::to_value(
+                                    "failed to decode aggregate share: bytes remaining in buffer",
+                                )
+                                .expect("string never fails to convert to JsValue"),
+                            ));
+                            }
+                        }
+
+                        Ok(prio_latest::vdaf::AggregateShare::from(share))
+                    }
+
                     let data = match kind {
                         VdafKind::Field32 => VdafAggregateShare::Field32(from_slices(chunks)?),
                         VdafKind::Field64 => VdafAggregateShare::Field64(from_slices(chunks)?),
                         VdafKind::Field128 => VdafAggregateShare::Field128(from_slices(chunks)?),
+                        VdafKind::Field32Latest => {
+                            VdafAggregateShare::Field32Latest(from_slices_latest(chunks)?)
+                        }
+                        VdafKind::Field64Latest => {
+                            VdafAggregateShare::Field64Latest(from_slices_latest(chunks)?)
+                        }
+                        VdafKind::Field128Latest => {
+                            VdafAggregateShare::Field128Latest(from_slices_latest(chunks)?)
+                        }
                     };
 
                     meta.into_agg_share_with_data(data)

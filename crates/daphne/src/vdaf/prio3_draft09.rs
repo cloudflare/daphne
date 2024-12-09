@@ -24,7 +24,6 @@ use prio_09::{
     },
 };
 
-
 use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
 
 const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
@@ -526,7 +525,8 @@ mod test {
         test_versions,
         testing::AggregationJobTest,
         vdaf::{
-            prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
+            prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config,
+            VdafConfig,
         },
         DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };

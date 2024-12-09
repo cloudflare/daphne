@@ -15,6 +15,8 @@ use crate::{
     durable_requests::ObjectIdFrom,
 };
 
+use prio_latest;
+
 use super::DurableRequestPayload;
 
 super::define_do_binding! {
@@ -98,10 +100,28 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
             }
             {
                 fn encode<'b, F, B, const ENCODED_SIZE: usize>(
-                    field: &prio::vdaf::AggregateShare<F>,
+                    field: &prio_09::vdaf::AggregateShare<F>,
                     get_bytes: B,
                 ) where
-                    F: prio::field::FieldElement + Into<[u8; ENCODED_SIZE]>,
+                    F: prio_09::field::FieldElement + Into<[u8; ENCODED_SIZE]>,
+                    B: FnOnce(u32) -> &'b mut [u8],
+                {
+                    let mut bytes = get_bytes(
+                        (F::ENCODED_SIZE * field.as_ref().len())
+                            .try_into()
+                            .expect("trying to encode a buffer longer than u32::MAX"),
+                    );
+                    for f in field.as_ref() {
+                        let f: [u8; ENCODED_SIZE] = (*f).into();
+                        bytes[..ENCODED_SIZE].copy_from_slice(&f);
+                        bytes = &mut bytes[ENCODED_SIZE..];
+                    }
+                }
+                fn encode_latest<'b, F, B, const ENCODED_SIZE: usize>(
+                    field: &prio_latest::vdaf::AggregateShare<F>,
+                    get_bytes: B,
+                ) where
+                    F: prio_latest::field::FieldElement + Into<[u8; ENCODED_SIZE]>,
                     B: FnOnce(u32) -> &'b mut [u8],
                 {
                     let mut bytes = get_bytes(
@@ -126,6 +146,15 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                     Some(VdafAggregateShare::Field32(field)) => {
                         encode(field, |len| data.init_field_prio2(len));
                     }
+                    Some(VdafAggregateShare::Field64Latest(field)) => {
+                        encode_latest(field, |len| data.init_field64(len));
+                    }
+                    Some(VdafAggregateShare::Field128Latest(field)) => {
+                        encode_latest(field, |len| data.init_field128(len));
+                    }
+                    Some(VdafAggregateShare::Field32Latest(field)) => {
+                        encode_latest(field, |len| data.init_field_prio2(len));
+                    }
                     None => data.set_none(()),
                 };
             }
@@ -147,10 +176,10 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
         let agg_share_delta = {
             let agg_share_delta = request.get_agg_share_delta()?;
             let data = {
-                fn decode<F>(fields: &[u8]) -> capnp::Result<prio::vdaf::AggregateShare<F>>
+                fn decode<F>(fields: &[u8]) -> capnp::Result<prio_09::vdaf::AggregateShare<F>>
                 where
-                    F: prio::field::FieldElement
-                        + for<'s> TryFrom<&'s [u8], Error = prio::field::FieldError>,
+                    F: prio_09::field::FieldElement
+                        + for<'s> TryFrom<&'s [u8], Error = prio_09::field::FieldError>,
                 {
                     let iter = fields.chunks_exact(F::ENCODED_SIZE);
                     if let length @ 1.. = iter.remainder().len() {
@@ -159,7 +188,7 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                             extra: format!("leftover bytes still present in buffer: {length}"),
                         });
                     }
-                    Ok(prio::vdaf::AggregateShare::from(
+                    Ok(prio_09::vdaf::AggregateShare::from(
                         iter.map(|f| f.try_into().unwrap()).collect::<Vec<_>>(),
                     ))
                 }
@@ -230,6 +259,7 @@ mod test {
         field::{Field128, Field64, FieldElement, FieldPrio2},
         vdaf::AggregateShare,
     };
+    use prio_latest;
     use rand::{thread_rng, Rng};
 
     use crate::durable_requests::bindings::DurableRequestPayloadExt;

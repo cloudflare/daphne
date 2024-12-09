@@ -3,8 +3,6 @@
 
 //! Parameters for the [Prio3 VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
-use std::any::Any;
-
 use crate::{
     fatal_error,
     messages::{taskprov::VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128, TaskId},
@@ -13,21 +11,20 @@ use crate::{
     VdafPrepState,
 };
 use prio_latest::{
-    codec::{ParameterizedDecode, Encode, Decode},
+    codec::{Encode, ParameterizedDecode},
     field::Field64,
     flp::{
         gadgets::{Mul, ParallelSum},
-        types::SumVec, Type,
+        types::SumVec,
+        Type,
     },
     vdaf::{
         prio3::{Prio3, Prio3InputShare, Prio3PrepareShare, Prio3PrepareState, Prio3PublicShare},
-        xof::XofHmacSha256Aes128, xof::Xof,
-        Aggregator, Aggregatable, OutputShare, AggregateShare, Collector, PrepareTransition,
+        xof::Xof,
+        xof::XofHmacSha256Aes128,
+        Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
-
-use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt::Debug, io::Cursor};
 
 const ERR_FIELD_TYPE: &str = "unexpected field type for step or message";
 const CTX_STRING: &[u8] = "dap-13".as_bytes();
@@ -153,7 +150,7 @@ pub(crate) fn prio3_latest_prep_init(
             })?;
             let (state, share) = prep_init_latest(
                 vdaf,
-                task_id,                
+                task_id,
                 verify_key,
                 agg_id,
                 nonce,
@@ -266,8 +263,8 @@ pub(crate) fn prio3_latest_prep_init(
     };
 
     type Prio3LatestPrepared<T, const SEED_SIZE: usize> = (
-        prio_latest::vdaf::prio3::Prio3PrepareState<<T as prio_latest::flp::Type>::Field, SEED_SIZE>,
-        prio_latest::vdaf::prio3::Prio3PrepareShare<<T as prio_latest::flp::Type>::Field, SEED_SIZE>,
+        Prio3PrepareState<<T as Type>::Field, SEED_SIZE>,
+        Prio3PrepareShare<<T as Type>::Field, SEED_SIZE>,
     );
 
     fn prep_init_latest<T, P, const SEED_SIZE: usize>(
@@ -280,8 +277,8 @@ pub(crate) fn prio3_latest_prep_init(
         input_share_data: &[u8],
     ) -> Result<Prio3LatestPrepared<T, SEED_SIZE>, VdafError>
     where
-        T: prio_latest::flp::Type,
-        P: prio_latest::vdaf::xof::Xof<SEED_SIZE>,
+        T: Type,
+        P: Xof<SEED_SIZE>,
     {
         // Parse the public share.
         let public_share = Prio3PublicShare::get_decoded_with_param(&vdaf, public_share_data)?;
@@ -289,12 +286,20 @@ pub(crate) fn prio3_latest_prep_init(
         // Parse the input share.
         let input_share =
             Prio3InputShare::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
-        
+
         let binding = [CTX_STRING, &task_id.0].concat();
         let ctx = binding.as_slice();
 
         // Run the prepare-init algorithm, returning the initial state.
-        Ok(vdaf.prepare_init(verify_key, &ctx, agg_id, &(), nonce, &public_share, &input_share)?)
+        Ok(vdaf.prepare_init(
+            verify_key,
+            &ctx,
+            agg_id,
+            &(),
+            nonce,
+            &public_share,
+            &input_share,
+        )?)
     }
 }
 
@@ -533,14 +538,13 @@ pub(crate) fn prio3_latest_unshard<M: IntoIterator<Item = Vec<u8>>>(
     }
 }
 
-
 fn unshard<V, M>(
     vdaf: &V,
     num_measurements: usize,
     agg_shares: M,
 ) -> Result<V::AggregateResult, VdafError>
 where
-    V: prio_latest::vdaf::Vdaf<AggregationParam = ()> + prio_latest::vdaf::Collector,
+    V: Vdaf<AggregationParam = ()> + Collector,
     M: IntoIterator<Item = Vec<u8>>,
 {
     let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
@@ -551,7 +555,7 @@ where
     Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
 }
 
-fn shard_then_encode<V: prio_latest::vdaf::Vdaf + prio_latest::vdaf::Client<16>>(
+fn shard_then_encode<V: Vdaf + Client<16>>(
     vdaf: &V,
     task_id: TaskId,
     measurement: &V::Measurement,
@@ -585,17 +589,17 @@ fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: us
     peer_share_data: &[u8],
 ) -> Result<(V::OutputShare, Vec<u8>), VdafError>
 where
-    V: prio_latest::vdaf::Vdaf<AggregationParam = ()> + prio_latest::vdaf::Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+    V: Vdaf<AggregationParam = ()> + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
 {
     // Decode the Helper's inbound message.
     let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
 
     let binding = [CTX_STRING, &task_id.0].concat();
     let ctx = binding.as_slice();
-    
+
     // Preprocess the inbound messages.
     let message = vdaf.prepare_shares_to_prepare_message(
-        ctx.clone(),
+        ctx,
         &(),
         if agg_id == 0 {
             [host_share, peer_share]
@@ -614,7 +618,6 @@ where
     }
 }
 
-
 fn prep_finish<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
     vdaf: &V,
     task_id: TaskId,
@@ -622,7 +625,7 @@ fn prep_finish<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
     peer_message_data: &[u8],
 ) -> Result<V::OutputShare, VdafError>
 where
-    V: prio_latest::vdaf::Vdaf + prio_latest::vdaf::Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+    V: Vdaf + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
 {
     // Decode the inbound message from the peer, which contains the preprocessed prepare message.
     let peer_message = V::PrepareMessage::get_decoded_with_param(&host_state, peer_message_data)?;
@@ -668,7 +671,8 @@ mod test {
         test_versions,
         testing::AggregationJobTest,
         vdaf::{
-            prio3_latest::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config, VdafConfig,
+            prio3_latest::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config,
+            VdafConfig,
         },
         DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };

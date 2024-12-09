@@ -486,7 +486,10 @@ mod test {
             // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
             // measurement to generate. However, we could extend the code to support more VDAFs.
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
-            assert_matches!(task_config.vdaf, VdafConfig::Prio3Draft09(Prio3Config::Count));
+            assert_matches!(
+                task_config.vdaf,
+                VdafConfig::Prio3Draft09(Prio3Config::Count)
+            );
 
             self.gen_test_report_for_measurement(task_id, DapMeasurement::U64(1))
                 .await

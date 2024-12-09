@@ -225,6 +225,7 @@ async fn finish_agg_job_and_aggregate(
     let mut report_status = HashMap::new();
     for _ in 0..RETRY_COUNT {
         let (agg_span, agg_job_resp) = task_config.produce_agg_job_resp(
+            *task_id,
             &report_status,
             part_batch_sel,
             initialized_reports,

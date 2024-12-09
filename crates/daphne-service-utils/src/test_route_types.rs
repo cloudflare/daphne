@@ -59,6 +59,30 @@ impl From<VdafConfig> for InternalTestVdaf {
                     Some(chunk_length),
                 ),
             },
+            VdafConfig::Prio3Latest(prio3) => match prio3 {
+                Prio3Config::Count => ("Prio3Count", None, None, None),
+                Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
+                Prio3Config::Histogram {
+                    length,
+                    chunk_length,
+                } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
+                Prio3Config::SumVec {
+                    bits,
+                    length,
+                    chunk_length,
+                } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
+                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                    bits,
+                    length,
+                    chunk_length,
+                    num_proofs: _unimplemented,
+                } => (
+                    "Prio3SumVecField64MultiproofHmacSha256Aes128",
+                    Some(bits),
+                    Some(length),
+                    Some(chunk_length),
+                ),
+            },
             VdafConfig::Prio2 { .. } => ("Prio2", None, None, None),
             VdafConfig::Pine(_) => ("Pine", None, None, None),
             #[cfg(feature = "experimental")]

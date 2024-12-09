@@ -30,6 +30,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 prio_09.workspace = true
+prio_latest.workspace = true
 prometheus.workspace = true
 rand.workspace = true
 serde-wasm-bindgen.workspace = true

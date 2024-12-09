@@ -16,16 +16,16 @@ use crate::{
     },
     metrics::{DaphneMetrics, ReportStatus},
     vdaf::{
-        prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init},
-        prio3_draft09::{prio3_prep_finish, prio3_prep_finish_from_shares, prio3_draft09_prep_init},
-        VdafError, VdafPrepShare, VdafPrepState,
+        prio2::{prio2_prep_finish, prio2_prep_finish_from_shares, prio2_prep_init}, prio3_draft09::{
+            prio3_draft09_prep_init, prio3_prep_finish, prio3_prep_finish_from_shares,
+        }, prio3_latest::{prio3_latest_prep_finish, prio3_latest_prep_finish_from_shares, prio3_latest_prep_init}, VdafError, VdafPrepShare, VdafPrepState
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
     DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
 };
-use prio_09::codec::{
+use prio_09::{codec::{
     encode_u32_items, CodecError, Decode, Encode, ParameterizedDecode, ParameterizedEncode,
-};
+}, vdaf::prio3};
 use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
@@ -201,6 +201,7 @@ impl InitializedReport {
                 &report_share.public_share,
                 &input_share,
             ),
+            VdafConfig::Prio3Latest(ref prio3_config) => prio3_latest_prep_init(prio3_config, &task_config.vdaf_verify_key, *task_id, agg_id, &report_share.report_metadata.id.0, &report_share.public_share, &input_share),
             VdafConfig::Prio2 { dimension } => prio2_prep_init(
                 *dimension,
                 &task_config.vdaf_verify_key,
@@ -497,6 +498,7 @@ impl DapTaskConfig {
     #[tracing::instrument(skip_all, fields(report_count = report_status.len()))]
     pub(crate) fn produce_agg_job_resp(
         &self,
+        task_id: TaskId,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport],
@@ -518,13 +520,18 @@ impl DapTaskConfig {
                         prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
-                            VdafConfig::Prio3Draft09(prio3_config) => prio3_prep_finish_from_shares(
-                                prio3_config,
-                                1,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
+                            VdafConfig::Prio3Draft09(prio3_config) => {
+                                prio3_prep_finish_from_shares(
+                                    prio3_config,
+                                    1,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                )
+                            }
+                            VdafConfig::Prio3Latest(prio3_config) => {
+                                prio3_latest_prep_finish_from_shares(prio3_config, 1, task_id, helper_prep_state.clone(), helper_prep_share.clone(), leader_prep_share)
+                            }
                             VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
                                 *dimension,
                                 helper_prep_state.clone(),
@@ -577,7 +584,7 @@ impl DapTaskConfig {
                                 TransitionVar::Failed(TransitionFailure::VdafPrepError)
                             }
 
-                            Err(e @( VdafError::CodecLatest(..) | VdafError::VdafLatest(..))) => {
+                            Err(e @ (VdafError::CodecLatest(..) | VdafError::VdafLatest(..))) => {
                                 tracing::warn!(error = ?e, "rejecting report - latest");
                                 TransitionVar::Failed(TransitionFailure::VdafPrepError)
                             }
@@ -670,6 +677,9 @@ impl DapTaskConfig {
             let res = match &self.vdaf {
                 VdafConfig::Prio3Draft09(prio3_config) => {
                     prio3_prep_finish(prio3_config, leader.prep_state, prep_msg)
+                }
+                VdafConfig::Prio3Latest(prio3_config) => {
+                    prio3_latest_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
                 }
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)

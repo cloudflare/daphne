@@ -765,7 +765,7 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id)
                 .unwrap();
             invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -791,7 +791,7 @@ mod test {
             let (mut invalid_public_share, invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id)
                 .unwrap();
             invalid_public_share.push(1); // Add spurious byte at the end
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -817,7 +817,7 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id)
                 .unwrap();
             invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
             invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share

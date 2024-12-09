@@ -394,6 +394,20 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
             VdafConfig::Prio3Draft09(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
+            VdafConfig::Prio3Latest(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { bits, length, chunk_length, num_proofs }) => Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                bits: (*bits).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+                length: (*length).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+
+                chunk_length: (*chunk_length).try_into().map_err(|_| {
+                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                })?,
+                num_proofs: *num_proofs,   
+            }),
+            VdafConfig::Prio3Latest(..) => Err(fatal_error!(err = format!("{vdaf_config} is not currently supported for taskprov"))),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic { .. } => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
