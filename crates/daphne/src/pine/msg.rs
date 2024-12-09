@@ -5,7 +5,7 @@
 
 use std::iter;
 
-use prio::{
+use prio_draft09::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode},
     field::FftFriendlyFieldElement,
     flp::Type,

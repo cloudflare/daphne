@@ -59,7 +59,7 @@ impl DefaultVdafConfigs {
         match self {
             Self::Prio2Dimension99k => VdafConfig::Prio2 { dimension: 99_992 },
             Self::Prio3NumProofs2 => {
-                VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,
                     chunk_length: 320,
@@ -67,7 +67,7 @@ impl DefaultVdafConfigs {
                 })
             }
             Self::Prio3NumProofs3 => {
-                VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,
                     chunk_length: 320,

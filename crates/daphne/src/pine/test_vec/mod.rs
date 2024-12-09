@@ -6,7 +6,7 @@ use crate::messages::taskprov::{
     VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
 };
 use crate::pine::{Pine, PineParam, ALPHA};
-use prio::{
+use prio_draft09::{
     codec::Encode,
     field::{FftFriendlyFieldElement, Field128, Field64},
     vdaf::{
@@ -14,7 +14,7 @@ use prio::{
         Aggregator, Collector, PrepareTransition,
     },
 };
-use prio::{field::FieldPrio2, vdaf::xof::XofHmacSha256Aes128};
+use prio_draft09::{field::FieldPrio2, vdaf::xof::XofHmacSha256Aes128};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

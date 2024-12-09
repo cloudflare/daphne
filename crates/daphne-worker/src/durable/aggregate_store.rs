@@ -35,10 +35,14 @@ use daphne_service_utils::durable_requests::bindings::{
     self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
     DurableMethod,
 };
+
 use prio::{
     codec::{Decode, Encode},
     field::FieldElement,
     vdaf::AggregateShare,
+};
+use prio_draft09::{
+    field::FieldElement as FieldElementDraft09, vdaf::AggregateShare as AggregateShareDraft09,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use worker::{
@@ -66,6 +70,9 @@ const COLLECTED_KEY: &str = "collected";
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum VdafKind {
+    Field32Draft09,
+    Field64Draft09,
+    Field128Draft09,
     Field32,
     Field64,
     Field128,
@@ -88,6 +95,9 @@ impl DapAggregateShareMetadata {
             max_time: share.max_time,
             checksum: share.checksum,
             kind: share.data.as_ref().map(|data| match data {
+                daphne::vdaf::VdafAggregateShare::Field32Draft09(_) => VdafKind::Field32Draft09,
+                daphne::vdaf::VdafAggregateShare::Field64Draft09(_) => VdafKind::Field64Draft09,
+                daphne::vdaf::VdafAggregateShare::Field128Draft09(_) => VdafKind::Field128Draft09,
                 daphne::vdaf::VdafAggregateShare::Field32(_) => VdafKind::Field32,
                 daphne::vdaf::VdafAggregateShare::Field64(_) => VdafKind::Field64,
                 daphne::vdaf::VdafAggregateShare::Field128(_) => VdafKind::Field128,
@@ -275,40 +285,58 @@ impl AggregateStore {
                 } else {
                     let kind = meta.kind.expect("if there is data there should be a type");
 
-                    fn from_slices<F, I>(chunks: I) -> Result<AggregateShare<F>>
-                    where
-                        F: FieldElement,
-                        I: Iterator<Item = Vec<u8>>,
-                    {
-                        let mut share = Vec::new();
-                        for chunk in chunks {
-                            let len = u64::try_from(chunk.len()).unwrap();
-                            let mut bytes = Cursor::new(chunk.as_slice());
-                            while bytes.position() < len {
-                                let x = F::decode(&mut bytes).map_err(|e| {
-                                    worker::Error::Internal(
-                                        serde_wasm_bindgen::to_value(&format!(
-                                            "failed to decode aggregate share: {e}"
-                                        ))
+                    macro_rules! make_from_slices {
+                        ($func_name:ident, $agg_share_type:ident, $field_trait:ident) => {
+                            fn $func_name<F, I>(chunks: I) -> Result<$agg_share_type<F>>
+                            where
+                                F: $field_trait,
+                                I: Iterator<Item = Vec<u8>>,
+                            {
+                                let mut share = Vec::new();
+                                for chunk in chunks {
+                                    let len = u64::try_from(chunk.len()).unwrap();
+                                    let mut bytes = Cursor::new(chunk.as_slice());
+                                    while bytes.position() < len {
+                                        let x = F::decode(&mut bytes).map_err(|e| {
+                                            worker::Error::Internal(
+                                                serde_wasm_bindgen::to_value(&format!(
+                                                    "failed to decode aggregate share: {e}"
+                                                ))
+                                                .expect("string never fails to convert to JsValue"),
+                                            )
+                                        })?;
+                                        share.push(x);
+                                    }
+                                    if bytes.position() < len {
+                                        return Err(worker::Error::Internal(
+                                        serde_wasm_bindgen::to_value(
+                                            "failed to decode aggregate share: bytes remaining in buffer",
+                                        )
                                         .expect("string never fails to convert to JsValue"),
-                                    )
-                                })?;
-                                share.push(x);
-                            }
-                            if bytes.position() < len {
-                                return Err(worker::Error::Internal(
-                                serde_wasm_bindgen::to_value(
-                                    "failed to decode aggregate share: bytes remaining in buffer",
-                                )
-                                .expect("string never fails to convert to JsValue"),
-                            ));
-                            }
-                        }
+                                    ));
+                                    }
+                                }
 
-                        Ok(AggregateShare::from(share))
+                                Ok($agg_share_type::from(share))
+                            }
+                        };
                     }
-
+                    make_from_slices!(
+                        from_slices_draft09,
+                        AggregateShareDraft09,
+                        FieldElementDraft09
+                    );
+                    make_from_slices!(from_slices, AggregateShare, FieldElement);
                     let data = match kind {
+                        VdafKind::Field32Draft09 => {
+                            VdafAggregateShare::Field32Draft09(from_slices_draft09(chunks)?)
+                        }
+                        VdafKind::Field64Draft09 => {
+                            VdafAggregateShare::Field64Draft09(from_slices_draft09(chunks)?)
+                        }
+                        VdafKind::Field128Draft09 => {
+                            VdafAggregateShare::Field128Draft09(from_slices_draft09(chunks)?)
+                        }
                         VdafKind::Field32 => VdafAggregateShare::Field32(from_slices(chunks)?),
                         VdafKind::Field64 => VdafAggregateShare::Field64(from_slices(chunks)?),
                         VdafKind::Field128 => VdafAggregateShare::Field128(from_slices(chunks)?),

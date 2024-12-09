@@ -8,7 +8,7 @@ use crate::{
     fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
     VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
-use prio::{
+use prio_draft09::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{
@@ -104,7 +104,7 @@ pub(crate) fn prio2_prep_finish_from_shares(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
 }
 
@@ -133,7 +133,7 @@ pub(crate) fn prio2_prep_finish(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
 }
 

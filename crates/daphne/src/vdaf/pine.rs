@@ -7,19 +7,19 @@ use crate::{
         VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
     },
     pine::{msg, vdaf::PinePrepState, Pine, PineParam},
-    vdaf::{prep_finish, prep_finish_from_shares, unshard},
     DapAggregateResult, DapMeasurement,
 };
 
 use super::{
-    shard_then_encode, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
+    prep_finish_draft09, prep_finish_from_shares_draft09, shard_then_encode_draft09,
+    unshard_draft09, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
-use prio::{
+use prio_draft09::{
     codec::ParameterizedDecode,
     field::{FftFriendlyFieldElement, Field64, FieldPrio2},
     vdaf::{
         xof::{Xof, XofHmacSha256Aes128},
-        Aggregator,
+        AggregateShare, Aggregator, OutputShare,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -71,11 +71,11 @@ impl PineConfig {
         match self {
             PineConfig::Field32HmacSha256Aes128 { param } => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
-                shard_then_encode(&vdaf, gradient, nonce)
+                shard_then_encode_draft09(&vdaf, gradient, nonce)
             }
             PineConfig::Field64HmacSha256Aes128 { param } => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
-                shard_then_encode(&vdaf, gradient, nonce)
+                shard_then_encode_draft09(&vdaf, gradient, nonce)
             }
         }
     }
@@ -140,9 +140,9 @@ impl PineConfig {
             ) => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
-                let agg_share = VdafAggregateShare::Field32(prio::vdaf::AggregateShare::from(
-                    prio::vdaf::OutputShare::from(out_share.0),
+                    prep_finish_from_shares_draft09(&vdaf, agg_id, state, share, peer_share_data)?;
+                let agg_share = VdafAggregateShare::Field32Draft09(AggregateShare::from(
+                    OutputShare::from(out_share.0),
                 ));
                 Ok((agg_share, outbound))
             }
@@ -153,9 +153,9 @@ impl PineConfig {
             ) => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
-                let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
-                    prio::vdaf::OutputShare::from(out_share.0),
+                    prep_finish_from_shares_draft09(&vdaf, agg_id, state, share, peer_share_data)?;
+                let agg_share = VdafAggregateShare::Field64Draft09(AggregateShare::from(
+                    OutputShare::from(out_share.0),
                 ));
                 Ok((agg_share, outbound))
             }
@@ -176,9 +176,9 @@ impl PineConfig {
                 VdafPrepState::Pine32HmacSha256Aes128(state),
             ) => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
-                let out_share = prep_finish(&vdaf, state, peer_message_data)?;
-                let agg_share = VdafAggregateShare::Field32(prio::vdaf::AggregateShare::from(
-                    prio::vdaf::OutputShare::from(out_share.0),
+                let out_share = prep_finish_draft09(&vdaf, state, peer_message_data)?;
+                let agg_share = VdafAggregateShare::Field32Draft09(AggregateShare::from(
+                    OutputShare::from(out_share.0),
                 ));
                 Ok(agg_share)
             }
@@ -187,9 +187,9 @@ impl PineConfig {
                 VdafPrepState::Pine64HmacSha256Aes128(state),
             ) => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
-                let out_share = prep_finish(&vdaf, state, peer_message_data)?;
-                let agg_share = VdafAggregateShare::Field64(prio::vdaf::AggregateShare::from(
-                    prio::vdaf::OutputShare::from(out_share.0),
+                let out_share = prep_finish_draft09(&vdaf, state, peer_message_data)?;
+                let agg_share = VdafAggregateShare::Field64Draft09(AggregateShare::from(
+                    OutputShare::from(out_share.0),
                 ));
                 Ok(agg_share)
             }
@@ -207,12 +207,12 @@ impl PineConfig {
         match self {
             PineConfig::Field32HmacSha256Aes128 { param } => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard_draft09(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }
             PineConfig::Field64HmacSha256Aes128 { param } => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard_draft09(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::F64Vec(agg_res))
             }
         }

@@ -7,7 +7,7 @@ use crate::{
     constants::DapAggregatorRole,
     hpke::{info_and_aad, HpkeConfig},
     messages::{Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId, Time},
-    vdaf::{prio2::prio2_shard, prio3::prio3_shard, VdafError},
+    vdaf::{prio2::prio2_shard, prio3::prio3_shard, prio3_draft09::prio3_draft09_shard, VdafError},
     DapError, DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::ParameterizedEncode;
@@ -45,7 +45,7 @@ impl VdafConfig {
         let mut rng = thread_rng();
         let report_id = ReportId(rng.gen());
         let (public_share, input_shares) = self
-            .produce_input_shares(measurement, &report_id.0)
+            .produce_input_shares(measurement, &report_id.0, task_id)
             .map_err(DapError::from_vdaf)?;
         Self::produce_report_with_extensions_for_shares(
             public_share,
@@ -121,9 +121,15 @@ impl VdafConfig {
         &self,
         measurement: DapMeasurement,
         nonce: &[u8; 16],
+        task_id: &TaskId,
     ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
         match self {
-            Self::Prio3(prio3_config) => Ok(prio3_shard(prio3_config, measurement, nonce)?),
+            Self::Prio3Draft09(prio3_config) => {
+                Ok(prio3_draft09_shard(prio3_config, measurement, nonce)?)
+            }
+            Self::Prio3(prio3_config) => {
+                Ok(prio3_shard(prio3_config, measurement, nonce, *task_id)?)
+            }
             Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {

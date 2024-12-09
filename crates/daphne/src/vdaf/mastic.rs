@@ -16,7 +16,7 @@ use super::{
 };
 
 use prio::{
-    codec::Decode,
+    codec::{CodecError, Decode},
     field::{Field64, FieldElement},
     vdaf::AggregateShare,
 };
@@ -92,7 +92,7 @@ pub(crate) fn mastic_prep_init(
             }
 
             if input_share_bytes.len() != 1 {
-                return Err(VdafError::Codec(prio::codec::CodecError::Other(
+                return Err(VdafError::Codec(CodecError::Other(
                     "mastic: malformed input share".into(),
                 )));
             }
@@ -104,7 +104,7 @@ pub(crate) fn mastic_prep_init(
                 .map(|prefix| {
                     let prefix_bytes = prefix.to_bytes();
                     if prefix_bytes.len() > input_size {
-                        return Err(VdafError::Codec(prio::codec::CodecError::Other(
+                        return Err(VdafError::Codec(CodecError::Other(
                             "mastic: malformed agg param: path with invalid length".into(),
                         )));
                     }

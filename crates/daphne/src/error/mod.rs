@@ -41,11 +41,15 @@ impl DapError {
 
     pub(crate) fn from_vdaf(e: VdafError) -> Self {
         match e {
-            VdafError::Codec(..) | VdafError::Vdaf(..) => {
+            VdafError::CodecDraft09(..) | VdafError::VdafDraft09(..) => {
                 tracing::warn!(error = ?e, "rejecting report");
                 Self::Transition(TransitionFailure::VdafPrepError)
             }
             VdafError::Dap(e) => e,
+            VdafError::Codec(..) | VdafError::Vdaf(..) => {
+                tracing::warn!(error = ?e, "rejecting report - latest");
+                Self::Transition(TransitionFailure::VdafPrepError)
+            }
         }
     }
 }

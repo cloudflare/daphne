@@ -43,7 +43,7 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
 
     let mut g = c.benchmark_group(function!());
     for vdaf_length in vdaf_lengths {
-        let vdaf = VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+        let vdaf = VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
             bits: 1,
             length: vdaf_length,
             chunk_length: 320,
@@ -67,7 +67,7 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
 
 fn consume_reports_vary_num_reports(c: &mut Criterion) {
     const VDAF: VdafConfig =
-        VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+        VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
             bits: 1,
             length: 1000,
             chunk_length: 320,

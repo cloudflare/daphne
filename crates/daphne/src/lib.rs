@@ -70,12 +70,14 @@ use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::taskprov::TaskprovAdvertisement;
 #[cfg(feature = "experimental")]
-use prio::codec::Decode;
-#[cfg(feature = "experimental")]
-use prio::vdaf::poplar1::Poplar1AggregationParam;
+use prio::{codec::Decode, vdaf::poplar1::Poplar1AggregationParam};
 use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
     vdaf::Aggregatable as AggregatableTrait,
+};
+use prio_draft09::{
+    codec::{CodecError as CodecErrorDraft09, ParameterizedDecode as ParameterizedDecodeDraft09},
+    vdaf::Aggregatable as AggregatableTraitDraft09,
 };
 pub use protocol::aggregator::ReplayProtection;
 use serde::{Deserialize, Serialize};
@@ -832,6 +834,25 @@ impl Encode for DapAggregationParam {
     }
 }
 
+impl prio_draft09::codec::Encode for DapAggregationParam {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), prio_draft09::codec::CodecError> {
+        let _ = bytes;
+        match self {
+            Self::Empty => Ok(()),
+            #[cfg(feature = "experimental")]
+            Self::Mastic(_) => Err(prio_draft09::codec::CodecError::UnexpectedValue),
+        }
+    }
+
+    fn encoded_len(&self) -> Option<usize> {
+        match self {
+            Self::Empty => Some(0),
+            #[cfg(feature = "experimental")]
+            Self::Mastic(agg_param) => agg_param.encoded_len(),
+        }
+    }
+}
+
 impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
     fn decode_with_param(
         vdaf_config: &VdafConfig,
@@ -841,6 +862,20 @@ impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
         match vdaf_config {
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic { .. } => Ok(Self::Mastic(Poplar1AggregationParam::decode(bytes)?)),
+            _ => Ok(Self::Empty),
+        }
+    }
+}
+
+impl ParameterizedDecodeDraft09<VdafConfig> for DapAggregationParam {
+    fn decode_with_param(
+        vdaf_config: &VdafConfig,
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, CodecErrorDraft09> {
+        let _ = bytes;
+        match vdaf_config {
+            #[cfg(feature = "experimental")]
+            VdafConfig::Mastic { .. } => Err(CodecErrorDraft09::UnexpectedValue),
             _ => Ok(Self::Empty),
         }
     }
@@ -903,6 +938,30 @@ impl DapAggregateShare {
             (None, Some(data)) => {
                 self.data = Some(data);
             }
+            (
+                Some(VdafAggregateShare::Field64Draft09(left)),
+                Some(VdafAggregateShare::Field64Draft09(right)),
+            ) => {
+                left.merge(&right).map_err(
+                    |e| fatal_error!(err = ?e, "failed to merge 64bit wide vdaf draft-09 shares"),
+                )?;
+            }
+            (
+                Some(VdafAggregateShare::Field128Draft09(left)),
+                Some(VdafAggregateShare::Field128Draft09(right)),
+            ) => {
+                left.merge(&right).map_err(
+                    |e| fatal_error!(err = ?e, "failed to merge 128bit wide vdaf draft-09 shares"),
+                )?;
+            }
+            (
+                Some(VdafAggregateShare::Field32Draft09(left)),
+                Some(VdafAggregateShare::Field32Draft09(right)),
+            ) => {
+                left.merge(&right).map_err(
+                    |e| fatal_error!(err = ?e, "failed to merge prio2 vdaf draft-09 shares"),
+                )?;
+            }
             (Some(VdafAggregateShare::Field64(left)), Some(VdafAggregateShare::Field64(right))) => {
                 left.merge(&right).map_err(
                     |e| fatal_error!(err = ?e, "failed to merge 64bit wide vdaf shares"),
@@ -920,7 +979,6 @@ impl DapAggregateShare {
                 left.merge(&right)
                     .map_err(|e| fatal_error!(err = ?e, "failed to merge prio2 vdaf shares"))?;
             }
-
             _ => return Err(fatal_error!(err = "invalid aggregate share merge")),
         };
 

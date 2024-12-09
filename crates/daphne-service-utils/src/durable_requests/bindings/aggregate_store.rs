@@ -16,6 +16,14 @@ use crate::{
 };
 
 use super::DurableRequestPayload;
+use prio::{
+    field::{FieldElement, FieldError},
+    vdaf::AggregateShare,
+};
+use prio_draft09::{
+    field::{FieldElement as FieldElementDraft09, FieldError as FieldErrorDraft09},
+    vdaf::AggregateShare as AggregateShareDraft09,
+};
 
 super::define_do_binding! {
     const BINDING = "DAP_AGGREGATE_STORE";
@@ -97,26 +105,41 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
                 checksum.copy_from_slice(&agg_share_delta.checksum);
             }
             {
-                fn encode<'b, F, B, const ENCODED_SIZE: usize>(
-                    field: &prio::vdaf::AggregateShare<F>,
-                    get_bytes: B,
-                ) where
-                    F: prio::field::FieldElement + Into<[u8; ENCODED_SIZE]>,
-                    B: FnOnce(u32) -> &'b mut [u8],
-                {
-                    let mut bytes = get_bytes(
-                        (F::ENCODED_SIZE * field.as_ref().len())
-                            .try_into()
-                            .expect("trying to encode a buffer longer than u32::MAX"),
-                    );
-                    for f in field.as_ref() {
-                        let f: [u8; ENCODED_SIZE] = (*f).into();
-                        bytes[..ENCODED_SIZE].copy_from_slice(&f);
-                        bytes = &mut bytes[ENCODED_SIZE..];
-                    }
+                macro_rules! make_encode {
+                    ($func_name:ident, $agg_share_type:ident, $field_trait:ident) => {
+                        fn $func_name<'b, F, B, const ENCODED_SIZE: usize>(
+                            field: &$agg_share_type<F>,
+                            get_bytes: B,
+                        ) where
+                            F: $field_trait + Into<[u8; ENCODED_SIZE]>,
+                            B: FnOnce(u32) -> &'b mut [u8],
+                        {
+                            let mut bytes = get_bytes(
+                                (F::ENCODED_SIZE * field.as_ref().len())
+                                    .try_into()
+                                    .expect("trying to encode a buffer longer than u32::MAX"),
+                            );
+                            for f in field.as_ref() {
+                                let f: [u8; ENCODED_SIZE] = (*f).into();
+                                bytes[..ENCODED_SIZE].copy_from_slice(&f);
+                                bytes = &mut bytes[ENCODED_SIZE..];
+                            }
+                        }
+                    };
                 }
+                make_encode!(encode_draft09, AggregateShareDraft09, FieldElementDraft09);
+                make_encode!(encode, AggregateShare, FieldElement);
                 let mut data = agg_share_delta_packet.init_data();
                 match &self.agg_share_delta.data {
+                    Some(VdafAggregateShare::Field64Draft09(field)) => {
+                        encode_draft09(field, |len| data.init_field64_draft09(len));
+                    }
+                    Some(VdafAggregateShare::Field128Draft09(field)) => {
+                        encode_draft09(field, |len| data.init_field128_draft09(len));
+                    }
+                    Some(VdafAggregateShare::Field32Draft09(field)) => {
+                        encode_draft09(field, |len| data.init_field_prio2_draft09(len));
+                    }
                     Some(VdafAggregateShare::Field64(field)) => {
                         encode(field, |len| data.init_field64(len));
                     }
@@ -147,23 +170,45 @@ impl DurableRequestPayload for AggregateStoreMergeReq {
         let agg_share_delta = {
             let agg_share_delta = request.get_agg_share_delta()?;
             let data = {
-                fn decode<F>(fields: &[u8]) -> capnp::Result<prio::vdaf::AggregateShare<F>>
-                where
-                    F: prio::field::FieldElement
-                        + for<'s> TryFrom<&'s [u8], Error = prio::field::FieldError>,
-                {
-                    let iter = fields.chunks_exact(F::ENCODED_SIZE);
-                    if let length @ 1.. = iter.remainder().len() {
-                        return Err(capnp::Error {
-                            kind: capnp::ErrorKind::Failed,
-                            extra: format!("leftover bytes still present in buffer: {length}"),
-                        });
-                    }
-                    Ok(prio::vdaf::AggregateShare::from(
-                        iter.map(|f| f.try_into().unwrap()).collect::<Vec<_>>(),
-                    ))
+                macro_rules! make_decode {
+                    ($func_name:ident, $agg_share_type:ident, $field_trait:ident, $field_error:ident) => {
+                        fn $func_name<F>(fields: &[u8]) -> capnp::Result<$agg_share_type<F>>
+                        where
+                            F: $field_trait + for<'s> TryFrom<&'s [u8], Error = $field_error>,
+                        {
+                            let iter = fields.chunks_exact(F::ENCODED_SIZE);
+                            if let length @ 1.. = iter.remainder().len() {
+                                return Err(capnp::Error {
+                                    kind: capnp::ErrorKind::Failed,
+                                    extra: format!(
+                                        "leftover bytes still present in buffer: {length}"
+                                    ),
+                                });
+                            }
+                            Ok($agg_share_type::from(
+                                iter.map(|f| f.try_into().unwrap()).collect::<Vec<_>>(),
+                            ))
+                        }
+                    };
                 }
+                make_decode!(
+                    decode_draft09,
+                    AggregateShareDraft09,
+                    FieldElementDraft09,
+                    FieldErrorDraft09
+                );
+                make_decode!(decode, AggregateShare, FieldElement, FieldError);
                 match agg_share_delta.get_data().which()? {
+                    dap_aggregate_share::data::Which::Field64Draft09(field) => {
+                        Some(VdafAggregateShare::Field64Draft09(decode_draft09(field?)?))
+                    }
+                    dap_aggregate_share::data::Which::Field128Draft09(field) => {
+                        Some(VdafAggregateShare::Field128Draft09(decode_draft09(field?)?))
+                    }
+                    dap_aggregate_share::data::Which::FieldPrio2Draft09(field) => {
+                        Some(VdafAggregateShare::Field32Draft09(decode_draft09(field?)?))
+                    }
+
                     dap_aggregate_share::data::Which::Field64(field) => {
                         Some(VdafAggregateShare::Field64(decode(field?)?))
                     }
@@ -230,11 +275,85 @@ mod test {
         field::{Field128, Field64, FieldElement, FieldPrio2},
         vdaf::AggregateShare,
     };
+    use prio_draft09::{
+        codec::Decode as DecodeDraft09,
+        field::{
+            Field128 as Field128Draft09, Field64 as Field64Draft09,
+            FieldElement as FieldElementDraft09, FieldPrio2 as FieldPrio2Draft09,
+        },
+        vdaf::AggregateShare as AggregateShareDraft09,
+    };
     use rand::{thread_rng, Rng};
 
     use crate::durable_requests::bindings::DurableRequestPayloadExt;
 
     use super::*;
+
+    #[test]
+    fn serialization_deserialization_round_trip_draft09() {
+        let mut rng = thread_rng();
+        for len in 0..20 {
+            let test_data = [
+                VdafAggregateShare::Field64Draft09(AggregateShareDraft09::from(
+                    (0..len)
+                        .map(|_| {
+                            Field64Draft09::get_decoded(
+                                &rng.gen::<[_; Field64Draft09::ENCODED_SIZE]>(),
+                            )
+                            .unwrap()
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+                VdafAggregateShare::Field128Draft09(AggregateShareDraft09::from(
+                    (0..len)
+                        .map(|_| {
+                            Field128Draft09::get_decoded(
+                                &rng.gen::<[_; Field128Draft09::ENCODED_SIZE]>(),
+                            )
+                            .unwrap()
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+                VdafAggregateShare::Field32Draft09(AggregateShareDraft09::from(
+                    (0..len)
+                        .map(|_| {
+                            // idk how to consistently generate a valid FieldPrio2 value, so I just
+                            // retry until I hit a valid one. Doesn't usualy take too long.
+                            (0..)
+                                .find_map(|_| {
+                                    FieldPrio2Draft09::get_decoded(&rng.gen::<[_; 4]>()).ok()
+                                })
+                                .unwrap()
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+            ]
+            .map(Some)
+            .into_iter()
+            .chain([None]);
+            for (i, data) in test_data.enumerate() {
+                let this = AggregateStoreMergeReq {
+                    contained_reports: (0..len)
+                        .map(|_| ReportId::get_decoded(&rng.gen::<[_; 16]>()).unwrap())
+                        .collect(),
+                    agg_share_delta: DapAggregateShare {
+                        report_count: rng.gen(),
+                        min_time: rng.gen(),
+                        max_time: rng.gen(),
+                        checksum: rng.gen(),
+                        data,
+                    },
+                    options: AggregateStoreMergeOptions {
+                        skip_replay_protection: i % 2 == 0,
+                    },
+                };
+                let other =
+                    AggregateStoreMergeReq::decode_from_bytes(&this.encode_to_bytes().unwrap())
+                        .unwrap();
+                assert_eq!(this, other);
+            }
+        }
+    }
 
     #[test]
     fn serialization_deserialization_round_trip() {

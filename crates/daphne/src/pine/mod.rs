@@ -15,7 +15,7 @@
 
 use std::marker::PhantomData;
 
-use prio::{
+use prio_draft09::{
     field::{FftFriendlyFieldElement, Field128, Field64},
     vdaf::{xof::XofTurboShake128, VdafError},
 };
@@ -389,7 +389,7 @@ pub mod vdaf;
 
 #[cfg(test)]
 mod tests {
-    use prio::field::Field128;
+    use prio_draft09::field::Field128;
 
     use super::*;
 
