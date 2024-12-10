@@ -408,7 +408,8 @@ impl deepsize::DeepSizeOf for VdafAggregateShare {
 
 impl Encode for VdafAggregateShare {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match self {
+        tracing::warn!("Begin encode");
+        let res = match self {
             VdafAggregateShare::Field32(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field64(agg_share) => agg_share.encode(bytes),
             VdafAggregateShare::Field128(agg_share) => agg_share.encode(bytes),
@@ -420,6 +421,13 @@ impl Encode for VdafAggregateShare {
             }
             VdafAggregateShare::Field128Latest(agg_share) => {
                 agg_share.encode(bytes).map_err(from_codec_error)
+            }
+        };
+        match res {
+            Ok(x) => Ok(x),
+            Err(e) => {
+                tracing::warn!("CodecError: {e}");
+                Err(e)
             }
         }
     }

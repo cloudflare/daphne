@@ -57,6 +57,7 @@ impl DapLeader for crate::App {
             .get_task_config_for(task_id)
             .await?
             .ok_or(DapAbort::UnrecognizedTask { task_id: *task_id })?;
+        tracing::warn!("Init Collect Job");
 
         self.test_leader_state.lock().await.init_collect_job(
             task_id,

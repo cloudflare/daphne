@@ -124,6 +124,7 @@ impl InMemoryLeaderState {
         batch_sel: BatchSelector,
         agg_param: DapAggregationParam,
     ) -> Result<(), DapError> {
+        tracing::warn!("Begin in-memory leader init_collect_job");
         let per_task = self.per_task.entry(*task_id).or_default();
 
         // Store the collection job in the pending state.
@@ -169,7 +170,7 @@ impl InMemoryLeaderState {
             batch_sel,
             agg_param,
         });
-
+        tracing::warn!("Finish in-memory leader init collect job");
         Ok(())
     }
 

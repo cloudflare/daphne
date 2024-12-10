@@ -401,6 +401,7 @@ async fn handle_do_request(
         tracing::debug!(len = body.len(), "deserializing do request");
 
         {
+            warn!("Body: {body:?}");
             let body = durable_request.body();
             let buffer = Uint8Array::new_with_length(body.len().try_into().map_err(|_| {
                 worker::Error::RustError(format!("buffer is too long {}", body.len()))
@@ -416,11 +417,13 @@ async fn handle_do_request(
         Request::new_with_init(url.as_str(), &do_req)?
     };
 
+    
     let binding = ctx.env.durable_object(&durable_request.binding)?;
     let obj = match &durable_request.id {
         ObjectIdFrom::Name(name) => binding.id_from_name(name.as_str())?,
         ObjectIdFrom::Hex(hex) => binding.id_from_string(hex.as_str())?,
     };
+    warn!("obj: {:?}", durable_request.id);
     retry(|attempt| {
         let ctx = &ctx;
         let obj = &obj;

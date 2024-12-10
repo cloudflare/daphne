@@ -42,6 +42,7 @@ use prio_09::{
 };
 use prio_latest::field::FieldElement as FieldElementLatest;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tracing::warn;
 use worker::{
     js_sys, wasm_bindgen::JsValue, Env, Error, Request, Response, Result, ScheduledTime, State,
 };
@@ -562,7 +563,14 @@ impl GcDurableObject for AggregateStore {
             // Idempotent
             // Output: `bool`
             Some(bindings::AggregateStore::CheckCollected) => {
-                Response::from_json(&self.is_collected().await?)
+                warn!("Begin Check Collected");
+                let k = Response::from_json(&self.is_collected().await?);
+                if k.is_err() {
+                    warn!("Err: {:?}", k);
+                } else {
+                    warn!("Success");
+                }
+                k
             }
 
             _ => Err(int_err(format!(
