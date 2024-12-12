@@ -2,5 +2,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 disallowed-methods = [
-    { path = "std::time::Instant::now", reason = "not implemented in wasm" },
+    { path = "std::time::Instant::now", reason = "not implemented in wasm. Use worker::Date::now()" },
+    { path = "std::time::SystemTime::now", reason = "not implemented in wasm. Use worker::Date::now()" },
 ]
