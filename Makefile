@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
-.PHONY: accept acceptance e2e load
+.PHONY: accept acceptance e2e load leader l helper h storage-proxy s
 
 leader:
 	RUST_LOG=hyper=off,debug cargo run \

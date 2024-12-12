@@ -561,7 +561,7 @@ impl Test {
         };
 
         // Send AggregateShareReq.
-        info!("Starting AggregationJobInitReq");
+        info!("Starting AggregationSharereq");
         let start = Instant::now();
         self.http_client
             .get_aggregate_share(
