@@ -1,7 +1,7 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use daphne_worker::initialize_tracing;
+use daphne_worker::{aggregator::App, initialize_tracing};
 use tracing::info;
 use worker::{event, Env, HttpRequest};
 
@@ -26,5 +26,29 @@ pub async fn main(
 
     info!(method = ?req.method(), "{}", req.uri().path());
 
-    Ok(daphne_worker::storage_proxy::handle_request(req, env, &prometheus::Registry::new()).await)
+    let registry = prometheus::Registry::new();
+    let response = match env
+        .var("DAP_WORKER_MODE")
+        .map(|t| t.to_string())
+        .ok()
+        .as_deref()
+    {
+        Some("storage-proxy") | None => {
+            daphne_worker::storage_proxy::handle_request(req, env, &registry).await
+        }
+        Some("aggregator") => {
+            daphne_worker::aggregator::handle_dap_request(
+                App::new(env, &registry, None).unwrap(),
+                req,
+            )
+            .await
+        }
+        Some(invalid) => {
+            return Err(worker::Error::RustError(format!(
+                "{invalid} is not a valid DAP_WORKER_MODE"
+            )))
+        }
+    };
+
+    Ok(response)
 }

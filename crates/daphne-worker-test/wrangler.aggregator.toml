@@ -1,0 +1,157 @@
+# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+
+main = "build/worker/shim.mjs"
+compatibility_date = "2023-12-21"
+
+# Don't ask to send metrics to Cloudflare. The worker may be run from a container.
+send_metrics = false
+
+# Before starting the worker, run `worker-build`.
+[build]
+command = "worker-build --dev"
+
+[[rules]]
+globs = ["**/*.wasm"]
+type = "CompiledWasm"
+fallthrough = false
+
+# NOTE: Variables marked as SECRET need to be provisioned securely in
+# production. In particular, they will not be passed as environment variables
+# as they are here. See
+# https://developers.cloudflare.com/workers/wrangler/commands/#secret.
+
+[env.helper]
+name = "daphne-helper-aggregator"
+
+[env.helper.vars]
+DAP_DEPLOYMENT = "dev"
+DAP_WORKER_MODE = "aggregator"
+DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"
+DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
+
+# SECRET
+TASKPROV_SECRETS_ENABLED = "true"
+TASKPROV_SECRETS_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18"
+TASKPROV_SECRETS_PEER_AUTH_EXPECT_LEADER_TOKEN = "I-am-the-leader"
+
+[env.helper.vars.SERVICE_CONFIG]
+env = "oxy"
+role = "helper"
+max_batch_duration = 360000
+min_batch_interval_start = 259200
+max_batch_interval_end = 259200
+supported_hpke_kems = ["x25519_hkdf_sha256"]
+default_version = "v09"
+report_storage_epoch_duration = 300000
+base_url = "http://127.0.0.1:8788"
+default_num_agg_span_shards = 4
+
+[env.helper.vars.TASKPROV_HPKE_COLLECTOR_CONFIG]
+id = 23
+kem_id = "p256_hkdf_sha256"
+kdf_id = "hkdf_sha256"
+aead_id = "aes128_gcm"
+public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+
+[dev]
+ip = "0.0.0.0"
+
+[env.helper.durable_objects]
+bindings = [
+    { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+    { name = "DAP_TEST_STATE_CLEANER", class_name = "TestStateCleaner" },
+]
+
+
+[[env.helper.kv_namespaces]]
+binding = "DAP_CONFIG"
+# KV bindings are in a looked up in a namespace identified by a 16-byte id number.
+# This number is assigned by calling
+#
+#    wrangler kv:namespace create <NAME>
+#
+# for some unique name you specify, and it returns a unique id number to use.
+# Here we should use something like "leader" for the <NAME>.
+id = "<assign-one-for-the-leader>"
+# A "preview id" is an id used when running in "wrangler dev" mode locally, and
+# can just be made up.  We generated the number below with the following python
+# code:
+#
+#    import secrets
+#    print(secrets.token_hex(16))
+#
+preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
+
+[env.leader]
+name = "daphne-leader-aggregator"
+
+[env.leader.vars]
+DAP_DEPLOYMENT = "dev"
+DAP_WORKER_MODE = "aggregator"
+DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"
+DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
+
+# SECRET
+TASKPROV_SECRETS_ENABLED = "true"
+TASKPROV_SECRETS_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18"
+TASKPROV_SECRETS_PEER_AUTH_EXPECT_COLLECTOR_TOKEN = "I-am-the-collector"
+TASKPROV_SECRETS_SELF_BEARER_TOKEN = "I-am-the-leader"
+
+[env.leader.vars.SERVICE_CONFIG]
+env = "oxy"
+role = "leader"
+max_batch_duration = 360000
+min_batch_interval_start = 259200
+max_batch_interval_end = 259200
+supported_hpke_kems = ["x25519_hkdf_sha256"]
+default_version = "v09"
+report_storage_epoch_duration = 300000
+base_url = "http://127.0.0.1:8787"
+default_num_agg_span_shards = 4
+
+[env.leader.vars.TASKPROV_HPKE_COLLECTOR_CONFIG]
+id = 23
+kem_id = "p256_hkdf_sha256"
+kdf_id = "hkdf_sha256"
+aead_id = "aes128_gcm"
+public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+
+[env.leader.durable_objects]
+bindings = [
+    { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
+    { name = "DAP_TEST_STATE_CLEANER", class_name = "TestStateCleaner" },
+]
+
+[[env.leader.kv_namespaces]]
+binding = "DAP_CONFIG"
+# KV bindings are in a looked up in a namespace identified by a 16-byte id number.
+# This number is assigned by calling
+#
+#    wrangler kv:namespace create <NAME>
+#
+# for some unique name you specify, and it returns a unique id number to use.
+# Here we should use something like "leader" for the <NAME>.
+id = "<assign-one-for-the-leader>"
+# A "preview id" is an id used when running in "wrangler dev" mode locally, and
+# can just be made up.  We generated the number below with the following python
+# code:
+#
+#    import secrets
+#    print(secrets.token_hex(16))
+#
+preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
+
+[[migrations]]
+tag = "v1"
+new_classes = [
+    "AggregateStore",
+    "GarbageCollector",
+    "HelperStateStore",
+]
+
+[[migrations]]
+tag = "v2"
+renamed_classes = [
+    { from = "GarbageCollector", to = "TestStateCleaner" },
+]
