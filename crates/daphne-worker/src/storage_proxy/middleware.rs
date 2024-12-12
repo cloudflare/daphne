@@ -1,10 +1,7 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     extract::{Path, State},
@@ -20,6 +17,7 @@ use http::{Method, StatusCode};
 use tower_service::Service;
 
 use super::RequestContext;
+use crate::elapsed;
 
 /// Performs bearer token auth of a request.
 pub async fn bearer_auth(
@@ -104,8 +102,4 @@ pub async fn time_do_requests(
         elapsed,
     );
     response
-}
-
-fn elapsed(date: &worker::Date) -> Duration {
-    Duration::from_millis(worker::Date::now().as_millis() - date.as_millis())
 }

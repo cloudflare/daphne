@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! This is a Worker that proxies requests to the storage that Workers has access to, i.e., KV and
@@ -84,7 +84,7 @@ use axum::{
 };
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-use daphne::messages::Time;
+use daphne::messages::{self, Time};
 use daphne_service_utils::durable_requests::{
     DurableRequest, ObjectIdFrom, DO_PATH_PREFIX, KV_PATH_PREFIX,
 };
@@ -136,10 +136,10 @@ pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> 
     let router = axum::Router::new()
         .route(
             constcat::concat!(KV_PATH_PREFIX, "/*path"),
-            routing::get(kv_get)
-                .post(kv_put)
-                .put(kv_put_if_not_exists)
-                .delete(kv_delete)
+            routing::get(kv_get_handler)
+                .post(kv_put_handler)
+                .put(kv_put_if_not_exists_handler)
+                .delete(kv_delete_handler)
                 .route_layer(from_fn_with_state(
                     ctx.clone(),
                     middleware::time_kv_requests,
@@ -147,7 +147,7 @@ pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> 
         )
         .route(
             constcat::concat!(DO_PATH_PREFIX, "/*path"),
-            routing::any(handle_do_request).layer(from_fn_with_state(
+            routing::any(handle_do_request_handler).layer(from_fn_with_state(
                 ctx.clone(),
                 middleware::time_do_requests,
             )),
@@ -157,7 +157,7 @@ pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> 
     let router = router
         .route(
             daphne_service_utils::durable_requests::PURGE_STORAGE,
-            routing::any(storage_purge),
+            routing::any(storage_purge_handler),
         )
         .route(
             daphne_service_utils::durable_requests::STORAGE_READY,
@@ -172,13 +172,21 @@ pub async fn handle_request(req: HttpRequest, env: Env, registry: &Registry) -> 
 
 /// Clear all storage. Only available to tests
 #[cfg(feature = "test-utils")]
-#[tracing::instrument(skip(ctx))]
 #[worker::send]
-async fn storage_purge(ctx: State<Arc<RequestContext>>) -> impl IntoResponse + 'static {
+async fn storage_purge_handler(ctx: State<Arc<RequestContext>>) -> impl IntoResponse + 'static {
+    storage_purge(&ctx.env)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+}
+
+#[cfg(feature = "test-utils")]
+#[tracing::instrument(skip_all)]
+#[worker::send]
+pub async fn storage_purge(env: &Env) -> Result<(), worker::Error> {
     use daphne_service_utils::durable_requests::bindings::{DurableMethod, TestStateCleaner};
 
     let kv_delete = async {
-        let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
+        let kv = env.kv(KV_BINDING_DAP_CONFIG)?;
         for key in kv.list().execute().await?.keys {
             kv.delete(&key.name).await?;
             tracing::trace!("deleted KV item {}", key.name);
@@ -192,17 +200,14 @@ async fn storage_purge(ctx: State<Arc<RequestContext>>) -> impl IntoResponse + '
             RequestInit::new().with_method(worker::Method::Post),
         )?;
 
-        ctx.env
-            .durable_object(TestStateCleaner::BINDING)?
+        env.durable_object(TestStateCleaner::BINDING)?
             .id_from_name(TestStateCleaner::NAME_STR)?
             .get_stub()?
             .fetch_with_request(req)
             .await
     };
 
-    futures::try_join!(kv_delete, do_delete)
-        .map(|_| ())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+    futures::try_join!(kv_delete, do_delete).map(|_| ())
 }
 
 #[derive(Debug)]
@@ -234,25 +239,23 @@ impl Header for ExpirationHeader {
     }
 }
 
-impl ExpirationHeader {
-    fn at_least_60s_from_now(self) -> Self {
-        // KV wont let you request an expiration that isn't at least 60 seconds into the
-        // future. If you try to do so, it will return a 400. The problem is, the only error
-        // the worker API returns is a JsValue that might contain a string that might
-        // explain that.
-        //
-        // In order to avoid parsing the error message we opt to just "hardcode" the
-        // expiration to be, at least 65 seconds from now. Effectively expiring the value as soon
-        // as possible. The extra 5 seconds are just in case we take a really long time from here to
-        // the request.
-        let now_plus_65_seconds = (Date::now().as_millis() / 1000) + 65;
-        Self(u64::max(self.0, now_plus_65_seconds))
-    }
+fn at_least_60s_from_now(time: messages::Time) -> messages::Time {
+    // KV wont let you request an expiration that isn't at least 60 seconds into the
+    // future. If you try to do so, it will return a 400. The problem is, the only error
+    // the worker API returns is a JsValue that might contain a string that might
+    // explain that.
+    //
+    // In order to avoid parsing the error message we opt to just "hardcode" the
+    // expiration to be, at least 65 seconds from now. Effectively expiring the value as soon
+    // as possible. The extra 5 seconds are just in case we take a really long time from here to
+    // the request.
+    let now_plus_65_seconds = (Date::now().as_millis() / 1000) + 65;
+    messages::Time::max(time, now_plus_65_seconds)
 }
 
 async fn retry<F, T, E, Fut>(mut f: F) -> Result<T, E>
 where
-    F: FnMut(usize) -> Fut,
+    F: FnMut(u8) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
     const RETRY_DELAYS: &[Duration] = &[
@@ -261,14 +264,14 @@ where
         Duration::from_millis(4_000),
         Duration::from_millis(8_000),
     ];
-    let attempts = RETRY_DELAYS.len() + 1;
+    let attempts = u8::try_from(RETRY_DELAYS.len() + 1).unwrap();
     let mut attempt = 1;
     loop {
         match f(attempt).await {
             Ok(ok) => return Ok(ok),
             Err(error) => {
                 if attempt < attempts {
-                    Delay::from(RETRY_DELAYS[attempt - 1]).await;
+                    Delay::from(RETRY_DELAYS[usize::from(attempt - 1)]).await;
                     attempt += 1;
                 } else {
                     return Err(error);
@@ -278,35 +281,50 @@ where
     }
 }
 
-#[tracing::instrument(skip(ctx))]
 #[worker::send]
-async fn kv_get(
+async fn kv_get_handler(
     ctx: State<Arc<RequestContext>>,
     Path(key): Path<String>,
 ) -> Result<impl IntoResponse, Error> {
-    let get = ctx.env.kv(KV_BINDING_DAP_CONFIG)?.get(&key);
-
-    if let Some(bytes) = retry(|_| get.clone().bytes()).await? {
+    if let Some(bytes) = kv_get(&ctx.env, &key).await? {
         Ok((StatusCode::OK, bytes).into_response())
     } else {
         Ok((StatusCode::NOT_FOUND, "value not found").into_response())
     }
 }
 
-#[tracing::instrument(skip(ctx, body))]
+#[tracing::instrument(skip(env))]
 #[worker::send]
-async fn kv_put(
+pub async fn kv_get(env: &Env, key: &str) -> Result<Option<Vec<u8>>, worker::Error> {
+    let get = env.kv(KV_BINDING_DAP_CONFIG)?.get(key);
+    Ok(retry(|_| get.clone().bytes()).await?)
+}
+
+#[worker::send]
+async fn kv_put_handler(
     ctx: State<Arc<RequestContext>>,
     expiration: Option<TypedHeader<ExpirationHeader>>,
     Path(key): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-    let expiration = expiration.map(|TypedHeader(header)| header);
+    let expiration = expiration.map(|TypedHeader(header)| header.0);
 
-    match ctx.env.kv(KV_BINDING_DAP_CONFIG)?.put_bytes(&key, &body) {
+    kv_put(&ctx.env, expiration, &key, &body).await?;
+
+    Ok(StatusCode::OK.into_response())
+}
+
+#[tracing::instrument(skip(env, body))]
+pub async fn kv_put(
+    env: &Env,
+    expiration: Option<messages::Time>,
+    key: &str,
+    body: &[u8],
+) -> Result<(), worker::Error> {
+    match env.kv(KV_BINDING_DAP_CONFIG)?.put_bytes(key, body) {
         Ok(mut put) => {
             if let Some(expiration_unix_timestamp) = expiration {
-                put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
+                put = put.expiration(at_least_60s_from_now(expiration_unix_timestamp));
             };
             if let Err(error) = retry(|_| put.clone().execute()).await {
                 tracing::warn!(
@@ -322,34 +340,47 @@ async fn kv_put(
             );
         }
     }
-
-    Ok(StatusCode::OK.into_response())
+    Ok(())
 }
 
-#[tracing::instrument(skip(ctx, body))]
 #[worker::send]
-async fn kv_put_if_not_exists(
+async fn kv_put_if_not_exists_handler(
     ctx: State<Arc<RequestContext>>,
     expiration: Option<TypedHeader<ExpirationHeader>>,
     Path(key): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-    let expiration = expiration.map(|TypedHeader(header)| header);
+    let expiration = expiration.map(|TypedHeader(header)| header.0);
 
-    let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
-    let listing = kv.list().prefix(key.clone());
+    if kv_put_if_not_exists(&ctx.env, expiration, &key, &body).await? {
+        Ok(StatusCode::OK)
+    } else {
+        Ok(StatusCode::CONFLICT)
+    }
+}
+
+#[tracing::instrument(skip(env, body))]
+#[worker::send]
+pub async fn kv_put_if_not_exists(
+    env: &Env,
+    expiration: Option<messages::Time>,
+    key: &str,
+    body: &[u8],
+) -> Result<bool, worker::Error> {
+    let kv = env.kv(KV_BINDING_DAP_CONFIG)?;
+    let listing = kv.list().prefix(key.to_string());
     if retry(|_| listing.clone().execute())
         .await?
         .keys
         .into_iter()
         .any(|k| k.name == key)
     {
-        Ok(StatusCode::CONFLICT.into_response())
+        Ok(false)
     } else {
-        match kv.put_bytes(&key, &body) {
+        match kv.put_bytes(key, body) {
             Ok(mut put) => {
                 if let Some(expiration_unix_timestamp) = expiration {
-                    put = put.expiration(expiration_unix_timestamp.at_least_60s_from_now().0);
+                    put = put.expiration(at_least_60s_from_now(expiration_unix_timestamp));
                 }
                 if let Err(error) = retry(|_| put.clone().execute()).await {
                     tracing::warn!(
@@ -366,26 +397,30 @@ async fn kv_put_if_not_exists(
             }
         }
 
-        Ok(StatusCode::OK.into_response())
+        Ok(true)
     }
 }
 
-#[tracing::instrument(skip(ctx))]
 #[worker::send]
-async fn kv_delete(
+async fn kv_delete_handler(
     ctx: State<Arc<RequestContext>>,
     Path(key): Path<String>,
 ) -> Result<impl IntoResponse, Error> {
-    let kv = ctx.env.kv(KV_BINDING_DAP_CONFIG)?;
-    retry(|_| kv.delete(&key)).await?;
+    kv_delete(&ctx.env, &key).await?;
 
     Ok(StatusCode::OK.into_response())
 }
 
+#[tracing::instrument(skip(env))]
+pub async fn kv_delete(env: &Env, key: &str) -> Result<(), worker::Error> {
+    let kv = env.kv(KV_BINDING_DAP_CONFIG)?;
+    retry(|_| kv.delete(key)).await?;
+    Ok(())
+}
+
 /// Handle a durable object request
-#[tracing::instrument(skip(ctx, headers, body))]
 #[worker::send]
-async fn handle_do_request(
+async fn handle_do_request_handler(
     ctx: State<Arc<RequestContext>>,
     headers: HeaderMap,
     Path(uri): Path<String>,
@@ -394,11 +429,42 @@ async fn handle_do_request(
     let durable_request = DurableRequest::try_from(body.as_ref())
         .map_err(|e| worker::Error::RustError(format!("invalid format: {e:?}")))?;
 
+    Ok(handle_do_request(
+        &ctx.env,
+        headers,
+        &uri,
+        durable_request,
+        |attempt, binding, uri| match attempt {
+            Some(attempt) => ctx.metrics.durable_request_retry_count_inc(
+                attempt.try_into().unwrap(),
+                binding,
+                uri,
+            ),
+            None => ctx
+                .metrics
+                .durable_request_retry_count_inc(-1, binding, uri),
+        },
+    )
+    .await?)
+}
+
+#[tracing::instrument(skip(env, headers, durable_request, retry_metric))]
+#[worker::send]
+pub async fn handle_do_request<P: AsRef<[u8]>>(
+    env: &Env,
+    headers: HeaderMap,
+    uri: &str,
+    durable_request: DurableRequest<P>,
+    retry_metric: impl Fn(Option<u8>, &str, &str),
+) -> Result<HttpResponse, worker::Error> {
     let http_request = {
         let mut do_req = RequestInit::new();
         do_req.with_method(worker::Method::Post);
         do_req.with_headers(headers.into());
-        tracing::debug!(len = body.len(), "deserializing do request");
+        tracing::debug!(
+            len = durable_request.body().len(),
+            "deserializing do request"
+        );
 
         {
             let body = durable_request.body();
@@ -409,24 +475,21 @@ async fn handle_do_request(
             buffer.copy_from(body);
             do_req.with_body(Some(buffer.into()));
         }
-        let url = Url::parse("https://fake-host/")
-            .unwrap()
-            .join(&uri)
-            .unwrap();
+        let url = Url::parse("https://fake-host/").unwrap().join(uri).unwrap();
         Request::new_with_init(url.as_str(), &do_req)?
     };
 
-    let binding = ctx.env.durable_object(&durable_request.binding)?;
+    let binding = env.durable_object(&durable_request.binding)?;
     let obj = match &durable_request.id {
         ObjectIdFrom::Name(name) => binding.id_from_name(name.as_str())?,
         ObjectIdFrom::Hex(hex) => binding.id_from_string(hex.as_str())?,
     };
     retry(|attempt| {
-        let ctx = &ctx;
         let obj = &obj;
         let binding = &durable_request.binding;
         let uri = &uri;
         let http_request = http_request.clone();
+        let retry_metric = &retry_metric;
         async move {
             tracing::debug!(id = obj.to_string(), "Getting DO stub");
 
@@ -438,11 +501,7 @@ async fn handle_do_request(
 
             match stub.fetch_with_request(http_request?).await {
                 Ok(ok) => {
-                    ctx.metrics.durable_request_retry_count_inc(
-                        (attempt - 1).try_into().unwrap(),
-                        binding,
-                        uri,
-                    );
+                    retry_metric(Some(attempt - 1), binding, uri);
                     Ok(HttpResponse::try_from(ok).unwrap())
                 }
                 Err(error) => {
@@ -454,9 +513,8 @@ async fn handle_do_request(
                         error = ?error,
                         "DO request failed"
                     );
-                    ctx.metrics
-                        .durable_request_retry_count_inc(-1, binding, uri);
-                    Err(error.into())
+                    retry_metric(None, binding, uri);
+                    Err(error)
                 }
             }
         }
