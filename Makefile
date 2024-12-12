@@ -21,6 +21,16 @@ helper:
 		-c ./crates/daphne-server/examples/configuration-helper.toml
 h: helper
 
+helper-worker:
+	cd ./crates/daphne-worker-test/ && \
+		wrangler dev -c wrangler.aggregator.toml --port 8788 -e helper
+hw: helper-worker
+
+leader-worker:
+	cd ./crates/daphne-worker-test/ && \
+		wrangler dev -c wrangler.aggregator.toml --port 8788 -e leader
+lw: leader-worker
+
 storage-proxy:
 	docker compose -f ./crates/daphne-worker-test/docker-compose-storage-proxy.yaml up --build
 s: storage-proxy
