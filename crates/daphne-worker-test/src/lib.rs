@@ -26,5 +26,21 @@ pub async fn main(
 
     info!(method = ?req.method(), "{}", req.uri().path());
 
-    Ok(daphne_worker::storage_proxy::handle_request(req, env, &prometheus::Registry::new()).await)
+    let registry = prometheus::Registry::new();
+    match env
+        .var("DAP_WORKER_MODE")
+        .map(|t| t.to_string())
+        .ok()
+        .as_deref()
+    {
+        Some("storage-proxy") | None => {
+            Ok(daphne_worker::storage_proxy::handle_request(req, env, &registry).await)
+        }
+        Some("aggregator") => {
+            Ok(daphne_worker::aggregator::handle_request(req, env, &registry, None).await)
+        }
+        Some(invalid) => Err(worker::Error::RustError(format!(
+            "{invalid} is not a valid DAP_WORKER_MODE"
+        ))),
+    }
 }
