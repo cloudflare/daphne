@@ -174,6 +174,12 @@ impl VdafConfig {
         const PRIO3_MAX_PROOFS: u8 = 3;
 
         match (version, var) {
+            (_, VdafTypeVar::Prio2Draft09 { dimension }) => Ok(VdafConfig::Prio2Draft09 {
+                dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
+                    detail: "dimension is larger than the system's word size".to_string(),
+                    task_id: *task_id,
+                })?,
+            }),
             (_, VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
                 dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
                     detail: "dimension is larger than the system's word size".to_string(),
@@ -181,7 +187,7 @@ impl VdafConfig {
                 })?,
             }),
             (
-                DapVersion::Draft09 | DapVersion::Latest,
+                _,
                 VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
                     bits,
                     length,
@@ -368,6 +374,11 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
 
     fn try_from(vdaf_config: &VdafConfig) -> Result<Self, DapError> {
         match vdaf_config {
+            VdafConfig::Prio2Draft09 { dimension } => Ok(Self::Prio2 {
+                dimension: (*dimension).try_into().map_err(|_| {
+                    fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
+                })?,
+            }),
             VdafConfig::Prio2 { dimension } => Ok(Self::Prio2 {
                 dimension: (*dimension).try_into().map_err(|_| {
                     fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
@@ -394,24 +405,6 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
             VdafConfig::Prio3Draft09(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
-            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                bits,
-                length,
-                chunk_length,
-                num_proofs,
-            }) => Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
-                bits: (*bits).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
-                length: (*length).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
-
-                chunk_length: (*chunk_length).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
-                num_proofs: *num_proofs,
-            }),
             VdafConfig::Prio3(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
@@ -531,7 +524,36 @@ mod test {
 
     test_versions! { try_from_taskprov }
 
-    fn check_vdaf_key_computation(version: DapVersion) {
+    fn check_vdaf_key_computation_vdaf_draft09(version: DapVersion) {
+        let task_id = TaskId([
+            0xb4, 0x76, 0x9b, 0xb0, 0x63, 0xa8, 0xb3, 0x31, 0x2a, 0xf7, 0x42, 0x97, 0xf3, 0x0f,
+            0xdb, 0xf8, 0xe0, 0xb7, 0x1c, 0x2e, 0xb2, 0x48, 0x1f, 0x59, 0x1d, 0x1d, 0x7d, 0xe6,
+            0x6a, 0x4c, 0xe3, 0x4f,
+        ]);
+        let verify_key_init: [u8; 32] = [
+            0x1a, 0x2a, 0x3f, 0x1b, 0xeb, 0xb4, 0xbb, 0xe4, 0x55, 0xea, 0xac, 0xee, 0x29, 0x1a,
+            0x0f, 0x32, 0xd7, 0xe1, 0xbc, 0x6c, 0x75, 0x10, 0x05, 0x60, 0x7b, 0x81, 0xda, 0xc3,
+            0xa7, 0xda, 0x76, 0x1d,
+        ];
+        let vk = compute_vdaf_verify_key(
+            version,
+            &verify_key_init,
+            &task_id,
+            &VdafConfig::Prio2Draft09 { dimension: 10 },
+        );
+        let expected: [u8; 32] = [
+            251, 209, 125, 181, 57, 15, 148, 158, 227, 45, 38, 52, 220, 73, 159, 91, 145, 40, 123,
+            204, 49, 124, 7, 97, 221, 4, 232, 53, 194, 171, 19, 51,
+        ];
+        match &vk {
+            VdafVerifyKey::L32(bytes) => assert_eq!(*bytes, expected),
+            VdafVerifyKey::L16(..) => unreachable!(),
+        }
+    }
+
+    test_versions! { check_vdaf_key_computation_vdaf_draft09 }
+
+    fn check_vdaf_key_computation_vdaf_latest(version: DapVersion) {
         let task_id = TaskId([
             0xb4, 0x76, 0x9b, 0xb0, 0x63, 0xa8, 0xb3, 0x31, 0x2a, 0xf7, 0x42, 0x97, 0xf3, 0x0f,
             0xdb, 0xf8, 0xe0, 0xb7, 0x1c, 0x2e, 0xb2, 0x48, 0x1f, 0x59, 0x1d, 0x1d, 0x7d, 0xe6,
@@ -558,7 +580,7 @@ mod test {
         }
     }
 
-    test_versions! { check_vdaf_key_computation }
+    test_versions! { check_vdaf_key_computation_vdaf_latest }
 
     fn resolve_advertised_task_config_expect_abort_unrecognized_vdaf(version: DapVersion) {
         // Create a request for a taskprov task with an unrecognized VDAF.

@@ -5,10 +5,10 @@
 //! [VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
-    fatal_error, messages::TaskId, vdaf::VdafError, DapAggregateResult, DapMeasurement,
-    VdafAggregateShare, VdafPrepShare, VdafPrepState, VdafVerifyKey,
+    fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
+    VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
-use prio::{
+use prio_draft09::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{
@@ -17,22 +17,17 @@ use prio::{
     },
 };
 
-const CTX_STRING: &[u8] = "dap-13".as_bytes();
-
 /// Split the given measurement into a sequence of encoded input shares.
-pub(crate) fn prio2_shard(
+pub(crate) fn prio2_draft09_shard(
     dimension: usize,
     measurement: DapMeasurement,
     nonce: &[u8; 16],
-    task_id: TaskId,
 ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
     let vdaf = Prio2::new(dimension).map_err(|e| {
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
-    let binding = [CTX_STRING, &task_id.0].concat();
-    let ctx = binding.as_slice();
     let (public_share, input_shares) = match measurement {
-        DapMeasurement::U32Vec(ref data) => vdaf.shard(ctx, data, nonce)?,
+        DapMeasurement::U32Vec(ref data) => vdaf.shard(data, nonce)?,
         _ => {
             return Err(VdafError::Dap(fatal_error!(
                 err = "prio2_shard: unexpected measurement type"
@@ -56,14 +51,13 @@ pub(crate) fn prio2_shard(
 }
 
 /// Consume an input share and return the corresponding prep state and share.
-pub(crate) fn prio2_prep_init(
+pub(crate) fn prio2_draft09_prep_init(
     dimension: usize,
     verify_key: &VdafVerifyKey,
     agg_id: usize,
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
-    task_id: TaskId,
 ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
     let VdafVerifyKey::L32(verify_key) = verify_key else {
         return Err(VdafError::Dap(fatal_error!(
@@ -77,31 +71,28 @@ pub(crate) fn prio2_prep_init(
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
-    let binding = [CTX_STRING, &task_id.0].concat();
-    let ctx = binding.as_slice();
-    let (state, share) =
-        vdaf.prepare_init(verify_key, ctx, agg_id, &(), nonce, &(), &input_share)?;
-    Ok((VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)))
+    let (state, share) = vdaf.prepare_init(verify_key, agg_id, &(), nonce, &(), &input_share)?;
+    Ok((
+        VdafPrepState::Prio2Draft09(state),
+        VdafPrepShare::Prio2Draft09(share),
+    ))
 }
 
 /// Consume the prep shares and return our output share.
-pub(crate) fn prio2_prep_finish_from_shares(
+pub(crate) fn prio2_draft09_prep_finish_from_shares(
     dimension: usize,
     host_state: VdafPrepState,
     host_share: VdafPrepShare,
     peer_share_data: &[u8],
-    task_id: TaskId,
 ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
     let vdaf = Prio2::new(dimension).map_err(|e| {
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
     let (out_share, outbound) = match (host_state, host_share) {
-        (VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)) => {
+        (VdafPrepState::Prio2Draft09(state), VdafPrepShare::Prio2Draft09(share)) => {
             let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
-            let binding = [CTX_STRING, &task_id.0].concat();
-            let ctx = binding.as_slice();
-            vdaf.prepare_shares_to_prepare_message(ctx, &(), [share, peer_share])?;
-            match vdaf.prepare_next(ctx, state, ())? {
+            vdaf.prepare_shares_to_prepare_message(&(), [share, peer_share])?;
+            match vdaf.prepare_next(state, ())? {
                 PrepareTransition::Continue(..) => {
                     return Err(VdafError::Dap(fatal_error!(
                         err = "prio2_prep_finish_from_shares: unexpected transition (continued)",
@@ -116,25 +107,22 @@ pub(crate) fn prio2_prep_finish_from_shares(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
 }
 
 /// Consume the prep message and return our output share.
-pub(crate) fn prio2_prep_finish(
+pub(crate) fn prio2_draft09_prep_finish(
     dimension: usize,
     host_state: VdafPrepState,
     peer_message_data: &[u8],
-    task_id: TaskId,
 ) -> Result<VdafAggregateShare, VdafError> {
     let vdaf = Prio2::new(dimension).map_err(|e| {
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
     <()>::get_decoded(peer_message_data)?;
-    let binding = [CTX_STRING, &task_id.0].concat();
-    let ctx = binding.as_slice();
     let out_share = match host_state {
-        VdafPrepState::Prio2(state) => match vdaf.prepare_next(ctx, state, ())? {
+        VdafPrepState::Prio2Draft09(state) => match vdaf.prepare_next(state, ())? {
             PrepareTransition::Continue(..) => {
                 return Err(VdafError::Dap(fatal_error!(
                     err = "prio2_prep_finish: unexpected transition (continued)",
@@ -148,12 +136,12 @@ pub(crate) fn prio2_prep_finish(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
 }
 
 /// Interpret `encoded_agg_shares` as a sequence of encoded aggregate shares and unshard them.
-pub(crate) fn prio2_unshard<M: IntoIterator<Item = Vec<u8>>>(
+pub(crate) fn prio2_draft09_unshard<M: IntoIterator<Item = Vec<u8>>>(
     dimension: usize,
     num_measurements: usize,
     encoded_agg_shares: M,
@@ -179,7 +167,7 @@ mod test {
 
     fn roundtrip(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio2 { dimension: 5 },
+            &VdafConfig::Prio2Draft09 { dimension: 5 },
             HpkeKemId::X25519HkdfSha256,
             version,
         );
