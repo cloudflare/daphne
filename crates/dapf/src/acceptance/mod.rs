@@ -387,7 +387,9 @@ impl Test {
             ..Default::default()
         }
         .to_config_with_taskprov(
-            b"cool task".to_vec(),
+            format!("cool task {}", rand::random::<usize>())
+                .as_bytes()
+                .to_vec(),
             now.0,
             daphne::roles::aggregator::TaskprovConfig {
                 hpke_collector_config: &fake_collector_hpke_receiver_config.config,
