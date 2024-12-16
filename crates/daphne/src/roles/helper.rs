@@ -12,7 +12,7 @@ use crate::{
     error::DapAbort,
     messages::{
         constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobInitReq,
-        AggregationJobResp, PartialBatchSelector, TaskId, TransitionFailure, TransitionVar,
+        AggregationJobResp, PartialBatchSelector, ReportError, TaskId, TransitionVar,
     },
     metrics::{DaphneMetrics, DaphneRequestType, ReportStatus},
     protocol::{
@@ -256,7 +256,7 @@ async fn finish_agg_job_and_aggregate(
                     report_status.extend(replays.into_iter().map(|report_id| {
                         (
                             report_id,
-                            ReportProcessedStatus::Rejected(TransitionFailure::ReportReplayed),
+                            ReportProcessedStatus::Rejected(ReportError::ReportReplayed),
                         )
                     }));
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
@@ -266,7 +266,7 @@ async fn finish_agg_job_and_aggregate(
                     report_status.extend(reports.into_iter().map(|(report_id, _)| {
                         (
                             report_id,
-                            ReportProcessedStatus::Rejected(TransitionFailure::BatchCollected),
+                            ReportProcessedStatus::Rejected(ReportError::BatchCollected),
                         )
                     }));
                     inc_restart_metric.call_once(|| metrics.agg_job_put_span_retry_inc());
@@ -294,8 +294,8 @@ async fn finish_agg_job_and_aggregate(
             metrics.report_inc_by(ReportStatus::Aggregated, out_shares_count);
 
             for transition in &agg_job_resp.transitions {
-                if let TransitionVar::Failed(failure) = &transition.var {
-                    metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
+                if let TransitionVar::Failed(err) = &transition.var {
+                    metrics.report_inc_by(ReportStatus::Rejected(*err), 1);
                 }
             }
 

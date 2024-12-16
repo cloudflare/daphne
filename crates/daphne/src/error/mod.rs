@@ -5,7 +5,7 @@ pub mod aborts;
 
 use std::fmt::{Debug, Display};
 
-use crate::{messages::TransitionFailure, vdaf::VdafError};
+use crate::{messages::ReportError, vdaf::VdafError};
 pub use aborts::DapAbort;
 use prio::codec::CodecError;
 
@@ -25,10 +25,10 @@ pub enum DapError {
     #[error("abort: {0}")]
     Abort(#[from] DapAbort),
 
-    /// Transition failure. This error blocks processing of a paritcular report and may, under
+    /// Report Error. This error blocks processing of a paritcular report and may, under
     /// certain conditions, trigger an abort.
-    #[error("transition error: {0}")]
-    Transition(#[from] TransitionFailure),
+    #[error("report error: {0}")]
+    ReportError(#[from] ReportError),
 }
 
 impl DapError {
@@ -43,12 +43,12 @@ impl DapError {
         match e {
             VdafError::CodecDraft09(..) | VdafError::VdafDraft09(..) => {
                 tracing::warn!(error = ?e, "rejecting report");
-                Self::Transition(TransitionFailure::VdafPrepError)
+                Self::ReportError(ReportError::VdafPrepError)
             }
             VdafError::Dap(e) => e,
             VdafError::Codec(..) | VdafError::Vdaf(..) => {
                 tracing::warn!(error = ?e, "rejecting report - latest");
-                Self::Transition(TransitionFailure::VdafPrepError)
+                Self::ReportError(ReportError::VdafPrepError)
             }
         }
     }
