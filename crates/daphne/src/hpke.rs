@@ -13,7 +13,7 @@ use hpke_rs_rust_crypto::HpkeRustCrypto as ImplHpkeCrypto;
 
 use crate::{
     fatal_error,
-    messages::{HpkeCiphertext, TaskId, TransitionFailure},
+    messages::{HpkeCiphertext, ReportError, TaskId},
     DapError, DapVersion,
 };
 use async_trait::async_trait;
@@ -29,13 +29,13 @@ const AEAD_ID_AES128GCM: u16 = 0x0001;
 
 impl From<HpkeError> for DapError {
     fn from(_e: HpkeError) -> Self {
-        Self::Transition(TransitionFailure::HpkeDecryptError)
+        Self::ReportError(ReportError::HpkeDecryptError)
     }
 }
 
 impl From<Error> for DapError {
     fn from(_e: Error) -> Self {
-        Self::Transition(TransitionFailure::HpkeDecryptError)
+        Self::ReportError(ReportError::HpkeDecryptError)
     }
 }
 
@@ -198,7 +198,7 @@ impl HpkeConfig {
         ciphertext: &HpkeCiphertext,
     ) -> Result<Vec<u8>, DapError> {
         if self.id != ciphertext.config_id {
-            return Err(DapError::Transition(TransitionFailure::HpkeUnknownConfigId));
+            return Err(DapError::ReportError(ReportError::HpkeUnknownConfigId));
         }
         let receiver: Hpke<ImplHpkeCrypto> = check_suite(self.kem_id, self.kdf_id, self.aead_id)?;
         let mut ctx = receiver.setup_receiver(
@@ -303,7 +303,7 @@ where
         self.clone()
             .map(|c| c.borrow())
             .find(|c| c.config.id == ciphertext.config_id)
-            .ok_or(DapError::Transition(TransitionFailure::HpkeUnknownConfigId))?
+            .ok_or(DapError::ReportError(ReportError::HpkeUnknownConfigId))?
             .decrypt(info, ciphertext)
     }
 }

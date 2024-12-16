@@ -7,8 +7,7 @@ use crate::{
     constants::DapAggregatorRole,
     hpke::{info_and_aad, HpkeDecrypter},
     messages::{
-        self, Extension, PlaintextInputShare, ReportMetadata, ReportShare, TaskId,
-        TransitionFailure,
+        self, Extension, PlaintextInputShare, ReportError, ReportMetadata, ReportShare, TaskId,
     },
     protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
     vdaf::{
@@ -38,7 +37,7 @@ pub enum InitializedReport<Peer> {
     },
     Rejected {
         metadata: ReportMetadata,
-        failure: TransitionFailure,
+        report_err: ReportError,
     },
 }
 
@@ -114,7 +113,7 @@ impl<P> InitializedReport<P> {
             ($failure:ident) => {
                 return Ok(InitializedReport::Rejected {
                     metadata: report_share.report_metadata,
-                    failure: TransitionFailure::$failure,
+                    report_err: ReportError::$failure,
                 })
             };
         }
@@ -141,10 +140,10 @@ impl<P> InitializedReport<P> {
             let encoded_input_share =
                 match decrypter.hpke_decrypt(info, &report_share.encrypted_input_share) {
                     Ok(encoded_input_share) => encoded_input_share,
-                    Err(DapError::Transition(failure)) => {
+                    Err(DapError::ReportError(err)) => {
                         return Ok(InitializedReport::Rejected {
                             metadata: report_share.report_metadata,
-                            failure,
+                            report_err: err,
                         })
                     }
                     Err(e) => return Err(e),

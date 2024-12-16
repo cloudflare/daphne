@@ -160,9 +160,9 @@ impl AxumDapResponse {
     }
 
     pub fn new_error<E: Into<DapError>>(error: E, metrics: &dyn DaphneServiceMetrics) -> Self {
-        // trigger abort if transition failures reach this point.
+        // Trigger abort if report errors reach this point.
         let error = match error.into() {
-            DapError::Transition(failure) => DapAbort::report_rejected(failure),
+            DapError::ReportError(err) => DapAbort::report_rejected(err),
             DapError::Fatal(e) => Err(e),
             DapError::Abort(abort) => Ok(abort),
         };
