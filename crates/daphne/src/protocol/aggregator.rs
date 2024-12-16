@@ -14,8 +14,8 @@ use crate::{
     hpke::{info_and_aad, HpkeConfig, HpkeDecrypter},
     messages::{
         self, encode_u32_bytes, AggregationJobInitReq, AggregationJobResp, Base64Encode,
-        BatchSelector, HpkeCiphertext, PartialBatchSelector, PrepareInit, Report, ReportId,
-        ReportShare, TaskId, Transition, TransitionFailure, TransitionVar,
+        BatchSelector, HpkeCiphertext, PartialBatchSelector, PrepareInit, Report, ReportError,
+        ReportId, ReportShare, TaskId, Transition, TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
     protocol::{decode_ping_pong_framed, PingPongMessageType},
@@ -43,7 +43,7 @@ pub(crate) enum ReportProcessedStatus {
     Aggregated,
 
     /// The report should be marked as rejected, e.g., because a replay was detected.
-    Rejected(TransitionFailure),
+    Rejected(ReportError),
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -178,7 +178,10 @@ impl DapTaskConfig {
                     });
                 }
 
-                InitializedReport::Rejected { failure, .. } => {
+                InitializedReport::Rejected {
+                    report_err: failure,
+                    ..
+                } => {
                     // Skip report that can't be processed any further.
                     metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                     continue;
@@ -291,7 +294,7 @@ impl DapTaskConfig {
         for initialized_report in initialized_reports {
             let status = report_status.get(&initialized_report.metadata().id);
             let var = match status {
-                Some(ReportProcessedStatus::Rejected(failure)) => TransitionVar::Failed(*failure),
+                Some(ReportProcessedStatus::Rejected(err)) => TransitionVar::Failed(*err),
                 Some(ReportProcessedStatus::Aggregated) | None => match initialized_report {
                     InitializedReport::Ready {
                         metadata,
@@ -372,7 +375,7 @@ impl DapTaskConfig {
                                 | VdafError::Vdaf(..)),
                             ) => {
                                 tracing::warn!(error = ?e, "rejecting report");
-                                TransitionVar::Failed(TransitionFailure::VdafPrepError)
+                                TransitionVar::Failed(ReportError::VdafPrepError)
                             }
 
                             Err(VdafError::Dap(e)) => return Err(e),
@@ -381,8 +384,8 @@ impl DapTaskConfig {
 
                     InitializedReport::Rejected {
                         metadata: _,
-                        failure,
-                    } => TransitionVar::Failed(*failure),
+                        report_err,
+                    } => TransitionVar::Failed(*report_err),
                 },
             };
 
@@ -449,8 +452,8 @@ impl DapTaskConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                TransitionVar::Failed(failure) => {
-                    metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
+                TransitionVar::Failed(err) => {
+                    metrics.report_inc_by(ReportStatus::Rejected(*err), 1);
                     continue;
                 }
             };
@@ -488,8 +491,7 @@ impl DapTaskConfig {
                     | VdafError::Vdaf(..)),
                 ) => {
                     tracing::warn!(error = ?e, "rejecting report");
-                    metrics
-                        .report_inc_by(ReportStatus::Rejected(TransitionFailure::VdafPrepError), 1);
+                    metrics.report_inc_by(ReportStatus::Rejected(ReportError::VdafPrepError), 1);
                 }
                 Err(VdafError::Dap(e)) => return Err(e),
             }

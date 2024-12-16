@@ -6,7 +6,7 @@
 use crate::{
     constants::DapMediaType,
     fatal_error,
-    messages::{AggregationJobId, ReportId, TaskId, TransitionFailure},
+    messages::{AggregationJobId, ReportError, ReportId, TaskId},
     DapError, DapRequestMeta, DapVersion,
 };
 use prio::codec::CodecError;
@@ -237,18 +237,16 @@ impl DapAbort {
     }
 
     #[inline]
-    pub fn report_rejected(failure_reason: TransitionFailure) -> Result<Self, FatalDapError> {
+    pub fn report_rejected(failure_reason: ReportError) -> Result<Self, FatalDapError> {
         let detail = match failure_reason {
-            TransitionFailure::BatchCollected => {
+            ReportError::BatchCollected => {
                 "The report pertains to a batch that has already been collected."
             }
-            TransitionFailure::ReportReplayed => {
-                "A report with the same ID was uploaded previously."
-            }
+            ReportError::ReportReplayed => "A report with the same ID was uploaded previously.",
             _ => {
                 let DapError::Fatal(fatal) = fatal_error!(
-                    err = "Attempted to construct a \"reportRejected\" abort with unexpected transition failure",
-                    unexpected_transition_failure = ?failure_reason,
+                    err = "Attempted to construct a \"reportRejected\" abort with unexpected report error",
+                    unexpected_report_error = ?failure_reason,
                 ) else {
                     unreachable!("fatal_error! should always create a DapError::Fatal");
                 };

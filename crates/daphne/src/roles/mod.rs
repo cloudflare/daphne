@@ -138,8 +138,8 @@ mod test {
         messages::{
             request::RequestBody, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
-            TransitionFailure, TransitionVar,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportError,
+            TaskId, Time, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -622,7 +622,7 @@ mod test {
     //        assert_eq!(agg_job_resp.transitions.len(), 1);
     //        assert_matches!(
     //            agg_job_resp.transitions[0].var,
-    //            TransitionVar::Failed(TransitionFailure::TaskExpired)
+    //            TransitionVar::Failed(ReportError::TaskExpired)
     //        );
     //
     //        assert_eq!(t.helper.audit_log.invocations(), 1);
@@ -757,7 +757,7 @@ mod test {
         // Expect failure due to invalid ciphertext.
         assert_matches!(
             transition.var,
-            TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
+            TransitionVar::Failed(ReportError::HpkeDecryptError)
         );
     }
 

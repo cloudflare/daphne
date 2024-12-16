@@ -3,7 +3,7 @@
 
 //! Daphne metrics.
 
-use crate::messages::TransitionFailure;
+use crate::messages::ReportError;
 use core::fmt;
 use std::borrow::Cow;
 
@@ -18,7 +18,7 @@ pub trait DaphneMetrics: Send + Sync {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ReportStatus {
-    Rejected(TransitionFailure),
+    Rejected(ReportError),
     Aggregated,
     Collected,
 }
