@@ -120,6 +120,13 @@ pub enum DapAggregatorRole {
 }
 
 impl DapAggregatorRole {
+    pub fn as_aggregator_id(self) -> usize {
+        match self {
+            DapAggregatorRole::Leader => 0,
+            DapAggregatorRole::Helper => 1,
+        }
+    }
+
     pub fn is_leader(self) -> bool {
         self == Self::Leader
     }
