@@ -5,17 +5,18 @@
 //! [VDAF](https://datatracker.ietf.org/doc/draft-patton-cfrg-vdaf/).
 
 use crate::{
-    fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
-    VdafPrepShare, VdafPrepState, VdafVerifyKey,
+    constants::DapAggregatorRole, fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement,
+    VdafAggregateShare, VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
 use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{
-        prio2::{Prio2, Prio2PrepareShare},
+        prio2::{Prio2, Prio2PrepareShare, Prio2PrepareState},
         AggregateShare, Aggregator, Client, Collector, PrepareTransition, Share, Vdaf,
     },
 };
+use std::io::Cursor;
 
 /// Split the given measurement into a sequence of encoded input shares.
 pub(crate) fn prio2_shard(
@@ -141,6 +142,21 @@ pub(crate) fn prio2_prep_finish(
     };
     let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
+}
+
+/// Parse our prep state.
+pub(crate) fn decode_prep_state(
+    dimension: usize,
+    role: DapAggregatorRole,
+    bytes: &mut Cursor<&[u8]>,
+) -> Result<VdafPrepState, VdafError> {
+    let vdaf = Prio2::new(dimension).map_err(|e| {
+        VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
+    })?;
+    Ok(VdafPrepState::Prio2(Prio2PrepareState::decode_with_param(
+        &(&vdaf, role.as_aggregator_id()),
+        bytes,
+    )?))
 }
 
 /// Interpret `encoded_agg_shares` as a sequence of encoded aggregate shares and unshard them.
