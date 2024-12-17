@@ -17,6 +17,8 @@ use prio::{
 };
 use rand::prelude::*;
 
+use subtle::{Choice, ConstantTimeEq};
+
 use super::{
     field_to_f64, msg, Pine, USAGE_MEAS_SHARE, USAGE_PROOF_SHARE, USAGE_PROVE_RAND,
     USAGE_VF_JOINT_RAND, USAGE_VF_JOINT_RAND_PART, USAGE_VF_JOINT_RAND_SEED,
@@ -344,11 +346,88 @@ pub struct PinePrepState<F, const SEED_SIZE: usize> {
     corrected_wr_joint_rand_seed: Seed<SEED_SIZE>,
     corrected_vf_joint_rand_seed: Seed<SEED_SIZE>,
     pub(crate) verifiers_len: usize,
+    meas_share_seed: Option<Seed<SEED_SIZE>>,
+}
+
+impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> Encode for PinePrepState<F, SEED_SIZE> {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        // NOTE This format is not specified in draft-chen-cfrg-vdaf-pine.
+        if let Some(ref seed) = self.meas_share_seed {
+            // The Helper encodes the seed.
+            seed.encode(bytes)?;
+        } else {
+            // The Leader encodes the vector itself.
+            for m in &self.gradient_share {
+                m.encode(bytes)?;
+            }
+        }
+        self.corrected_wr_joint_rand_seed.encode(bytes)?;
+        self.corrected_vf_joint_rand_seed.encode(bytes)?;
+        Ok(())
+    }
+
+    fn encoded_len(&self) -> Option<usize> {
+        let gradient_len = if self.meas_share_seed.is_some() {
+            SEED_SIZE
+        } else {
+            F::ENCODED_SIZE * self.gradient_share.len()
+        };
+        Some(gradient_len + SEED_SIZE * 2)
+    }
+}
+
+impl<F, X, const SEED_SIZE: usize> ParameterizedDecode<(&Pine<F, X, SEED_SIZE>, bool)>
+    for PinePrepState<F, SEED_SIZE>
+where
+    F: FftFriendlyFieldElement,
+    X: Xof<SEED_SIZE>,
+{
+    fn decode_with_param(
+        (pine, is_leader): &(&Pine<F, X, SEED_SIZE>, bool),
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        let (gradient_share, meas_share_seed) = if *is_leader {
+            (
+                std::iter::repeat_with(|| F::decode(bytes))
+                    .take(pine.flp.dimension)
+                    .collect::<Result<Vec<_>, _>>()?,
+                None,
+            )
+        } else {
+            let seed = Seed::decode(bytes)?;
+            let mut gradient_share = pine.helper_meas_share(seed.as_ref());
+            gradient_share.truncate(pine.flp.dimension);
+            (gradient_share, Some(seed))
+        };
+
+        Ok(Self {
+            gradient_share,
+            corrected_wr_joint_rand_seed: Seed::decode(bytes)?,
+            corrected_vf_joint_rand_seed: Seed::decode(bytes)?,
+            verifiers_len: pine.flp_sq_norm_equal.verifier_len()
+                * pine.num_proofs_sq_norm_equal as usize
+                + pine.flp.verifier_len() * pine.num_proofs as usize,
+            meas_share_seed,
+        })
+    }
 }
 
 impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> PartialEq for PinePrepState<F, SEED_SIZE> {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!("constant time compare")
+    fn eq(&self, other: &Self) -> bool {
+        (self.gradient_share.ct_eq(&other.gradient_share)
+            & self
+                .corrected_wr_joint_rand_seed
+                .ct_eq(&other.corrected_wr_joint_rand_seed)
+            & self
+                .corrected_vf_joint_rand_seed
+                .ct_eq(&other.corrected_vf_joint_rand_seed)
+            & self.verifiers_len.ct_eq(&other.verifiers_len)
+            & match (&self.meas_share_seed, &other.meas_share_seed) {
+                (Some(ours), Some(theirs)) => ours.ct_eq(theirs),
+                (None, None) => Choice::from(1),
+                _ => Choice::from(0),
+            })
+        .into()
     }
 }
 
@@ -526,6 +605,15 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize>
                 corrected_wr_joint_rand_seed,
                 corrected_vf_joint_rand_seed,
                 verifiers_len: verifiers_share.len(),
+                meas_share_seed: match input_share {
+                    msg::InputShare(msg::InputShareFor::Helper {
+                        meas_share,
+                        proofs_share: _,
+                        wr_blind: _,
+                        vf_blind: _,
+                    }) => Some(meas_share.clone()),
+                    msg::InputShare(msg::InputShareFor::Leader { .. }) => None,
+                },
             },
             msg::PrepShare {
                 verifiers_share,
@@ -668,7 +756,7 @@ impl<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usize> Coll
 mod tests {
 
     use prio::{
-        codec::Decode,
+        codec::{Decode, Encode, ParameterizedDecode},
         field::{Field128, Field64},
         vdaf::{
             test_utils::{run_vdaf, run_vdaf_prepare},
@@ -680,6 +768,8 @@ mod tests {
     use crate::pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine, PineParam};
 
     use assert_matches::assert_matches;
+
+    use super::PinePrepState;
 
     #[test]
     fn run_128() {
@@ -869,5 +959,39 @@ mod tests {
             input_shares,
         )
         .is_err());
+    }
+
+    #[test]
+    fn roundtrip_prep_state() {
+        let dimension = 100;
+        let norm_bound = norm_bound_f64_to_u64(1000.0, 15);
+        let pine = Pine::new_64(norm_bound, dimension, 15, 4, 4).unwrap();
+
+        let (leader_prep_state, helper_prep_state) = {
+            let verify_key = [0; 16];
+            let nonce = [0; 16];
+            let (public_share, input_shares) = pine.shard(&vec![1.0; dimension], &nonce).unwrap();
+            let (leader_prep_state, _leader_prep_share) = pine
+                .prepare_init(&verify_key, 0, &(), &nonce, &public_share, &input_shares[0])
+                .unwrap();
+            let (helper_prep_state, _helper_prep_share) = pine
+                .prepare_init(&verify_key, 1, &(), &nonce, &public_share, &input_shares[1])
+                .unwrap();
+            (leader_prep_state, helper_prep_state)
+        };
+
+        let got = PinePrepState::get_decoded_with_param(
+            &(&pine, true),
+            &leader_prep_state.get_encoded().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(got, leader_prep_state);
+
+        let got = PinePrepState::get_decoded_with_param(
+            &(&pine, false),
+            &helper_prep_state.get_encoded().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(got, helper_prep_state);
     }
 }
