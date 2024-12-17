@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::{
+    constants::DapAggregatorRole,
     fatal_error,
     messages::taskprov::{
         VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128, VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128,
@@ -20,6 +21,7 @@ use prio_draft09::{
     },
 };
 use serde::{Deserialize, Serialize};
+use std::io::Cursor;
 
 pub(crate) fn pine32_hmac_sha256_aes128(
     param: &PineParam,
@@ -232,6 +234,33 @@ fn prep_init<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usi
 
     // Run the prepare-init algorithm, returning the initial state.
     Ok(vdaf.prepare_init(verify_key, agg_id, &(), nonce, &public_share, &input_share)?)
+}
+
+pub fn decode_prep_state(
+    config: &PineConfig,
+    role: DapAggregatorRole,
+    cursor: &mut Cursor<&[u8]>,
+) -> Result<VdafPrepState, VdafError> {
+    Ok(match config {
+        PineConfig::Field32HmacSha256Aes128 { param } => VdafPrepState::Pine32HmacSha256Aes128(
+            PinePrepState::<FieldPrio2, 32>::decode_with_param(
+                &(
+                    &pine32_hmac_sha256_aes128(param)?,
+                    role == DapAggregatorRole::Leader,
+                ),
+                cursor,
+            )?,
+        ),
+        PineConfig::Field64HmacSha256Aes128 { param } => {
+            VdafPrepState::Pine64HmacSha256Aes128(PinePrepState::<Field64, 32>::decode_with_param(
+                &(
+                    &pine64_hmac_sha256_aes128(param)?,
+                    role == DapAggregatorRole::Leader,
+                ),
+                cursor,
+            )?)
+        }
+    })
 }
 
 #[cfg(test)]

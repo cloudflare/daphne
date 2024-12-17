@@ -383,21 +383,22 @@ where
     X: Xof<SEED_SIZE>,
 {
     fn decode_with_param(
-        (pine, is_leader): &(&Pine<F, X, SEED_SIZE>, bool),
+        (pine, role): &(&Pine<F, X, SEED_SIZE>, bool),
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let (gradient_share, meas_share_seed) = if *is_leader {
-            (
+        let (gradient_share, meas_share_seed) = match role {
+            true => (
                 std::iter::repeat_with(|| F::decode(bytes))
                     .take(pine.flp.dimension)
                     .collect::<Result<Vec<_>, _>>()?,
                 None,
-            )
-        } else {
-            let seed = Seed::decode(bytes)?;
-            let mut gradient_share = pine.helper_meas_share(seed.as_ref());
-            gradient_share.truncate(pine.flp.dimension);
-            (gradient_share, Some(seed))
+            ),
+            false => {
+                let seed = Seed::decode(bytes)?;
+                let mut gradient_share = pine.helper_meas_share(seed.as_ref());
+                gradient_share.truncate(pine.flp.dimension);
+                (gradient_share, Some(seed))
+            }
         };
 
         Ok(Self {
