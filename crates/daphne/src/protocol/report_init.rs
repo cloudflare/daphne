@@ -12,8 +12,8 @@ use crate::{
     },
     protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
     vdaf::{
-        prio2::prio2_prep_init, prio3::prio3_prep_init, prio3_draft09::prio3_draft09_prep_init,
-        VdafConfig, VdafPrepShare, VdafPrepState,
+        prio2::prio2_prep_init, prio2_draft09::prio2_draft09_prep_init, prio3::prio3_prep_init,
+        prio3_draft09::prio3_draft09_prep_init, VdafConfig, VdafPrepShare, VdafPrepState,
     },
     DapAggregationParam, DapError, DapTaskConfig,
 };
@@ -215,6 +215,14 @@ impl<P> InitializedReport<P> {
                 &report_share.public_share,
                 &input_share,
             ),
+            VdafConfig::Prio2Draft09 { dimension } => prio2_draft09_prep_init(
+                *dimension,
+                &task_config.vdaf_verify_key,
+                agg_id,
+                &report_share.report_metadata.id.0,
+                &report_share.public_share,
+                &input_share,
+            ),
             VdafConfig::Prio2 { dimension } => prio2_prep_init(
                 *dimension,
                 &task_config.vdaf_verify_key,
@@ -222,6 +230,7 @@ impl<P> InitializedReport<P> {
                 &report_share.report_metadata.id.0,
                 &report_share.public_share,
                 &input_share,
+                *task_id,
             ),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {

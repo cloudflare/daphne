@@ -7,7 +7,10 @@ use crate::{
     constants::DapAggregatorRole,
     hpke::{info_and_aad, HpkeConfig},
     messages::{Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId, Time},
-    vdaf::{prio2::prio2_shard, prio3::prio3_shard, prio3_draft09::prio3_draft09_shard, VdafError},
+    vdaf::{
+        prio2::prio2_shard, prio2_draft09::prio2_draft09_shard, prio3::prio3_shard,
+        prio3_draft09::prio3_draft09_shard, VdafError,
+    },
     DapError, DapMeasurement, DapVersion, VdafConfig,
 };
 use prio::codec::ParameterizedEncode;
@@ -130,7 +133,10 @@ impl VdafConfig {
             Self::Prio3(prio3_config) => {
                 Ok(prio3_shard(prio3_config, measurement, nonce, *task_id)?)
             }
-            Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce)?),
+            Self::Prio2Draft09 { dimension } => {
+                Ok(prio2_draft09_shard(*dimension, measurement, nonce)?)
+            }
+            Self::Prio2 { dimension } => Ok(prio2_shard(*dimension, measurement, nonce, *task_id)?),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic {
                 input_size,

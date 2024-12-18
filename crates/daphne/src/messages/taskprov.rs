@@ -35,6 +35,9 @@ const DP_MECHANISM_NONE: u8 = 0x01;
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub enum VdafTypeVar {
+    Prio2Draft09 {
+        dimension: u32,
+    },
     Prio2 {
         dimension: u32,
     },
@@ -135,7 +138,7 @@ impl ParameterizedEncode<DapVersion> for VdafTypeVar {
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         match self {
-            Self::Prio2 { dimension } => {
+            Self::Prio2Draft09 { dimension } | Self::Prio2 { dimension } => {
                 VDAF_TYPE_PRIO2.encode(bytes)?;
                 dimension.encode(bytes)?;
             }

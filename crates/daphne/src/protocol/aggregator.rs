@@ -21,6 +21,7 @@ use crate::{
     protocol::{decode_ping_pong_framed, PingPongMessageType},
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares},
+        prio2_draft09::{prio2_draft09_prep_finish, prio2_draft09_prep_finish_from_shares},
         prio3::{prio3_prep_finish, prio3_prep_finish_from_shares},
         prio3_draft09::{prio3_draft09_prep_finish, prio3_draft09_prep_finish_from_shares},
         VdafError,
@@ -318,11 +319,20 @@ impl DapTaskConfig {
                                 helper_prep_share.clone(),
                                 leader_prep_share,
                             ),
+                            VdafConfig::Prio2Draft09 { dimension } => {
+                                prio2_draft09_prep_finish_from_shares(
+                                    *dimension,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                )
+                            }
                             VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
                                 *dimension,
                                 helper_prep_state.clone(),
                                 helper_prep_share.clone(),
                                 leader_prep_share,
+                                task_id,
                             ),
                             #[cfg(feature = "experimental")]
                             VdafConfig::Mastic {
@@ -462,8 +472,11 @@ impl DapTaskConfig {
                 VdafConfig::Prio3(prio3_config) => {
                     prio3_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
                 }
+                VdafConfig::Prio2Draft09 { dimension } => {
+                    prio2_draft09_prep_finish(*dimension, leader.prep_state, prep_msg)
+                }
                 VdafConfig::Prio2 { dimension } => {
-                    prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
+                    prio2_prep_finish(*dimension, leader.prep_state, prep_msg, *task_id)
                 }
                 #[cfg(feature = "experimental")]
                 VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),

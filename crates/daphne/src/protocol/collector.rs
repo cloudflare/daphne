@@ -8,7 +8,10 @@ use crate::{
     fatal_error,
     hpke::{info_and_aad, HpkeDecrypter},
     messages::{BatchSelector, HpkeCiphertext, TaskId},
-    vdaf::{prio2::prio2_unshard, prio3::prio3_unshard, prio3_draft09::prio3_draft09_unshard},
+    vdaf::{
+        prio2::prio2_unshard, prio2_draft09::prio2_draft09_unshard, prio3::prio3_unshard,
+        prio3_draft09::prio3_draft09_unshard,
+    },
     DapAggregateResult, DapAggregationParam, DapError, DapVersion, VdafConfig,
 };
 
@@ -77,6 +80,9 @@ impl VdafConfig {
                 prio3_draft09_unshard(prio3_config, num_measurements, agg_shares)
             }
             Self::Prio3(prio3_config) => prio3_unshard(prio3_config, num_measurements, agg_shares),
+            Self::Prio2Draft09 { dimension } => {
+                prio2_draft09_unshard(*dimension, num_measurements, agg_shares)
+            }
             Self::Prio2 { dimension } => prio2_unshard(*dimension, num_measurements, agg_shares),
             #[cfg(feature = "experimental")]
             Self::Mastic {
