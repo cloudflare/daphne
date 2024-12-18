@@ -33,23 +33,13 @@ pub(crate) fn prio3_shard(
     task_id: TaskId,
 ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
     match (config, measurement) {
-        (Prio3Config::Count, DapMeasurement::U64(measurement)) => {
+        (Prio3Config::Count, DapMeasurement::U64(measurement)) if measurement < 2 => {
             let vdaf = Prio3::new_count(2).map_err(|e| {
                 VdafError::Dap(
                     fatal_error!(err = ?e, "failed to create prio3 count from num_aggregators(2)"),
                 )
             })?;
-            // TODO(cjpatton) Make this constant time.
-            let measurement = match measurement {
-                0 => false,
-                1 => true,
-                _ => {
-                    return Err(VdafError::Dap(fatal_error!(
-                        err = "cannot represent measurement as a 0 or 1"
-                    )))
-                }
-            };
-            shard_then_encode(&vdaf, task_id, &measurement, nonce)
+            shard_then_encode(&vdaf, task_id, &(measurement != 0), nonce)
         }
         (
             Prio3Config::Histogram {
