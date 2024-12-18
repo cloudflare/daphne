@@ -847,4 +847,52 @@ mod tests {
     }
 
     test_versions! { roundtrip_vdaf_config_not_implemented }
+
+    fn parse_taskprov_advertisement_with_wrong_task_id(version: DapVersion) {
+        let taskprov_advertisement = TaskprovAdvertisement {
+            task_info: b"this is a cool task!".to_vec(),
+            leader_url: UrlBytes {
+                bytes: b"http://exmaple.com/v02".to_vec(),
+            },
+            helper_url: UrlBytes {
+                bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
+            },
+            query_config: QueryConfig {
+                time_precision: 12_341_234,
+                max_batch_query_count: match version {
+                    DapVersion::Draft09 => 1337,
+                    DapVersion::Latest => 1,
+                },
+                min_batch_size: 55,
+                batch_mode: BatchMode::LeaderSelected {
+                    max_batch_size: match version {
+                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                        DapVersion::Latest => None,
+                    },
+                },
+            },
+            task_expiration: 23_232_232_232,
+            vdaf_config: VdafConfig {
+                dp_config: DpConfig::None,
+                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            },
+        };
+
+        let err = TaskprovAdvertisement::parse_taskprov_advertisement(
+            &taskprov_advertisement
+                .serialize_to_header_value(version)
+                .unwrap(),
+            &TaskId([1; 32]),
+            version,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            DapAbort::UnrecognizedTask {
+                task_id: TaskId([1; 32]),
+            }
+        );
+    }
+
+    test_versions! { parse_taskprov_advertisement_with_wrong_task_id }
 }

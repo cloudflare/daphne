@@ -575,7 +575,7 @@ impl DapTaskParameters {
         let task_id = taskprov_advertisement.compute_task_id(self.version);
 
         // Compute the DAP task config.
-        let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov(
+        let task_config = taskprov::DapTaskConfigNeedsOptIn::try_from_taskprov_advertisement(
             self.version,
             &task_id,
             taskprov_advertisement.clone(),

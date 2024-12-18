@@ -107,7 +107,7 @@ async fn resolve_task_config(
             }
             .into());
         };
-        let task_config = DapTaskConfigNeedsOptIn::try_from_taskprov(
+        let task_config = DapTaskConfigNeedsOptIn::try_from_taskprov_advertisement(
             req.version,
             &req.task_id,
             taskprov_advertisement.clone(),
