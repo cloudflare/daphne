@@ -37,48 +37,6 @@ pub trait DurableMethod {
     fn name(params: Self::NameParameters<'_>) -> ObjectIdFrom;
 }
 
-pub trait DurableRequestPayload {
-    fn decode_from_reader(
-        reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
-    ) -> capnp::Result<Self>
-    where
-        Self: Sized;
-
-    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator>;
-}
-
-pub trait DurableRequestPayloadExt {
-    fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
-    where
-        Self: Sized;
-    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>>;
-}
-
-impl<T> DurableRequestPayloadExt for T
-where
-    T: DurableRequestPayload,
-{
-    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        let message = self.encode_to_builder();
-        capnp::serialize_packed::write_message(&mut buf, &message)?;
-        Ok(buf)
-    }
-
-    fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut cursor = std::io::Cursor::new(bytes);
-        let reader = capnp::serialize_packed::read_message(
-            &mut cursor,
-            capnp::message::ReaderOptions::new(),
-        )?;
-
-        T::decode_from_reader(reader)
-    }
-}
-
 macro_rules! define_do_binding {
     (
         const BINDING = $binding:literal;
