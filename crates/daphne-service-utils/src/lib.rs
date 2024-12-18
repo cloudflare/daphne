@@ -6,6 +6,7 @@
 pub mod bearer_token;
 #[cfg(feature = "durable_requests")]
 pub mod capnproto_payload;
+pub mod cpu_offload;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
@@ -21,5 +22,15 @@ mod durable_request_capnp {
     include!(concat!(
         env!("OUT_DIR"),
         "/src/durable_requests/durable_request_capnp.rs"
+    ));
+}
+
+mod cpu_offload_capnp {
+    #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::needless_lifetimes)]
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/src/cpu_offload/cpu_offload_capnp.rs"
     ));
 }
