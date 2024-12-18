@@ -25,7 +25,7 @@ pub(crate) mod test_state_cleaner;
 
 use crate::tracing_utils::shorten_paths;
 use daphne_service_utils::{
-    capnproto_payload::{CapnprotoPayload, CapnprotoPayloadExt},
+    capnproto_payload::{CapnprotoPayloadDecode, CapnprotoPayloadDecodeExt},
     durable_requests::bindings::DurableMethod,
 };
 use serde::{Deserialize, Serialize};
@@ -210,7 +210,7 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 
 async fn req_parse<T>(req: &mut Request) -> Result<T>
 where
-    T: CapnprotoPayload,
+    T: CapnprotoPayloadDecode,
 {
     T::decode_from_bytes(&req.bytes().await?).map_err(|e| Error::RustError(e.to_string()))
 }
