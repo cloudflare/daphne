@@ -11,7 +11,7 @@ use daphne::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    capnproto_payload::CapnprotoPayload,
+    capnproto_payload::{CapnprotoPayloadDecode, CapnprotoPayloadEncode},
     durable_request_capnp::{aggregate_store_merge_req, dap_aggregate_share},
     durable_requests::ObjectIdFrom,
 };
@@ -68,7 +68,7 @@ pub struct AggregateStoreMergeOptions {
     pub skip_replay_protection: bool,
 }
 
-impl CapnprotoPayload for AggregateStoreMergeReq {
+impl CapnprotoPayloadEncode for AggregateStoreMergeReq {
     fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator> {
         let Self {
             contained_reports,
@@ -162,7 +162,9 @@ impl CapnprotoPayload for AggregateStoreMergeReq {
         }
         message
     }
+}
 
+impl CapnprotoPayloadDecode for AggregateStoreMergeReq {
     fn decode_from_reader(
         reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
     ) -> capnp::Result<Self> {
@@ -285,7 +287,9 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::capnproto_payload::CapnprotoPayloadExt as _;
+    use crate::capnproto_payload::{
+        CapnprotoPayloadDecodeExt as _, CapnprotoPayloadEncodeExt as _,
+    };
 
     use super::*;
 
