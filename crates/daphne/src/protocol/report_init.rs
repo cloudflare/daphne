@@ -13,12 +13,15 @@ use crate::{
     protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
     vdaf::{
         prio2::prio2_prep_init, prio3::prio3_prep_init, prio3_draft09::prio3_draft09_prep_init,
-        VdafConfig, VdafPrepShare, VdafPrepState,
+        VdafConfig, VdafPrepShare, VdafPrepState, VdafVerifyKey,
     },
-    DapAggregationParam, DapError, DapTaskConfig,
+    DapAggregationParam, DapError, DapTaskConfig, DapVersion,
 };
 use prio::codec::{CodecError, ParameterizedDecode as _};
-use std::ops::{Deref, Range};
+use std::{
+    borrow::Cow,
+    ops::{Deref, Range},
+};
 
 /// Report state during aggregation initialization after the VDAF preparation step.
 ///
@@ -44,6 +47,12 @@ pub enum InitializedReport<Peer> {
 
 pub struct WithPeerPrepShare(Vec<u8>);
 
+impl From<Vec<u8>> for WithPeerPrepShare {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
 impl Deref for WithPeerPrepShare {
     type Target = Vec<u8>;
     fn deref(&self) -> &Self::Target {
@@ -52,11 +61,11 @@ impl Deref for WithPeerPrepShare {
 }
 
 impl InitializedReport<()> {
-    pub fn from_client(
+    pub fn from_client<'s>(
         decrypter: &impl HpkeDecrypter,
         valid_report_range: Range<messages::Time>,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
+        task_config: impl Into<PartialDapTaskConfig<'s>>,
         report_share: ReportShare,
         agg_param: &DapAggregationParam,
     ) -> Result<Self, DapError> {
@@ -73,11 +82,11 @@ impl InitializedReport<()> {
 }
 
 impl InitializedReport<WithPeerPrepShare> {
-    pub fn from_leader(
+    pub fn from_leader<'s>(
         decrypter: &impl HpkeDecrypter,
         valid_report_range: Range<messages::Time>,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
+        task_config: impl Into<PartialDapTaskConfig<'s>>,
         report_share: ReportShare,
         prep_init_payload: Vec<u8>,
         agg_param: &DapAggregationParam,
@@ -94,12 +103,44 @@ impl InitializedReport<WithPeerPrepShare> {
     }
 }
 
+impl<'s> From<&'s DapTaskConfig> for PartialDapTaskConfig<'s> {
+    fn from(config: &'s DapTaskConfig) -> Self {
+        PartialDapTaskConfig {
+            not_after: config.not_after,
+            method_is_taskprov: config.method_is_taskprov(),
+            version: config.version,
+            vdaf: Cow::Borrowed(&config.vdaf),
+            vdaf_verify_key: Cow::Borrowed(&config.vdaf_verify_key),
+        }
+    }
+}
+
+impl<'s> From<&'s PartialDapTaskConfig<'_>> for PartialDapTaskConfig<'s> {
+    fn from(config: &'s PartialDapTaskConfig<'_>) -> Self {
+        Self {
+            not_after: config.not_after,
+            method_is_taskprov: config.method_is_taskprov,
+            version: config.version,
+            vdaf: Cow::Borrowed(&config.vdaf),
+            vdaf_verify_key: Cow::Borrowed(&config.vdaf_verify_key),
+        }
+    }
+}
+
+pub struct PartialDapTaskConfig<'s> {
+    pub not_after: messages::Time,
+    pub method_is_taskprov: bool,
+    pub version: DapVersion,
+    pub vdaf: Cow<'s, VdafConfig>,
+    pub vdaf_verify_key: Cow<'s, VdafVerifyKey>,
+}
+
 impl<P> InitializedReport<P> {
-    fn initialize<S>(
+    fn initialize<'s, S>(
         decrypter: &impl HpkeDecrypter,
         valid_report_range: Range<messages::Time>,
         task_id: &TaskId,
-        task_config: &DapTaskConfig,
+        task_config: impl Into<PartialDapTaskConfig<'s>>,
         report_share: ReportShare,
         prep_init_payload: S,
         // We need to use this variable for Mastic, which is currently fenced by the
@@ -110,6 +151,7 @@ impl<P> InitializedReport<P> {
     where
         S: PrepInitPayload<Decoded = P>,
     {
+        let task_config = task_config.into();
         macro_rules! reject {
             ($failure:ident) => {
                 return Ok(InitializedReport::Rejected {
@@ -167,7 +209,7 @@ impl<P> InitializedReport<P> {
             let mut taskprov_indicated = false;
             for extension in extensions {
                 match extension {
-                    Extension::Taskprov { .. } if task_config.method_is_taskprov() => {
+                    Extension::Taskprov { .. } if task_config.method_is_taskprov => {
                         taskprov_indicated = true;
                     }
 
@@ -176,7 +218,7 @@ impl<P> InitializedReport<P> {
                 }
             }
 
-            if task_config.method_is_taskprov() && !taskprov_indicated {
+            if task_config.method_is_taskprov && !taskprov_indicated {
                 // taskprov: If the task configuration method is taskprov, then we expect each
                 // report to indicate support.
                 reject!(InvalidMessage);
@@ -197,7 +239,7 @@ impl<P> InitializedReport<P> {
             DapAggregatorRole::Leader => 0,
             DapAggregatorRole::Helper => 1,
         };
-        let res = match &task_config.vdaf {
+        let res = match task_config.vdaf.as_ref() {
             VdafConfig::Prio3Draft09(ref prio3_config) => prio3_draft09_prep_init(
                 prio3_config,
                 &task_config.vdaf_verify_key,
