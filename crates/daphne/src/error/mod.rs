@@ -3,16 +3,15 @@
 
 pub mod aborts;
 
-use std::fmt::{Debug, Display};
-
 use crate::{messages::ReportError, vdaf::VdafError};
 pub use aborts::DapAbort;
+use aborts::ProblemDetails;
 use prio::codec::CodecError;
-
-use self::aborts::ProblemDetails;
+use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Display};
 
 /// DAP errors.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum DapError {
     /// Fatal error. If this triggers an abort, then treat this as an internal error.
     ///
@@ -54,7 +53,8 @@ impl DapError {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct FatalDapError(pub(crate) String);
 
 impl FatalDapError {

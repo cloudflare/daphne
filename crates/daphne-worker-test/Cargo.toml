@@ -18,11 +18,13 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
+async-trait.workspace = true
 cap.workspace = true
 cfg-if.workspace = true
 console_error_panic_hook = { version = "0.1.7", optional = true }
 daphne = { path = "../daphne" }
 daphne-worker = { path = "../daphne-worker", features = ["test-utils"] }
+futures.workspace = true
 prometheus.workspace = true
 tracing.workspace = true
 worker.workspace = true

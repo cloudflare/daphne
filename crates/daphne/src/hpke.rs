@@ -325,7 +325,7 @@ impl HpkeDecrypter for HpkeReceiverConfig {
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
     #[serde(with = "HpkePrivateKeySerde")]
-    private_key: HpkePrivateKey,
+    pub private_key: HpkePrivateKey,
 }
 
 #[cfg(any(test, feature = "test-utils"))]

@@ -3,8 +3,10 @@
 
 use daphne::constants::DapAggregatorRole;
 use daphne_worker::{aggregator::App, initialize_tracing};
+use futures::stream;
+use std::convert::Infallible;
 use tracing::info;
-use worker::{event, Env, HttpRequest};
+use worker::{event, Env, HttpRequest, ResponseBody};
 
 mod durable;
 mod utils;
@@ -49,7 +51,7 @@ pub async fn main(
                 Some(bad_role) => panic!("'{bad_role}' is not a valid role"),
             };
             daphne_worker::aggregator::handle_dap_request(
-                App::new(env, &registry, None).unwrap(),
+                App::new(env, &registry, None, Box::new(CpuOffload)).unwrap(),
                 req,
                 role,
             )
@@ -63,4 +65,34 @@ pub async fn main(
     };
 
     Ok(response)
+}
+
+struct CpuOffload;
+
+#[async_trait::async_trait(?Send)]
+impl daphne_worker::aggregator::CpuOffload for CpuOffload {
+    async fn request(
+        &self,
+        mut req: HttpRequest,
+    ) -> worker::Result<daphne_worker::Response<worker::Body>> {
+        let url = format!("http://localhost:8787{}", req.uri().path())
+            .parse()
+            .unwrap();
+        *req.uri_mut() = url;
+        let response: worker::Response =
+            worker::Fetch::Request(req.try_into().expect("invalid request"))
+                .send()
+                .await?;
+
+        Ok(daphne_worker::Response::builder()
+            .status(response.status_code())
+            .body(match response.into_parts().1 {
+                ResponseBody::Empty => worker::Body::empty(),
+                ResponseBody::Body(vec) => {
+                    worker::Body::from_stream(stream::iter([Ok::<_, Infallible>(vec)])).unwrap()
+                }
+                ResponseBody::Stream(readable_stream) => worker::Body::new(readable_stream),
+            })
+            .unwrap())
+    }
 }

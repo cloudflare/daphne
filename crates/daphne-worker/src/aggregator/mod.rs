@@ -7,6 +7,7 @@ mod roles;
 mod router;
 
 use crate::storage::{kv, Do, Kv};
+use axum::response::Response;
 use config::{DaphneServiceConfig, PeerBearerToken};
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
@@ -22,9 +23,14 @@ use metrics::DaphneServiceMetrics;
 use roles::BearerTokens;
 use router::DaphneService;
 use std::sync::{Arc, Mutex};
-use worker::send::SendWrapper;
+use worker::{send::SendWrapper, HttpRequest};
 
 pub use router::handle_dap_request;
+
+#[async_trait::async_trait(?Send)]
+pub trait CpuOffload {
+    async fn request(&self, req: HttpRequest) -> worker::Result<Response<worker::Body>>;
+}
 
 pub struct App {
     http: reqwest::Client,
@@ -33,6 +39,8 @@ pub struct App {
     metrics: Box<dyn DaphneServiceMetrics + Send + Sync>,
     service_config: DaphneServiceConfig,
     audit_log: Box<dyn AuditLog + Send + Sync>,
+
+    cpu_offload: Box<dyn CpuOffload + Send + Sync>,
 
     /// Volatile memory for the Leader, including the work queue, pending reports, and pending
     /// colleciton requests. Note that in a production Leader, it is necessary to store this state
@@ -125,6 +133,7 @@ impl App {
         env: worker::Env,
         registry: &prometheus::Registry,
         audit_log: impl Into<Option<Box<dyn AuditLog + Send + Sync>>>,
+        cpu_offload: Box<dyn CpuOffload + Send + Sync>,
     ) -> Result<Self, DapError> {
         let metrics = metrics::DaphnePromServiceMetrics::register(registry)?;
         let service_config = config::load_config_from_env(&env)?;
@@ -135,6 +144,7 @@ impl App {
             metrics: Box::new(metrics),
             audit_log: audit_log.into().unwrap_or_else(|| Box::new(NoopAuditLog)),
             service_config,
+            cpu_offload,
             test_leader_state: Default::default(),
         })
     }
