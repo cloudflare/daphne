@@ -5,6 +5,8 @@
 
 pub mod bearer_token;
 #[cfg(feature = "durable_requests")]
+pub mod capnproto_payload;
+#[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
 #[cfg(feature = "test-utils")]
