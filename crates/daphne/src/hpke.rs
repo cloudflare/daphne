@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Hybrid Public-Key Encryption ([HPKE](https://datatracker.ietf.org/doc/rfc9180/)).
@@ -325,7 +325,7 @@ impl HpkeDecrypter for HpkeReceiverConfig {
 pub struct HpkeReceiverConfig {
     pub config: HpkeConfig,
     #[serde(with = "HpkePrivateKeySerde")]
-    private_key: HpkePrivateKey,
+    pub private_key: HpkePrivateKey,
 }
 
 #[cfg(any(test, feature = "test-utils"))]

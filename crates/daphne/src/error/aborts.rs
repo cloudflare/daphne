@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Definitions and tooling for DAP protocol aborts.
@@ -18,7 +18,7 @@ use super::FatalDapError;
 // The display implementation of this error is used for metrics, as such, it can't be changed to
 // include field values
 /// DAP aborts.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum DapAbort {
     /// Bad request. Sent in response to an HTTP request that couldn't be handled preoprly.
     #[error("bad request")]

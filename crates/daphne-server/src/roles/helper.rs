@@ -10,12 +10,12 @@ use daphne::{
 
 #[async_trait]
 impl DapHelper for crate::App {
-    async fn assert_agg_job_is_immutable(
+    async fn assert_agg_job_is_legal(
         &self,
         _id: AggregationJobId,
         _version: DapVersion,
         _task_id: &TaskId,
-        _req: &AggregationJobRequestHash,
+        _req_hash: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         // the server implementation can't check for this
         Ok(())

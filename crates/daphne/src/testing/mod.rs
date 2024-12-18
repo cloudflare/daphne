@@ -874,16 +874,16 @@ impl DapAggregator for InMemoryAggregator {
 
 #[async_trait]
 impl DapHelper for InMemoryAggregator {
-    async fn assert_agg_job_is_immutable(
+    async fn assert_agg_job_is_legal(
         &self,
         id: AggregationJobId,
         _version: DapVersion,
         _task_id: &TaskId,
-        req: &AggregationJobRequestHash,
+        req_hash: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         match self.processed_jobs.lock().unwrap().entry(id) {
             Entry::Occupied(occupied_entry) => {
-                if occupied_entry.get() == req {
+                if occupied_entry.get() == req_hash {
                     Ok(())
                 } else {
                     Err(DapAbort::BadRequest(
@@ -893,7 +893,7 @@ impl DapHelper for InMemoryAggregator {
                 }
             }
             Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(req.clone());
+                vacant_entry.insert(req_hash.clone());
                 Ok(())
             }
         }

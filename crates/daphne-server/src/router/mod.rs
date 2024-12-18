@@ -1,7 +1,8 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 mod aggregator;
+mod compute_offload;
 mod extractor;
 mod helper;
 mod leader;
@@ -98,6 +99,8 @@ pub fn new(role: DapAggregatorRole, aggregator: App) -> axum::Router<()> {
         DapAggregatorRole::Leader => leader::add_leader_routes(router),
         DapAggregatorRole::Helper => helper::add_helper_routes(router),
     };
+
+    let router = compute_offload::add_routes(router);
 
     #[cfg(feature = "test-utils")]
     let router = test_routes::add_test_routes(router, role);

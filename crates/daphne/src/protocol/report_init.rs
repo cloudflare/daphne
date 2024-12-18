@@ -104,7 +104,7 @@ impl<'s> From<&'s DapTaskConfig> for PartialDapTaskConfigForReportInit<'s> {
             method_is_taskprov: config.method_is_taskprov(),
             version: config.version,
             vdaf: Cow::Borrowed(&config.vdaf),
-            vdaf_verify_key: Cow::Borrowed(&config.vdaf_verify_key),
+            vdaf_verify_key: config.vdaf_verify_key.clone(),
         }
     }
 }
@@ -116,7 +116,7 @@ impl<'s> From<&'s PartialDapTaskConfigForReportInit<'_>> for PartialDapTaskConfi
             method_is_taskprov: config.method_is_taskprov,
             version: config.version,
             vdaf: Cow::Borrowed(&config.vdaf),
-            vdaf_verify_key: Cow::Borrowed(&config.vdaf_verify_key),
+            vdaf_verify_key: config.vdaf_verify_key.clone(),
         }
     }
 }
@@ -126,7 +126,7 @@ pub struct PartialDapTaskConfigForReportInit<'s> {
     pub method_is_taskprov: bool,
     pub version: DapVersion,
     pub vdaf: Cow<'s, VdafConfig>,
-    pub vdaf_verify_key: Cow<'s, VdafVerifyKey>,
+    pub vdaf_verify_key: VdafVerifyKey,
 }
 
 impl<P> InitializedReport<P> {

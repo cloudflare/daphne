@@ -396,6 +396,18 @@ impl KeyType for VdafVerifyKey {
     }
 }
 
+impl From<[u8; 32]> for VdafVerifyKey {
+    fn from(a: [u8; 32]) -> Self {
+        Self(a)
+    }
+}
+
+impl VdafVerifyKey {
+    pub fn inner(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 impl AsRef<[u8]> for VdafVerifyKey {
     fn as_ref(&self) -> &[u8] {
         &self.0

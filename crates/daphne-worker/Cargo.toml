@@ -44,7 +44,7 @@ serde_json.workspace = true
 static_assertions.workspace = true
 thiserror.workspace = true
 tower-service.workspace = true
-tower.workspace = true
+tower = { workspace = true, features = ["util"] }
 tracing-core.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"]}
 tracing.workspace = true
@@ -57,7 +57,7 @@ features = ["query", "json", "http1", "http2"]
 
 [dependencies.daphne-service-utils]
 path = "../daphne-service-utils"
-features = ["durable_requests"]
+features = ["durable_requests", "compute-offload"]
 
 [dev-dependencies]
 daphne = { path = "../daphne", features = ["test-utils"] }

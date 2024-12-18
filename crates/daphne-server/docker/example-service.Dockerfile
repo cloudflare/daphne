@@ -31,3 +31,10 @@ RUN sed -i 's/localhost/leader_storage/g' configuration.toml
 COPY --from=builder /dap/target/debug/examples/service .
 
 ENTRYPOINT ["./service"]
+
+FROM debian:bookworm AS compute-offload
+
+COPY ./crates/daphne-server/examples/configuration-cpu-offload.toml configuration.toml
+COPY --from=builder /dap/target/debug/examples/service .
+
+ENTRYPOINT ["./service"]
