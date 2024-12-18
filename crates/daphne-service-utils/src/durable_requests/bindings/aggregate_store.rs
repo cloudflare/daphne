@@ -11,11 +11,11 @@ use daphne::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    capnproto_payload::CapnprotoPayload,
     durable_request_capnp::{aggregate_store_merge_req, dap_aggregate_share},
     durable_requests::ObjectIdFrom,
 };
 
-use super::DurableRequestPayload;
 use prio::{
     field::{FieldElement, FieldError},
     vdaf::AggregateShare,
@@ -68,7 +68,7 @@ pub struct AggregateStoreMergeOptions {
     pub skip_replay_protection: bool,
 }
 
-impl DurableRequestPayload for AggregateStoreMergeReq {
+impl CapnprotoPayload for AggregateStoreMergeReq {
     fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator> {
         let Self {
             contained_reports,
@@ -285,7 +285,7 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::durable_requests::bindings::DurableRequestPayloadExt;
+    use crate::capnproto_payload::CapnprotoPayloadExt as _;
 
     use super::*;
 
