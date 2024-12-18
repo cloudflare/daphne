@@ -24,8 +24,9 @@ pub(crate) mod aggregate_store;
 pub(crate) mod test_state_cleaner;
 
 use crate::tracing_utils::shorten_paths;
-use daphne_service_utils::durable_requests::bindings::{
-    DurableMethod, DurableRequestPayload, DurableRequestPayloadExt,
+use daphne_service_utils::{
+    capnproto_payload::{CapnprotoPayload, CapnprotoPayloadExt},
+    durable_requests::bindings::DurableMethod,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info_span;
@@ -209,7 +210,7 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
 
 async fn req_parse<T>(req: &mut Request) -> Result<T>
 where
-    T: DurableRequestPayload,
+    T: CapnprotoPayload,
 {
     T::decode_from_bytes(&req.bytes().await?).map_err(|e| Error::RustError(e.to_string()))
 }
