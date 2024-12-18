@@ -103,7 +103,7 @@ pub(crate) fn prio3_prep_init(
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
     return match (&config, verify_key) {
-        (Prio3Config::Count, VdafVerifyKey::L16(verify_key)) => {
+        (Prio3Config::Count, VdafVerifyKey::L32(verify_key)) => {
             let vdaf = Prio3::new_count(2).map_err(|e| {
                 VdafError::Dap(
                     fatal_error!(err = ?e, "failed to create prio3 from num_aggregators(2)"),
@@ -128,7 +128,7 @@ pub(crate) fn prio3_prep_init(
                 length,
                 chunk_length,
             },
-            VdafVerifyKey::L16(verify_key),
+            VdafVerifyKey::L32(verify_key),
         ) => {
             let vdaf = Prio3::new_histogram(2, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 histogram from num_aggregators(2), length({length}), chunk_length({chunk_length})")))?;
@@ -146,7 +146,7 @@ pub(crate) fn prio3_prep_init(
                 VdafPrepShare::Prio3Field128(share),
             ))
         }
-        (Prio3Config::Sum { .. }, VdafVerifyKey::L16(_)) => {
+        (Prio3Config::Sum { .. }, VdafVerifyKey::L32(_)) => {
             Err(VdafError::Dap(fatal_error!(err = "sum unimplemented")))
         }
         (
@@ -155,7 +155,7 @@ pub(crate) fn prio3_prep_init(
                 length,
                 chunk_length,
             },
-            VdafVerifyKey::L16(verify_key),
+            VdafVerifyKey::L32(verify_key),
         ) => {
             let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length)
                 .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3 sum vec from num_aggregators(2), bits({bits}), length({length}), chunk_length({chunk_length})")))?;
