@@ -7,7 +7,7 @@ use std::fmt::Debug;
 
 use axum::http::StatusCode;
 use daphne_service_utils::{
-    capnproto_payload::{CapnprotoPayload, CapnprotoPayloadExt as _},
+    capnproto_payload::{CapnprotoPayloadEncode, CapnprotoPayloadEncodeExt as _},
     durable_requests::{bindings::DurableMethod, DurableRequest, ObjectIdFrom, DO_PATH_PREFIX},
 };
 use serde::de::DeserializeOwned;
@@ -95,7 +95,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
 }
 
 impl<'d, B: DurableMethod> RequestBuilder<'d, B, [u8; 0]> {
-    pub fn encode<T: CapnprotoPayload>(self, payload: &T) -> RequestBuilder<'d, B, Vec<u8>> {
+    pub fn encode<T: CapnprotoPayloadEncode>(self, payload: &T) -> RequestBuilder<'d, B, Vec<u8>> {
         self.with_body(payload.encode_to_bytes().unwrap())
     }
 
