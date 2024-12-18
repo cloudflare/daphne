@@ -1,26 +1,31 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-pub trait CapnprotoPayload {
+pub trait CapnprotoPayloadEncode {
+    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator>;
+}
+
+pub trait CapnprotoPayloadEncodeExt {
+    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>>;
+}
+
+pub trait CapnprotoPayloadDecode {
     fn decode_from_reader(
         reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
     ) -> capnp::Result<Self>
     where
         Self: Sized;
-
-    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator>;
 }
 
-pub trait CapnprotoPayloadExt {
+pub trait CapnprotoPayloadDecodeExt {
     fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
     where
         Self: Sized;
-    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>>;
 }
 
-impl<T> CapnprotoPayloadExt for T
+impl<T> CapnprotoPayloadEncodeExt for T
 where
-    T: CapnprotoPayload,
+    T: CapnprotoPayloadEncode,
 {
     fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>> {
         let mut buf = Vec::new();
@@ -28,7 +33,12 @@ where
         capnp::serialize_packed::write_message(&mut buf, &message)?;
         Ok(buf)
     }
+}
 
+impl<T> CapnprotoPayloadDecodeExt for T
+where
+    T: CapnprotoPayloadDecode,
+{
     fn decode_from_bytes(bytes: &[u8]) -> capnp::Result<Self>
     where
         Self: Sized,
