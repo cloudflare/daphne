@@ -93,7 +93,9 @@ use url::Url;
 use vdaf::mastic::MasticWeight;
 
 pub use messages::request::{DapRequest, DapRequestMeta, DapResponse};
-pub use protocol::report_init::{InitializedReport, WithPeerPrepShare};
+pub use protocol::report_init::{
+    InitializedReport, PartialDapTaskConfigForReportInit, WithPeerPrepShare,
+};
 
 /// DAP version used for a task.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
