@@ -91,12 +91,12 @@ pub trait DapHelper: DapAggregator {
     /// - this the first time we see this aggregation job
     /// - this aggregation job has been seen before and it hasn't changed since the last time we
     ///     saw it.
-    async fn assert_agg_job_is_immutable(
+    async fn assert_agg_job_is_legal(
         &self,
         id: AggregationJobId,
         version: DapVersion,
         task_id: &TaskId,
-        req: &AggregationJobRequestHash,
+        req_hash: &AggregationJobRequestHash,
     ) -> Result<(), DapError>;
 }
 

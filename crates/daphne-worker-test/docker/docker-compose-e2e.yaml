@@ -8,6 +8,17 @@ networks:
     driver: bridge
 
 services:
+  compute-offload:
+    networks:
+      - dap_network
+    ports:
+      - "4000"
+    build:
+      context: ../../..
+      dockerfile: crates/daphne-server/docker/example-service.Dockerfile
+      target: compute-offload
+    environment:
+      - RUST_LOG=info
   leader:
     networks:
       - dap_network

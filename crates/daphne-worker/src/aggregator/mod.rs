@@ -7,6 +7,7 @@ mod roles;
 mod router;
 
 use crate::storage::{kv, Do, Kv};
+use axum::response::Response;
 use config::{DaphneServiceConfig, PeerBearerToken};
 use daphne::{
     audit_log::{AuditLog, NoopAuditLog},
@@ -16,7 +17,13 @@ use daphne::{
     roles::{leader::in_memory_leader::InMemoryLeaderState, DapAggregator as _},
     DapError,
 };
-use daphne_service_utils::bearer_token::BearerToken;
+use daphne_service_utils::{
+    bearer_token::BearerToken,
+    capnproto::{
+        CapnprotoPayloadDecode, CapnprotoPayloadDecodeExt, CapnprotoPayloadEncode,
+        CapnprotoPayloadEncodeExt,
+    },
+};
 use either::Either::{self, Left, Right};
 use metrics::DaphneServiceMetrics;
 use roles::BearerTokens;
@@ -26,6 +33,37 @@ use worker::send::SendWrapper;
 
 pub use router::handle_dap_request;
 
+#[async_trait::async_trait(?Send)]
+pub trait ComputeOffload {
+    async fn request(&self, path: &str, body: &[u8]) -> worker::Result<Response<worker::Body>>;
+}
+
+impl dyn ComputeOffload + Send + Sync {
+    pub async fn compute<I, O>(&self, path: &str, body: &I) -> worker::Result<O>
+    where
+        I: CapnprotoPayloadEncode,
+        O: CapnprotoPayloadDecode,
+    {
+        let resp = self.request(path, &body.encode_to_bytes()).await?;
+
+        if resp.status().is_success() {
+            O::decode_from_bytes(
+                &http_body_util::BodyExt::collect(resp.into_body())
+                    .await?
+                    .to_bytes(),
+            )
+            .map_err(|e| {
+                worker::Error::RustError(format!("failed to decode body from cpu offload: {e:?}"))
+            })
+        } else {
+            Err(worker::Error::RustError(format!(
+                "request to cpu offload failed with code: {}",
+                resp.status()
+            )))
+        }
+    }
+}
+
 pub struct App {
     http: reqwest::Client,
     env: SendWrapper<worker::Env>,
@@ -33,6 +71,8 @@ pub struct App {
     metrics: Box<dyn DaphneServiceMetrics + Send + Sync>,
     service_config: DaphneServiceConfig,
     audit_log: Box<dyn AuditLog + Send + Sync>,
+
+    compute_offload: Box<dyn ComputeOffload + Send + Sync>,
 
     /// Volatile memory for the Leader, including the work queue, pending reports, and pending
     /// colleciton requests. Note that in a production Leader, it is necessary to store this state
@@ -125,6 +165,7 @@ impl App {
         env: worker::Env,
         registry: &prometheus::Registry,
         audit_log: impl Into<Option<Box<dyn AuditLog + Send + Sync>>>,
+        compute_offload: Box<dyn ComputeOffload + Send + Sync>,
     ) -> Result<Self, DapError> {
         static PERSISTENT_ENOUGH_STATE: LazyLock<Arc<Mutex<InMemoryLeaderState>>> =
             LazyLock::new(Default::default);
@@ -138,6 +179,7 @@ impl App {
             audit_log: audit_log.into().unwrap_or_else(|| Box::new(NoopAuditLog)),
             service_config,
             test_leader_state: PERSISTENT_ENOUGH_STATE.clone(),
+            compute_offload,
         })
     }
 

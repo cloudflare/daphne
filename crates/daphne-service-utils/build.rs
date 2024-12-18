@@ -2,11 +2,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 fn main() {
-    #[cfg(feature = "durable_requests")]
-    ::capnpc::CompilerCommand::new()
-        .file("./src/capnproto/base.capnp")
-        .file("./src/durable_requests/durable_request.capnp")
-        .file("./src/durable_requests/bindings/aggregation_job_store.capnp")
-        .run()
-        .expect("compiling schema");
+    #[cfg(any(feature = "durable_requests", feature = "compute-offload"))]
+    {
+        let mut compiler = ::capnpc::CompilerCommand::new();
+
+        compiler.file("./src/capnproto/base.capnp");
+
+        #[cfg(feature = "durable_requests")]
+        compiler
+            .file("./src/durable_requests/durable_request.capnp")
+            .file("./src/durable_requests/bindings/aggregation_job_store.capnp");
+
+        #[cfg(feature = "compute-offload")]
+        compiler.file("./src/compute_offload/compute_offload.capnp");
+
+        compiler.run().expect("compiling schema");
+    }
 }

@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
 [package]
@@ -17,7 +17,7 @@ all-features = true
 
 [dependencies]
 daphne = { path = "../daphne" }
-daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests"] }
+daphne-service-utils = { path = "../daphne-service-utils", features = ["durable_requests", "compute-offload"] }
 either.workspace = true
 futures.workspace = true
 hex.workspace = true
@@ -33,6 +33,7 @@ tokio.workspace = true
 tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 url.workspace = true
+rayon.workspace = true
 
 [dependencies.axum]
 workspace = true

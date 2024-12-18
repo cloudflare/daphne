@@ -4,8 +4,10 @@
 #![cfg_attr(not(test), deny(unused_crate_dependencies))]
 
 pub mod bearer_token;
-#[cfg(feature = "durable_requests")]
+#[cfg(any(feature = "durable_requests", feature = "compute-offload"))]
 pub mod capnproto;
+#[cfg(feature = "compute-offload")]
+pub mod compute_offload;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
@@ -13,7 +15,7 @@ pub mod http_headers;
 pub mod test_route_types;
 
 // the generated code expects this module to be defined at the root of the library.
-#[cfg(feature = "durable_requests")]
+#[cfg(any(feature = "durable_requests", feature = "compute-offload"))]
 #[doc(hidden)]
 pub mod base_capnp {
     #![allow(dead_code)]
@@ -41,5 +43,16 @@ mod aggregation_job_store_capnp {
     include!(concat!(
         env!("OUT_DIR"),
         "/src/durable_requests/bindings/aggregation_job_store_capnp.rs"
+    ));
+}
+
+#[cfg(feature = "compute-offload")]
+mod compute_offload_capnp {
+    #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::needless_lifetimes)]
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/src/compute_offload/compute_offload_capnp.rs"
     ));
 }

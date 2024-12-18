@@ -82,7 +82,7 @@ impl HandleAggJob<Init> {
     ) -> Result<HandleAggJob<LegalAggregationJobReq>, DapError> {
         let Self { state: Init(req) } = self;
         aggregator
-            .assert_agg_job_is_immutable(
+            .assert_agg_job_is_legal(
                 req.resource_id,
                 req.version,
                 &req.task_id,

@@ -14,12 +14,12 @@ use std::borrow::Cow;
 
 #[axum::async_trait]
 impl DapHelper for App {
-    async fn assert_agg_job_is_immutable(
+    async fn assert_agg_job_is_legal(
         &self,
         id: AggregationJobId,
         version: DapVersion,
         task_id: &TaskId,
-        req: &AggregationJobRequestHash,
+        req_hash: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         let response = self
             .durable()
@@ -27,7 +27,7 @@ impl DapHelper for App {
             .request(aggregation_job_store::Command::NewJob, (version, task_id))
             .encode(&aggregation_job_store::NewJobRequest {
                 id,
-                agg_job_hash: Cow::Borrowed(req.get()),
+                agg_job_hash: Cow::Borrowed(req_hash.get()),
             })
             .send::<aggregation_job_store::NewJobResponse>()
             .await

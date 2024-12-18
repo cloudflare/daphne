@@ -356,6 +356,12 @@ impl DapAggregator for App {
 
 pub struct HpkeDecrypter(Marc<Vec<HpkeReceiverConfig>>);
 
+impl AsRef<[HpkeReceiverConfig]> for HpkeDecrypter {
+    fn as_ref(&self) -> &[HpkeReceiverConfig] {
+        self.0.as_ref()
+    }
+}
+
 impl hpke::HpkeDecrypter for HpkeDecrypter {
     fn hpke_decrypt(
         &self,

@@ -34,4 +34,4 @@ COPY crates/daphne-worker-test/wrangler.aggregator.toml /
 # this container doesn't need worker-build but the wrangler.toml requires it, so we just fake it
 RUN ln -s /usr/bin/true /usr/bin/worker-build
 
-ENTRYPOINT ["wrangler", "dev", "--config", "wrangler.aggregator.toml", "-e", "helper", "--port", "8788"]
+ENTRYPOINT ["wrangler", "dev", "--config", "wrangler.aggregator.toml", "-e", "helper", "--port", "8788", "--var", "COMPUTE_OFFLOAD_HOST:compute-offload:5000"]
