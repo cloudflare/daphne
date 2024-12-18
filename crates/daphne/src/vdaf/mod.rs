@@ -236,9 +236,9 @@ pub enum VdafPrepState {
     Prio3Draft09Field64(Prio3Draft09PrepareState<Field64Draft09, 16>),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareState<Field64Draft09, 32>),
     Prio3Draft09Field128(Prio3Draft09PrepareState<Field128Draft09, 16>),
-    Prio3Field64(Prio3PrepareState<Field64, 16>),
+    Prio3Field64(Prio3PrepareState<Field64, 32>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
-    Prio3Field128(Prio3PrepareState<Field128, 16>),
+    Prio3Field128(Prio3PrepareState<Field128, 32>),
     #[cfg(feature = "experimental")]
     Mastic {
         out_share: Vec<Field64>,
@@ -279,9 +279,9 @@ pub enum VdafPrepShare {
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareShare<Field64Draft09, 32>),
     Prio3Draft09Field128(Prio3Draft09PrepareShare<Field128Draft09, 16>),
 
-    Prio3Field64(Prio3PrepareShare<Field64, 16>),
+    Prio3Field64(Prio3PrepareShare<Field64, 32>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
-    Prio3Field128(Prio3PrepareShare<Field128, 16>),
+    Prio3Field128(Prio3PrepareShare<Field128, 32>),
     #[cfg(feature = "experimental")]
     Mastic(Field64),
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64Draft09, 32>),
@@ -435,12 +435,9 @@ impl VdafConfig {
     pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
         match self {
             Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
+            | Self::Prio2 { .. }
+            | Self::Prio3(..) => VdafVerifyKey::L32([0; 32]),
             Self::Prio3Draft09(..) => VdafVerifyKey::L16([0; 16]),
-            Self::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. }) => {
-                VdafVerifyKey::L32([0; 32])
-            }
-            Self::Prio3(..) => VdafVerifyKey::L16([0; 16]),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
             Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
@@ -451,7 +448,8 @@ impl VdafConfig {
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
         match self {
             Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. } => Ok(VdafVerifyKey::L32(
+            | Self::Prio2 { .. }
+            | Self::Prio3(..) => Ok(VdafVerifyKey::L32(
                 <[u8; 32]>::try_from(bytes)
                     .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
                     .map_err(from_codec_error)?,
@@ -460,9 +458,6 @@ impl VdafConfig {
                 <[u8; 16]>::try_from(bytes)
                     .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
                     .map_err(from_codec_error)?,
-            )),
-            Self::Prio3(..) => Ok(VdafVerifyKey::L16(
-                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
             )),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => Ok(VdafVerifyKey::L16(

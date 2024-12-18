@@ -61,7 +61,7 @@ matchit = "0.7.3"
 p256 = { version = "0.13.2", features = ["ecdsa-core", "ecdsa", "pem"] }
 paste = "1.0.15"
 prio_draft09 = { package = "prio", version = "0.16.7" }
-prio = { git = "https://github.com/divviup/libprio-rs.git", rev = "937e8a61c51019671232dee2d28dbe72413cdadc" }
+prio = { git = "https://github.com/divviup/libprio-rs.git", rev = "c50bb9a47b396ad6a08a3fec36b98bcc2d9217a1" }
 prometheus = "0.13.4"
 rand = "0.8.5"
 rayon = "1.10.0"
