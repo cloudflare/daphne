@@ -73,10 +73,12 @@ impl VdafConfig {
 
         let num_measurements = usize::try_from(report_count).unwrap();
         match self {
-            Self::Prio3Draft09(prio3_config) => {
-                prio3_draft09_unshard(prio3_config, num_measurements, agg_shares)
-            }
-            Self::Prio3(prio3_config) => prio3_unshard(prio3_config, num_measurements, agg_shares),
+            Self::Prio3(prio3_config) => match version {
+                DapVersion::Draft09 => {
+                    prio3_draft09_unshard(prio3_config, num_measurements, agg_shares)
+                }
+                DapVersion::Latest => prio3_unshard(prio3_config, num_measurements, agg_shares),
+            },
             Self::Prio2 { dimension } => prio2_unshard(*dimension, num_measurements, agg_shares),
             #[cfg(feature = "experimental")]
             Self::Mastic {

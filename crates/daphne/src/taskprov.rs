@@ -64,8 +64,13 @@ pub(crate) fn extract_prk_from_verify_key_init(
 }
 
 impl VdafConfig {
-    fn expand_into_taskprov_verify_key(&self, prk: &Prk, task_id: &TaskId) -> VdafVerifyKey {
-        let mut verify_key = self.uninitialized_verify_key();
+    fn expand_into_taskprov_verify_key(
+        &self,
+        prk: &Prk,
+        task_id: &TaskId,
+        version: DapVersion,
+    ) -> VdafVerifyKey {
+        let mut verify_key = self.uninitialized_verify_key(version);
         let info = [task_id.as_ref()];
         // This expand(), and the associated fill() below can only fail if the length is wrong,
         // and it won't be, so we unwrap().
@@ -91,6 +96,7 @@ fn compute_vdaf_verify_key(
     vdaf_config.expand_into_taskprov_verify_key(
         &extract_prk_from_verify_key_init(version, verify_key_init),
         task_id,
+        version,
     )
 }
 
@@ -197,7 +203,7 @@ impl VdafConfig {
                         task_id: *task_id,
                     });
                 }
-                Ok(VdafConfig::Prio3Draft09(
+                Ok(VdafConfig::Prio3(
                     Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                         bits: bits.into(),
                         length: length.try_into().map_err(|_| DapAbort::InvalidTask {
@@ -370,37 +376,34 @@ impl TryFrom<&DapBatchMode> for messages::taskprov::BatchMode {
     }
 }
 
-impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
-    type Error = DapError;
-
-    fn try_from(vdaf_config: &VdafConfig) -> Result<Self, DapError> {
+impl messages::taskprov::VdafTypeVar {
+    pub fn of_config(vdaf_config: &VdafConfig, version: DapVersion) -> Result<Self, DapError> {
         match vdaf_config {
             VdafConfig::Prio2 { dimension } => Ok(Self::Prio2 {
                 dimension: (*dimension).try_into().map_err(|_| {
                     fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
                 })?,
             }),
-            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits,
                 length,
                 chunk_length,
                 num_proofs,
-            }) => Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
-                bits: (*bits).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
-                length: (*length).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
+            }) if version == DapVersion::Draft09 => {
+                Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                    bits: (*bits).try_into().map_err(|_| {
+                        fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                    })?,
+                    length: (*length).try_into().map_err(|_| {
+                        fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                    })?,
 
-                chunk_length: (*chunk_length).try_into().map_err(|_| {
-                    fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
-                })?,
-                num_proofs: *num_proofs,
-            }),
-            VdafConfig::Prio3Draft09(..) => Err(fatal_error!(
-                err = format!("{vdaf_config} is not currently supported for taskprov")
-            )),
+                    chunk_length: (*chunk_length).try_into().map_err(|_| {
+                        fatal_error!(err = format!("{vdaf_config}: bits is too large for taskprov"))
+                    })?,
+                    num_proofs: *num_proofs,
+                })
+            }
             VdafConfig::Prio3(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
@@ -445,7 +448,10 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
             task_expiration: task_config.not_after,
             vdaf_config: messages::taskprov::VdafConfig {
                 dp_config: messages::taskprov::DpConfig::None,
-                var: (&task_config.vdaf).try_into()?,
+                var: messages::taskprov::VdafTypeVar::of_config(
+                    &task_config.vdaf,
+                    task_config.version,
+                )?,
             },
         })
     }
