@@ -26,8 +26,8 @@ use daphne::{
 pub enum DefaultVdafConfigs {
     Prio2Dimension99k,
     #[default]
-    Prio3NumProofs2,
-    Prio3NumProofs3,
+    Prio3Draft09NumProofs2,
+    Prio3Draft09NumProofs3,
 }
 
 impl fmt::Display for DefaultVdafConfigs {
@@ -40,16 +40,16 @@ impl ValueEnum for DefaultVdafConfigs {
     fn value_variants<'a>() -> &'a [Self] {
         &[
             Self::Prio2Dimension99k,
-            Self::Prio3NumProofs2,
-            Self::Prio3NumProofs3,
+            Self::Prio3Draft09NumProofs2,
+            Self::Prio3Draft09NumProofs3,
         ]
     }
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
         match self {
             Self::Prio2Dimension99k => Some(PossibleValue::new("prio2-dimension-99k")),
-            Self::Prio3NumProofs2 => Some(PossibleValue::new("prio3-num-proofs-2")),
-            Self::Prio3NumProofs3 => Some(PossibleValue::new("prio3-num-proofs-3")),
+            Self::Prio3Draft09NumProofs2 => Some(PossibleValue::new("prio3-draft-09-num-proofs-2")),
+            Self::Prio3Draft09NumProofs3 => Some(PossibleValue::new("prio3-draft-09-num-proofs-3")),
         }
     }
 }
@@ -58,7 +58,7 @@ impl DefaultVdafConfigs {
     fn into_vdaf_config(self) -> VdafConfig {
         match self {
             Self::Prio2Dimension99k => VdafConfig::Prio2 { dimension: 99_992 },
-            Self::Prio3NumProofs2 => {
+            Self::Prio3Draft09NumProofs2 => {
                 VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,
@@ -66,7 +66,7 @@ impl DefaultVdafConfigs {
                     num_proofs: 2,
                 })
             }
-            Self::Prio3NumProofs3 => {
+            Self::Prio3Draft09NumProofs3 => {
                 VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                     bits: 1,
                     length: 100_000,

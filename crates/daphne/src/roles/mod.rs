@@ -138,8 +138,8 @@ mod test {
         messages::{
             request::RequestBody, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, TaskId, Time,
-            TransitionFailure, TransitionVar,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportError,
+            TaskId, Time, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -198,7 +198,7 @@ mod test {
             };
 
             // Task Parameters that the Leader and Helper must agree on.
-            let vdaf_config = VdafConfig::Prio3Draft09(Prio3Config::Count);
+            let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
             let leader_url = Url::parse("https://leader.com/v02/").unwrap();
             let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
             let collector_hpke_receiver_config =
@@ -486,10 +486,7 @@ mod test {
             // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
             // measurement to generate. However, we could extend the code to support more VDAFs.
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
-            assert_matches!(
-                task_config.vdaf,
-                VdafConfig::Prio3Draft09(Prio3Config::Count)
-            );
+            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
 
             self.gen_test_report_for_measurement(task_id, DapMeasurement::U64(1))
                 .await
@@ -625,7 +622,7 @@ mod test {
     //        assert_eq!(agg_job_resp.transitions.len(), 1);
     //        assert_matches!(
     //            agg_job_resp.transitions[0].var,
-    //            TransitionVar::Failed(TransitionFailure::TaskExpired)
+    //            TransitionVar::Failed(ReportError::TaskExpired)
     //        );
     //
     //        assert_eq!(t.helper.audit_log.invocations(), 1);
@@ -760,7 +757,7 @@ mod test {
         // Expect failure due to invalid ciphertext.
         assert_matches!(
             transition.var,
-            TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
+            TransitionVar::Failed(ReportError::HpkeDecryptError)
         );
     }
 
@@ -1527,7 +1524,9 @@ mod test {
 
     async_test_versions! { e2e_taskprov_prio2 }
 
-    async fn e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
+    async fn e2e_taskprov_prio3_draft09_sum_vec_field64_multiproof_hmac_sha256_aes128(
+        version: DapVersion,
+    ) {
         e2e_taskprov(
             version,
             VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
@@ -1541,7 +1540,7 @@ mod test {
         .await;
     }
 
-    async_test_versions! { e2e_taskprov_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
+    async_test_versions! { e2e_taskprov_prio3_draft09_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
     async fn e2e_taskprov_pine32_hmac_sha256_aes128(version: DapVersion) {
         use crate::{pine::PineParam, vdaf::pine::PineConfig};

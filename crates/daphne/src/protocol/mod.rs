@@ -68,8 +68,7 @@ mod test {
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
             AggregationJobInitReq, BatchSelector, Extension, Interval, PartialBatchSelector,
-            PrepareInit, Report, ReportId, ReportShare, Transition, TransitionFailure,
-            TransitionVar,
+            PrepareInit, Report, ReportError, ReportId, ReportShare, Transition, TransitionVar,
         },
         test_versions,
         testing::AggregationJobTest,
@@ -491,7 +490,7 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
             agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::HpkeDecryptError)
+            TransitionVar::Failed(ReportError::HpkeDecryptError)
         );
     }
 
@@ -526,7 +525,7 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
             agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::ReportDropped)
+            TransitionVar::Failed(ReportError::ReportDropped)
         );
     }
 
@@ -561,7 +560,7 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
             agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::ReportTooEarly)
+            TransitionVar::Failed(ReportError::ReportTooEarly)
         );
     }
 
@@ -581,7 +580,7 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 1);
         assert_matches!(
             agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::HpkeUnknownConfigId)
+            TransitionVar::Failed(ReportError::HpkeUnknownConfigId)
         );
     }
 
@@ -622,11 +621,11 @@ mod test {
         assert_eq!(agg_job_resp.transitions.len(), 2);
         assert_matches!(
             agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(TransitionFailure::VdafPrepError)
+            TransitionVar::Failed(ReportError::VdafPrepError)
         );
         assert_matches!(
             agg_job_resp.transitions[1].var,
-            TransitionVar::Failed(TransitionFailure::VdafPrepError)
+            TransitionVar::Failed(ReportError::VdafPrepError)
         );
     }
 
