@@ -18,15 +18,14 @@ use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
     field::{Field128, Field64, FieldPrio2},
     vdaf::{
+        prio2::{Prio2PrepareShare, Prio2PrepareState},
         prio3::{Prio3PrepareShare, Prio3PrepareState},
         AggregateShare, Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
 
-#[cfg(feature = "experimental")]
+#[cfg(any(test, feature = "test-utils", feature = "experimental"))]
 use prio::field::FieldElement;
-#[cfg(any(test, feature = "test-utils"))]
-use prio_draft09::field::FieldElement as FieldElementDraft09;
 use prio_draft09::{
     codec::{
         CodecError as CodecErrorDraft09, Encode as EncodeDraft09,
@@ -36,7 +35,6 @@ use prio_draft09::{
         Field128 as Field128Draft09, Field64 as Field64Draft09, FieldPrio2 as FieldPrio2Draft09,
     },
     vdaf::{
-        prio2::{Prio2PrepareShare, Prio2PrepareState},
         prio3::{
             Prio3PrepareShare as Prio3Draft09PrepareShare,
             Prio3PrepareState as Prio3Draft09PrepareState,
@@ -293,7 +291,7 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
         match self {
             // The Prio2 prep share consists of three field elements.
-            Self::Prio2(_msg) => 3 * FieldPrio2Draft09::ENCODED_SIZE,
+            Self::Prio2(_msg) => 3 * FieldPrio2::ENCODED_SIZE,
             // The Prio3 prep share consists of an optional XOF seed for the Aggregator's joint
             // randomness part and a sequence of field elements for the Aggregator's verifier
             // share. The length of the verifier share depends on the Prio3 type, which we don't
@@ -324,7 +322,7 @@ impl Encode for VdafPrepShare {
             Self::Prio3Field64(share) => share.encode(bytes),
             Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3Field128(share) => share.encode(bytes),
-            Self::Prio2(share) => share.encode(bytes).map_err(from_codec_error),
+            Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
             Self::Mastic(share) => share.encode(bytes),
             Self::Pine64HmacSha256Aes128(share) => share.encode(bytes).map_err(from_codec_error),
@@ -365,7 +363,7 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
             VdafPrepState::Prio2(state) => Ok(VdafPrepShare::Prio2(
-                Prio2PrepareShare::decode_with_param(state, bytes).map_err(from_codec_error)?,
+                Prio2PrepareShare::decode_with_param(state, bytes)?,
             )),
             #[cfg(feature = "experimental")]
             VdafPrepState::Mastic { .. } => {
