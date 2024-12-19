@@ -8,7 +8,7 @@ use crate::{
     fatal_error, vdaf::VdafError, DapAggregateResult, DapMeasurement, VdafAggregateShare,
     VdafPrepShare, VdafPrepState, VdafVerifyKey,
 };
-use prio_draft09::{
+use prio::{
     codec::{Decode, Encode, ParameterizedDecode},
     field::FieldPrio2,
     vdaf::{
@@ -27,7 +27,8 @@ pub(crate) fn prio2_shard(
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
     let (public_share, input_shares) = match measurement {
-        DapMeasurement::U32Vec(ref data) => vdaf.shard(data, nonce)?,
+        // Prio2 ignores the ctx string, so we don't construct it.
+        DapMeasurement::U32Vec(ref data) => vdaf.shard(&[], data, nonce)?,
         _ => {
             return Err(VdafError::Dap(fatal_error!(
                 err = "prio2_shard: unexpected measurement type"
@@ -71,7 +72,10 @@ pub(crate) fn prio2_prep_init(
     <()>::get_decoded_with_param(&vdaf, public_share_data)?;
     let input_share: Share<FieldPrio2, 32> =
         Share::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
-    let (state, share) = vdaf.prepare_init(verify_key, agg_id, &(), nonce, &(), &input_share)?;
+
+    // Prio2 ignores the ctx string, so we don't construct it.
+    let (state, share) =
+        vdaf.prepare_init(verify_key, &[], agg_id, &(), nonce, &(), &input_share)?;
     Ok((VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)))
 }
 
@@ -88,8 +92,9 @@ pub(crate) fn prio2_prep_finish_from_shares(
     let (out_share, outbound) = match (host_state, host_share) {
         (VdafPrepState::Prio2(state), VdafPrepShare::Prio2(share)) => {
             let peer_share = Prio2PrepareShare::get_decoded_with_param(&state, peer_share_data)?;
-            vdaf.prepare_shares_to_prepare_message(&(), [share, peer_share])?;
-            match vdaf.prepare_next(state, ())? {
+            // Prio2 ignores the ctx string, so we don't construct it.
+            vdaf.prepare_shares_to_prepare_message(&[], &(), [share, peer_share])?;
+            match vdaf.prepare_next(&[], state, ())? {
                 PrepareTransition::Continue(..) => {
                     return Err(VdafError::Dap(fatal_error!(
                         err = "prio2_prep_finish_from_shares: unexpected transition (continued)",
@@ -104,7 +109,7 @@ pub(crate) fn prio2_prep_finish_from_shares(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok((agg_share, outbound))
 }
 
@@ -118,8 +123,9 @@ pub(crate) fn prio2_prep_finish(
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;
     <()>::get_decoded(peer_message_data)?;
+    // Prio2 ignores the ctx string, so we don't construct it.
     let out_share = match host_state {
-        VdafPrepState::Prio2(state) => match vdaf.prepare_next(state, ())? {
+        VdafPrepState::Prio2(state) => match vdaf.prepare_next(&[], state, ())? {
             PrepareTransition::Continue(..) => {
                 return Err(VdafError::Dap(fatal_error!(
                     err = "prio2_prep_finish: unexpected transition (continued)",
@@ -133,7 +139,7 @@ pub(crate) fn prio2_prep_finish(
             )))
         }
     };
-    let agg_share = VdafAggregateShare::Field32Draft09(vdaf.aggregate(&(), [out_share])?);
+    let agg_share = VdafAggregateShare::Field32(vdaf.aggregate(&(), [out_share])?);
     Ok(agg_share)
 }
 
