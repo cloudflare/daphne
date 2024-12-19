@@ -37,18 +37,20 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
     let mut test = AggregationJobTest::new(
         &VdafConfig::Prio2 { dimension: 0 },
         HpkeKemId::P256HkdfSha256,
-        DapVersion::Latest,
+        DapVersion::Draft09,
     );
     test.disable_replay_protection();
 
     let mut g = c.benchmark_group(function!());
     for vdaf_length in vdaf_lengths {
-        let vdaf = VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-            bits: 1,
-            length: vdaf_length,
-            chunk_length: 320,
-            num_proofs: 2,
-        });
+        let vdaf = VdafConfig::Prio3(
+            Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
+                bits: 1,
+                length: vdaf_length,
+                chunk_length: 320,
+                num_proofs: 2,
+            },
+        );
         test.change_vdaf(vdaf);
         let reports = test
             .produce_repeated_reports(vdaf.gen_measurement().unwrap())
@@ -66,15 +68,16 @@ fn consume_reports_vary_vdaf_dimension(c: &mut Criterion) {
 }
 
 fn consume_reports_vary_num_reports(c: &mut Criterion) {
-    const VDAF: VdafConfig =
-        VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+    const VDAF: VdafConfig = VdafConfig::Prio3(
+        Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
             bits: 1,
             length: 1000,
             chunk_length: 320,
             num_proofs: 2,
-        });
+        },
+    );
 
-    let mut test = AggregationJobTest::new(&VDAF, HpkeKemId::P256HkdfSha256, DapVersion::Latest);
+    let mut test = AggregationJobTest::new(&VDAF, HpkeKemId::P256HkdfSha256, DapVersion::Draft09);
     test.disable_replay_protection();
 
     let mut g = c.benchmark_group(function!());

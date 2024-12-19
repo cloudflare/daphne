@@ -30,34 +30,44 @@ pub struct InternalTestVdaf {
     pub length: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_length: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<String>,
 }
 
 impl From<VdafConfig> for InternalTestVdaf {
     fn from(vdaf: VdafConfig) -> Self {
-        let (typ, bits, length, chunk_length) = match vdaf {
-            VdafConfig::Prio3Draft09(prio3) => match prio3 {
-                Prio3Config::Count => ("Prio3Draft09Count", None, None, None),
-                Prio3Config::Sum { bits } => ("Prio3Draft09Sum", Some(bits), None, None),
+        let (typ, bits, length, chunk_length, dimension) = match vdaf {
+            VdafConfig::Prio3(prio3) => match prio3 {
+                Prio3Config::Count => ("Prio3Count", None, None, None, None),
+                Prio3Config::Sum { max_measurement } => (
+                    "Prio3Sum",
+                    Some(usize::try_from(max_measurement).unwrap()),
+                    None,
+                    None,
+                    None,
+                ),
                 Prio3Config::Histogram {
                     length,
                     chunk_length,
                 } => (
-                    "Prio3Draft09Histogram",
+                    "Prio3Histogram",
                     None,
                     Some(length),
                     Some(chunk_length),
+                    None,
                 ),
                 Prio3Config::SumVec {
                     bits,
                     length,
                     chunk_length,
                 } => (
-                    "Prio3Draft09SumVec",
+                    "Prio3SumVec",
                     Some(bits),
                     Some(length),
                     Some(chunk_length),
+                    None,
                 ),
-                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
                     bits,
                     length,
                     chunk_length,
@@ -67,34 +77,11 @@ impl From<VdafConfig> for InternalTestVdaf {
                     Some(bits),
                     Some(length),
                     Some(chunk_length),
+                    None,
                 ),
             },
-            VdafConfig::Prio3(prio3) => match prio3 {
-                Prio3Config::Count => ("Prio3Count", None, None, None),
-                Prio3Config::Sum { bits } => ("Prio3Sum", Some(bits), None, None),
-                Prio3Config::Histogram {
-                    length,
-                    chunk_length,
-                } => ("Prio3Histogram", None, Some(length), Some(chunk_length)),
-                Prio3Config::SumVec {
-                    bits,
-                    length,
-                    chunk_length,
-                } => ("Prio3SumVec", Some(bits), Some(length), Some(chunk_length)),
-                Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                    bits,
-                    length,
-                    chunk_length,
-                    num_proofs: _unimplemented,
-                } => (
-                    "Prio3SumVecField64MultiproofHmacSha256Aes128",
-                    Some(bits),
-                    Some(length),
-                    Some(chunk_length),
-                ),
-            },
-            VdafConfig::Prio2 { .. } => ("Prio2", None, None, None),
-            VdafConfig::Pine(_) => ("Pine", None, None, None),
+            VdafConfig::Prio2 { dimension } => ("Prio2", None, None, None, Some(dimension)),
+            VdafConfig::Pine(_) => ("Pine", None, None, None, None),
             #[cfg(feature = "experimental")]
             VdafConfig::Mastic { .. } => todo!(),
         };
@@ -103,6 +90,7 @@ impl From<VdafConfig> for InternalTestVdaf {
             bits: bits.map(|a| a.to_string()),
             length: length.map(|a| a.to_string()),
             chunk_length: chunk_length.map(|a| a.to_string()),
+            dimension: dimension.map(|a| a.to_string()),
         }
     }
 }

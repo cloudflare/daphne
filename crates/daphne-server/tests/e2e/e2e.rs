@@ -151,7 +151,6 @@ async fn hpke_configs_are_cached(version: DapVersion) {
 
 async_test_versions! { hpke_configs_are_cached }
 
-// TODO draft02 cleanup: In draft09, the client is meant to PUT its report, not POST it.
 async fn leader_upload(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let mut rng = thread_rng();
@@ -171,7 +170,7 @@ async fn leader_upload(version: DapVersion) {
             &hpke_config_list,
             t.now,
             &t.task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![1; 10]),
             version,
         )
         .unwrap();
@@ -202,7 +201,7 @@ async fn leader_upload(version: DapVersion) {
                 &hpke_config_list,
                 t.now,
                 &bad_id,
-                DapMeasurement::U64(999),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 version,
             )
             .unwrap()
@@ -222,7 +221,7 @@ async fn leader_upload(version: DapVersion) {
             &hpke_config_list,
             t.now,
             &t.task_id,
-            DapMeasurement::U64(999),
+            DapMeasurement::U32Vec(vec![1; 10]),
             version,
         )
         .unwrap();
@@ -264,7 +263,7 @@ async fn leader_upload(version: DapVersion) {
             &hpke_config_list,
             t.task_config.not_after, // past the expiration date
             &t.task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![1; 10]),
             version,
         )
         .unwrap();
@@ -352,7 +351,7 @@ async fn leader_back_compat_upload(version: DapVersion) {
             &hpke_config_list,
             t.now,
             &t.task_id,
-            DapMeasurement::U64(23),
+            DapMeasurement::U32Vec(vec![0; 10]),
             version,
         )
         .unwrap();
@@ -561,7 +560,7 @@ async fn internal_leader_process(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -641,7 +640,7 @@ async fn leader_collect_ok(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -707,7 +706,10 @@ async fn leader_collect_ok(version: DapVersion) {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(u128::from(t.task_config.min_batch_size))
+        DapAggregateResult::U32Vec(vec![
+            u32::try_from(t.task_config.min_batch_size).unwrap();
+            10
+        ])
     );
 
     // Check that the time interval for the reports is correct.
@@ -739,7 +741,7 @@ async fn leader_collect_ok(version: DapVersion) {
     //      "upload",
     //      DapMediaType::Report,
     //      t.task_config.vdaf
-    //          .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U64(1))
+    //          .produce_report(&hpke_config_list, now, &t.task_id, DapMeasurement::U32Vec(vec![1; 10]))
     //          .unwrap()
     //          .get_encoded(),
     //      400,
@@ -779,7 +781,7 @@ async fn leader_collect_ok_interleaved(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -843,7 +845,7 @@ async fn leader_collect_not_ready_min_batch_size(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -936,7 +938,7 @@ async fn leader_collect_back_compat(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -1091,7 +1093,7 @@ async fn leader_collect_abort_overlapping_batch_interval(version: DapVersion) {
                     &hpke_config_list,
                     now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -1187,7 +1189,7 @@ async fn leader_selected() {
                     &hpke_config_list,
                     t.now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()
@@ -1256,7 +1258,10 @@ async fn leader_selected() {
         .unwrap();
     assert_eq!(
         agg_res,
-        DapAggregateResult::U128(u128::from(t.task_config.min_batch_size))
+        DapAggregateResult::U32Vec(vec![
+            u32::try_from(t.task_config.min_batch_size).unwrap();
+            10
+        ])
     );
 
     // Collector: Poll the collect URI once more. Expect the response to be the same as the first,
@@ -1282,7 +1287,7 @@ async fn leader_selected() {
                     &hpke_config_list,
                     t.now,
                     &t.task_id,
-                    DapMeasurement::U64(1),
+                    DapMeasurement::U32Vec(vec![1; 10]),
                     version,
                 )
                 .unwrap()

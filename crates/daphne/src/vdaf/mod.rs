@@ -74,7 +74,6 @@ pub(crate) enum VdafError {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
-    Prio3Draft09(Prio3Config),
     Prio3(Prio3Config),
     Prio2 {
         dimension: usize,
@@ -112,7 +111,6 @@ pub(crate) fn from_codec_error(c: CodecErrorDraft09) -> CodecError {
 impl std::fmt::Display for VdafConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VdafConfig::Prio3Draft09(prio3_config) => write!(f, "Prio3Draft09({prio3_config})"),
             VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
             #[cfg(feature = "experimental")]
@@ -135,8 +133,8 @@ pub enum Prio3Config {
     Count,
 
     /// The sum of 64-bit, unsigned integers. Each measurement is an integer in range `[0,
-    /// 2^bits)`.
-    Sum { bits: usize },
+    /// max_measurement]`.
+    Sum { max_measurement: u64 },
 
     /// A histogram for estimating the distribution of 64-bit, unsigned integers where each
     /// measurement is a bucket index in range `[0, len)`.
@@ -151,8 +149,11 @@ pub enum Prio3Config {
     },
 
     /// A variant of `SumVec` that uses a smaller field (`Field64`), multiple proofs, and a custom
-    /// XOF (`XofHmacSha256Aes128`).
-    SumVecField64MultiproofHmacSha256Aes128 {
+    /// XOF (`XofHmacSha256Aes128`). This VDAF is only supported in DAP-09.
+    //
+    // Ensure the serialization of this type is backwards compatible.
+    #[serde(rename = "sum_vec_field64_multiproof_hmac_sha256_aes128")]
+    Draft09SumVecField64MultiproofHmacSha256Aes128 {
         bits: usize,
         length: usize,
         chunk_length: usize,
@@ -168,18 +169,18 @@ impl std::fmt::Display for Prio3Config {
                 length,
                 chunk_length,
             } => write!(f, "Histogram({length},{chunk_length})"),
-            Prio3Config::Sum { bits } => write!(f, "Sum({bits})"),
+            Prio3Config::Sum { max_measurement } => write!(f, "Sum({max_measurement})"),
             Prio3Config::SumVec {
                 bits,
                 length,
                 chunk_length,
             } => write!(f, "SumVec({bits},{length},{chunk_length})"),
-            Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
                 bits,
                 length,
                 chunk_length,
                 num_proofs,
-            } => write!(f, "SumVecField64MultiproofHmacSha256Aes128({bits},{length},{chunk_length},{num_proofs})"),
+            } => write!(f, "Draft09SumVecField64MultiproofHmacSha256Aes128({bits},{length},{chunk_length},{num_proofs})"),
         }
     }
 }
@@ -231,9 +232,7 @@ impl AsMut<[u8]> for VdafVerifyKey {
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug, Eq, PartialEq))]
 pub enum VdafPrepState {
     Prio2(Prio2PrepareState),
-    Prio3Draft09Field64(Prio3Draft09PrepareState<Field64Draft09, 16>),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareState<Field64Draft09, 32>),
-    Prio3Draft09Field128(Prio3Draft09PrepareState<Field128Draft09, 16>),
     Prio3Field64(Prio3PrepareState<Field64, 32>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 32>),
@@ -254,9 +253,7 @@ impl deepsize::DeepSizeOf for VdafPrepState {
         // This happens to be correct for helpers but not for leaders
         match self {
             Self::Prio2(_)
-            | Self::Prio3Draft09Field64(_)
             | Self::Prio3Draft09Field64HmacSha256Aes128(_)
-            | Self::Prio3Draft09Field128(_)
             | Self::Prio3Field64(_)
             | Self::Prio3Field64HmacSha256Aes128(_)
             | Self::Prio3Field128(_)
@@ -273,10 +270,7 @@ impl deepsize::DeepSizeOf for VdafPrepState {
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug))]
 pub enum VdafPrepShare {
     Prio2(Prio2PrepareShare),
-    Prio3Draft09Field64(Prio3Draft09PrepareShare<Field64Draft09, 16>),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareShare<Field64Draft09, 32>),
-    Prio3Draft09Field128(Prio3Draft09PrepareShare<Field128Draft09, 16>),
-
     Prio3Field64(Prio3PrepareShare<Field64, 32>),
     Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3Field128(Prio3PrepareShare<Field128, 32>),
@@ -297,9 +291,7 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
             // share. The length of the verifier share depends on the Prio3 type, which we don't
             // know at this point. Likewise, whether the XOF seed is present depends on the Prio3
             // type.
-            Self::Prio3Draft09Field64(..)
-            | Self::Prio3Draft09Field64HmacSha256Aes128(..)
-            | Self::Prio3Draft09Field128(..)
+            Self::Prio3Draft09Field64HmacSha256Aes128(..)
             | Self::Prio3Field64(..)
             | Self::Prio3Field64HmacSha256Aes128(..)
             | Self::Prio3Field128(..)
@@ -314,11 +306,9 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
 impl Encode for VdafPrepShare {
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
-            Self::Prio3Draft09Field64(share) => share.encode(bytes).map_err(from_codec_error),
             Self::Prio3Draft09Field64HmacSha256Aes128(share) => {
                 share.encode(bytes).map_err(from_codec_error)
             }
-            Self::Prio3Draft09Field128(share) => share.encode(bytes).map_err(from_codec_error),
             Self::Prio3Field64(share) => share.encode(bytes),
             Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3Field128(share) => share.encode(bytes),
@@ -337,20 +327,12 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match state {
-            VdafPrepState::Prio3Draft09Field64(state) => Ok(VdafPrepShare::Prio3Draft09Field64(
-                Prio3Draft09PrepareShare::decode_with_param(state, bytes)
-                    .map_err(from_codec_error)?,
-            )),
             VdafPrepState::Prio3Draft09Field64HmacSha256Aes128(state) => {
                 Ok(VdafPrepShare::Prio3Draft09Field64HmacSha256Aes128(
                     Prio3Draft09PrepareShare::decode_with_param(state, bytes)
                         .map_err(from_codec_error)?,
                 ))
             }
-            VdafPrepState::Prio3Draft09Field128(state) => Ok(VdafPrepShare::Prio3Draft09Field128(
-                Prio3Draft09PrepareShare::decode_with_param(state, bytes)
-                    .map_err(from_codec_error)?,
-            )),
             VdafPrepState::Prio3Field64(state) => Ok(VdafPrepShare::Prio3Field64(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
@@ -432,10 +414,7 @@ impl Encode for VdafAggregateShare {
 impl VdafConfig {
     pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
         match self {
-            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. }
-            | Self::Prio3(..) => VdafVerifyKey::L32([0; 32]),
-            Self::Prio3Draft09(..) => VdafVerifyKey::L16([0; 16]),
+            Self::Prio2 { .. } | Self::Prio3(..) => VdafVerifyKey::L32([0; 32]),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
             Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
@@ -445,15 +424,8 @@ impl VdafConfig {
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
         match self {
-            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. }
-            | Self::Prio3(..) => Ok(VdafVerifyKey::L32(
+            Self::Prio2 { .. } | Self::Prio3(..) => Ok(VdafVerifyKey::L32(
                 <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(from_codec_error)?,
-            )),
-            Self::Prio3Draft09(..) => Ok(VdafVerifyKey::L16(
-                <[u8; 16]>::try_from(bytes)
                     .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
                     .map_err(from_codec_error)?,
             )),
@@ -481,7 +453,7 @@ impl VdafConfig {
     /// executed.
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
-            Self::Prio3Draft09(..) | Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
+            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => true,
             Self::Pine(..) => agg_param.is_empty(),
@@ -612,7 +584,7 @@ where
     Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
 }
 
-fn shard_then_encode_draft09<V: VdafDraft09 + ClientDraft09<16>>(
+pub(crate) fn shard_then_encode_draft09<V: VdafDraft09 + ClientDraft09<16>>(
     vdaf: &V,
     measurement: &V::Measurement,
     nonce: &[u8; 16],

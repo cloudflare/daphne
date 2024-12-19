@@ -198,7 +198,9 @@ mod test {
             };
 
             // Task Parameters that the Leader and Helper must agree on.
-            let vdaf_config = VdafConfig::Prio3(Prio3Config::Count);
+            //
+            // We need to use a VDAF that is compatible with all versions of DAP.
+            let vdaf_config = VdafConfig::Prio2 { dimension: 10 };
             let leader_url = Url::parse("https://leader.com/v02/").unwrap();
             let helper_url = Url::parse("http://helper.org:8788/v02/").unwrap();
             let collector_hpke_receiver_config =
@@ -483,12 +485,12 @@ mod test {
         }
 
         pub async fn gen_test_report(&self, task_id: &TaskId) -> Report {
-            // Construct report. We expect the VDAF to be Prio3Count so that we know what type of
-            // measurement to generate. However, we could extend the code to support more VDAFs.
+            // Construct report. We expect the VDAF to be Prio2 because it's supported in all
+            // versions of DAP. In the future we might want to test multiple different VDAFs.
             let task_config = self.leader.unchecked_get_task_config(task_id).await;
-            assert_matches!(task_config.vdaf, VdafConfig::Prio3(Prio3Config::Count));
+            assert_matches!(task_config.vdaf, VdafConfig::Prio2 { dimension: 10 });
 
-            self.gen_test_report_for_measurement(task_id, DapMeasurement::U64(1))
+            self.gen_test_report_for_measurement(task_id, DapMeasurement::U32Vec(vec![1; 10]))
                 .await
         }
 
@@ -1524,28 +1526,28 @@ mod test {
 
     async_test_versions! { e2e_taskprov_prio2 }
 
-    async fn e2e_taskprov_prio3_draft09_sum_vec_field64_multiproof_hmac_sha256_aes128(
-        version: DapVersion,
-    ) {
+    #[tokio::test]
+    async fn e2e_taskprov_prio3_draft09_sum_vec_field64_multiproof_hmac_sha256_aes128_draft09() {
         e2e_taskprov(
-            version,
-            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
-                bits: 1,
-                length: 10,
-                chunk_length: 2,
-                num_proofs: 3,
-            }),
+            DapVersion::Draft09,
+            VdafConfig::Prio3(
+                Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
+                    bits: 1,
+                    length: 10,
+                    chunk_length: 2,
+                    num_proofs: 3,
+                },
+            ),
             DapMeasurement::U64Vec(vec![1; 10]),
         )
         .await;
     }
 
-    async_test_versions! { e2e_taskprov_prio3_draft09_sum_vec_field64_multiproof_hmac_sha256_aes128 }
-
-    async fn e2e_taskprov_pine32_hmac_sha256_aes128(version: DapVersion) {
+    #[tokio::test]
+    async fn e2e_taskprov_pine32_hmac_sha256_aes128_draft09() {
         use crate::{pine::PineParam, vdaf::pine::PineConfig};
         e2e_taskprov(
-            version,
+            DapVersion::Draft09,
             VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
                 param: PineParam {
                     norm_bound: 16,
@@ -1564,12 +1566,11 @@ mod test {
         .await;
     }
 
-    async_test_versions! { e2e_taskprov_pine32_hmac_sha256_aes128 }
-
-    async fn e2e_taskprov_pine64_hmac_sha256_aes128(version: DapVersion) {
+    #[tokio::test]
+    async fn e2e_taskprov_pine64_hmac_sha256_aes128_draft09() {
         use crate::{pine::PineParam, vdaf::pine::PineConfig};
         e2e_taskprov(
-            version,
+            DapVersion::Draft09,
             VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
                 param: PineParam {
                     norm_bound: 16,
@@ -1587,8 +1588,6 @@ mod test {
         )
         .await;
     }
-
-    async_test_versions! { e2e_taskprov_pine64_hmac_sha256_aes128 }
 
     // Test multiple tasks in flight at once.
     async fn multi_task(version: DapVersion) {
