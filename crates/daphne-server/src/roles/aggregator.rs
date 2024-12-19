@@ -216,19 +216,22 @@ impl DapAggregator for crate::App {
     ) -> Result<(), DapError> {
         let expiration_time = task_config.not_after;
 
-        if self.service_config.role.is_leader() {
-            self.kv()
-                .put_with_expiration::<kv::prefix::TaskConfig>(
-                    task_id,
-                    task_config,
-                    expiration_time,
-                )
-                .await
-                .map_err(|e| fatal_error!(err = ?e, "failed to put the a task config in kv"))?;
-        } else {
-            self.kv()
-                .only_cache_put::<kv::prefix::TaskConfig>(task_id, task_config)
-                .await;
+        match self.service_config.role {
+            daphne::constants::DapAggregatorRole::Leader => {
+                self.kv()
+                    .put_with_expiration::<kv::prefix::TaskConfig>(
+                        task_id,
+                        task_config,
+                        expiration_time,
+                    )
+                    .await
+                    .map_err(|e| fatal_error!(err = ?e, "failed to put the a task config in kv"))?;
+            }
+            daphne::constants::DapAggregatorRole::Helper => {
+                self.kv()
+                    .only_cache_put::<kv::prefix::TaskConfig>(task_id, task_config)
+                    .await;
+            }
         }
         Ok(())
     }

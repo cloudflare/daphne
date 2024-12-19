@@ -75,16 +75,6 @@ pub enum DapRole {
     Helper,
 }
 
-impl DapRole {
-    pub fn is_leader(self) -> bool {
-        self == Self::Leader
-    }
-
-    pub fn is_helper(self) -> bool {
-        self == Self::Helper
-    }
-}
-
 impl FromStr for DapRole {
     type Err = String;
 
@@ -117,16 +107,6 @@ impl fmt::Display for DapRole {
 pub enum DapAggregatorRole {
     Leader,
     Helper,
-}
-
-impl DapAggregatorRole {
-    pub fn is_leader(self) -> bool {
-        self == Self::Leader
-    }
-
-    pub fn is_helper(self) -> bool {
-        self == Self::Helper
-    }
 }
 
 impl FromStr for DapAggregatorRole {
