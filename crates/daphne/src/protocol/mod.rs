@@ -11,7 +11,7 @@ pub(crate) mod report_init;
 
 /// checks if an iterator has no duplicate items, returns the ok if there are no dups or an error
 /// with the first offending item.
-fn no_duplicates<I>(iterator: I) -> Result<(), I::Item>
+pub(crate) fn no_duplicates<I>(iterator: I) -> Result<(), I::Item>
 where
     I: Iterator,
     I::Item: Eq + std::hash::Hash,

@@ -37,7 +37,7 @@ pub async fn main(
             Ok(daphne_worker::storage_proxy::handle_request(req, env, &registry).await)
         }
         Some("aggregator") => {
-            Ok(daphne_worker::aggregator::handle_request(req, env, &registry, None).await)
+            Ok(daphne_worker::aggregator::handle_request(req, env, &registry, None, todo!()).await)
         }
         Some(invalid) => Err(worker::Error::RustError(format!(
             "{invalid} is not a valid DAP_WORKER_MODE"

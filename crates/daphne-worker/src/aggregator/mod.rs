@@ -32,6 +32,7 @@ pub async fn handle_request(
     env: worker::Env,
     registry: &prometheus::Registry,
     audit_log: Option<Box<dyn AuditLog + Send + Sync>>,
+    cpu_offload: Box<dyn CpuOffload + Send + Sync>,
 ) -> Response {
     let config = match config::load_config_from_env(&env) {
         Ok(config) => config,
@@ -54,6 +55,7 @@ pub async fn handle_request(
             env,
             registry,
             config,
+            cpu_offload,
             audit_log.unwrap_or_else(|| Box::new(NoopAuditLog)),
         ),
     )
@@ -63,6 +65,11 @@ pub async fn handle_request(
     resp
 }
 
+#[async_trait::async_trait]
+pub trait CpuOffload {
+    async fn request(&self, req: HttpRequest) -> Response;
+}
+
 struct App {
     http: reqwest::Client,
     env: SendWrapper<worker::Env>,
@@ -70,6 +77,8 @@ struct App {
     metrics: Box<dyn DaphneServiceMetrics + Send + Sync>,
     service_config: DaphneServiceConfig,
     audit_log: Box<dyn AuditLog + Send + Sync>,
+
+    cpu_offload: Box<dyn CpuOffload + Send + Sync>,
 
     /// Volatile memory for the Leader, including the work queue, pending reports, and pending
     /// colleciton requests. Note that in a production Leader, it is necessary to store this state
@@ -162,6 +171,7 @@ impl App {
         env: worker::Env,
         daphne_service_metrics: M,
         service_config: DaphneServiceConfig,
+        cpu_offload: Box<dyn CpuOffload + Send + Sync>,
         audit_log: Box<dyn AuditLog + Send + Sync>,
     ) -> Self
     where
@@ -174,6 +184,7 @@ impl App {
             metrics: Box::new(daphne_service_metrics),
             audit_log,
             service_config,
+            cpu_offload,
             test_leader_state: Default::default(),
         }
     }

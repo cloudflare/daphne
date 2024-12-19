@@ -37,7 +37,7 @@ use std::{
     ops::Range,
 };
 
-pub(crate) enum ReportProcessedStatus {
+pub enum ReportProcessedStatus {
     /// The report should be marked as aggregated. However it has already been committed to
     /// storage, so don't do so again.
     Aggregated,
