@@ -120,7 +120,7 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
 }
 
 impl DapBatchMode {
-    fn try_from_taskprov(task_id: &TaskId, var: BatchMode) -> Result<Self, DapAbort> {
+    fn try_from_taskprov_advertisement(task_id: &TaskId, var: BatchMode) -> Result<Self, DapAbort> {
         match var {
             BatchMode::LeaderSelected { max_batch_size } => {
                 Ok(DapBatchMode::LeaderSelected { max_batch_size })
@@ -166,7 +166,7 @@ impl PineParam {
 }
 
 impl VdafConfig {
-    fn try_from_taskprov(
+    fn try_from_taskprov_advertisement(
         task_id: &TaskId,
         version: DapVersion,
         var: VdafTypeVar,
@@ -287,24 +287,28 @@ pub struct DapTaskConfigNeedsOptIn {
 }
 
 impl DapTaskConfigNeedsOptIn {
-    pub(crate) fn try_from_taskprov(
+    pub(crate) fn try_from_taskprov_advertisement(
         version: DapVersion,
         task_id: &TaskId,
-        task_config: TaskprovAdvertisement,
+        taskprov_advertisement: TaskprovAdvertisement,
         taskprov_config: TaskprovConfig<'_>,
     ) -> Result<Self, DapAbort> {
         // Only one query per batch is currently supported.
-        if task_config.query_config.max_batch_query_count != 1 {
+        if taskprov_advertisement.query_config.max_batch_query_count != 1 {
             return Err(DapAbort::InvalidTask {
                 detail: format!(
                     "unsupported max batch query count {}",
-                    task_config.query_config.max_batch_query_count
+                    taskprov_advertisement.query_config.max_batch_query_count
                 ),
                 task_id: *task_id,
             });
         }
 
-        let vdaf = VdafConfig::try_from_taskprov(task_id, version, task_config.vdaf_config.var)?;
+        let vdaf = VdafConfig::try_from_taskprov_advertisement(
+            task_id,
+            version,
+            taskprov_advertisement.vdaf_config.var,
+        )?;
         let vdaf_verify_key = compute_vdaf_verify_key(
             version,
             taskprov_config.vdaf_verify_key_init,
@@ -313,17 +317,20 @@ impl DapTaskConfigNeedsOptIn {
         );
         Ok(Self {
             version,
-            leader_url: url_from_bytes(task_id, &task_config.leader_url.bytes)?,
-            helper_url: url_from_bytes(task_id, &task_config.helper_url.bytes)?,
-            time_precision: task_config.query_config.time_precision,
-            task_expiration: task_config.task_expiration,
-            min_batch_size: task_config.query_config.min_batch_size.into(),
-            query: DapBatchMode::try_from_taskprov(task_id, task_config.query_config.batch_mode)?,
+            leader_url: url_from_bytes(task_id, &taskprov_advertisement.leader_url.bytes)?,
+            helper_url: url_from_bytes(task_id, &taskprov_advertisement.helper_url.bytes)?,
+            time_precision: taskprov_advertisement.query_config.time_precision,
+            task_expiration: taskprov_advertisement.task_expiration,
+            min_batch_size: taskprov_advertisement.query_config.min_batch_size.into(),
+            query: DapBatchMode::try_from_taskprov_advertisement(
+                task_id,
+                taskprov_advertisement.query_config.batch_mode,
+            )?,
             vdaf,
             vdaf_verify_key,
             collector_hpke_config: taskprov_config.hpke_collector_config.clone(),
             method: DapTaskConfigMethod::Taskprov {
-                info: task_config.task_info,
+                info: taskprov_advertisement.task_info,
             },
         })
     }
@@ -480,8 +487,8 @@ mod test {
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
-    fn try_from_taskprov(version: DapVersion) {
-        let taskprov_config = messages::taskprov::TaskprovAdvertisement {
+    fn try_from_taskprov_advertisement(version: DapVersion) {
+        let taskprov_advertisemnt = messages::taskprov::TaskprovAdvertisement {
             task_info: "cool task".as_bytes().to_vec(),
             leader_url: messages::taskprov::UrlBytes {
                 bytes: b"https://leader.com/".to_vec(),
@@ -504,12 +511,16 @@ mod test {
             },
         };
 
-        let task_id = compute_task_id(&taskprov_config.get_encoded_with_param(&version).unwrap());
+        let task_id = compute_task_id(
+            &taskprov_advertisemnt
+                .get_encoded_with_param(&version)
+                .unwrap(),
+        );
 
-        let task_config = DapTaskConfigNeedsOptIn::try_from_taskprov(
+        let task_config = DapTaskConfigNeedsOptIn::try_from_taskprov_advertisement(
             version,
             &task_id,
-            taskprov_config.clone(),
+            taskprov_advertisemnt.clone(),
             crate::roles::aggregator::TaskprovConfig {
                 hpke_collector_config: &HpkeReceiverConfig::gen(23, HpkeKemId::P256HkdfSha256)
                     .unwrap()
@@ -525,11 +536,11 @@ mod test {
 
         assert_eq!(
             messages::taskprov::TaskprovAdvertisement::try_from(&task_config).unwrap(),
-            taskprov_config
+            taskprov_advertisemnt
         );
     }
 
-    test_versions! { try_from_taskprov }
+    test_versions! { try_from_taskprov_advertisement }
 
     fn check_vdaf_key_computation(version: DapVersion) {
         let task_id = TaskId([
@@ -612,7 +623,7 @@ mod test {
             .config;
 
         assert_matches::assert_matches!(
-            DapTaskConfigNeedsOptIn::try_from_taskprov(
+            DapTaskConfigNeedsOptIn::try_from_taskprov_advertisement(
                 req.version,
                 &task_id,
                 req.taskprov_advertisement.unwrap(),
@@ -677,7 +688,7 @@ mod test {
             .unwrap()
             .config;
 
-        let _ = DapTaskConfigNeedsOptIn::try_from_taskprov(
+        let _ = DapTaskConfigNeedsOptIn::try_from_taskprov_advertisement(
             req.version,
             &task_id,
             req.taskprov_advertisement.unwrap(),
