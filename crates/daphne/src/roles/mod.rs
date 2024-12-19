@@ -224,7 +224,7 @@ mod test {
                     min_batch_size: 1,
                     query: DapBatchMode::TimeInterval,
                     vdaf: vdaf_config,
-                    vdaf_verify_key: vdaf_config.gen_verify_key(),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(version),
                     method: Default::default(),
                     num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
@@ -244,7 +244,7 @@ mod test {
                         max_batch_size: Some(NonZeroU32::new(2).unwrap()),
                     },
                     vdaf: vdaf_config,
-                    vdaf_verify_key: vdaf_config.gen_verify_key(),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(version),
                     method: Default::default(),
                     num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
@@ -262,7 +262,7 @@ mod test {
                     min_batch_size: 1,
                     query: DapBatchMode::TimeInterval,
                     vdaf: vdaf_config,
-                    vdaf_verify_key: vdaf_config.gen_verify_key(),
+                    vdaf_verify_key: vdaf_config.gen_verify_key(version),
                     method: Default::default(),
                     num_agg_span_shards: global_config.default_num_agg_span_shards,
                 },
@@ -287,7 +287,7 @@ mod test {
                         min_batch_size: 10,
                         query: DapBatchMode::TimeInterval,
                         vdaf: mastic,
-                        vdaf_verify_key: mastic.gen_verify_key(),
+                        vdaf_verify_key: mastic.gen_verify_key(version),
                         method: Default::default(),
                         num_agg_span_shards: global_config.default_num_agg_span_shards,
                     },
@@ -1529,7 +1529,7 @@ mod test {
     ) {
         e2e_taskprov(
             version,
-            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 1,
                 length: 10,
                 chunk_length: 2,

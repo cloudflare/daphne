@@ -52,6 +52,7 @@ use std::io::Read;
 
 #[cfg(feature = "experimental")]
 pub use self::mastic::MasticWeightConfig;
+use crate::DapVersion;
 
 const CTX_STRING_PREFIX: &[u8] = b"dap-13";
 
@@ -74,7 +75,6 @@ pub(crate) enum VdafError {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum VdafConfig {
-    Prio3Draft09(Prio3Config),
     Prio3(Prio3Config),
     Prio2 {
         dimension: usize,
@@ -112,7 +112,6 @@ pub(crate) fn from_codec_error(c: CodecErrorDraft09) -> CodecError {
 impl std::fmt::Display for VdafConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VdafConfig::Prio3Draft09(prio3_config) => write!(f, "Prio3Draft09({prio3_config})"),
             VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
             #[cfg(feature = "experimental")]
@@ -430,12 +429,18 @@ impl Encode for VdafAggregateShare {
 }
 
 impl VdafConfig {
-    pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
+    pub(crate) fn uninitialized_verify_key(&self, version: DapVersion) -> VdafVerifyKey {
         match self {
-            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. }
-            | Self::Prio3(..) => VdafVerifyKey::L32([0; 32]),
-            Self::Prio3Draft09(..) => VdafVerifyKey::L16([0; 16]),
+            Self::Prio3(config) => match version {
+                DapVersion::Draft09 => match config {
+                    Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. } => {
+                        VdafVerifyKey::L32([0; 32])
+                    }
+                    _ => VdafVerifyKey::L16([0; 16]),
+                },
+                DapVersion::Latest => VdafVerifyKey::L32([0; 32]),
+            },
+            Self::Prio2 { .. } => VdafVerifyKey::L32([0; 32]),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
             Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
@@ -443,36 +448,42 @@ impl VdafConfig {
     }
 
     /// Parse a verification key from raw bytes.
-    pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
+    pub fn get_decoded_verify_key(
+        &self,
+        bytes: &[u8],
+        version: DapVersion,
+    ) -> Result<VdafVerifyKey, CodecError> {
+        let decode_32 = || {
+            <[u8; 32]>::try_from(bytes)
+                .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
+                .map_err(from_codec_error)
+                .map(VdafVerifyKey::L32)
+        };
+        let decode_16 = || {
+            <[u8; 16]>::try_from(bytes)
+                .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
+                .map_err(from_codec_error)
+                .map(VdafVerifyKey::L16)
+        };
         match self {
-            Self::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. })
-            | Self::Prio2 { .. }
-            | Self::Prio3(..) => Ok(VdafVerifyKey::L32(
-                <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(from_codec_error)?,
-            )),
-            Self::Prio3Draft09(..) => Ok(VdafVerifyKey::L16(
-                <[u8; 16]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(from_codec_error)?,
-            )),
+            Self::Prio3(config) => match version {
+                DapVersion::Draft09 => match config {
+                    Prio3Config::SumVecField64MultiproofHmacSha256Aes128 { .. } => decode_32(),
+                    _ => decode_16(),
+                },
+                DapVersion::Latest => decode_32(),
+            },
+            Self::Prio2 { .. } => decode_32(),
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } => Ok(VdafVerifyKey::L16(
-                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
-            )),
-            Self::Pine(..) => Ok(VdafVerifyKey::L32(
-                <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(from_codec_error)?,
-            )),
+            Self::Mastic { .. } => decode_16(),
+            Self::Pine(..) => decode_32(),
         }
     }
 
     /// Generate the Aggregators' shared verification parameters.
-    pub fn gen_verify_key(&self) -> VdafVerifyKey {
+    pub fn gen_verify_key(&self, version: DapVersion) -> VdafVerifyKey {
         let mut rng = thread_rng();
-        let mut verify_key = self.uninitialized_verify_key();
+        let mut verify_key = self.uninitialized_verify_key(version);
         rng.fill(verify_key.as_mut());
         verify_key
     }
@@ -481,7 +492,7 @@ impl VdafConfig {
     /// executed.
     pub fn is_valid_agg_param(&self, agg_param: &[u8]) -> bool {
         match self {
-            Self::Prio3Draft09(..) | Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
+            Self::Prio3(..) | Self::Prio2 { .. } => agg_param.is_empty(),
             #[cfg(feature = "experimental")]
             Self::Mastic { .. } => true,
             Self::Pine(..) => agg_param.is_empty(),

@@ -29,7 +29,7 @@ use std::{
 use tokio::time::timeout;
 use url::Url;
 
-const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Sum { bits: 10 });
+const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Sum { bits: 10 });
 pub(crate) const MIN_BATCH_SIZE: u64 = 10;
 pub(crate) const MAX_BATCH_SIZE: u32 = 12;
 pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
@@ -117,7 +117,7 @@ impl TestRunner {
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
             vdaf: *VDAF_CONFIG,
-            vdaf_verify_key: VDAF_CONFIG.gen_verify_key(),
+            vdaf_verify_key: VDAF_CONFIG.gen_verify_key(version),
             collector_hpke_config: collector_hpke_receiver.config.clone(),
             method: Default::default(),
             num_agg_span_shards: global_config.default_num_agg_span_shards,
@@ -170,7 +170,7 @@ impl TestRunner {
             "type": "Prio3Sum",
             "bits": assert_matches!(
                 t.task_config.vdaf,
-                VdafConfig::Prio3Draft09(Prio3Config::Sum{ bits }) => format!("{bits}")
+                VdafConfig::Prio3(Prio3Config::Sum{ bits }) => format!("{bits}")
             ),
         });
 

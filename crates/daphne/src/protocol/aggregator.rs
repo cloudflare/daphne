@@ -304,23 +304,23 @@ impl DapTaskConfig {
                         prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
-                            VdafConfig::Prio3Draft09(prio3_config) => {
-                                prio3_draft09_prep_finish_from_shares(
+                            VdafConfig::Prio3(prio3_config) => match self.version {
+                                DapVersion::Draft09 => prio3_draft09_prep_finish_from_shares(
                                     prio3_config,
                                     1,
                                     helper_prep_state.clone(),
                                     helper_prep_share.clone(),
                                     leader_prep_share,
-                                )
-                            }
-                            VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
-                                prio3_config,
-                                1,
-                                task_id,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
+                                ),
+                                DapVersion::Latest => prio3_prep_finish_from_shares(
+                                    prio3_config,
+                                    1,
+                                    task_id,
+                                    helper_prep_state.clone(),
+                                    helper_prep_share.clone(),
+                                    leader_prep_share,
+                                ),
+                            },
                             VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
                                 *dimension,
                                 helper_prep_state.clone(),
@@ -459,12 +459,14 @@ impl DapTaskConfig {
             };
 
             let res = match &self.vdaf {
-                VdafConfig::Prio3Draft09(prio3_config) => {
-                    prio3_draft09_prep_finish(prio3_config, leader.prep_state, prep_msg)
-                }
-                VdafConfig::Prio3(prio3_config) => {
-                    prio3_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
-                }
+                VdafConfig::Prio3(prio3_config) => match self.version {
+                    DapVersion::Draft09 => {
+                        prio3_draft09_prep_finish(prio3_config, leader.prep_state, prep_msg)
+                    }
+                    DapVersion::Latest => {
+                        prio3_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
+                    }
+                },
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
                 }

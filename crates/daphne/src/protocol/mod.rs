@@ -97,7 +97,6 @@ mod test {
     use std::iter::zip;
 
     const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-    const TEST_VDAF_DRAFT09: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Count);
 
     fn roundtrip_report(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -211,7 +210,7 @@ mod test {
     #[test]
     fn roundtrip_report_vdaf_draft09() {
         let version = DapVersion::Draft09;
-        let t = AggregationJobTest::new(TEST_VDAF_DRAFT09, HpkeKemId::X25519HkdfSha256, version);
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let report = t
             .task_config
             .vdaf
@@ -714,7 +713,7 @@ mod test {
     #[test]
     fn finish_agg_job_vdaf_draft09() {
         let version = DapVersion::Draft09;
-        let t = AggregationJobTest::new(TEST_VDAF_DRAFT09, HpkeKemId::X25519HkdfSha256, version);
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![
             DapMeasurement::U64(1),
             DapMeasurement::U64(1),
@@ -982,7 +981,7 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id, version)
                 .unwrap();
             invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -1008,7 +1007,7 @@ mod test {
             let (mut invalid_public_share, invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id, version)
                 .unwrap();
             invalid_public_share.push(1); // Add spurious byte at the end
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -1034,7 +1033,7 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(measurement, &report_id.0, &self.task_id, version)
                 .unwrap();
             invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
             invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share

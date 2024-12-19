@@ -841,7 +841,6 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
         } => {
             let vdaf = use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf")?
                 .into_vdaf_config();
-            let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key());
             let CliDapBatchMode(query) = use_or_request_from_user_or_default(
                 query,
                 || DapBatchMode::LeaderSelected {
@@ -849,6 +848,16 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 },
                 "query",
             )?;
+
+            let leader = use_or_request_from_user(leader_url, "leader url")?;
+            let helper = use_or_request_from_user(helper_url, "helper url")?;
+
+            let vdaf_verify_key = encode_base64url(vdaf.gen_verify_key({
+                let vl = deduce_dap_version_from_url(&leader)?;
+                let vh = deduce_dap_version_from_url(&helper)?;
+                assert_eq!(vl, vh, "leader and helper url version are mismatched");
+                vl
+            }));
             let role = use_or_request_from_user(role, "role")?;
             let default_task_id = TaskId(thread_rng().gen());
             let internal_task = InternalTestAddTask {
@@ -858,8 +867,8 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     "task id",
                 )?
                 .into(),
-                leader: use_or_request_from_user(leader_url, "leader url")?,
-                helper: use_or_request_from_user(helper_url, "helper url")?,
+                leader,
+                helper,
                 vdaf: InternalTestVdaf::from(vdaf),
                 leader_authentication_token: use_or_request_from_user(
                     leader_auth_token,

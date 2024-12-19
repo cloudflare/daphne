@@ -528,7 +528,7 @@ mod test {
 
     fn roundtrip_count(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3Draft09(Prio3Config::Count),
+            &VdafConfig::Prio3(Prio3Config::Count),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
@@ -549,7 +549,7 @@ mod test {
 
     fn roundtrip_sum(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3Draft09(Prio3Config::Sum { bits: 23 }),
+            &VdafConfig::Prio3(Prio3Config::Sum { bits: 23 }),
             HpkeKemId::X25519HkdfSha256,
             version,
         );
@@ -570,7 +570,7 @@ mod test {
 
     fn roundtrip_sum_vec(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3Draft09(Prio3Config::SumVec {
+            &VdafConfig::Prio3(Prio3Config::SumVec {
                 bits: 23,
                 length: 2,
                 chunk_length: 1,
@@ -593,7 +593,7 @@ mod test {
 
     fn roundtrip_histogram(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3Draft09(Prio3Config::Histogram {
+            &VdafConfig::Prio3(Prio3Config::Histogram {
                 length: 3,
                 chunk_length: 1,
             }),
@@ -617,7 +617,7 @@ mod test {
 
     fn roundtrip_sum_vec_field64_multiproof_hmac_sha256_aes128(version: DapVersion) {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            &VdafConfig::Prio3(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
                 bits: 23,
                 length: 2,
                 chunk_length: 1,
