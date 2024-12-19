@@ -54,6 +54,7 @@ use std::io::Read;
 
 #[cfg(feature = "experimental")]
 pub use self::mastic::MasticWeightConfig;
+use crate::constants::DapAggregatorRole;
 
 const CTX_STRING_PREFIX: &[u8] = b"dap-13";
 
@@ -228,6 +229,28 @@ impl AsMut<[u8]> for VdafVerifyKey {
     }
 }
 
+fn upgrade_codec_error(error: CodecErrorDraft09) -> CodecError {
+    match error {
+        CodecErrorDraft09::Io(error) => CodecError::Io(error),
+        CodecErrorDraft09::BytesLeftOver(n) => CodecError::BytesLeftOver(n),
+        CodecErrorDraft09::LengthPrefixTooBig(n) => CodecError::LengthPrefixTooBig(n),
+        CodecErrorDraft09::LengthPrefixOverflow => CodecError::LengthPrefixOverflow,
+        CodecErrorDraft09::Other(error) => CodecError::Other(error),
+        _ => CodecError::UnexpectedValue,
+    }
+}
+
+fn downgrade_codec_error(error: CodecError) -> CodecErrorDraft09 {
+    match error {
+        CodecError::Io(error) => CodecErrorDraft09::Io(error),
+        CodecError::BytesLeftOver(n) => CodecErrorDraft09::BytesLeftOver(n),
+        CodecError::LengthPrefixTooBig(n) => CodecErrorDraft09::LengthPrefixTooBig(n),
+        CodecError::LengthPrefixOverflow => CodecErrorDraft09::LengthPrefixOverflow,
+        CodecError::Other(error) => CodecErrorDraft09::Other(error),
+        _ => CodecErrorDraft09::UnexpectedValue,
+    }
+}
+
 /// VDAF preparation state.
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug, Eq, PartialEq))]
@@ -245,6 +268,96 @@ pub enum VdafPrepState {
     },
     Pine64HmacSha256Aes128(PinePrepState<Field64Draft09, 32>),
     Pine32HmacSha256Aes128(PinePrepState<FieldPrio2Draft09, 32>),
+}
+
+impl prio_draft09::codec::Encode for VdafPrepState {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), prio_draft09::codec::CodecError> {
+        match self {
+            Self::Prio3Draft09Field64(state) => state.encode(bytes),
+            Self::Prio3Draft09Field64HmacSha256Aes128(state) => state.encode(bytes),
+            Self::Prio3Draft09Field128(state) => state.encode(bytes),
+
+            Self::Prio3Field64(state) => state.encode(bytes).map_err(downgrade_codec_error),
+            Self::Prio3Field64HmacSha256Aes128(state) => {
+                state.encode(bytes).map_err(downgrade_codec_error)
+            }
+            Self::Prio3Field128(state) => state.encode(bytes).map_err(downgrade_codec_error),
+
+            Self::Prio2(state) => state.encode(bytes),
+            Self::Pine64HmacSha256Aes128(state) => state.encode(bytes),
+            Self::Pine32HmacSha256Aes128(state) => state.encode(bytes),
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } => todo!("encoding of prep state is not implemented"),
+        }
+    }
+}
+
+impl prio_draft09::codec::ParameterizedDecode<(&VdafConfig, DapAggregatorRole)> for VdafPrepState {
+    fn decode_with_param(
+        (vdaf_config, role): &(&VdafConfig, DapAggregatorRole),
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, prio_draft09::codec::CodecError> {
+        match vdaf_config {
+            VdafConfig::Prio3(ref prio3_config) => {
+                prio3::decode_prep_state(prio3_config, *role, bytes)
+            }
+            VdafConfig::Prio3Draft09(prio3_config) => {
+                prio3_draft09::decode_prep_state(prio3_config, *role, bytes)
+            }
+            VdafConfig::Prio2 { dimension } => prio2::decode_prep_state(*dimension, *role, bytes),
+            VdafConfig::Pine(config) => pine::decode_prep_state(config, *role, bytes),
+            #[cfg(feature = "experimental")]
+            VdafConfig::Mastic { .. } => {
+                todo!("decoding of mastic prep state is not implemented")
+            }
+        }
+        .map_err(|e| prio_draft09::codec::CodecError::Other(Box::new(e)))
+    }
+}
+
+impl Encode for VdafPrepState {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        match self {
+            Self::Prio3Draft09Field64(state) => state.encode(bytes).map_err(upgrade_codec_error),
+            Self::Prio3Draft09Field64HmacSha256Aes128(state) => {
+                state.encode(bytes).map_err(upgrade_codec_error)
+            }
+            Self::Prio3Draft09Field128(state) => state.encode(bytes).map_err(upgrade_codec_error),
+
+            Self::Prio3Field64(state) => state.encode(bytes),
+            Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
+            Self::Prio3Field128(state) => state.encode(bytes),
+
+            Self::Prio2(state) => state.encode(bytes).map_err(upgrade_codec_error),
+            Self::Pine64HmacSha256Aes128(state) => state.encode(bytes).map_err(upgrade_codec_error),
+            Self::Pine32HmacSha256Aes128(state) => state.encode(bytes).map_err(upgrade_codec_error),
+            #[cfg(feature = "experimental")]
+            Self::Mastic { .. } => todo!("encoding of prep state is not implemented"),
+        }
+    }
+}
+
+impl ParameterizedDecode<(&VdafConfig, DapAggregatorRole)> for VdafPrepState {
+    fn decode_with_param(
+        (vdaf_config, role): &(&VdafConfig, DapAggregatorRole),
+        bytes: &mut std::io::Cursor<&[u8]>,
+    ) -> Result<Self, CodecError> {
+        match vdaf_config {
+            VdafConfig::Prio3(ref prio3_config) => {
+                prio3::decode_prep_state(prio3_config, *role, bytes)
+            }
+            VdafConfig::Prio3Draft09(prio3_config) => {
+                prio3_draft09::decode_prep_state(prio3_config, *role, bytes)
+            }
+            VdafConfig::Prio2 { dimension } => prio2::decode_prep_state(*dimension, *role, bytes),
+            VdafConfig::Pine(config) => pine::decode_prep_state(config, *role, bytes),
+            #[cfg(feature = "experimental")]
+            VdafConfig::Mastic { .. } => {
+                todo!("decoding of mastic prep state is not implemented")
+            }
+        }
+        .map_err(|e| CodecError::Other(Box::new(e)))
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
