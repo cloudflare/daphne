@@ -532,6 +532,7 @@ impl Test {
             agg_job_state,
             agg_job_resp,
             self.metrics(),
+            task_config.version,
         )?;
 
         let aggregated_report_count = agg_share_span

@@ -10,10 +10,7 @@ use crate::{
         self, Extension, PlaintextInputShare, ReportError, ReportMetadata, ReportShare, TaskId,
     },
     protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
-    vdaf::{
-        prio2::prio2_prep_init, prio3::prio3_prep_init, prio3_draft09::prio3_draft09_prep_init,
-        VdafConfig, VdafPrepShare, VdafPrepState,
-    },
+    vdaf::{prio2::prio2_prep_init, VdafConfig, VdafPrepShare, VdafPrepState},
     DapAggregationParam, DapError, DapTaskConfig,
 };
 use prio::codec::{CodecError, ParameterizedDecode as _};
@@ -197,16 +194,8 @@ impl<P> InitializedReport<P> {
             DapAggregatorRole::Helper => 1,
         };
         let res = match &task_config.vdaf {
-            VdafConfig::Prio3Draft09(ref prio3_config) => prio3_draft09_prep_init(
-                prio3_config,
-                &task_config.vdaf_verify_key,
-                agg_id,
-                &report_share.report_metadata.id.0,
-                &report_share.public_share,
-                &input_share,
-            ),
-            VdafConfig::Prio3(ref prio3_config) => prio3_prep_init(
-                prio3_config,
+            VdafConfig::Prio3(prio3_config) => prio3_config.prep_init(
+                task_config.version,
                 &task_config.vdaf_verify_key,
                 *task_id,
                 agg_id,

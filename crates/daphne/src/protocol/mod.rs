@@ -72,7 +72,7 @@ mod test {
         },
         test_versions,
         testing::AggregationJobTest,
-        vdaf::{Prio3Config, VdafConfig},
+        vdaf::VdafConfig,
         DapAggregateResult, DapAggregateShare, DapAggregationParam, DapError, DapMeasurement,
         DapVersion, VdafAggregateShare, VdafPrepShare, VdafPrepState,
     };
@@ -80,24 +80,17 @@ mod test {
     use hpke_rs::HpkePublicKey;
     use prio::{
         codec::encode_u32_items,
+        field::FieldPrio2,
         vdaf::{
-            prio3::Prio3, Aggregator as VdafAggregator, Collector as VdafCollector,
-            PrepareTransition,
-        },
-    };
-    use prio_draft09::{
-        field::Field64 as Field64Draft09,
-        vdaf::{
-            prio3::Prio3 as Prio3Draft09, AggregateShare as AggregateShareDraft09,
-            Aggregator as VdafAggregatorDraft09, Collector as VdafCollectorDraft09,
-            OutputShare as OutputShareDraft09, PrepareTransition as PrepareTransitionDraft09,
+            prio2::Prio2, AggregateShare, Aggregator as VdafAggregator, Collector as VdafCollector,
+            OutputShare, PrepareTransition,
         },
     };
     use rand::prelude::*;
     use std::iter::zip;
 
-    const TEST_VDAF: &VdafConfig = &VdafConfig::Prio3(Prio3Config::Count);
-    const TEST_VDAF_DRAFT09: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Count);
+    // Choose a VDAF for testing that is supported by all versions of DAP.
+    const TEST_VDAF: &VdafConfig = &VdafConfig::Prio2 { dimension: 10 };
 
     fn roundtrip_report(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -108,7 +101,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.now,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 t.task_config.version,
             )
             .unwrap();
@@ -170,26 +163,23 @@ mod test {
             helper_prep_share,
         ) {
             (
-                VdafPrepState::Prio3Field64(leader_step),
-                VdafPrepState::Prio3Field64(helper_step),
-                VdafPrepShare::Prio3Field64(leader_share),
-                VdafPrepShare::Prio3Field64(helper_share),
+                VdafPrepState::Prio2(leader_step),
+                VdafPrepState::Prio2(helper_step),
+                VdafPrepShare::Prio2(leader_share),
+                VdafPrepShare::Prio2(helper_share),
             ) => {
-                let ctx = &["dap-13".as_bytes(), &t.task_id.0].concat();
-                //let ctx = binding.as_slice();
-                let vdaf = Prio3::new_count(2).unwrap();
-                let message = vdaf
-                    .prepare_shares_to_prepare_message(ctx, &(), [leader_share, helper_share])
+                let vdaf = Prio2::new(10).unwrap();
+                vdaf.prepare_shares_to_prepare_message(&[], &(), [leader_share, helper_share])
                     .unwrap();
 
                 let leader_out_share = assert_matches!(
-                    vdaf.prepare_next(ctx, leader_step, message.clone()).unwrap(),
+                    vdaf.prepare_next(&[], leader_step, ()).unwrap(),
                     PrepareTransition::Finish(out_share) => out_share
                 );
                 let leader_agg_share = vdaf.aggregate(&(), [leader_out_share]).unwrap();
 
                 let helper_out_share = assert_matches!(
-                    vdaf.prepare_next(ctx, helper_step, message).unwrap(),
+                    vdaf.prepare_next(&[], helper_step, ()).unwrap(),
                     PrepareTransition::Finish(out_share) => out_share
                 );
                 let helper_agg_share = vdaf.aggregate(&(), [helper_out_share]).unwrap();
@@ -197,7 +187,7 @@ mod test {
                 assert_eq!(
                     vdaf.unshard(&(), vec![leader_agg_share, helper_agg_share], 1)
                         .unwrap(),
-                    1,
+                    vec![1; 10],
                 );
             }
             _ => {
@@ -207,113 +197,6 @@ mod test {
     }
 
     test_versions! { roundtrip_report }
-
-    #[test]
-    fn roundtrip_report_vdaf_draft09() {
-        let version = DapVersion::Draft09;
-        let t = AggregationJobTest::new(TEST_VDAF_DRAFT09, HpkeKemId::X25519HkdfSha256, version);
-        let report = t
-            .task_config
-            .vdaf
-            .produce_report(
-                &t.client_hpke_config_list,
-                t.now,
-                &t.task_id,
-                DapMeasurement::U64(1),
-                t.task_config.version,
-            )
-            .unwrap();
-
-        let [leader_share, helper_share] = report.encrypted_input_shares;
-
-        let InitializedReport::Ready {
-            prep_share: leader_prep_share,
-            prep_state: leader_prep_state,
-            ..
-        } = InitializedReport::from_client(
-            &t.leader_hpke_receiver_config,
-            t.valid_report_time_range(),
-            &t.task_id,
-            &t.task_config,
-            ReportShare {
-                report_metadata: report.report_metadata.clone(),
-                public_share: report.public_share.clone(),
-                encrypted_input_share: leader_share,
-            },
-            &DapAggregationParam::Empty,
-        )
-        .unwrap()
-        else {
-            panic!("rejected unexpectedly");
-        };
-
-        let InitializedReport::Ready {
-            prep_share: helper_prep_share,
-            prep_state: helper_prep_state,
-            ..
-        } = InitializedReport::from_leader(
-            &t.helper_hpke_receiver_config,
-            t.valid_report_time_range(),
-            &t.task_id,
-            &t.task_config,
-            ReportShare {
-                report_metadata: report.report_metadata,
-                public_share: report.public_share,
-                encrypted_input_share: helper_share,
-            },
-            {
-                let mut outbound = Vec::new();
-                outbound.push(PingPongMessageType::Initialize as u8);
-                encode_u32_items(&mut outbound, &version, &[leader_prep_share.clone()]).unwrap();
-                outbound
-            },
-            &DapAggregationParam::Empty,
-        )
-        .unwrap()
-        else {
-            panic!("rejected unexpectedly");
-        };
-
-        match (
-            leader_prep_state,
-            helper_prep_state,
-            leader_prep_share,
-            helper_prep_share,
-        ) {
-            (
-                VdafPrepState::Prio3Draft09Field64(leader_step),
-                VdafPrepState::Prio3Draft09Field64(helper_step),
-                VdafPrepShare::Prio3Draft09Field64(leader_share),
-                VdafPrepShare::Prio3Draft09Field64(helper_share),
-            ) => {
-                let vdaf = Prio3Draft09::new_count(2).unwrap();
-                let message = vdaf
-                    .prepare_shares_to_prepare_message(&(), [leader_share, helper_share])
-                    .unwrap();
-
-                let leader_out_share = assert_matches!(
-                    vdaf.prepare_next(leader_step, message.clone()).unwrap(),
-                    PrepareTransitionDraft09::Finish(out_share) => out_share
-                );
-                let leader_agg_share = vdaf.aggregate(&(), [leader_out_share]).unwrap();
-
-                let helper_out_share = assert_matches!(
-                    vdaf.prepare_next(helper_step, message).unwrap(),
-                    PrepareTransitionDraft09::Finish(out_share) => out_share
-                );
-                let helper_agg_share = vdaf.aggregate(&(), [helper_out_share]).unwrap();
-
-                assert_eq!(
-                    vdaf.unshard(&(), vec![leader_agg_share, helper_agg_share], 1)
-                        .unwrap(),
-                    1,
-                );
-            }
-            _ => {
-                panic!("unexpected output from leader or helper");
-            }
-        }
-    }
 
     fn roundtrip_report_unsupported_hpke_suite(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -334,7 +217,7 @@ mod test {
             &unsupported_hpke_config_list,
             t.now,
             &t.task_id,
-            DapMeasurement::U64(1),
+            DapMeasurement::U32Vec(vec![1; 10]),
             t.task_config.version,
         );
         assert_matches!(
@@ -348,9 +231,9 @@ mod test {
     fn produce_agg_job_req(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![
-            DapMeasurement::U64(1),
-            DapMeasurement::U64(0),
-            DapMeasurement::U64(0),
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![0; 10]),
+            DapMeasurement::U32Vec(vec![0; 10]),
         ]);
 
         let (agg_job_state, agg_job_init_req) =
@@ -374,7 +257,7 @@ mod test {
 
     fn produce_agg_job_req_skip_hpke_decrypt_err(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+        let mut reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![0; 10])]);
 
         // Simulate HPKE decryption error of leader's report share.
         reports[0].encrypted_input_shares[0].payload[0] ^= 1;
@@ -399,7 +282,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.valid_report_time_range().start - 1,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 t.task_config.version,
             )
             .unwrap()];
@@ -424,7 +307,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.valid_report_time_range().end + 1,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 t.task_config.version,
             )
             .unwrap()];
@@ -442,7 +325,7 @@ mod test {
 
     fn produce_agg_job_req_skip_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+        let mut reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1; 10])]);
 
         // Client tries to send Leader encrypted input with incorrect config ID.
         reports[0].encrypted_input_shares[0].config_id ^= 1;
@@ -461,8 +344,14 @@ mod test {
     fn produce_agg_job_req_skip_vdaf_prep_error(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![
-            t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version),
-            t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version),
+            t.produce_invalid_report_public_share_decode_failure(
+                DapMeasurement::U32Vec(vec![1; 10]),
+                version,
+            ),
+            t.produce_invalid_report_input_share_decode_failure(
+                DapMeasurement::U32Vec(vec![1; 10]),
+                version,
+            ),
         ];
 
         let (agg_job_state, _agg_job_init_req) =
@@ -478,7 +367,7 @@ mod test {
 
     fn handle_agg_job_req_hpke_decrypt_err(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+        let mut reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1; 10])]);
 
         // Simulate HPKE decryption error of helper's report share.
         reports[0].encrypted_input_shares[1].payload[0] ^= 1;
@@ -505,7 +394,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.valid_report_time_range().start - 1,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 t.task_config.version,
             )
             .unwrap()];
@@ -540,7 +429,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.valid_report_time_range().end + 1,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 t.task_config.version,
             )
             .unwrap()];
@@ -568,7 +457,7 @@ mod test {
 
     fn handle_agg_job_req_hpke_unknown_config_id(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let mut reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+        let mut reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1; 10])]);
 
         // Client tries to send Helper encrypted input with incorrect config ID.
         reports[0].encrypted_input_shares[1].config_id ^= 1;
@@ -588,10 +477,14 @@ mod test {
 
     fn handle_agg_job_req_vdaf_prep_error(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let report0 =
-            t.produce_invalid_report_public_share_decode_failure(DapMeasurement::U64(1), version);
-        let report1 =
-            t.produce_invalid_report_input_share_decode_failure(DapMeasurement::U64(1), version);
+        let report0 = t.produce_invalid_report_public_share_decode_failure(
+            DapMeasurement::U32Vec(vec![1; 10]),
+            version,
+        );
+        let report1 = t.produce_invalid_report_input_share_decode_failure(
+            DapMeasurement::U32Vec(vec![1; 10]),
+            version,
+        );
 
         let agg_job_init_req = AggregationJobInitReq {
             agg_param: Vec::new(),
@@ -633,7 +526,10 @@ mod test {
 
     fn agg_job_resp_abort_transition_out_of_order(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
+        let reports = t.produce_reports(vec![
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
+        ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
@@ -653,7 +549,10 @@ mod test {
 
     fn agg_job_resp_abort_report_id_repeated(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
+        let reports = t.produce_reports(vec![
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
+        ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
@@ -673,7 +572,10 @@ mod test {
     fn agg_job_resp_abort_unrecognized_report_id(version: DapVersion) {
         let mut rng = thread_rng();
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
+        let reports = t.produce_reports(vec![
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
+        ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
@@ -694,7 +596,7 @@ mod test {
 
     fn agg_job_resp_abort_invalid_transition(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let reports = t.produce_reports(vec![DapMeasurement::U64(1)]);
+        let reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1; 10])]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
@@ -711,59 +613,14 @@ mod test {
 
     test_versions! { agg_job_resp_abort_invalid_transition }
 
-    #[test]
-    fn finish_agg_job_vdaf_draft09() {
-        let version = DapVersion::Draft09;
-        let t = AggregationJobTest::new(TEST_VDAF_DRAFT09, HpkeKemId::X25519HkdfSha256, version);
-        let reports = t.produce_reports(vec![
-            DapMeasurement::U64(1),
-            DapMeasurement::U64(1),
-            DapMeasurement::U64(0),
-            DapMeasurement::U64(0),
-            DapMeasurement::U64(1),
-        ]);
-
-        let (leader_state, agg_job_init_req) =
-            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
-
-        let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
-            let leader_agg_span = t.consume_agg_job_resp(leader_state, agg_job_resp);
-
-            (leader_agg_span, helper_agg_span)
-        };
-
-        assert_eq!(leader_agg_span.report_count(), 5);
-        let num_measurements = leader_agg_span.report_count();
-
-        let VdafAggregateShare::Field64Draft09(leader_agg_share) =
-            leader_agg_span.collapsed().data.unwrap()
-        else {
-            panic!("unexpected VdafAggregateShare variant")
-        };
-
-        let VdafAggregateShare::Field64Draft09(helper_agg_share) =
-            helper_agg_span.collapsed().data.unwrap()
-        else {
-            panic!("unexpected VdafAggregateShare variant")
-        };
-
-        let vdaf = Prio3Draft09::new_count(2).unwrap();
-        assert_eq!(
-            vdaf.unshard(&(), [leader_agg_share, helper_agg_share], num_measurements,)
-                .unwrap(),
-            3,
-        );
-    }
-
     fn finish_agg_job(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = t.produce_reports(vec![
-            DapMeasurement::U64(1),
-            DapMeasurement::U64(1),
-            DapMeasurement::U64(0),
-            DapMeasurement::U64(0),
-            DapMeasurement::U64(1),
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![0; 10]),
+            DapMeasurement::U32Vec(vec![0; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
         ]);
 
         let (leader_state, agg_job_init_req) =
@@ -779,36 +636,40 @@ mod test {
         assert_eq!(leader_agg_span.report_count(), 5);
         let num_measurements = leader_agg_span.report_count();
 
-        let VdafAggregateShare::Field64(leader_agg_share) =
+        let VdafAggregateShare::Field32(leader_agg_share) =
             leader_agg_span.collapsed().data.unwrap()
         else {
             panic!("unexpected VdafAggregateShare variant")
         };
 
-        let VdafAggregateShare::Field64(helper_agg_share) =
+        let VdafAggregateShare::Field32(helper_agg_share) =
             helper_agg_span.collapsed().data.unwrap()
         else {
             panic!("unexpected VdafAggregateShare variant")
         };
 
-        let vdaf = Prio3::new_count(2).unwrap();
+        let vdaf = Prio2::new(10).unwrap();
         assert_eq!(
             vdaf.unshard(&(), [leader_agg_share, helper_agg_share], num_measurements,)
                 .unwrap(),
-            3,
+            vec![3; 10],
         );
     }
 
     test_versions! { finish_agg_job }
 
-    #[tokio::test]
-    async fn agg_job_init_req_skip_vdaf_prep_error_draft09() {
-        let t =
-            AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, DapVersion::Draft09);
-        let mut reports = t.produce_reports(vec![DapMeasurement::U64(1), DapMeasurement::U64(1)]);
+    fn agg_job_init_req_skip_vdaf_prep_error(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let mut reports = t.produce_reports(vec![
+            DapMeasurement::U32Vec(vec![1; 10]),
+            DapMeasurement::U32Vec(vec![1; 10]),
+        ]);
         reports.insert(
             1,
-            t.produce_invalid_report_vdaf_prep_failure(DapMeasurement::U64(1), DapVersion::Draft09),
+            t.produce_invalid_report_vdaf_prep_failure(
+                DapMeasurement::U32Vec(vec![1; 10]),
+                version,
+            ),
         );
 
         let (leader_state, agg_job_init_req) =
@@ -830,6 +691,8 @@ mod test {
         assert_eq!(leader_agg_span.report_count(), 2);
     }
 
+    test_versions! { agg_job_init_req_skip_vdaf_prep_error }
+
     fn encrypted_agg_share(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let leader_agg_share = DapAggregateShare {
@@ -837,22 +700,18 @@ mod test {
             min_time: 1_637_359_200,
             max_time: 1_637_359_200,
             checksum: [0; 32],
-            data: Some(VdafAggregateShare::Field64Draft09(
-                AggregateShareDraft09::from(OutputShareDraft09::from(vec![Field64Draft09::from(
-                    23,
-                )])),
-            )),
+            data: Some(VdafAggregateShare::Field32(AggregateShare::from(
+                OutputShare::from(vec![FieldPrio2::from(23); 10]),
+            ))),
         };
         let helper_agg_share = DapAggregateShare {
             report_count: 50,
             min_time: 1_637_359_200,
             max_time: 1_637_359_200,
             checksum: [0; 32],
-            data: Some(VdafAggregateShare::Field64Draft09(
-                AggregateShareDraft09::from(OutputShareDraft09::from(vec![Field64Draft09::from(
-                    9,
-                )])),
-            )),
+            data: Some(VdafAggregateShare::Field32(AggregateShare::from(
+                OutputShare::from(vec![FieldPrio2::from(9); 10]),
+            ))),
         };
 
         let batch_selector = BatchSelector::TimeInterval {
@@ -878,7 +737,7 @@ mod test {
             vec![leader_encrypted_agg_share, helper_encrypted_agg_share],
         );
 
-        assert_eq!(agg_res, DapAggregateResult::U64(32));
+        assert_eq!(agg_res, DapAggregateResult::U32Vec(vec![32; 10]));
     }
 
     test_versions! { encrypted_agg_share }
@@ -892,7 +751,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.now,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 vec![Extension::NotImplemented {
                     typ: 0xffff,
                     payload: b"some extension data".to_vec(),
@@ -934,7 +793,7 @@ mod test {
                 &t.client_hpke_config_list,
                 t.now,
                 &t.task_id,
-                DapMeasurement::U64(1),
+                DapMeasurement::U32Vec(vec![1; 10]),
                 vec![
                     Extension::NotImplemented {
                         typ: 23,
@@ -982,7 +841,12 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(
+                    measurement,
+                    &report_id.0,
+                    &self.task_id,
+                    self.task_config.version,
+                )
                 .unwrap();
             invalid_input_shares[1][0] ^= 1; // The first bit is incorrect!
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -1008,7 +872,12 @@ mod test {
             let (mut invalid_public_share, invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(
+                    measurement,
+                    &report_id.0,
+                    &self.task_id,
+                    self.task_config.version,
+                )
                 .unwrap();
             invalid_public_share.push(1); // Add spurious byte at the end
             VdafConfig::produce_report_with_extensions_for_shares(
@@ -1034,7 +903,12 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(measurement, &report_id.0, &self.task_id)
+                .produce_input_shares(
+                    measurement,
+                    &report_id.0,
+                    &self.task_id,
+                    self.task_config.version,
+                )
                 .unwrap();
             invalid_input_shares[0].push(1); // Add a spurious byte to the Leader's share
             invalid_input_shares[1].push(1); // Add a spurious byte to the Helper's share

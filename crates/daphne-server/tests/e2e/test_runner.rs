@@ -10,7 +10,7 @@ use daphne::{
         encode_base64url, taskprov::TaskprovAdvertisement, Base64Encode, BatchId, CollectionJobId,
         Duration, HpkeConfigList, Interval, TaskId,
     },
-    vdaf::{Prio3Config, VdafConfig},
+    vdaf::VdafConfig,
     DapBatchMode, DapGlobalConfig, DapLeaderProcessTelemetry, DapTaskConfig, DapVersion,
 };
 use daphne_service_utils::http_headers;
@@ -29,7 +29,8 @@ use std::{
 use tokio::time::timeout;
 use url::Url;
 
-const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio3Draft09(Prio3Config::Sum { bits: 10 });
+// Use a VDAF that is supported in all versions of DAP.
+const VDAF_CONFIG: &VdafConfig = &VdafConfig::Prio2 { dimension: 10 };
 pub(crate) const MIN_BATCH_SIZE: u64 = 10;
 pub(crate) const MAX_BATCH_SIZE: u32 = 12;
 pub(crate) const TIME_PRECISION: Duration = 3600; // seconds
@@ -167,10 +168,10 @@ impl TestRunner {
             encode_base64url(t.collector_hpke_receiver.config.get_encoded().unwrap());
 
         let vdaf = json!({
-            "type": "Prio3Sum",
-            "bits": assert_matches!(
+            "type": "Prio2",
+            "dimension": assert_matches!(
                 t.task_config.vdaf,
-                VdafConfig::Prio3Draft09(Prio3Config::Sum{ bits }) => format!("{bits}")
+                VdafConfig::Prio2{ dimension } => format!("{dimension}")
             ),
         });
 

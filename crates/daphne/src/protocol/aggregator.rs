@@ -21,8 +21,6 @@ use crate::{
     protocol::{decode_ping_pong_framed, PingPongMessageType},
     vdaf::{
         prio2::{prio2_prep_finish, prio2_prep_finish_from_shares},
-        prio3::{prio3_prep_finish, prio3_prep_finish_from_shares},
-        prio3_draft09::{prio3_draft09_prep_finish, prio3_draft09_prep_finish_from_shares},
         VdafError,
     },
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
@@ -286,6 +284,7 @@ impl DapTaskConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport<WithPeerPrepShare>],
+        version: DapVersion,
     ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
         let num_reports = initialized_reports.len();
         let mut agg_span = DapAggregateSpan::default();
@@ -304,23 +303,15 @@ impl DapTaskConfig {
                         prep_state: helper_prep_state,
                     } => {
                         let res = match &self.vdaf {
-                            VdafConfig::Prio3Draft09(prio3_config) => {
-                                prio3_draft09_prep_finish_from_shares(
-                                    prio3_config,
+                            VdafConfig::Prio3(prio3_config) => prio3_config
+                                .prep_finish_from_shares(
+                                    version,
                                     1,
+                                    task_id,
                                     helper_prep_state.clone(),
                                     helper_prep_share.clone(),
                                     leader_prep_share,
-                                )
-                            }
-                            VdafConfig::Prio3(prio3_config) => prio3_prep_finish_from_shares(
-                                prio3_config,
-                                1,
-                                task_id,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
+                                ),
                             VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
                                 *dimension,
                                 helper_prep_state.clone(),
@@ -406,6 +397,7 @@ impl DapTaskConfig {
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
+        version: DapVersion,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
@@ -459,11 +451,8 @@ impl DapTaskConfig {
             };
 
             let res = match &self.vdaf {
-                VdafConfig::Prio3Draft09(prio3_config) => {
-                    prio3_draft09_prep_finish(prio3_config, leader.prep_state, prep_msg)
-                }
                 VdafConfig::Prio3(prio3_config) => {
-                    prio3_prep_finish(prio3_config, leader.prep_state, prep_msg, *task_id)
+                    prio3_config.prep_finish(leader.prep_state, prep_msg, *task_id, version)
                 }
                 VdafConfig::Prio2 { dimension } => {
                     prio2_prep_finish(*dimension, leader.prep_state, prep_msg)

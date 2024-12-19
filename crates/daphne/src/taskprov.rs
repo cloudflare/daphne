@@ -181,7 +181,7 @@ impl VdafConfig {
                 })?,
             }),
             (
-                DapVersion::Draft09 | DapVersion::Latest,
+                DapVersion::Draft09,
                 VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
                     bits,
                     length,
@@ -197,8 +197,8 @@ impl VdafConfig {
                         task_id: *task_id,
                     });
                 }
-                Ok(VdafConfig::Prio3Draft09(
-                    Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+                Ok(VdafConfig::Prio3(
+                    Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
                         bits: bits.into(),
                         length: length.try_into().map_err(|_| DapAbort::InvalidTask {
                             detail: "length is larger than the system's word size".to_string(),
@@ -215,7 +215,7 @@ impl VdafConfig {
                     },
                 ))
             }
-            (_, VdafTypeVar::Pine32HmacSha256Aes128 { param }) => {
+            (DapVersion::Draft09, VdafTypeVar::Pine32HmacSha256Aes128 { param }) => {
                 if let Err(e) = pine32_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
                         detail: format!("invalid parameters for Pine32: {e}"),
@@ -232,7 +232,7 @@ impl VdafConfig {
                     }))
                 }
             }
-            (_, VdafTypeVar::Pine64HmacSha256Aes128 { param }) => {
+            (DapVersion::Draft09, VdafTypeVar::Pine64HmacSha256Aes128 { param }) => {
                 if let Err(e) = pine64_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
                         detail: format!("invalid parameters for Pine64: {e}"),
@@ -251,6 +251,10 @@ impl VdafConfig {
             }
             (_, VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
                 detail: format!("unimplemented VDAF type ({typ})"),
+                task_id: *task_id,
+            }),
+            (_, _) => Err(DapAbort::InvalidTask {
+                detail: format!("VDAF not supported in {version}"),
                 task_id: *task_id,
             }),
         }
@@ -380,7 +384,7 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
                     fatal_error!(err = "{vdaf_config}: dimension is too large for taskprov")
                 })?,
             }),
-            VdafConfig::Prio3Draft09(Prio3Config::SumVecField64MultiproofHmacSha256Aes128 {
+            VdafConfig::Prio3(Prio3Config::Draft09SumVecField64MultiproofHmacSha256Aes128 {
                 bits,
                 length,
                 chunk_length,
@@ -398,9 +402,6 @@ impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
                 })?,
                 num_proofs: *num_proofs,
             }),
-            VdafConfig::Prio3Draft09(..) => Err(fatal_error!(
-                err = format!("{vdaf_config} is not currently supported for taskprov")
-            )),
             VdafConfig::Prio3(..) => Err(fatal_error!(
                 err = format!("{vdaf_config} is not currently supported for taskprov")
             )),
