@@ -841,10 +841,10 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(
+                .shard(
                     measurement,
                     &report_id.0,
-                    &self.task_id,
+                    self.task_id,
                     self.task_config.version,
                 )
                 .unwrap();
@@ -872,10 +872,10 @@ mod test {
             let (mut invalid_public_share, invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(
+                .shard(
                     measurement,
                     &report_id.0,
-                    &self.task_id,
+                    self.task_id,
                     self.task_config.version,
                 )
                 .unwrap();
@@ -903,10 +903,10 @@ mod test {
             let (invalid_public_share, mut invalid_input_shares) = self
                 .task_config
                 .vdaf
-                .produce_input_shares(
+                .shard(
                     measurement,
                     &report_id.0,
-                    &self.task_id,
+                    self.task_id,
                     self.task_config.version,
                 )
                 .unwrap();

@@ -5,8 +5,6 @@ use super::{
     no_duplicates,
     report_init::{InitializedReport, WithPeerPrepShare},
 };
-#[cfg(feature = "experimental")]
-use crate::vdaf::mastic::{mastic_prep_finish, mastic_prep_finish_from_shares};
 use crate::{
     constants::DapAggregatorRole,
     error::DapAbort,
@@ -19,12 +17,9 @@ use crate::{
     },
     metrics::{DaphneMetrics, ReportStatus},
     protocol::{decode_ping_pong_framed, PingPongMessageType},
-    vdaf::{
-        prio2::{prio2_prep_finish, prio2_prep_finish_from_shares},
-        VdafError,
-    },
+    vdaf::VdafError,
     AggregationJobReportState, DapAggregateShare, DapAggregateSpan, DapAggregationJobState,
-    DapAggregationParam, DapError, DapTaskConfig, DapVersion, VdafConfig,
+    DapAggregationParam, DapError, DapTaskConfig, DapVersion,
 };
 
 use prio::codec::{encode_u32_items, Encode, ParameterizedDecode, ParameterizedEncode};
@@ -284,7 +279,6 @@ impl DapTaskConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport<WithPeerPrepShare>],
-        version: DapVersion,
     ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
         let num_reports = initialized_reports.len();
         let mut agg_span = DapAggregateSpan::default();
@@ -302,39 +296,14 @@ impl DapTaskConfig {
                         prep_share: helper_prep_share,
                         prep_state: helper_prep_state,
                     } => {
-                        let res = match &self.vdaf {
-                            VdafConfig::Prio3(prio3_config) => prio3_config
-                                .prep_finish_from_shares(
-                                    version,
-                                    1,
-                                    task_id,
-                                    helper_prep_state.clone(),
-                                    helper_prep_share.clone(),
-                                    leader_prep_share,
-                                ),
-                            VdafConfig::Prio2 { dimension } => prio2_prep_finish_from_shares(
-                                *dimension,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
-                            #[cfg(feature = "experimental")]
-                            VdafConfig::Mastic {
-                                input_size: _,
-                                weight_config,
-                            } => mastic_prep_finish_from_shares(
-                                *weight_config,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
-                            VdafConfig::Pine(pine) => pine.prep_finish_from_shares(
-                                1,
-                                helper_prep_state.clone(),
-                                helper_prep_share.clone(),
-                                leader_prep_share,
-                            ),
-                        };
+                        let res = self.vdaf.prep_finish_from_shares(
+                            self.version,
+                            1,
+                            task_id,
+                            helper_prep_state.clone(),
+                            helper_prep_share.clone(),
+                            leader_prep_share,
+                        );
 
                         match res {
                             Ok((data, prep_msg)) => {
@@ -397,7 +366,6 @@ impl DapTaskConfig {
         state: DapAggregationJobState,
         agg_job_resp: AggregationJobResp,
         metrics: &dyn DaphneMetrics,
-        version: DapVersion,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
@@ -450,17 +418,9 @@ impl DapTaskConfig {
                 }
             };
 
-            let res = match &self.vdaf {
-                VdafConfig::Prio3(prio3_config) => {
-                    prio3_config.prep_finish(leader.prep_state, prep_msg, *task_id, version)
-                }
-                VdafConfig::Prio2 { dimension } => {
-                    prio2_prep_finish(*dimension, leader.prep_state, prep_msg)
-                }
-                #[cfg(feature = "experimental")]
-                VdafConfig::Mastic { .. } => mastic_prep_finish(leader.prep_state, prep_msg),
-                VdafConfig::Pine(pine) => pine.prep_finish(leader.prep_state, prep_msg),
-            };
+            let res = self
+                .vdaf
+                .prep_finish(leader.prep_state, prep_msg, *task_id, self.version);
 
             match res {
                 Ok(data) => {

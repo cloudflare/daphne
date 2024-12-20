@@ -240,13 +240,14 @@ fn prep_init<F: FftFriendlyFieldElement, X: Xof<SEED_SIZE>, const SEED_SIZE: usi
 #[cfg(test)]
 mod test {
     use crate::{
-        hpke::HpkeKemId, pine::PineParam, test_versions, testing::AggregationJobTest,
-        vdaf::VdafConfig, DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
+        hpke::HpkeKemId, pine::PineParam, testing::AggregationJobTest, vdaf::VdafConfig,
+        DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
     use super::PineConfig;
 
-    fn roundtrip_pine32_hmac_sha256_aes128(version: DapVersion) {
+    #[test]
+    fn roundtrip_pine32_hmac_sha256_aes128_draft09() {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig::Field32HmacSha256Aes128 {
                 param: PineParam {
@@ -262,7 +263,7 @@ mod test {
                 },
             }),
             HpkeKemId::X25519HkdfSha256,
-            version,
+            DapVersion::Draft09,
         );
         let DapAggregateResult::F64Vec(got) = t.roundtrip(
             DapAggregationParam::Empty,
@@ -282,9 +283,8 @@ mod test {
         }
     }
 
-    test_versions! { roundtrip_pine32_hmac_sha256_aes128 }
-
-    fn roundtrip_pine64_hmac_sha256_aes128(version: DapVersion) {
+    #[test]
+    fn roundtrip_pine64_hmac_sha256_aes128_draft09() {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Pine(PineConfig::Field64HmacSha256Aes128 {
                 param: PineParam {
@@ -300,7 +300,7 @@ mod test {
                 },
             }),
             HpkeKemId::X25519HkdfSha256,
-            version,
+            DapVersion::Draft09,
         );
         let DapAggregateResult::F64Vec(got) = t.roundtrip(
             DapAggregationParam::Empty,
@@ -319,6 +319,4 @@ mod test {
             );
         }
     }
-
-    test_versions! { roundtrip_pine64_hmac_sha256_aes128 }
 }

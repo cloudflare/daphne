@@ -13,6 +13,7 @@ pub(crate) mod prio3_draft09;
 
 use crate::pine::vdaf::PinePrepState;
 use crate::{fatal_error, messages::TaskId, DapError};
+use crate::{DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion};
 use pine::PineConfig;
 use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
@@ -119,6 +120,205 @@ impl std::fmt::Display for VdafConfig {
                 weight_config,
             } => write!(f, "Mastic({input_size}, {weight_config})"),
             VdafConfig::Pine(pine_config) => write!(f, "{pine_config}"),
+        }
+    }
+}
+
+impl VdafConfig {
+    pub(crate) fn shard(
+        &self,
+        measurement: DapMeasurement,
+        nonce: &[u8; 16],
+        task_id: TaskId,
+        version: DapVersion,
+    ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
+        match (version, self) {
+            (_, Self::Prio2 { dimension }) => prio2::prio2_shard(*dimension, measurement, nonce),
+            (_, Self::Prio3(prio3_config)) => {
+                prio3_config.shard(version, measurement, nonce, task_id)
+            }
+            (DapVersion::Draft09, Self::Pine(pine_config)) => pine_config.shard(measurement, nonce),
+            #[cfg(feature = "experimental")]
+            (
+                DapVersion::Latest,
+                VdafConfig::Mastic {
+                    input_size,
+                    weight_config,
+                },
+            ) => Ok(mastic::mastic_shard(
+                *input_size,
+                *weight_config,
+                measurement,
+            )?),
+            _ => Err(VdafError::Dap(fatal_error!(
+                err = format!("{self:?} is not supported in DAP {version}")
+            ))),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prep_init(
+        &self,
+        version: DapVersion,
+        verify_key: &VdafVerifyKey,
+        task_id: TaskId,
+        agg_id: usize,
+        // This is used by Mastic, which for the moment is behind the "experimental" flag.
+        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
+        agg_param: &DapAggregationParam,
+        nonce: &[u8; 16],
+        public_share_data: &[u8],
+        input_share_data: &[u8],
+    ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
+        match (version, self) {
+            (_, VdafConfig::Prio2 { dimension }) => prio2::prio2_prep_init(
+                *dimension,
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data,
+            ),
+            (_, Self::Prio3(prio3_config)) => prio3_config.prep_init(
+                version,
+                verify_key,
+                task_id,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data,
+            ),
+            (DapVersion::Draft09, Self::Pine(pine)) => pine.prep_init(
+                verify_key,
+                agg_id,
+                nonce,
+                public_share_data,
+                input_share_data,
+            ),
+            #[cfg(feature = "experimental")]
+            (
+                DapVersion::Latest,
+                Self::Mastic {
+                    input_size,
+                    weight_config,
+                },
+            ) => mastic::mastic_prep_init(
+                *input_size,
+                *weight_config,
+                verify_key,
+                agg_param,
+                public_share_data,
+                input_share_data,
+            ),
+            _ => Err(VdafError::Dap(fatal_error!(
+                err = format!("{self:?} is not supported in DAP {version}")
+            ))),
+        }
+    }
+
+    pub(crate) fn prep_finish_from_shares(
+        &self,
+        version: DapVersion,
+        agg_id: usize,
+        task_id: TaskId,
+        host_state: VdafPrepState,
+        host_share: VdafPrepShare,
+        peer_share_data: &[u8],
+    ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
+        match (version, self) {
+            (_, Self::Prio2 { dimension }) => prio2::prio2_prep_finish_from_shares(
+                *dimension,
+                host_state,
+                host_share,
+                peer_share_data,
+            ),
+            (_, Self::Prio3(prio3_config)) => prio3_config.prep_finish_from_shares(
+                version,
+                agg_id,
+                task_id,
+                host_state,
+                host_share,
+                peer_share_data,
+            ),
+            (DapVersion::Draft09, Self::Pine(pine_config)) => {
+                pine_config.prep_finish_from_shares(agg_id, host_state, host_share, peer_share_data)
+            }
+            #[cfg(feature = "experimental")]
+            (
+                DapVersion::Latest,
+                Self::Mastic {
+                    input_size: _,
+                    weight_config,
+                },
+            ) => mastic::mastic_prep_finish_from_shares(
+                *weight_config,
+                host_state,
+                host_share,
+                peer_share_data,
+            ),
+            _ => Err(VdafError::Dap(fatal_error!(
+                err = format!("{self:?} is not supported in DAP {version}")
+            ))),
+        }
+    }
+
+    pub(crate) fn prep_finish(
+        &self,
+        host_state: VdafPrepState,
+        peer_message_data: &[u8],
+        task_id: TaskId,
+        version: DapVersion,
+    ) -> Result<VdafAggregateShare, VdafError> {
+        match (version, self) {
+            (_, Self::Prio2 { dimension }) => {
+                prio2::prio2_prep_finish(*dimension, host_state, peer_message_data)
+            }
+            (_, Self::Prio3(prio3_config)) => {
+                prio3_config.prep_finish(host_state, peer_message_data, task_id, version)
+            }
+            (DapVersion::Draft09, Self::Pine(pine_config)) => {
+                pine_config.prep_finish(host_state, peer_message_data)
+            }
+            #[cfg(feature = "experimental")]
+            (DapVersion::Latest, Self::Mastic { .. }) => {
+                mastic::mastic_prep_finish(host_state, peer_message_data)
+            }
+            _ => Err(VdafError::Dap(fatal_error!(
+                err = format!("{self:?} is not supported in DAP {version}")
+            ))),
+        }
+    }
+
+    pub(crate) fn unshard<M: IntoIterator<Item = Vec<u8>>>(
+        &self,
+        version: DapVersion,
+        // This is used by Mastic, which for the moment is behind the "experimental" flag.
+        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
+        agg_param: &DapAggregationParam,
+        num_measurements: usize,
+        agg_shares: M,
+    ) -> Result<DapAggregateResult, VdafError> {
+        match (version, self) {
+            (_, Self::Prio2 { dimension }) => {
+                prio2::prio2_unshard(*dimension, num_measurements, agg_shares)
+            }
+            (_, Self::Prio3(prio3_config)) => {
+                prio3_config.unshard(version, num_measurements, agg_shares)
+            }
+            (DapVersion::Draft09, Self::Pine(pine_config)) => {
+                pine_config.unshard(num_measurements, agg_shares)
+            }
+            #[cfg(feature = "experimental")]
+            (
+                DapVersion::Latest,
+                Self::Mastic {
+                    input_size: _,
+                    weight_config,
+                },
+            ) => mastic::mastic_unshard(*weight_config, agg_param, agg_shares),
+            _ => Err(VdafError::Dap(fatal_error!(
+                err = format!("{self:?} is not supported in DAP {version}")
+            ))),
         }
     }
 }
