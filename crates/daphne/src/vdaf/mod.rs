@@ -4,12 +4,12 @@
 //! Verifiable, Distributed Aggregation Functions
 //! ([VDAFs](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/)).
 
+pub(crate) mod draft09;
 #[cfg(feature = "experimental")]
 pub(crate) mod mastic;
 pub(crate) mod pine;
 pub(crate) mod prio2;
 pub(crate) mod prio3;
-pub(crate) mod prio3_draft09;
 
 use crate::pine::vdaf::PinePrepState;
 use crate::{fatal_error, messages::TaskId, DapError};
@@ -40,9 +40,7 @@ use prio_draft09::{
             Prio3PrepareShare as Prio3Draft09PrepareShare,
             Prio3PrepareState as Prio3Draft09PrepareState,
         },
-        AggregateShare as AggregateShareDraft09, Aggregator as AggregatorDraft09,
-        Client as ClientDraft09, Collector as CollectorDraft09,
-        PrepareTransition as PrepareTransitionDraft09, Vdaf as VdafDraft09,
+        AggregateShare as AggregateShareDraft09,
     },
 };
 use rand::prelude::*;
@@ -774,98 +772,6 @@ fn unshard<V, M>(
 ) -> Result<V::AggregateResult, VdafError>
 where
     V: Vdaf<AggregationParam = ()> + Collector,
-    M: IntoIterator<Item = Vec<u8>>,
-{
-    let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
-    for data in agg_shares {
-        let agg_share = V::AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
-        agg_shares_vec.push(agg_share);
-    }
-    Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
-}
-
-pub(crate) fn shard_then_encode_draft09<V: VdafDraft09 + ClientDraft09<16>>(
-    vdaf: &V,
-    measurement: &V::Measurement,
-    nonce: &[u8; 16],
-) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
-    let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
-
-    Ok((
-        public_share.get_encoded()?,
-        input_shares
-            .iter()
-            .map(|input_share| input_share.get_encoded())
-            .collect::<Result<Vec<_>, _>>()?
-            .try_into()
-            .map_err(|e: Vec<_>| {
-                VdafError::Dap(fatal_error!(
-                    err = format!("expected 2 input shares got {}", e.len())
-                ))
-            })?,
-    ))
-}
-
-fn prep_finish_from_shares_draft09<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
-    vdaf: &V,
-    agg_id: usize,
-    host_state: V::PrepareState,
-    host_share: V::PrepareShare,
-    peer_share_data: &[u8],
-) -> Result<(V::OutputShare, Vec<u8>), VdafError>
-where
-    V: VdafDraft09<AggregationParam = ()> + AggregatorDraft09<VERIFY_KEY_SIZE, NONCE_SIZE>,
-{
-    // Decode the Helper's inbound message.
-    let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
-
-    // Preprocess the inbound messages.
-    let message = vdaf.prepare_shares_to_prepare_message(
-        &(),
-        if agg_id == 0 {
-            [host_share, peer_share]
-        } else {
-            [peer_share, host_share]
-        },
-    )?;
-    let message_data = message.get_encoded()?;
-
-    // Compute the host's output share.
-    match vdaf.prepare_next(host_state, message)? {
-        PrepareTransitionDraft09::Continue(..) => Err(VdafError::Dap(fatal_error!(
-            err = format!("prep_finish_from_shares: unexpected transition")
-        ))),
-        PrepareTransitionDraft09::Finish(out_share) => Ok((out_share, message_data)),
-    }
-}
-
-fn prep_finish_draft09<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
-    vdaf: &V,
-    host_state: V::PrepareState,
-    peer_message_data: &[u8],
-) -> Result<V::OutputShare, VdafError>
-where
-    V: VdafDraft09 + AggregatorDraft09<VERIFY_KEY_SIZE, NONCE_SIZE>,
-{
-    // Decode the inbound message from the peer, which contains the preprocessed prepare message.
-    let peer_message = V::PrepareMessage::get_decoded_with_param(&host_state, peer_message_data)?;
-
-    // Compute the host's output share.
-    match vdaf.prepare_next(host_state, peer_message)? {
-        PrepareTransitionDraft09::Continue(..) => Err(VdafError::Dap(fatal_error!(
-            err = format!("prep_finish: unexpected transition"),
-        ))),
-        PrepareTransitionDraft09::Finish(out_share) => Ok(out_share),
-    }
-}
-
-fn unshard_draft09<V, M>(
-    vdaf: &V,
-    num_measurements: usize,
-    agg_shares: M,
-) -> Result<V::AggregateResult, VdafError>
-where
-    V: VdafDraft09<AggregationParam = ()> + CollectorDraft09,
     M: IntoIterator<Item = Vec<u8>>,
 {
     let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
