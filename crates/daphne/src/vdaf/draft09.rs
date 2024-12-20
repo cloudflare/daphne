@@ -1,7 +1,7 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Parameters for the [Prio3 VDAF](https://datatracker.ietf.org/doc/draft-irtf-cfrg-vdaf/09/).
+//! DAP-09 compatibility.
 
 use crate::{
     fatal_error, messages::taskprov::VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
@@ -9,7 +9,7 @@ use crate::{
 };
 
 use prio_draft09::{
-    codec::ParameterizedDecode,
+    codec::{Encode, ParameterizedDecode},
     field::Field64,
     flp::{
         gadgets::{Mul, ParallelSum},
@@ -19,7 +19,7 @@ use prio_draft09::{
     vdaf::{
         prio3::{Prio3, Prio3InputShare, Prio3PrepareShare, Prio3PrepareState, Prio3PublicShare},
         xof::{Xof, XofHmacSha256Aes128},
-        Aggregator,
+        Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
 
@@ -51,7 +51,29 @@ type Prio3Draft09Prepared<T, const SEED_SIZE: usize> = (
     Prio3PrepareShare<<T as Type>::Field, SEED_SIZE>,
 );
 
-pub(crate) fn prep_init_draft09<T, P, const SEED_SIZE: usize>(
+pub(crate) fn shard_then_encode<V: Vdaf + Client<16>>(
+    vdaf: &V,
+    measurement: &V::Measurement,
+    nonce: &[u8; 16],
+) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
+    let (public_share, input_shares) = vdaf.shard(measurement, nonce)?;
+
+    Ok((
+        public_share.get_encoded()?,
+        input_shares
+            .iter()
+            .map(|input_share| input_share.get_encoded())
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|e: Vec<_>| {
+                VdafError::Dap(fatal_error!(
+                    err = format!("expected 2 input shares got {}", e.len())
+                ))
+            })?,
+    ))
+}
+
+pub(crate) fn prep_init<T, P, const SEED_SIZE: usize>(
     vdaf: Prio3<T, P, SEED_SIZE>,
     verify_key: &[u8; SEED_SIZE],
     agg_id: usize,
@@ -73,18 +95,87 @@ where
     Ok(vdaf.prepare_init(verify_key, agg_id, &(), nonce, &public_share, &input_share)?)
 }
 
+pub(crate) fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
+    vdaf: &V,
+    agg_id: usize,
+    host_state: V::PrepareState,
+    host_share: V::PrepareShare,
+    peer_share_data: &[u8],
+) -> Result<(V::OutputShare, Vec<u8>), VdafError>
+where
+    V: Vdaf<AggregationParam = ()> + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+{
+    // Decode the Helper's inbound message.
+    let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
+
+    // Preprocess the inbound messages.
+    let message = vdaf.prepare_shares_to_prepare_message(
+        &(),
+        if agg_id == 0 {
+            [host_share, peer_share]
+        } else {
+            [peer_share, host_share]
+        },
+    )?;
+    let message_data = message.get_encoded()?;
+
+    // Compute the host's output share.
+    match vdaf.prepare_next(host_state, message)? {
+        PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
+            err = format!("prep_finish_from_shares: unexpected transition")
+        ))),
+        PrepareTransition::Finish(out_share) => Ok((out_share, message_data)),
+    }
+}
+
+pub(crate) fn prep_finish<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
+    vdaf: &V,
+    host_state: V::PrepareState,
+    peer_message_data: &[u8],
+) -> Result<V::OutputShare, VdafError>
+where
+    V: Vdaf + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+{
+    // Decode the inbound message from the peer, which contains the preprocessed prepare message.
+    let peer_message = V::PrepareMessage::get_decoded_with_param(&host_state, peer_message_data)?;
+
+    // Compute the host's output share.
+    match vdaf.prepare_next(host_state, peer_message)? {
+        PrepareTransition::Continue(..) => Err(VdafError::Dap(fatal_error!(
+            err = format!("prep_finish: unexpected transition"),
+        ))),
+        PrepareTransition::Finish(out_share) => Ok(out_share),
+    }
+}
+
+pub(crate) fn unshard<V, M>(
+    vdaf: &V,
+    num_measurements: usize,
+    agg_shares: M,
+) -> Result<V::AggregateResult, VdafError>
+where
+    V: Vdaf<AggregationParam = ()> + Collector,
+    M: IntoIterator<Item = Vec<u8>>,
+{
+    let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
+    for data in agg_shares {
+        let agg_share = V::AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
+        agg_shares_vec.push(agg_share);
+    }
+    Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
+}
+
 #[cfg(test)]
 mod test {
 
     use prio_draft09::vdaf::prio3_test::check_test_vec;
 
+    use super::*;
+
     use crate::{
         hpke::HpkeKemId,
         testing::AggregationJobTest,
-        vdaf::{
-            prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128, Prio3Config,
-            VdafConfig,
-        },
+        vdaf::{Prio3Config, VdafConfig},
         DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion,
     };
 
@@ -114,7 +205,7 @@ mod test {
     }
 
     #[test]
-    fn test_vec_sum_vec_field64_multiproof_hmac_sha256_aes128() {
+    fn test_vec_sum_vec_field64_multiproof_hmac_sha256_aes128_draft09() {
         for test_vec_json_str in [
             include_str!("test_vec/Prio3SumVecField64MultiproofHmacSha256Aes128_0.json"),
             include_str!("test_vec/Prio3SumVecField64MultiproofHmacSha256Aes128_1.json"),

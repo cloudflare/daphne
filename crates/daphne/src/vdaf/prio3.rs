@@ -6,12 +6,10 @@
 use crate::{
     fatal_error,
     messages::TaskId,
-    vdaf::{prio3_draft09, VdafError, VdafVerifyKey},
+    vdaf::{draft09, VdafError, VdafVerifyKey},
     DapAggregateResult, DapMeasurement, DapVersion, Prio3Config, VdafAggregateShare, VdafPrepShare,
     VdafPrepState,
 };
-
-use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
 
 use prio::{
     codec::ParameterizedDecode,
@@ -22,6 +20,8 @@ use prio::{
         Aggregator,
     },
 };
+
+use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
 
 const CTX_STRING_PREFIX: &[u8] = b"dap-13";
 
@@ -90,13 +90,13 @@ impl Prio3Config {
                 },
                 DapMeasurement::U64Vec(measurement),
             ) => {
-                let vdaf = prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,
                     *length,
                     *chunk_length,
                     *num_proofs,
                 )?;
-                super::shard_then_encode_draft09(&vdaf, &measurement, nonce)
+                draft09::shard_then_encode(&vdaf, &measurement, nonce)
             }
             _ => Err(VdafError::Dap(fatal_error!(
                 err =
@@ -218,13 +218,13 @@ impl Prio3Config {
                 },
                 VdafVerifyKey::L32(verify_key),
             ) => {
-                let vdaf = prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,
                     *length,
                     *chunk_length,
                     *num_proofs,
                 )?;
-                let (state, share) = prio3_draft09::prep_init_draft09(
+                let (state, share) = draft09::prep_init(
                     vdaf,
                     verify_key,
                     agg_id,
@@ -368,19 +368,14 @@ impl Prio3Config {
                 VdafPrepState::Prio3Draft09Field64HmacSha256Aes128(state),
                 VdafPrepShare::Prio3Draft09Field64HmacSha256Aes128(share),
             ) => {
-                let vdaf = prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,
                     *length,
                     *chunk_length,
                     *num_proofs,
                 )?;
-                let (out_share, outbound) = super::prep_finish_from_shares_draft09(
-                    &vdaf,
-                    agg_id,
-                    state,
-                    share,
-                    peer_share_data,
-                )?;
+                let (out_share, outbound) =
+                    draft09::prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64Draft09(
                     prio_draft09::vdaf::Aggregator::aggregate(&vdaf, &(), [out_share])?,
                 );
@@ -463,13 +458,13 @@ impl Prio3Config {
                 },
                 VdafPrepState::Prio3Draft09Field64HmacSha256Aes128(state),
             ) => {
-                let vdaf = prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,
                     *length,
                     *chunk_length,
                     *num_proofs,
                 )?;
-                let out_share = super::prep_finish_draft09(&vdaf, state, peer_message_data)?;
+                let out_share = draft09::prep_finish(&vdaf, state, peer_message_data)?;
                 VdafAggregateShare::Field64Draft09(prio_draft09::vdaf::Aggregator::aggregate(
                     &vdaf,
                     &(),
@@ -549,13 +544,13 @@ impl Prio3Config {
                     num_proofs,
                 },
             ) => {
-                let vdaf = prio3_draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+                let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,
                     *length,
                     *chunk_length,
                     *num_proofs,
                 )?;
-                let agg_res = super::unshard_draft09(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = draft09::unshard(&vdaf, num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::U64Vec(agg_res))
             }
             _ => Err(VdafError::Dap(fatal_error!(
