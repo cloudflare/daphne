@@ -5,7 +5,10 @@
 
 use std::{borrow::Cow, iter};
 
-use crate::pine::{dst, USAGE_QUERY_RAND};
+use crate::{
+    constants::DapAggregatorRole,
+    pine::{dst, USAGE_QUERY_RAND},
+};
 use prio_draft09::{
     codec::{CodecError, Decode, Encode, ParameterizedDecode},
     field::FftFriendlyFieldElement,
@@ -376,28 +379,29 @@ impl<F: FftFriendlyFieldElement, const SEED_SIZE: usize> Encode for PinePrepStat
     }
 }
 
-impl<F, X, const SEED_SIZE: usize> ParameterizedDecode<(&Pine<F, X, SEED_SIZE>, bool)>
+impl<F, X, const SEED_SIZE: usize> ParameterizedDecode<(&Pine<F, X, SEED_SIZE>, DapAggregatorRole)>
     for PinePrepState<F, SEED_SIZE>
 where
     F: FftFriendlyFieldElement,
     X: Xof<SEED_SIZE>,
 {
     fn decode_with_param(
-        (pine, is_leader): &(&Pine<F, X, SEED_SIZE>, bool),
+        (pine, role): &(&Pine<F, X, SEED_SIZE>, DapAggregatorRole),
         bytes: &mut std::io::Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let (gradient_share, meas_share_seed) = if *is_leader {
-            (
+        let (gradient_share, meas_share_seed) = match role {
+            DapAggregatorRole::Leader => (
                 std::iter::repeat_with(|| F::decode(bytes))
                     .take(pine.flp.dimension)
                     .collect::<Result<Vec<_>, _>>()?,
                 None,
-            )
-        } else {
-            let seed = Seed::decode(bytes)?;
-            let mut gradient_share = pine.helper_meas_share(seed.as_ref());
-            gradient_share.truncate(pine.flp.dimension);
-            (gradient_share, Some(seed))
+            ),
+            DapAggregatorRole::Helper => {
+                let seed = Seed::decode(bytes)?;
+                let mut gradient_share = pine.helper_meas_share(seed.as_ref());
+                gradient_share.truncate(pine.flp.dimension);
+                (gradient_share, Some(seed))
+            }
         };
 
         Ok(Self {
@@ -765,7 +769,10 @@ mod tests {
         },
     };
 
-    use crate::pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine, PineParam};
+    use crate::{
+        constants::DapAggregatorRole,
+        pine::{msg, norm_bound_f64_to_u64, vdaf::PineVec, Pine, PineParam},
+    };
 
     use assert_matches::assert_matches;
 
@@ -981,14 +988,14 @@ mod tests {
         };
 
         let got = PinePrepState::get_decoded_with_param(
-            &(&pine, true),
+            &(&pine, DapAggregatorRole::Leader),
             &leader_prep_state.get_encoded().unwrap(),
         )
         .unwrap();
         assert_eq!(got, leader_prep_state);
 
         let got = PinePrepState::get_decoded_with_param(
-            &(&pine, false),
+            &(&pine, DapAggregatorRole::Helper),
             &helper_prep_state.get_encoded().unwrap(),
         )
         .unwrap();
