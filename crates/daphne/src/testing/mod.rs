@@ -223,7 +223,6 @@ impl AggregationJobTest {
                         self.replay_protection,
                     )
                     .unwrap(),
-                self.task_config.version,
             )
             .unwrap()
     }
@@ -242,7 +241,6 @@ impl AggregationJobTest {
                 leader_state,
                 agg_job_resp,
                 &self.leader_metrics,
-                self.task_config.version,
             )
             .unwrap()
     }
@@ -255,13 +253,7 @@ impl AggregationJobTest {
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
-            .consume_agg_job_resp(
-                &self.task_id,
-                leader_state,
-                agg_job_resp,
-                metrics,
-                self.task_config.version,
-            )
+            .consume_agg_job_resp(&self.task_id, leader_state, agg_job_resp, metrics)
             .expect_err("consume_agg_job_resp() succeeded; expected failure")
     }
 

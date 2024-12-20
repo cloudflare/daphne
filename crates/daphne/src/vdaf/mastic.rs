@@ -232,18 +232,19 @@ mod test {
 
     use super::*;
     use crate::{
-        hpke::HpkeKemId, test_versions, testing::AggregationJobTest, vdaf::VdafConfig,
-        DapAggregateResult, DapMeasurement, DapVersion,
+        hpke::HpkeKemId, testing::AggregationJobTest, vdaf::VdafConfig, DapAggregateResult,
+        DapMeasurement, DapVersion,
     };
 
-    fn roundtrip_count(version: DapVersion) {
+    #[test]
+    fn roundtrip_count() {
         let mut t = AggregationJobTest::new(
             &VdafConfig::Mastic {
                 input_size: 4,
                 weight_config: MasticWeightConfig::Count,
             },
             HpkeKemId::X25519HkdfSha256,
-            version,
+            DapVersion::Latest,
         );
         let got = t.roundtrip(
             DapAggregationParam::Mastic(
@@ -279,6 +280,4 @@ mod test {
 
         assert_eq!(got, DapAggregateResult::U64Vec(vec![1, 2]));
     }
-
-    test_versions! { roundtrip_count }
 }

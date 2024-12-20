@@ -1,14 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(feature = "experimental")]
-use crate::vdaf::mastic::mastic_unshard;
 use crate::{
     constants::DapAggregatorRole,
     fatal_error,
     hpke::{info_and_aad, HpkeDecrypter},
     messages::{BatchSelector, HpkeCiphertext, TaskId},
-    vdaf::prio2::prio2_unshard,
     DapAggregateResult, DapAggregationParam, DapError, DapVersion, VdafConfig,
 };
 
@@ -72,18 +69,7 @@ impl VdafConfig {
         }
 
         let num_measurements = usize::try_from(report_count).unwrap();
-        match self {
-            Self::Prio3(prio3_config) => {
-                prio3_config.unshard(version, num_measurements, agg_shares)
-            }
-            Self::Prio2 { dimension } => prio2_unshard(*dimension, num_measurements, agg_shares),
-            #[cfg(feature = "experimental")]
-            Self::Mastic {
-                input_size: _,
-                weight_config,
-            } => mastic_unshard(*weight_config, agg_param, agg_shares),
-            Self::Pine(pine) => pine.unshard(num_measurements, agg_shares),
-        }
-        .map_err(|e| fatal_error!(err = ?e, "failed to unshard agg_shares"))
+        self.unshard(version, agg_param, num_measurements, agg_shares)
+            .map_err(|e| fatal_error!(err = ?e, "failed to unshard agg_shares"))
     }
 }

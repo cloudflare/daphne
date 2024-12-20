@@ -1,8 +1,6 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#[cfg(feature = "experimental")]
-use crate::vdaf::mastic::mastic_prep_init;
 use crate::{
     constants::DapAggregatorRole,
     hpke::{info_and_aad, HpkeDecrypter},
@@ -10,7 +8,7 @@ use crate::{
         self, Extension, PlaintextInputShare, ReportError, ReportMetadata, ReportShare, TaskId,
     },
     protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
-    vdaf::{prio2::prio2_prep_init, VdafConfig, VdafPrepShare, VdafPrepState},
+    vdaf::{VdafPrepShare, VdafPrepState},
     DapAggregationParam, DapError, DapTaskConfig,
 };
 use prio::codec::{CodecError, ParameterizedDecode as _};
@@ -98,9 +96,6 @@ impl<P> InitializedReport<P> {
         task_config: &DapTaskConfig,
         report_share: ReportShare,
         prep_init_payload: S,
-        // We need to use this variable for Mastic, which is currently fenced by the
-        // "experimental" feature.
-        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
         agg_param: &DapAggregationParam,
     ) -> Result<Self, DapError>
     where
@@ -193,44 +188,16 @@ impl<P> InitializedReport<P> {
             DapAggregatorRole::Leader => 0,
             DapAggregatorRole::Helper => 1,
         };
-        let res = match &task_config.vdaf {
-            VdafConfig::Prio3(prio3_config) => prio3_config.prep_init(
-                task_config.version,
-                &task_config.vdaf_verify_key,
-                *task_id,
-                agg_id,
-                &report_share.report_metadata.id.0,
-                &report_share.public_share,
-                &input_share,
-            ),
-            VdafConfig::Prio2 { dimension } => prio2_prep_init(
-                *dimension,
-                &task_config.vdaf_verify_key,
-                agg_id,
-                &report_share.report_metadata.id.0,
-                &report_share.public_share,
-                &input_share,
-            ),
-            #[cfg(feature = "experimental")]
-            VdafConfig::Mastic {
-                input_size,
-                weight_config,
-            } => mastic_prep_init(
-                *input_size,
-                *weight_config,
-                &task_config.vdaf_verify_key,
-                agg_param,
-                &report_share.public_share,
-                input_share.as_ref(),
-            ),
-            VdafConfig::Pine(pine) => pine.prep_init(
-                &task_config.vdaf_verify_key,
-                agg_id,
-                &report_share.report_metadata.id.0,
-                &report_share.public_share,
-                &input_share,
-            ),
-        };
+        let res = task_config.vdaf.prep_init(
+            task_config.version,
+            &task_config.vdaf_verify_key,
+            *task_id,
+            agg_id,
+            agg_param,
+            report_share.report_metadata.id.as_ref(),
+            &report_share.public_share,
+            &input_share,
+        );
 
         match res {
             Ok((prep_state, prep_share)) => Ok(InitializedReport::Ready {

@@ -341,13 +341,8 @@ async fn run_agg_job<A: DapLeader>(
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     // Handle AggregationJobResp.
-    let agg_span = task_config.consume_agg_job_resp(
-        task_id,
-        agg_job_state,
-        agg_job_resp,
-        metrics,
-        task_config.version,
-    )?;
+    let agg_span =
+        task_config.consume_agg_job_resp(task_id, agg_job_state, agg_job_resp, metrics)?;
 
     let out_shares_count = agg_span.report_count() as u64;
     if out_shares_count == 0 {

@@ -232,7 +232,6 @@ async fn finish_agg_job_and_aggregate(
             &report_status,
             part_batch_sel,
             initialized_reports,
-            task_config.version,
         )?;
 
         let put_shares_result = helper
