@@ -223,6 +223,33 @@ pub async fn handle_upload_req<A: DapLeader>(
         .into());
     }
 
+    match (
+        &report.report_metadata.public_extensions,
+        task_config.version,
+    ) {
+        (Some(extensions), DapVersion::Latest) => {
+            if !extensions.is_empty() {
+                return match DapAbort::unsupported_extensions(&task_id, extensions) {
+                    Ok(abort) => Err::<(), DapError>(abort.into()),
+                    Err(fatal) => Err(fatal),
+                };
+            }
+        }
+        (None, DapVersion::Draft09) => (),
+        (Some(_), DapVersion::Draft09) => {
+            return Err(DapError::Abort(DapAbort::version_mismatch(
+                DapVersion::Draft09,
+                DapVersion::Latest,
+            )))
+        }
+        (None, DapVersion::Latest) => {
+            return Err(DapError::Abort(DapAbort::version_mismatch(
+                DapVersion::Latest,
+                DapVersion::Draft09,
+            )))
+        }
+    }
+
     // Store the report for future processing. At this point, the report may be rejected if
     // the Leader detects that the report was replayed or pertains to a batch that has already
     // been collected.
