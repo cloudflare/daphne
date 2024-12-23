@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{
-    no_duplicates,
+    check_no_duplicates,
     report_init::{InitializedReport, WithPeerPrepShare},
 };
 use crate::{
@@ -241,7 +241,7 @@ impl DapTaskConfig {
             DapAggregationParam::get_decoded_with_param(&self.vdaf, &agg_job_init_req.agg_param)
                 .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
         if replay_protection.enabled() {
-            no_duplicates(
+            check_no_duplicates(
                 agg_job_init_req
                     .prep_inits
                     .iter()

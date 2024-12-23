@@ -772,6 +772,87 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_failure_hpke_decrypt_error }
 
+    #[tokio::test]
+    async fn handle_unknown_public_extensions() {
+        let version = DapVersion::Latest;
+        let t = Test::new(version);
+        let task_id = &t.time_interval_task_id;
+        let task_config = t.leader.unchecked_get_task_config(task_id).await;
+
+        // Construct HPKE config list.
+        let hpke_config_list = [
+            t.leader
+                .get_hpke_config_for(task_config.version, Some(task_id))
+                .await
+                .unwrap()
+                .clone(),
+            t.helper
+                .get_hpke_config_for(task_config.version, Some(task_id))
+                .await
+                .unwrap()
+                .clone(),
+        ];
+
+        let report = task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &hpke_config_list,
+                t.now,
+                task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                Some(vec![Extension::NotImplemented {
+                    typ: 0x01,
+                    payload: vec![0x01],
+                }]),
+                vec![],
+                task_config.version,
+            )
+            .unwrap();
+
+        let req = DapRequest {
+            meta: DapRequestMeta {
+                version: task_config.version,
+                media_type: Some(DapMediaType::Report),
+                task_id: *task_id,
+                ..Default::default()
+            },
+            resource_id: (),
+            payload: report,
+        };
+        assert_eq!(
+            leader::handle_upload_req(&*t.leader, req).await,
+            Err(DapError::Abort(DapAbort::UnsupportedExtension {
+                detail: "[1]".into(),
+                task_id: *task_id
+            }))
+        );
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "assertion `left == right` failed\n  left: Latest\n right: Draft09")]
+    async fn handle_public_extensions_draft09() {
+        let version = DapVersion::Draft09;
+        let t = Test::new(version);
+        let task_id = &t.time_interval_task_id;
+        let task_config = t.leader.unchecked_get_task_config(task_id).await;
+        let mut report = t.gen_test_report(task_id).await;
+        // This change breaks the HPKE decryption, but triggers a failure
+        // before the HPKE data is checked.
+        report.report_metadata.public_extensions = Some(vec![]);
+
+        let req = DapRequest {
+            meta: DapRequestMeta {
+                version: task_config.version,
+                media_type: Some(DapMediaType::Report),
+                task_id: *task_id,
+                ..Default::default()
+            },
+            resource_id: (),
+            payload: report,
+        };
+        _ = leader::handle_upload_req(&*t.leader, req).await;
+    }
+
     async fn handle_agg_job_req_transition_continue(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
@@ -1484,6 +1565,10 @@ mod test {
                     t.now,
                     &task_id,
                     test_measurement.clone(),
+                    match version {
+                        DapVersion::Draft09 => None,
+                        DapVersion::Latest => Some(vec![]),
+                    },
                     vec![Extension::Taskprov],
                     task_config.version,
                 )
@@ -1598,6 +1683,271 @@ mod test {
             DapMeasurement::F64Vec(vec![0.0; 10]),
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn leader_upload_taskprov_public() {
+        let version = DapVersion::Latest;
+        let t = Test::new(DapVersion::Latest);
+
+        let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+            version,
+            min_batch_size: 1,
+            query: DapBatchMode::LeaderSelected {
+                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+            },
+            ..Default::default()
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            t.now,
+            t.leader.get_taskprov_config().unwrap(),
+        )
+        .unwrap();
+
+        // Clients: Send upload request to Leader.
+        let hpke_config_list = [
+            t.leader
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+            t.helper
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+        ];
+
+        for _ in 0..task_config.min_batch_size {
+            let report = task_config
+                .vdaf
+                .produce_report_with_extensions(
+                    &hpke_config_list,
+                    t.now + 1,
+                    &task_id,
+                    DapMeasurement::U32Vec(vec![1; 10]),
+                    Some(vec![Extension::Taskprov]),
+                    vec![],
+                    version,
+                )
+                .unwrap();
+            let req = DapRequest {
+                meta: DapRequestMeta {
+                    version,
+                    media_type: Some(DapMediaType::Report),
+                    task_id,
+                    taskprov_advertisement: Some(taskprov_advertisement.clone()),
+                },
+                resource_id: (),
+                payload: report,
+            };
+            leader::handle_upload_req(&*t.leader, req).await.unwrap();
+        }
+        // Collector: Request result from the Leader.
+        let query = Query::LeaderSelectedCurrentBatch;
+        leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
+            .await
+            .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
+
+        assert_metrics_include!(t.helper_registry, {
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="aggregate"}"#: 1,
+            r#"inbound_request_counter{env="test_helper",host="helper.org",type="collect"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_helper",host="helper.org",status="collected"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="started"}"#: 1,
+            r#"aggregation_job_counter{env="test_helper",host="helper.org",status="completed"}"#: 1,
+        });
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="aggregated"}"#: 1,
+            r#"report_counter{env="test_leader",host="leader.com",status="collected"}"#: 1,
+        });
+    }
+
+    #[tokio::test]
+    async fn leader_upload_taskprov_public_extension_errors() {
+        let version = DapVersion::Latest;
+        let t = Test::new(DapVersion::Latest);
+
+        let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+            version,
+            min_batch_size: 1,
+            query: DapBatchMode::LeaderSelected {
+                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+            },
+            ..Default::default()
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            t.now,
+            t.leader.get_taskprov_config().unwrap(),
+        )
+        .unwrap();
+
+        // Clients: Send upload request to Leader.
+        let hpke_config_list = [
+            t.leader
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+            t.helper
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+        ];
+
+        let report = task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &hpke_config_list,
+                t.now + 1,
+                &task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                Some(vec![Extension::Taskprov, Extension::Taskprov]),
+                vec![],
+                version,
+            )
+            .unwrap();
+        let req = DapRequest {
+            meta: DapRequestMeta {
+                version,
+                media_type: Some(DapMediaType::Report),
+                task_id,
+                taskprov_advertisement: Some(taskprov_advertisement.clone()),
+            },
+            resource_id: (),
+            payload: report,
+        };
+        assert_eq!(
+            DapError::Abort(DapAbort::InvalidMessage {
+                detail: "Repeated public extension".into(),
+                task_id,
+            }),
+            leader::handle_upload_req(&*t.leader, req)
+                .await
+                .unwrap_err()
+        );
+
+        let report = task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &hpke_config_list,
+                t.now + 1,
+                &task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                Some(vec![
+                    Extension::Taskprov,
+                    Extension::NotImplemented {
+                        typ: 14,
+                        payload: b"Ignore".into(),
+                    },
+                    Extension::NotImplemented {
+                        typ: 15,
+                        payload: b"Ignore".into(),
+                    },
+                ]),
+                vec![],
+                version,
+            )
+            .unwrap();
+        let req = DapRequest {
+            meta: DapRequestMeta {
+                version,
+                media_type: Some(DapMediaType::Report),
+                task_id,
+                taskprov_advertisement: Some(taskprov_advertisement.clone()),
+            },
+            resource_id: (),
+            payload: report,
+        };
+
+        assert_eq!(
+            DapError::Abort(DapAbort::unsupported_extension(&task_id, &[14, 15]).unwrap()),
+            leader::handle_upload_req(&*t.leader, req)
+                .await
+                .unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn leader_upload_taskprov_in_public_and_private_extensions() {
+        let version = DapVersion::Latest;
+        let t = Test::new(DapVersion::Latest);
+
+        let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+            version,
+            min_batch_size: 1,
+            query: DapBatchMode::LeaderSelected {
+                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+            },
+            ..Default::default()
+        }
+        .to_config_with_taskprov(
+            b"cool task".to_vec(),
+            t.now,
+            t.leader.get_taskprov_config().unwrap(),
+        )
+        .unwrap();
+
+        // Clients: Send upload request to Leader.
+        let hpke_config_list = [
+            t.leader
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+            t.helper
+                .get_hpke_config_for(version, Some(&task_id))
+                .await
+                .unwrap()
+                .clone(),
+        ];
+
+        for _ in 0..task_config.min_batch_size {
+            let report = task_config
+                .vdaf
+                .produce_report_with_extensions(
+                    &hpke_config_list,
+                    t.now + 1,
+                    &task_id,
+                    DapMeasurement::U32Vec(vec![1; 10]),
+                    Some(vec![Extension::Taskprov]),
+                    vec![Extension::Taskprov],
+                    version,
+                )
+                .unwrap();
+            let req = DapRequest {
+                meta: DapRequestMeta {
+                    version,
+                    media_type: Some(DapMediaType::Report),
+                    task_id,
+                    taskprov_advertisement: Some(taskprov_advertisement.clone()),
+                },
+                resource_id: (),
+                payload: report,
+            };
+            leader::handle_upload_req(&*t.leader, req).await.unwrap();
+        }
+        // Collector: Request result from the Leader.
+        let query = Query::LeaderSelectedCurrentBatch;
+        leader::handle_coll_job_req(&*t.leader, &t.gen_test_coll_job_req(query, &task_id).await)
+            .await
+            .unwrap();
+
+        leader::process(&*t.leader, "leader.com", 100)
+            .await
+            .unwrap();
+
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_invalid_message"}"#: 1,
+            r#"inbound_request_counter{env="test_leader",host="leader.com",type="upload"}"#: 1,
+        });
     }
 
     // Test multiple tasks in flight at once.

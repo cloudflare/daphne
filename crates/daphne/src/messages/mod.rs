@@ -177,7 +177,7 @@ pub type Duration = u64;
 pub type Time = u64;
 
 /// Report extensions.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Hash)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum Extension {
@@ -195,16 +195,13 @@ impl Extension {
     }
 }
 
-impl ParameterizedEncode<DapVersion> for Extension {
-    fn encode_with_param(
-        &self,
-        version: &DapVersion,
-        bytes: &mut Vec<u8>,
-    ) -> Result<(), CodecError> {
+impl Encode for Extension {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
         match self {
             Self::Taskprov => {
                 EXTENSION_TASKPROV.encode(bytes)?;
-                encode_u16_prefixed(*version, bytes, |_, _| Ok(()))?;
+                // We've hard coded the version here, but we don't actually use it.
+                encode_u16_prefixed(DapVersion::Latest, bytes, |_, _| Ok(()))?;
             }
             Self::NotImplemented { typ, payload } => {
                 typ.encode(bytes)?;
@@ -215,15 +212,15 @@ impl ParameterizedEncode<DapVersion> for Extension {
     }
 }
 
-impl ParameterizedDecode<DapVersion> for Extension {
-    fn decode_with_param(
-        version: &DapVersion,
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
+impl Decode for Extension {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
         let typ = u16::decode(bytes)?;
         match typ {
             EXTENSION_TASKPROV => {
-                decode_u16_prefixed(*version, bytes, |_version, inner, _len| <()>::decode(inner))?;
+                // We've hard coded the version here, but we don't actually use it.
+                decode_u16_prefixed(DapVersion::Latest, bytes, |_version, inner, _len| {
+                    <()>::decode(inner)
+                })?;
                 Ok(Self::Taskprov)
             }
             _ => Ok(Self::NotImplemented {
@@ -240,28 +237,45 @@ impl ParameterizedDecode<DapVersion> for Extension {
 pub struct ReportMetadata {
     pub id: ReportId,
     pub time: Time,
+    pub public_extensions: Option<Vec<Extension>>,
 }
 
 impl ParameterizedEncode<DapVersion> for ReportMetadata {
     fn encode_with_param(
         &self,
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         self.id.encode(bytes)?;
         self.time.encode(bytes)?;
+        match (version, &self.public_extensions) {
+            (DapVersion::Draft09, None) => (),
+            (DapVersion::Latest, Some(extensions)) => {
+                encode_u16_items(bytes, version, extensions.as_slice())?;
+            }
+            _ => {
+                return Err(CodecError::Other(
+                    "encountered incorrectly set public extensions".into(),
+                ))
+            }
+        }
+
         Ok(())
     }
 }
 
 impl ParameterizedDecode<DapVersion> for ReportMetadata {
     fn decode_with_param(
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         let metadata = Self {
             id: ReportId::decode(bytes)?,
             time: Time::decode(bytes)?,
+            public_extensions: match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(decode_u16_items(version, bytes)?),
+            },
         };
 
         Ok(metadata)
@@ -1406,7 +1420,7 @@ impl Decode for HpkeCiphertext {
 /// A plaintext input share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaintextInputShare {
-    pub extensions: Vec<Extension>,
+    pub private_extensions: Vec<Extension>,
     pub payload: Vec<u8>,
 }
 
@@ -1416,7 +1430,7 @@ impl ParameterizedEncode<DapVersion> for PlaintextInputShare {
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u16_items(bytes, version, &self.extensions)?;
+        encode_u16_items(bytes, version, &self.private_extensions)?;
         encode_u32_bytes(bytes, &self.payload)?;
         Ok(())
     }
@@ -1428,7 +1442,7 @@ impl ParameterizedDecode<DapVersion> for PlaintextInputShare {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
-            extensions: decode_u16_items(version, bytes)?,
+            private_extensions: decode_u16_items(version, bytes)?,
             payload: decode_u32_bytes(bytes)?,
         })
     }
@@ -1570,6 +1584,10 @@ mod test {
             report_metadata: ReportMetadata {
                 id: ReportId([23; 16]),
                 time: 1_637_364_244,
+                public_extensions: match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(Vec::new()),
+                },
             },
             public_share: b"public share".to_vec(),
             encrypted_input_shares: [
@@ -1596,6 +1614,59 @@ mod test {
     }
 
     test_versions! {read_report}
+
+    fn report_metadata_encode_decode(version: DapVersion) {
+        let ext_rm = ReportMetadata {
+            id: ReportId([15; 16]),
+            time: 123_456,
+            public_extensions: Some(vec![Extension::NotImplemented {
+                typ: 0x10,
+                payload: vec![0x11, 0x12],
+            }]),
+        };
+        let no_ext_rm = ReportMetadata {
+            id: ReportId([13; 16]),
+            time: 123_456,
+            public_extensions: None,
+        };
+        let good_rm = match version {
+            DapVersion::Draft09 => &no_ext_rm,
+            DapVersion::Latest => &ext_rm,
+        };
+        let bad_rm = match version {
+            DapVersion::Draft09 => &ext_rm,
+            DapVersion::Latest => &no_ext_rm,
+        };
+        assert!(matches!(
+            bad_rm.get_encoded_with_param(&version).unwrap_err(),
+            CodecError::Other(..)
+        ));
+        let bytes = good_rm.get_encoded_with_param(&version).unwrap();
+        assert_eq!(
+            ReportMetadata::get_decoded_with_param(&version, bytes.as_slice()).unwrap(),
+            *good_rm
+        );
+    }
+
+    test_versions! {report_metadata_encode_decode}
+
+    #[test]
+    fn report_metadata_encode_latest_decode_draft09() {
+        let ext_rm = ReportMetadata {
+            id: ReportId([15; 16]),
+            time: 123_456,
+            public_extensions: Some(vec![Extension::NotImplemented {
+                typ: 0x10,
+                payload: vec![0x11, 0x12],
+            }]),
+        };
+        let bytes = ext_rm.get_encoded_with_param(&DapVersion::Latest).unwrap();
+        assert!(matches!(
+            ReportMetadata::get_decoded_with_param(&DapVersion::Draft09, bytes.as_slice())
+                .unwrap_err(),
+            CodecError::BytesLeftOver(..)
+        ));
+    }
 
     fn partial_batch_selector_encode_decode(version: DapVersion) {
         const TEST_DATA_DRAFT09: &[u8] = &[1];
@@ -1684,14 +1755,15 @@ mod test {
             0, 0, 0, 32, 116, 104, 105, 115, 32, 105, 115, 32, 97, 110, 32, 97, 103, 103, 114, 101,
             103, 97, 116, 105, 111, 110, 32, 112, 97, 114, 97, 109, 101, 116, 101, 114, 2, 0, 32,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 158, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
-            0, 0, 0, 0, 97, 152, 38, 185, 0, 0, 0, 12, 112, 117, 98, 108, 105, 99, 32, 115, 104,
-            97, 114, 101, 23, 0, 16, 101, 110, 99, 97, 112, 115, 117, 108, 97, 116, 101, 100, 32,
-            107, 101, 121, 0, 0, 0, 10, 99, 105, 112, 104, 101, 114, 116, 101, 120, 116, 0, 0, 0,
-            10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-            17, 17, 17, 17, 17, 17, 17, 0, 0, 0, 0, 9, 194, 107, 103, 0, 0, 0, 12, 112, 117, 98,
-            108, 105, 99, 32, 115, 104, 97, 114, 101, 0, 0, 0, 0, 0, 0, 10, 99, 105, 112, 104, 101,
-            114, 116, 101, 120, 116, 0, 0, 0, 10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101,
+            0, 0, 0, 0, 0, 0, 162, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+            0, 0, 0, 0, 97, 152, 38, 185, 0, 0, 0, 0, 0, 12, 112, 117, 98, 108, 105, 99, 32, 115,
+            104, 97, 114, 101, 23, 0, 16, 101, 110, 99, 97, 112, 115, 117, 108, 97, 116, 101, 100,
+            32, 107, 101, 121, 0, 0, 0, 10, 99, 105, 112, 104, 101, 114, 116, 101, 120, 116, 0, 0,
+            0, 10, 112, 114, 101, 112, 32, 115, 104, 97, 114, 101, 17, 17, 17, 17, 17, 17, 17, 17,
+            17, 17, 17, 17, 17, 17, 17, 17, 0, 0, 0, 0, 9, 194, 107, 103, 0, 0, 0, 0, 0, 12, 112,
+            117, 98, 108, 105, 99, 32, 115, 104, 97, 114, 101, 0, 0, 0, 0, 0, 0, 10, 99, 105, 112,
+            104, 101, 114, 116, 101, 120, 116, 0, 0, 0, 10, 112, 114, 101, 112, 32, 115, 104, 97,
+            114, 101,
         ];
 
         let want = AggregationJobInitReq {
@@ -1705,6 +1777,10 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
                             time: 1_637_361_337,
+                            public_extensions: match version {
+                                DapVersion::Draft09 => None,
+                                DapVersion::Latest => Some(Vec::new()),
+                            },
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1720,6 +1796,10 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
                             time: 163_736_423,
+                            public_extensions: match version {
+                                DapVersion::Draft09 => None,
+                                DapVersion::Latest => Some(Vec::new()),
+                            },
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1759,6 +1839,10 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([99; 16]),
                             time: 1_637_361_337,
+                            public_extensions: match version {
+                                DapVersion::Draft09 => None,
+                                DapVersion::Latest => Some(Vec::new()),
+                            },
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {
@@ -1774,6 +1858,10 @@ mod test {
                         report_metadata: ReportMetadata {
                             id: ReportId([17; 16]),
                             time: 163_736_423,
+                            public_extensions: match version {
+                                DapVersion::Draft09 => None,
+                                DapVersion::Latest => Some(Vec::new()),
+                            },
                         },
                         public_share: b"public share".to_vec(),
                         encrypted_input_share: HpkeCiphertext {

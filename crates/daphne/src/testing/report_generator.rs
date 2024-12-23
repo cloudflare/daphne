@@ -45,7 +45,8 @@ impl ReportGenerator {
         measurement: &DapMeasurement,
         version: DapVersion,
         now: Time,
-        extensions: Vec<messages::Extension>,
+        public_extensions: Option<Vec<messages::Extension>>,
+        private_extensions: Vec<messages::Extension>,
         replay_reports: bool,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
@@ -78,7 +79,8 @@ impl ReportGenerator {
                                     report_time_dist.sample(&mut thread_rng()),
                                     &task_id,
                                     measurement.clone(),
-                                    extensions.clone(),
+                                    public_extensions.clone(),
+                                    private_extensions.clone(),
                                     version,
                                 )
                                 .expect("we have to panic here since we can't return the error")
@@ -90,7 +92,8 @@ impl ReportGenerator {
                             report_time_dist.sample(&mut thread_rng()),
                             &task_id,
                             measurement.clone(),
-                            extensions.clone(),
+                            public_extensions.clone(),
+                            private_extensions.clone(),
                             version,
                         )?
                     };

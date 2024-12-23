@@ -7,7 +7,7 @@ use crate::{
     messages::{
         self, Extension, PlaintextInputShare, ReportError, ReportMetadata, ReportShare, TaskId,
     },
-    protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
+    protocol::{check_no_duplicates, decode_ping_pong_framed, PingPongMessageType},
     vdaf::{VdafConfig, VdafPrepShare, VdafPrepState, VdafVerifyKey},
     DapAggregationParam, DapError, DapTaskConfig, DapVersion,
 };
@@ -158,9 +158,16 @@ impl<P> InitializedReport<P> {
             _ => {}
         }
 
+        match (
+            &report_share.report_metadata.public_extensions,
+            task_config.version,
+        ) {
+            (Some(..), crate::DapVersion::Latest) | (None, crate::DapVersion::Draft09) => (),
+            (_, _) => reject!(InvalidMessage),
+        }
         // decrypt input share
         let PlaintextInputShare {
-            extensions,
+            private_extensions,
             payload: input_share,
         } = {
             let info = info_and_aad::InputShare {
@@ -194,18 +201,38 @@ impl<P> InitializedReport<P> {
 
         // Handle report extensions.
         {
-            if no_duplicates(extensions.iter().map(|e| e.type_code())).is_err() {
+            // Check for duplicates in public and private extensions
+            if check_no_duplicates(
+                private_extensions
+                    .iter()
+                    .chain(
+                        report_share
+                            .report_metadata
+                            .public_extensions
+                            .as_deref()
+                            .unwrap_or_default(),
+                    )
+                    .map(|e| e.type_code()),
+            )
+            .is_err()
+            {
                 reject!(InvalidMessage)
             }
-            let mut taskprov_indicated = false;
-            for extension in extensions {
-                match extension {
-                    Extension::Taskprov { .. } if task_config.method_is_taskprov => {
-                        taskprov_indicated = true;
-                    }
 
+            let mut taskprov_indicated = false;
+            for extension in private_extensions.iter().chain(
+                report_share
+                    .report_metadata
+                    .public_extensions
+                    .as_deref()
+                    .unwrap_or_default(),
+            ) {
+                match extension {
+                    Extension::Taskprov { .. } => {
+                        taskprov_indicated = task_config.method_is_taskprov;
+                    }
                     // Reject reports with unrecognized extensions.
-                    _ => reject!(InvalidMessage),
+                    Extension::NotImplemented { .. } => reject!(InvalidMessage),
                 }
             }
 
