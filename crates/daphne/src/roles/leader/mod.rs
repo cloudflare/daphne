@@ -20,9 +20,10 @@ use crate::{
     messages::{
         taskprov::TaskprovAdvertisement, AggregateShare, AggregateShareReq, AggregationJobId,
         AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-        CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
+        CollectionReq, Extension, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
+    protocol,
     roles::resolve_task_config,
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
     DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
@@ -214,6 +215,8 @@ pub async fn handle_upload_req<A: DapLeader>(
         }
         .into());
     }
+
+    // Check that the report was generated after the task's `not_before` time.
     if report.report_metadata.time
         < task_config.as_ref().not_before - task_config.as_ref().time_precision
     {
@@ -221,6 +224,34 @@ pub async fn handle_upload_req<A: DapLeader>(
             detail: "The timestamp preceeds the start of the task's validity window".into(),
         }
         .into());
+    }
+
+    if let Some(public_extensions) = &report.report_metadata.public_extensions {
+        // We can be sure at this point that the ReportMetadata is well formed
+        // because the decoding / error checking happens in the extractor.
+        assert_eq!(DapVersion::Latest, task_config.version);
+        let mut unknown_extensions = Vec::<u16>::new();
+        if protocol::check_no_duplicates(public_extensions.iter()).is_err() {
+            return Err(DapError::Abort(DapAbort::InvalidMessage {
+                detail: "Repeated public extension".into(),
+                task_id,
+            }));
+        };
+        for extension in public_extensions {
+            match extension {
+                Extension::Taskprov => (),
+                Extension::NotImplemented { typ, .. } => unknown_extensions.push(*typ),
+            }
+        }
+
+        if !unknown_extensions.is_empty() {
+            return match DapAbort::unsupported_extension(&task_id, &unknown_extensions) {
+                Ok(abort) => Err::<(), DapError>(abort.into()),
+                Err(fatal) => Err(fatal),
+            };
+        }
+    } else {
+        assert_eq!(DapVersion::Draft09, task_config.version);
     }
 
     // Store the report for future processing. At this point, the report may be rejected if

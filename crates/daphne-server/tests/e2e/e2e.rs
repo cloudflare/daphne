@@ -304,6 +304,10 @@ async fn leader_upload(version: DapVersion) {
                     report_metadata: ReportMetadata {
                         id: ReportId([1; 16]),
                         time: t.now,
+                        public_extensions: match version {
+                            DapVersion::Draft09 => None,
+                            DapVersion::Latest => Some(Vec::new()),
+                        },
                     },
                     public_share: b"public share".to_vec(),
                     encrypted_input_shares: [
@@ -424,6 +428,10 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -451,6 +459,10 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -516,6 +528,10 @@ async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -540,6 +556,100 @@ async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
 }
 
 async_test_versions!(leader_upload_taskprov_wrong_version);
+
+#[tokio::test]
+async fn leader_upload_taksprov_public_errors() {
+    let version = DapVersion::Latest;
+    let t = TestRunner::default_with_version(version).await;
+    let client = t.http_client();
+    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
+
+    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
+        version,
+        min_batch_size: 10,
+        query: DapBatchMode::TimeInterval,
+        leader_url: t.task_config.leader_url.clone(),
+        helper_url: t.task_config.helper_url.clone(),
+        ..Default::default()
+    }
+    .to_config_with_taskprov(
+        b"cool task".to_vec(),
+        t.now,
+        daphne::roles::aggregator::TaskprovConfig {
+            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
+            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
+        },
+    )
+    .unwrap();
+
+    // Repeated public extension
+    let report = task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now + 1,
+            &task_id,
+            DapMeasurement::U32Vec(vec![1; 10]),
+            Some(vec![Extension::Taskprov, Extension::Taskprov]),
+            vec![],
+            version,
+        )
+        .unwrap();
+    t.leader_request_expect_abort(
+        client,
+        None,
+        &format!("tasks/{}/reports", task_id.to_base64url()),
+        &http::Method::POST,
+        DapMediaType::Report,
+        Some(
+            &taskprov_advertisement
+                .serialize_to_header_value(version)
+                .unwrap(),
+        ),
+        report.get_encoded_with_param(&version).unwrap(),
+        400,
+        "invalidMessage",
+    )
+    .await
+    .unwrap();
+
+    // Unsupported public extension
+    let report = task_config
+        .vdaf
+        .produce_report_with_extensions(
+            &hpke_config_list,
+            t.now + 1,
+            &task_id,
+            DapMeasurement::U32Vec(vec![1; 10]),
+            Some(vec![
+                Extension::Taskprov,
+                Extension::NotImplemented {
+                    typ: 3,
+                    payload: b"ignore".to_vec(),
+                },
+            ]),
+            vec![],
+            version,
+        )
+        .unwrap();
+    t.leader_request_expect_abort(
+        client,
+        None,
+        &format!("tasks/{}/reports", task_id.to_base64url()),
+        &http::Method::POST,
+        DapMediaType::Report,
+        Some(
+            &taskprov_advertisement
+                .serialize_to_header_value(version)
+                .unwrap(),
+        ),
+        report.get_encoded_with_param(&version).unwrap(),
+        400,
+        "unsupportedExtension",
+    )
+    .await
+    .unwrap();
+}
 
 async fn internal_leader_process(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
@@ -1408,6 +1518,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                     now,
                     &task_id,
                     DapMeasurement::U32Vec(vec![1; 10]),
+                    match version {
+                        DapVersion::Draft09 => None,
+                        DapVersion::Latest => Some(vec![]),
+                    },
                     extensions,
                     version,
                 )

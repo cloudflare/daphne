@@ -10,17 +10,17 @@ use crate::{
         hpke_receiver_config::{self, hpke_config},
         initialize_reports,
         initialized_reports::{self, initialized_report},
-        partial_dap_task_config, prepare_init, report_metadata, time_range,
+        partial_dap_task_config, prepare_init, public_extensions_list, report_metadata, time_range,
     },
 };
 use daphne::{
     constants::DapAggregatorRole,
     hpke::{HpkeConfig, HpkeReceiverConfig},
-    messages::{self, HpkeCiphertext, PrepareInit, ReportMetadata, ReportShare, TaskId},
+    messages::{self, Extension, HpkeCiphertext, PrepareInit, ReportMetadata, ReportShare, TaskId},
     vdaf::{VdafConfig, VdafPrepShare, VdafPrepState},
     InitializedReport, PartialDapTaskConfigForReportInit, WithPeerPrepShare,
 };
-use prio::codec::{Encode, ParameterizedDecode, ParameterizedEncode};
+use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::{borrow::Cow, ops::Range};
 
 pub struct InitializeReports<'s> {
@@ -318,9 +318,27 @@ impl CapnprotoPayloadEncode for ReportMetadata {
     type Builder<'a> = report_metadata::Builder<'a>;
 
     fn encode_to_builder(&self, mut builder: Self::Builder<'_>) {
-        let Self { id, time } = self;
+        let Self {
+            id,
+            time,
+            public_extensions,
+        } = self;
         id.encode_to_builder(builder.reborrow().init_id());
         builder.set_time(*time);
+        if let Some(ref extensions) = public_extensions {
+            let mut e = builder
+                .init_public_extensions()
+                .init_list(usize_to_capnp_len(extensions.len()));
+            for (i, data) in extensions
+                .iter()
+                .enumerate()
+                .map(|(i, ext)| (usize_to_capnp_len(i), ext.get_encoded().unwrap()))
+            {
+                e.reborrow().set(i, &data);
+            }
+        } else {
+            builder.init_public_extensions().set_none(());
+        }
     }
 }
 
@@ -331,9 +349,25 @@ impl CapnprotoPayloadDecode for ReportMetadata {
     where
         Self: Sized,
     {
+        let id = <_>::decode_from_reader(reader.get_id()?)?;
+        let time = reader.get_time();
+        let public_extensions = match reader.get_public_extensions()?.which()? {
+            public_extensions_list::List(list) => Some(
+                list?
+                    .into_iter()
+                    .map(|data| {
+                        Extension::get_decoded(data?)
+                            .map_err(|e| capnp::Error::failed(e.to_string()))
+                    })
+                    .collect::<Result<Vec<_>, capnp::Error>>()?,
+            ),
+            public_extensions_list::None(()) => None,
+        };
+
         Ok(Self {
-            id: <_>::decode_from_reader(reader.get_id()?)?,
-            time: reader.get_time(),
+            id,
+            time,
+            public_extensions,
         })
     }
 }
@@ -484,5 +518,47 @@ fn to_capnp<E: ToString>(e: E) -> capnp::Error {
     capnp::Error {
         kind: capnp::ErrorKind::Failed,
         extra: e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::capnproto::{CapnprotoPayloadDecodeExt, CapnprotoPayloadEncodeExt};
+
+    #[test]
+    fn report_metadata_roundtrip() {
+        let report_metadata = ReportMetadata {
+            id: messages::ReportId(rand::random()),
+            time: rand::random(),
+            public_extensions: Some(vec![
+                Extension::Taskprov,
+                Extension::NotImplemented {
+                    typ: 23,
+                    payload: b"some extension payload".to_vec(),
+                },
+            ]),
+        };
+
+        assert_eq!(
+            report_metadata,
+            ReportMetadata::decode_from_bytes(&report_metadata.encode_to_bytes()).unwrap()
+        );
+    }
+
+    #[test]
+    fn report_metadata_roundtrip_draft09() {
+        let report_metadata = ReportMetadata {
+            id: messages::ReportId(rand::random()),
+            time: rand::random(),
+            // draft09 compatibility: Previously there was no extensions field in the report
+            // metadata.
+            public_extensions: None,
+        };
+
+        assert_eq!(
+            report_metadata,
+            ReportMetadata::decode_from_bytes(&report_metadata.encode_to_bytes()).unwrap()
+        );
     }
 }

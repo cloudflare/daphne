@@ -655,6 +655,10 @@ impl Test {
                         measurement.as_ref(),
                         version,
                         now.0,
+                        match version {
+                            DapVersion::Draft09 => None,
+                            DapVersion::Latest => Some(vec![]),
+                        },
                         vec![messages::Extension::Taskprov],
                         self.replay_reports,
                     )

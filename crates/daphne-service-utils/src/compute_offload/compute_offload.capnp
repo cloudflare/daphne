@@ -53,10 +53,24 @@ struct PartialDapTaskConfig @0xdcc9bf18fc62d406 {
     vdafVerifyKey       @4  :VdafVerifyKey;
 }
 
+struct PublicExtensionsList @0x8b3c98c0ddd0043e {
+
+    union {
+	# Each extension is encoded according to the DAP spec in
+	# tag-length-value form.
+        list @0 :List(Data);
+
+	# draft09 compatibility: Previously DAP had no extensions in the
+	# report.
+	none @1 :Void;
+    }
+}
+
 struct ReportMetadata @0xefba178ad4584bc4 {
 
-    id   @0 :Base.ReportId;
-    time @1 :Base.Time;
+    id               @0 :Base.ReportId;
+    time             @1 :Base.Time;
+    publicExtensions @2 :PublicExtensionsList;
 }
 
 struct PrepareInit @0x8192568cb3d03f59 {
