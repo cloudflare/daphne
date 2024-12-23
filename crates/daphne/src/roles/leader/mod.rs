@@ -20,7 +20,7 @@ use crate::{
     messages::{
         taskprov::TaskprovAdvertisement, AggregateShare, AggregateShareReq, AggregationJobId,
         AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-        CollectionReq, Interval, PartialBatchSelector, Query, Report, TaskId,
+        CollectionReq, Extension, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     roles::resolve_task_config,
@@ -221,6 +221,47 @@ pub async fn handle_upload_req<A: DapLeader>(
             detail: "The timestamp preceeds the start of the task's validity window".into(),
         }
         .into());
+    }
+
+    match (
+        &report.report_metadata.public_extensions,
+        task_config.version,
+    ) {
+        (Some(extensions), DapVersion::Latest) => {
+            let mut unknown_extensions = Vec::<u16>::new();
+            if crate::protocol::no_duplicates(extensions.iter()).is_err() {
+                return Err(DapError::Abort(DapAbort::InvalidMessage {
+                    detail: "Repeated public extension".into(),
+                    task_id,
+                }));
+            };
+            for extension in extensions {
+                match extension {
+                    Extension::Taskprov => (),
+                    Extension::NotImplemented { typ, .. } => unknown_extensions.push(*typ),
+                }
+            }
+
+            if !unknown_extensions.is_empty() {
+                return match DapAbort::unsupported_extension(&task_id, &unknown_extensions) {
+                    Ok(abort) => Err::<(), DapError>(abort.into()),
+                    Err(fatal) => Err(fatal),
+                };
+            }
+        }
+        (None, DapVersion::Draft09) => (),
+        (Some(_), DapVersion::Draft09) => {
+            return Err(DapError::Abort(DapAbort::version_mismatch(
+                DapVersion::Draft09,
+                DapVersion::Latest,
+            )))
+        }
+        (None, DapVersion::Latest) => {
+            return Err(DapError::Abort(DapAbort::version_mismatch(
+                DapVersion::Latest,
+                DapVersion::Draft09,
+            )))
+        }
     }
 
     // Store the report for future processing. At this point, the report may be rejected if

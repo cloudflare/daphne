@@ -76,6 +76,10 @@ impl VdafConfig {
         let metadata = ReportMetadata {
             id: *report_id,
             time,
+            public_extensions: match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(Vec::new()),
+            },
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {

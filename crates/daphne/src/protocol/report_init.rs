@@ -158,6 +158,28 @@ impl<P> InitializedReport<P> {
             _ => {}
         }
 
+        // We don't check for duplicates here, because we check for them later
+        // on, and the taskprov extension, the only one we support, has no
+        // side-effects if processed when the report should have been rejected.
+
+        let mut taskprov_indicated = false;
+        match (
+            &report_share.report_metadata.public_extensions,
+            task_config.version,
+        ) {
+            (Some(extensions), crate::DapVersion::Latest) => {
+                for extension in extensions {
+                    match extension {
+                        Extension::Taskprov { .. } => {
+                            taskprov_indicated |= task_config.method_is_taskprov;
+                        }
+                        Extension::NotImplemented { .. } => reject!(InvalidMessage),
+                    }
+                }
+            }
+            (None, crate::DapVersion::Draft09) => (),
+            (_, _) => reject!(InvalidMessage),
+        }
         // decrypt input share
         let PlaintextInputShare {
             extensions,
@@ -194,18 +216,31 @@ impl<P> InitializedReport<P> {
 
         // Handle report extensions.
         {
-            if no_duplicates(extensions.iter().map(|e| e.type_code())).is_err() {
+            // Check for duplicates in public and private extensions
+            if no_duplicates(
+                extensions
+                    .iter()
+                    .chain(
+                        report_share
+                            .report_metadata
+                            .public_extensions
+                            .as_deref()
+                            .unwrap_or_default(),
+                    )
+                    .map(|e| e.type_code()),
+            )
+            .is_err()
+            {
                 reject!(InvalidMessage)
             }
-            let mut taskprov_indicated = false;
+
             for extension in extensions {
                 match extension {
-                    Extension::Taskprov { .. } if task_config.method_is_taskprov => {
-                        taskprov_indicated = true;
+                    Extension::Taskprov { .. } => {
+                        taskprov_indicated |= task_config.method_is_taskprov;
                     }
-
                     // Reject reports with unrecognized extensions.
-                    _ => reject!(InvalidMessage),
+                    Extension::NotImplemented { .. } => reject!(InvalidMessage),
                 }
             }
 
