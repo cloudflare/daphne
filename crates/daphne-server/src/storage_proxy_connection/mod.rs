@@ -96,7 +96,7 @@ impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
 
 impl<'d, B: DurableMethod> RequestBuilder<'d, B, [u8; 0]> {
     pub fn encode<T: CapnprotoPayloadEncode>(self, payload: &T) -> RequestBuilder<'d, B, Vec<u8>> {
-        self.with_body(payload.encode_to_bytes().unwrap())
+        self.with_body(payload.encode_to_bytes())
     }
 
     pub fn with_body<T: AsRef<[u8]>>(self, payload: T) -> RequestBuilder<'d, B, T> {
