@@ -116,6 +116,18 @@ impl<P> InitializedReport<P> {
             _ => {}
         }
 
+        match (
+            &report_share.report_metadata.public_extensions,
+            task_config.version,
+        ) {
+            (Some(extensions), crate::DapVersion::Latest) => {
+                if !extensions.is_empty() {
+                    reject!(InvalidMessage)
+                }
+            }
+            (None, crate::DapVersion::Draft09) => (),
+            (_, _) => reject!(InvalidMessage),
+        }
         // decrypt input share
         let PlaintextInputShare {
             extensions,

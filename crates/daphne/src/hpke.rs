@@ -612,6 +612,10 @@ mod test {
             report_metadata: &ReportMetadata {
                 id: ReportId(rand::random()),
                 time: rand::random(),
+                public_extensions: match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(Vec::new()),
+                },
             },
         };
         let plaintext = b"plaintext";
@@ -703,6 +707,10 @@ mod test {
         let report_metadata = &ReportMetadata {
             id: ReportId(rand::random()),
             time: rand::random(),
+            public_extensions: match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(Vec::new()),
+            },
         };
         let public_share = &vec![rand::random(); (0..100).choose(&mut rand::thread_rng()).unwrap()];
 

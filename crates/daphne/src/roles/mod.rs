@@ -765,6 +765,46 @@ mod test {
 
     async_test_versions! { handle_agg_job_req_failure_hpke_decrypt_error }
 
+    async fn handle_unknown_public_extensions(version: DapVersion) {
+        let t = Test::new(version);
+        let task_id = &t.time_interval_task_id;
+        let task_config = t.leader.unchecked_get_task_config(task_id).await;
+        let mut report = t.gen_test_report(task_id).await;
+        report.report_metadata.public_extensions = Some(vec![Extension::NotImplemented {
+            typ: 0x01,
+            payload: vec![0x01],
+        }]);
+
+        let req = DapRequest {
+            meta: DapRequestMeta {
+                version: task_config.version,
+                media_type: Some(DapMediaType::Report),
+                task_id: *task_id,
+                ..Default::default()
+            },
+            resource_id: (),
+            payload: report,
+        };
+        match version {
+            DapVersion::Draft09 => assert_eq!(
+                leader::handle_upload_req(&*t.leader, req).await,
+                Err(DapError::Abort(DapAbort::version_mismatch(
+                    DapVersion::Draft09,
+                    DapVersion::Latest
+                )))
+            ),
+            DapVersion::Latest => assert_eq!(
+                leader::handle_upload_req(&*t.leader, req).await,
+                Err(DapError::Abort(DapAbort::UnsupportedExtension {
+                    detail: "[1]".into(),
+                    task_id: *task_id
+                }))
+            ),
+        }
+    }
+
+    async_test_versions! { handle_unknown_public_extensions }
+
     async fn handle_agg_job_req_transition_continue(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;

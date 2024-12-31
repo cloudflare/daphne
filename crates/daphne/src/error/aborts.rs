@@ -95,6 +95,10 @@ pub enum DapAbort {
     /// Unrecognized DAP task. Sent in response to a request indicating an unrecognized task ID.
     #[error("unrecognizedTask")]
     UnrecognizedTask { task_id: TaskId },
+
+    /// Unsupported Extension. Sent in response to a report upload with an unsupported extension.
+    #[error("unsupportedExtension")]
+    UnsupportedExtension { detail: String, task_id: TaskId },
 }
 
 impl DapAbort {
@@ -116,7 +120,8 @@ impl DapAbort {
             | Self::InvalidBatchSize { detail, task_id }
             | Self::BatchModeMismatch { detail, task_id }
             | Self::UnauthorizedRequest { detail, task_id }
-            | Self::InvalidMessage { detail, task_id } => (
+            | Self::InvalidMessage { detail, task_id }
+            | Self::UnsupportedExtension { detail, task_id } => (
                 Some(task_id),
                 Some(detail),
                 None,
@@ -259,6 +264,25 @@ impl DapAbort {
         })
     }
 
+    pub fn unsupported_extensions(
+        task_id: &TaskId,
+        unknown_extensions: &[crate::messages::Extension],
+    ) -> Result<Self, DapError> {
+        let detail = serde_json::to_string(
+            &unknown_extensions
+                .iter()
+                .map(|extension| extension.type_code())
+                .collect::<Vec<u16>>(),
+        );
+        match detail {
+            Ok(s) => Ok(Self::UnsupportedExtension {
+                detail: s,
+                task_id: *task_id,
+            }),
+            Err(x) => Err(fatal_error!(err = %x,)),
+        }
+    }
+
     fn title_and_type(&self) -> (&'static str, Option<String>) {
         let (title, dap_abort_type) = match self {
             Self::BatchInvalid { .. } => ("Batch boundary check failed", Some(self.to_string())),
@@ -300,6 +324,9 @@ impl DapAbort {
                 Some(self.to_string()),
             ),
             Self::BadRequest(..) => ("Bad request", None),
+            Self::UnsupportedExtension { .. } => {
+                ("Unsupported extensions in report", Some(self.to_string()))
+            }
         };
 
         (

@@ -301,6 +301,10 @@ async fn leader_upload(version: DapVersion) {
                 report_metadata: ReportMetadata {
                     id: ReportId([1; 16]),
                     time: t.now,
+                    public_extensions: match version {
+                        DapVersion::Draft09 => None,
+                        DapVersion::Latest => Some(Vec::new()),
+                    },
                 },
                 public_share: b"public share".to_vec(),
                 encrypted_input_shares: [
