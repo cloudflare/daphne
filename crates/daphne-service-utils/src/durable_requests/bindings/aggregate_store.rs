@@ -69,16 +69,16 @@ pub struct AggregateStoreMergeOptions {
 }
 
 impl CapnprotoPayloadEncode for AggregateStoreMergeReq {
-    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator> {
+    type Builder<'a> = aggregate_store_merge_req::Builder<'a>;
+
+    fn encode_to_builder(&self, mut builder: Self::Builder<'_>) {
         let Self {
             contained_reports,
             agg_share_delta,
             options,
         } = self;
-        let mut message = capnp::message::Builder::new_default();
-        let mut request = message.init_root::<aggregate_store_merge_req::Builder>();
         {
-            let mut contained_reports = request.reborrow().init_contained_reports(
+            let mut contained_reports = builder.reborrow().init_contained_reports(
                 contained_reports
                     .len()
                     .try_into()
@@ -94,7 +94,7 @@ impl CapnprotoPayloadEncode for AggregateStoreMergeReq {
             }
         }
         {
-            let mut agg_share_delta_packet = request.reborrow().init_agg_share_delta();
+            let mut agg_share_delta_packet = builder.reborrow().init_agg_share_delta();
             agg_share_delta_packet.set_report_count(agg_share_delta.report_count);
             agg_share_delta_packet.set_min_time(agg_share_delta.min_time);
             agg_share_delta_packet.set_max_time(agg_share_delta.max_time);
@@ -157,20 +157,18 @@ impl CapnprotoPayloadEncode for AggregateStoreMergeReq {
             let AggregateStoreMergeOptions {
                 skip_replay_protection,
             } = options;
-            let mut options_packet = request.init_options();
+            let mut options_packet = builder.init_options();
             options_packet.set_skip_replay_protection(*skip_replay_protection);
         }
-        message
     }
 }
 
 impl CapnprotoPayloadDecode for AggregateStoreMergeReq {
-    fn decode_from_reader(
-        reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
-    ) -> capnp::Result<Self> {
-        let request = reader.get_root::<aggregate_store_merge_req::Reader>()?;
+    type Reader<'a> = aggregate_store_merge_req::Reader<'a>;
+
+    fn decode_from_reader(reader: Self::Reader<'_>) -> capnp::Result<Self> {
         let agg_share_delta = {
-            let agg_share_delta = request.get_agg_share_delta()?;
+            let agg_share_delta = reader.get_agg_share_delta()?;
             let data = {
                 macro_rules! make_decode {
                     ($func_name:ident, $agg_share_type:ident, $field_trait:ident, $field_error:ident) => {
@@ -238,8 +236,7 @@ impl CapnprotoPayloadDecode for AggregateStoreMergeReq {
             }
         };
         let contained_reports = {
-            request
-                .reborrow()
+            reader
                 .get_contained_reports()?
                 .into_iter()
                 .map(|report| {
@@ -257,7 +254,7 @@ impl CapnprotoPayloadDecode for AggregateStoreMergeReq {
             contained_reports,
             agg_share_delta,
             options: AggregateStoreMergeOptions {
-                skip_replay_protection: request.get_options()?.get_skip_replay_protection(),
+                skip_replay_protection: reader.get_options()?.get_skip_replay_protection(),
             },
         })
     }
@@ -352,8 +349,7 @@ mod test {
                     },
                 };
                 let other =
-                    AggregateStoreMergeReq::decode_from_bytes(&this.encode_to_bytes().unwrap())
-                        .unwrap();
+                    AggregateStoreMergeReq::decode_from_bytes(&this.encode_to_bytes()).unwrap();
                 assert_eq!(this, other);
             }
         }
@@ -411,8 +407,7 @@ mod test {
                     },
                 };
                 let other =
-                    AggregateStoreMergeReq::decode_from_bytes(&this.encode_to_bytes().unwrap())
-                        .unwrap();
+                    AggregateStoreMergeReq::decode_from_bytes(&this.encode_to_bytes()).unwrap();
                 assert_eq!(this, other);
             }
         }

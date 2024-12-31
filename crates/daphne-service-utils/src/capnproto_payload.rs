@@ -1,18 +1,22 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use capnp::traits::{FromPointerBuilder, FromPointerReader};
+
 pub trait CapnprotoPayloadEncode {
-    fn encode_to_builder(&self) -> capnp::message::Builder<capnp::message::HeapAllocator>;
+    type Builder<'a>: FromPointerBuilder<'a>;
+
+    fn encode_to_builder(&self, builder: Self::Builder<'_>);
 }
 
 pub trait CapnprotoPayloadEncodeExt {
-    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>>;
+    fn encode_to_bytes(&self) -> Vec<u8>;
 }
 
 pub trait CapnprotoPayloadDecode {
-    fn decode_from_reader(
-        reader: capnp::message::Reader<capnp::serialize::OwnedSegments>,
-    ) -> capnp::Result<Self>
+    type Reader<'a>: FromPointerReader<'a>;
+
+    fn decode_from_reader(reader: Self::Reader<'_>) -> capnp::Result<Self>
     where
         Self: Sized;
 }
@@ -27,11 +31,12 @@ impl<T> CapnprotoPayloadEncodeExt for T
 where
     T: CapnprotoPayloadEncode,
 {
-    fn encode_to_bytes(&self) -> capnp::Result<Vec<u8>> {
+    fn encode_to_bytes(&self) -> Vec<u8> {
+        let mut message = capnp::message::Builder::new_default();
+        self.encode_to_builder(message.init_root::<T::Builder<'_>>());
         let mut buf = Vec::new();
-        let message = self.encode_to_builder();
-        capnp::serialize_packed::write_message(&mut buf, &message)?;
-        Ok(buf)
+        capnp::serialize_packed::write_message(&mut buf, &message).expect("infalible");
+        buf
     }
 }
 
@@ -49,6 +54,7 @@ where
             capnp::message::ReaderOptions::new(),
         )?;
 
+        let reader = reader.get_root::<T::Reader<'_>>()?;
         T::decode_from_reader(reader)
     }
 }
