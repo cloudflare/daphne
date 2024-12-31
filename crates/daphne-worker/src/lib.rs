@@ -30,3 +30,17 @@ pub(crate) fn int_err<S: ToString>(s: S) -> Error {
 pub(crate) fn elapsed(date: &worker::Date) -> Duration {
     Duration::from_millis(worker::Date::now().as_millis() - date.as_millis())
 }
+
+pub(crate) use daphne_service_utils::base_capnp;
+pub(crate) use daphne_service_utils::compute_offload_capnp;
+
+mod queue_messages_capnp {
+    #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::needless_lifetimes)]
+    #![allow(clippy::extra_unused_type_parameters)]
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/src/aggregator/queues/queue_messages_capnp.rs"
+    ));
+}

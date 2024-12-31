@@ -21,6 +21,16 @@ helper:
 		-c ./crates/daphne-server/examples/configuration-helper.toml
 h: helper
 
+compute-offload:
+	RUST_LOG=hyper=off,debug cargo run \
+		--profile release-symbols \
+		--features test-utils \
+		--example service \
+		-- \
+		-c ./crates/daphne-server/examples/configuration-cpu-offload.toml
+co: compute-offload
+
+
 helper-worker:
 	cd ./crates/daphne-worker-test/ && \
 		wrangler dev -c wrangler.aggregator.toml --port 8788 -e helper

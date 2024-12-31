@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{collections::HashSet, ops::Range};
@@ -80,13 +80,19 @@ pub trait DapAggregator: HpkeProvider + Sized {
     /// collected batch.
     async fn is_batch_overlapping(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError>;
 
     /// Check whether the given batch ID has been observed before. This is called by the Leader
     /// (resp. Helper) in response to a CollectReq (resp. AggregateShareReq) for leader-selected tasks.
-    async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError>;
+    async fn batch_exists(
+        &self,
+        version: DapVersion,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError>;
 
     /// Store a set of output shares and mark the corresponding reports as aggregated.
     ///
@@ -113,6 +119,7 @@ pub trait DapAggregator: HpkeProvider + Sized {
     /// Fetch the aggregate share for the given batch.
     async fn get_agg_share(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError>;
@@ -120,6 +127,7 @@ pub trait DapAggregator: HpkeProvider + Sized {
     /// Mark a batch as collected.
     async fn mark_collected(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError>;

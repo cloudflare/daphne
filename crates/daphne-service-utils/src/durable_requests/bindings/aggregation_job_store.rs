@@ -18,7 +18,7 @@ super::define_do_binding! {
 
     enum Command {
         NewJob = "/new-job",
-        ListJobIds = "/job-ids",
+        ContainsJob = "/contains",
     }
 
     fn name((version, task_id): (DapVersion, &'n TaskId)) -> ObjectIdFrom {

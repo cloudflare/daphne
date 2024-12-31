@@ -22,12 +22,28 @@ struct U8L16 @0x9e3f65b13f71cfcb {
     snd @1 :UInt64;
 }
 
-struct PartialBatchSelector {
+struct PartialBatchSelector @0xae86084e56c22fc0 {
     union {
         timeInterval @0 :Void;
         leaderSelectedByBatchId @1 :BatchId;
     }
 }
+
+enum ReportError @0xa76428617779e659 {
+    reserved @0;
+    batchCollected @1;
+    reportReplayed @2;
+    reportDropped @3;
+    hpkeUnknownConfigId @4;
+    hpkeDecryptError @5;
+    vdafPrepError @6;
+    batchSaturated @7;
+    taskExpired @8;
+    invalidMessage @9;
+    reportTooEarly @10;
+    taskNotStarted @11;
+}
+
 
 using ReportId = U8L16;
 using BatchId = U8L32;

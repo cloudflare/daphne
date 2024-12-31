@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 mod cache;
-// mod request_coalescer;
 
 use std::{any::Any, fmt::Display, future::Future, sync::RwLock};
 
-use daphne_service_utils::durable_requests::KV_PATH_PREFIX;
 use mappable_rc::Marc;
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::{info_span, Instrument};
@@ -167,9 +165,12 @@ pub(crate) enum GetOrInsertError<E> {
     Other(E),
 }
 
-impl<E> From<Error> for GetOrInsertError<E> {
-    fn from(error: Error) -> Self {
-        Self::StorageProxy(error)
+impl<E, E2> From<E2> for GetOrInsertError<E>
+where
+    Error: From<E2>,
+{
+    fn from(error: E2) -> Self {
+        Self::StorageProxy(error.into())
     }
 }
 
@@ -440,6 +441,6 @@ impl<'h> Kv<'h> {
     }
 
     fn to_key<P: KvPrefix>(key: &P::Key) -> String {
-        format!("{KV_PATH_PREFIX}/{}/{key}", P::PREFIX)
+        format!("{}/{key}", P::PREFIX)
     }
 }

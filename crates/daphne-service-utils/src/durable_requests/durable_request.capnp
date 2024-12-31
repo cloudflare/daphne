@@ -3,6 +3,8 @@
 
 @0xd076f8051f8de41a;
 
+using Base = import "../capnproto/base.capnp";
+
 enum Method @0xdd078556311145a1 {
     get @0;
     post @1;
@@ -24,11 +26,6 @@ struct DurableRequest @0xfbd55b93d47690b9 {
     retry @3 :Bool;
 }
 
-struct UInt128 @0x8f8f75793b90ee0c {
-    low @0 :UInt64;
-    high @1 :UInt64;
-}
-
 struct DapAggregateShare @0xb34ce529a4a66aed {
     reportCount @0 :UInt64;
     minTime @1 :UInt64;
@@ -46,9 +43,7 @@ struct DapAggregateShare @0xb34ce529a4a66aed {
 }
 
 struct AggregateStoreMergeReq @0xbaad7bdeb4b06161 {
-    using ReportId = UInt128;
-
-    containedReports @0 :List(ReportId);
+    containedReports @0 :List(Base.ReportId);
     aggShareDelta @1 :DapAggregateShare;
     options @2 :MergeReqOptions;
 }

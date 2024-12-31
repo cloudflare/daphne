@@ -11,8 +11,8 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
-        AggregationJobInitReq, PartialBatchSelector, TaskId,
+        constant_time_eq, request::PollAggregationJob, AggregateShare, AggregateShareReq,
+        AggregationJobId, AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     protocol::aggregator::ReplayProtection,
@@ -98,6 +98,14 @@ pub trait DapHelper: DapAggregator {
         task_id: &TaskId,
         req_hash: &AggregationJobRequestHash,
     ) -> Result<(), DapError>;
+
+    /// Polls for the completion of an aggregation job.
+    async fn poll_aggregated(
+        &self,
+        version: DapVersion,
+        task_id: &TaskId,
+        agg_job_id: &AggregationJobId,
+    ) -> Result<AggregationJobResp, DapError>;
 }
 
 pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
@@ -125,6 +133,22 @@ pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
         media_type: DapMediaType::AggregationJobResp,
         payload: agg_job_resp
             .get_encoded_with_param(&version)
+            .map_err(DapError::encoding)?,
+    })
+}
+
+pub async fn handle_agg_job_poll_req<A: DapHelper>(
+    aggregator: &A,
+    req: DapRequest<PollAggregationJob>,
+) -> Result<DapResponse, DapError> {
+    let response = aggregator
+        .poll_aggregated(req.version, &req.task_id, &req.resource_id)
+        .await?;
+    Ok(DapResponse {
+        version: req.version,
+        media_type: DapMediaType::AggregationJobResp,
+        payload: response
+            .get_encoded_with_param(&req.version)
             .map_err(DapError::encoding)?,
     })
 }
@@ -159,8 +183,9 @@ pub async fn handle_agg_share_req<A: DapHelper>(
     )
     .await?;
 
+    tracing::info!("jaljskdlasjdklajskljdklajskldklajskldjkalsjdkl");
     let agg_share = aggregator
-        .get_agg_share(&task_id, &req.payload.batch_sel)
+        .get_agg_share(req.version, &task_id, &req.payload.batch_sel)
         .await?;
 
     // Check that we have aggreagted the same set of reports as the Leader.
@@ -194,7 +219,7 @@ pub async fn handle_agg_share_req<A: DapHelper>(
 
     // Mark each aggregated report as collected.
     aggregator
-        .mark_collected(&task_id, &req.payload.batch_sel)
+        .mark_collected(task_config.version, &task_id, &req.payload.batch_sel)
         .await?;
 
     let encrypted_agg_share = task_config.produce_helper_encrypted_agg_share(

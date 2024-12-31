@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::collections::HashSet;
@@ -11,7 +11,7 @@ use daphne::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    capnproto::{CapnprotoPayloadDecode, CapnprotoPayloadEncode},
+    capnproto::{usize_to_capnp_len, CapnprotoPayloadDecode, CapnprotoPayloadEncode},
     durable_request_capnp::{aggregate_store_merge_req, dap_aggregate_share},
     durable_requests::ObjectIdFrom,
 };
@@ -85,74 +85,10 @@ impl CapnprotoPayloadEncode for AggregateStoreMergeReq {
                     .expect("can't serialize more than u32::MAX reports"),
             );
             for (i, r) in self.contained_reports.iter().enumerate() {
-                let mut report = contained_reports.reborrow().get(i.try_into().unwrap());
-                let bytes: &[u8; 16] = r.as_ref();
-                let low = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-                report.set_low(low);
-                let high = u64::from_le_bytes(bytes[8..].try_into().unwrap());
-                report.set_high(high);
+                r.encode_to_builder(contained_reports.reborrow().get(usize_to_capnp_len(i)));
             }
         }
-        {
-            let mut agg_share_delta_packet = builder.reborrow().init_agg_share_delta();
-            agg_share_delta_packet.set_report_count(agg_share_delta.report_count);
-            agg_share_delta_packet.set_min_time(agg_share_delta.min_time);
-            agg_share_delta_packet.set_max_time(agg_share_delta.max_time);
-            {
-                let checksum = agg_share_delta_packet
-                    .reborrow()
-                    .init_checksum(agg_share_delta.checksum.len().try_into().unwrap());
-                checksum.copy_from_slice(&agg_share_delta.checksum);
-            }
-            {
-                macro_rules! make_encode {
-                    ($func_name:ident, $agg_share_type:ident, $field_trait:ident) => {
-                        fn $func_name<'b, F, B, const ENCODED_SIZE: usize>(
-                            field: &$agg_share_type<F>,
-                            get_bytes: B,
-                        ) where
-                            F: $field_trait + Into<[u8; ENCODED_SIZE]>,
-                            B: FnOnce(u32) -> &'b mut [u8],
-                        {
-                            let mut bytes = get_bytes(
-                                (F::ENCODED_SIZE * field.as_ref().len())
-                                    .try_into()
-                                    .expect("trying to encode a buffer longer than u32::MAX"),
-                            );
-                            for f in field.as_ref() {
-                                let f: [u8; ENCODED_SIZE] = (*f).into();
-                                bytes[..ENCODED_SIZE].copy_from_slice(&f);
-                                bytes = &mut bytes[ENCODED_SIZE..];
-                            }
-                        }
-                    };
-                }
-                make_encode!(encode_draft09, AggregateShareDraft09, FieldElementDraft09);
-                make_encode!(encode, AggregateShare, FieldElement);
-                let mut data = agg_share_delta_packet.init_data();
-                match &self.agg_share_delta.data {
-                    Some(VdafAggregateShare::Field64Draft09(field)) => {
-                        encode_draft09(field, |len| data.init_field64_draft09(len));
-                    }
-                    Some(VdafAggregateShare::Field128Draft09(field)) => {
-                        encode_draft09(field, |len| data.init_field128_draft09(len));
-                    }
-                    Some(VdafAggregateShare::Field32Draft09(field)) => {
-                        encode_draft09(field, |len| data.init_field_prio2_draft09(len));
-                    }
-                    Some(VdafAggregateShare::Field64(field)) => {
-                        encode(field, |len| data.init_field64(len));
-                    }
-                    Some(VdafAggregateShare::Field128(field)) => {
-                        encode(field, |len| data.init_field128(len));
-                    }
-                    Some(VdafAggregateShare::Field32(field)) => {
-                        encode(field, |len| data.init_field_prio2(len));
-                    }
-                    None => data.set_none(()),
-                };
-            }
-        }
+        agg_share_delta.encode_to_builder(builder.reborrow().init_agg_share_delta());
         {
             let AggregateStoreMergeOptions {
                 skip_replay_protection,
@@ -167,95 +103,148 @@ impl CapnprotoPayloadDecode for AggregateStoreMergeReq {
     type Reader<'a> = aggregate_store_merge_req::Reader<'a>;
 
     fn decode_from_reader(reader: Self::Reader<'_>) -> capnp::Result<Self> {
-        let agg_share_delta = {
-            let agg_share_delta = reader.get_agg_share_delta()?;
-            let data = {
-                macro_rules! make_decode {
-                    ($func_name:ident, $agg_share_type:ident, $field_trait:ident, $field_error:ident) => {
-                        fn $func_name<F>(fields: &[u8]) -> capnp::Result<$agg_share_type<F>>
-                        where
-                            F: $field_trait + for<'s> TryFrom<&'s [u8], Error = $field_error>,
-                        {
-                            let iter = fields.chunks_exact(F::ENCODED_SIZE);
-                            if let length @ 1.. = iter.remainder().len() {
-                                return Err(capnp::Error {
-                                    kind: capnp::ErrorKind::Failed,
-                                    extra: format!(
-                                        "leftover bytes still present in buffer: {length}"
-                                    ),
-                                });
-                            }
-                            Ok($agg_share_type::from(
-                                iter.map(|f| f.try_into().unwrap()).collect::<Vec<_>>(),
-                            ))
-                        }
-                    };
-                }
-                make_decode!(
-                    decode_draft09,
-                    AggregateShareDraft09,
-                    FieldElementDraft09,
-                    FieldErrorDraft09
-                );
-                make_decode!(decode, AggregateShare, FieldElement, FieldError);
-                match agg_share_delta.get_data().which()? {
-                    dap_aggregate_share::data::Which::Field64Draft09(field) => {
-                        Some(VdafAggregateShare::Field64Draft09(decode_draft09(field?)?))
-                    }
-                    dap_aggregate_share::data::Which::Field128Draft09(field) => {
-                        Some(VdafAggregateShare::Field128Draft09(decode_draft09(field?)?))
-                    }
-                    dap_aggregate_share::data::Which::FieldPrio2Draft09(field) => {
-                        Some(VdafAggregateShare::Field32Draft09(decode_draft09(field?)?))
-                    }
-
-                    dap_aggregate_share::data::Which::Field64(field) => {
-                        Some(VdafAggregateShare::Field64(decode(field?)?))
-                    }
-                    dap_aggregate_share::data::Which::Field128(field) => {
-                        Some(VdafAggregateShare::Field128(decode(field?)?))
-                    }
-                    dap_aggregate_share::data::Which::FieldPrio2(field) => {
-                        Some(VdafAggregateShare::Field32(decode(field?)?))
-                    }
-                    dap_aggregate_share::data::Which::None(()) => None,
-                }
-            };
-            DapAggregateShare {
-                report_count: agg_share_delta.get_report_count(),
-                min_time: agg_share_delta.get_min_time(),
-                max_time: agg_share_delta.get_max_time(),
-                checksum: agg_share_delta
-                    .get_checksum()?
-                    .try_into()
-                    .map_err(|_| capnp::Error {
-                        kind: capnp::ErrorKind::Failed,
-                        extra: "checksum had unexpected size".into(),
-                    })?,
-                data,
-            }
-        };
-        let contained_reports = {
-            reader
+        Ok(Self {
+            contained_reports: reader
                 .get_contained_reports()?
                 .into_iter()
-                .map(|report| {
-                    let low = report.get_low();
-                    let high = report.get_high();
-
-                    let mut buffer = [0; 16];
-                    buffer[..8].copy_from_slice(&low.to_le_bytes());
-                    buffer[8..].copy_from_slice(&high.to_le_bytes());
-                    ReportId(buffer)
-                })
-                .collect()
-        };
-        Ok(Self {
-            contained_reports,
-            agg_share_delta,
+                .map(ReportId::decode_from_reader)
+                .collect::<capnp::Result<_>>()?,
+            agg_share_delta: <_>::decode_from_reader(reader.get_agg_share_delta()?)?,
             options: AggregateStoreMergeOptions {
                 skip_replay_protection: reader.get_options()?.get_skip_replay_protection(),
             },
+        })
+    }
+}
+
+impl CapnprotoPayloadEncode for DapAggregateShare {
+    type Builder<'a> = dap_aggregate_share::Builder<'a>;
+
+    fn encode_to_builder(&self, mut builder: Self::Builder<'_>) {
+        builder.set_report_count(self.report_count);
+        builder.set_min_time(self.min_time);
+        builder.set_max_time(self.max_time);
+        builder.set_checksum(&self.checksum);
+        {
+            macro_rules! make_encode {
+                ($func_name:ident, $agg_share_type:ident, $field_trait:ident) => {
+                    fn $func_name<'b, F, B, const ENCODED_SIZE: usize>(
+                        field: &$agg_share_type<F>,
+                        get_bytes: B,
+                    ) where
+                        F: $field_trait + Into<[u8; ENCODED_SIZE]>,
+                        B: FnOnce(u32) -> &'b mut [u8],
+                    {
+                        let mut bytes = get_bytes(
+                            (F::ENCODED_SIZE * field.as_ref().len())
+                                .try_into()
+                                .expect("trying to encode a buffer longer than u32::MAX"),
+                        );
+                        for f in field.as_ref() {
+                            let f: [u8; ENCODED_SIZE] = (*f).into();
+                            bytes[..ENCODED_SIZE].copy_from_slice(&f);
+                            bytes = &mut bytes[ENCODED_SIZE..];
+                        }
+                    }
+                };
+            }
+            make_encode!(encode_draft09, AggregateShareDraft09, FieldElementDraft09);
+            make_encode!(encode, AggregateShare, FieldElement);
+            let mut data = builder.init_data();
+            match &self.data {
+                Some(VdafAggregateShare::Field64Draft09(field)) => {
+                    encode_draft09(field, |len| data.init_field64_draft09(len));
+                }
+                Some(VdafAggregateShare::Field128Draft09(field)) => {
+                    encode_draft09(field, |len| data.init_field128_draft09(len));
+                }
+                Some(VdafAggregateShare::Field32Draft09(field)) => {
+                    encode_draft09(field, |len| data.init_field_prio2_draft09(len));
+                }
+                Some(VdafAggregateShare::Field64(field)) => {
+                    encode(field, |len| data.init_field64(len));
+                }
+                Some(VdafAggregateShare::Field128(field)) => {
+                    encode(field, |len| data.init_field128(len));
+                }
+                Some(VdafAggregateShare::Field32(field)) => {
+                    encode(field, |len| data.init_field_prio2(len));
+                }
+                None => data.set_none(()),
+            };
+        }
+    }
+}
+
+impl CapnprotoPayloadDecode for DapAggregateShare {
+    type Reader<'a> = dap_aggregate_share::Reader<'a>;
+
+    fn decode_from_reader(agg_share_delta: Self::Reader<'_>) -> capnp::Result<Self>
+    where
+        Self: Sized,
+    {
+        let data = {
+            macro_rules! make_decode {
+                ($func_name:ident, $agg_share_type:ident, $field_trait:ident, $field_error:ident) => {
+                    fn $func_name<F>(fields: &[u8]) -> capnp::Result<$agg_share_type<F>>
+                    where
+                        F: $field_trait + for<'s> TryFrom<&'s [u8], Error = $field_error>,
+                    {
+                        let iter = fields.chunks_exact(F::ENCODED_SIZE);
+                        if let length @ 1.. = iter.remainder().len() {
+                            return Err(capnp::Error {
+                                kind: capnp::ErrorKind::Failed,
+                                extra: format!("leftover bytes still present in buffer: {length}"),
+                            });
+                        }
+                        Ok($agg_share_type::from(
+                            iter.map(|f| f.try_into().unwrap()).collect::<Vec<_>>(),
+                        ))
+                    }
+                };
+            }
+            make_decode!(
+                decode_draft09,
+                AggregateShareDraft09,
+                FieldElementDraft09,
+                FieldErrorDraft09
+            );
+            make_decode!(decode, AggregateShare, FieldElement, FieldError);
+            match agg_share_delta.get_data().which()? {
+                dap_aggregate_share::data::Which::Field64Draft09(field) => {
+                    Some(VdafAggregateShare::Field64Draft09(decode_draft09(field?)?))
+                }
+                dap_aggregate_share::data::Which::Field128Draft09(field) => {
+                    Some(VdafAggregateShare::Field128Draft09(decode_draft09(field?)?))
+                }
+                dap_aggregate_share::data::Which::FieldPrio2Draft09(field) => {
+                    Some(VdafAggregateShare::Field32Draft09(decode_draft09(field?)?))
+                }
+
+                dap_aggregate_share::data::Which::Field64(field) => {
+                    Some(VdafAggregateShare::Field64(decode(field?)?))
+                }
+                dap_aggregate_share::data::Which::Field128(field) => {
+                    Some(VdafAggregateShare::Field128(decode(field?)?))
+                }
+                dap_aggregate_share::data::Which::FieldPrio2(field) => {
+                    Some(VdafAggregateShare::Field32(decode(field?)?))
+                }
+                dap_aggregate_share::data::Which::None(()) => None,
+            }
+        };
+        Ok(Self {
+            report_count: agg_share_delta.get_report_count(),
+            min_time: agg_share_delta.get_min_time(),
+            max_time: agg_share_delta.get_max_time(),
+            checksum: agg_share_delta
+                .get_checksum()?
+                .try_into()
+                .map_err(|_| capnp::Error {
+                    kind: capnp::ErrorKind::Failed,
+                    extra: "checksum had unexpected size".into(),
+                })?,
+            data,
         })
     }
 }

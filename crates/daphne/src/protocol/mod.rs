@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::messages;
@@ -565,7 +565,7 @@ mod test {
         agg_job_resp.prep_resps[1] = tmp;
 
         assert_matches!(
-            t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),
+            t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp,),
             DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }

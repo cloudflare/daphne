@@ -3,6 +3,7 @@
 
 mod config;
 mod metrics;
+pub mod queues;
 mod roles;
 mod router;
 
@@ -31,6 +32,7 @@ use router::DaphneService;
 use std::sync::{Arc, LazyLock, Mutex};
 use worker::send::SendWrapper;
 
+use queues::Queue;
 pub use router::handle_dap_request;
 
 #[async_trait::async_trait(?Send)]
@@ -193,5 +195,13 @@ impl App {
 
     fn bearer_tokens(&self) -> BearerTokens<'_> {
         BearerTokens::from(Kv::new(&self.env, &self.kv_state))
+    }
+
+    fn async_aggregation_queue(&self) -> Queue<queues::AsyncAggregationMessage> {
+        Queue::from(
+            self.env
+                .get_binding::<worker::Queue>("ASYNC_AGGREGATION_QUEUE")
+                .unwrap(),
+        )
     }
 }

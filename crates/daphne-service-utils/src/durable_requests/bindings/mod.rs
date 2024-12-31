@@ -6,8 +6,11 @@
 //!
 //! It also defines types that are used as the body of requests sent to these objects.
 
+pub mod agg_job_response_store;
 mod aggregate_store;
+pub mod aggregate_store_v2;
 pub mod aggregation_job_store;
+pub mod replay_checker;
 #[cfg(feature = "test-utils")]
 mod test_state_cleaner;
 
@@ -48,6 +51,10 @@ macro_rules! define_do_binding {
         fn name($params:tt : $params_ty:ty) -> ObjectIdFrom $name_impl:block
 
     ) => {
+        // guarantee at compile time that all paths start with a / to ensure that concatenation
+        // with the base url later has a predictable outcome.
+        $(const _: () = assert!(matches!($route.as_bytes().first(), Some(b'/')));)*
+
         #[derive(
             serde::Serialize,
             serde::Deserialize,
