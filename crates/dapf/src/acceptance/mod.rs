@@ -27,6 +27,7 @@ use daphne::{
         BatchId, BatchSelector, PartialBatchSelector, TaskId,
     },
     metrics::DaphneMetrics,
+    protocol::ReadyAggregationJobResp,
     testing::report_generator::ReportGenerator,
     vdaf::VdafConfig,
     DapAggregateShare, DapAggregateSpan, DapAggregationParam, DapBatchMode, DapMeasurement,
@@ -511,7 +512,7 @@ impl Test {
         let _guard = load_control.wait().await;
         info!("Starting AggregationJobInitReq");
         let start = Instant::now();
-        let agg_job_resp = self
+        let mut agg_job_resp = self
             .http_client
             .submit_aggregation_job_init_req(
                 self.helper_url.join(&format!(
@@ -528,14 +529,42 @@ impl Test {
             )
             .await?;
         let duration = start.elapsed();
-        info!("Finished AggregationJobInitReq in {duration:#?}");
+        info!("Finished submitting AggregationJobInitReq in {duration:#?}");
+        let mut poll_count = 1;
+        let ready = loop {
+            agg_job_resp = match agg_job_resp {
+                messages::AggregationJobResp::Ready { prep_resps } => {
+                    if poll_count != 1 {
+                        info!(
+                            "Finished polling for AggregationJobResp after {:#?}",
+                            start.elapsed()
+                        );
+                    }
+                    break ReadyAggregationJobResp { prep_resps };
+                }
+                messages::AggregationJobResp::Processing => {
+                    if poll_count == 1 {
+                        info!("Polling for AggregationJobResp");
+                    }
+                    tokio::time::sleep(Duration::from_millis(poll_count * 200)).await;
+                    poll_count += 1;
+                    self.http_client
+                        .poll_aggregation_job_init(
+                            self.helper_url
+                                .join(&format!("tasks/{task_id}/aggregation_jobs/{agg_job_id}"))?,
+                            task_config.version,
+                            functions::helper::Options {
+                                taskprov_advertisement: taskprov_advertisement.as_ref(),
+                                bearer_token: self.bearer_token.as_ref(),
+                            },
+                        )
+                        .await?
+                }
+            };
+        };
 
-        let agg_share_span = task_config.consume_agg_job_resp(
-            task_id,
-            agg_job_state,
-            agg_job_resp.unwrap_ready(), // TODO: implement polling
-            self.metrics(),
-        )?;
+        let agg_share_span =
+            task_config.consume_agg_job_resp(task_id, agg_job_state, ready, self.metrics())?;
 
         let aggregated_report_count = agg_share_span
             .iter()

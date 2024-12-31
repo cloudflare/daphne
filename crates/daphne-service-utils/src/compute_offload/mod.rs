@@ -479,44 +479,6 @@ impl CapnprotoPayloadDecode for InitializedReports {
     }
 }
 
-impl From<messages::ReportError> for initialized_report::ReportError {
-    fn from(failure: messages::ReportError) -> Self {
-        match failure {
-            messages::ReportError::Reserved => Self::Reserved,
-            messages::ReportError::BatchCollected => Self::BatchCollected,
-            messages::ReportError::ReportReplayed => Self::ReportReplayed,
-            messages::ReportError::ReportDropped => Self::ReportDropped,
-            messages::ReportError::HpkeUnknownConfigId => Self::HpkeUnknownConfigId,
-            messages::ReportError::HpkeDecryptError => Self::HpkeDecryptError,
-            messages::ReportError::VdafPrepError => Self::VdafPrepError,
-            messages::ReportError::BatchSaturated => Self::BatchSaturated,
-            messages::ReportError::TaskExpired => Self::TaskExpired,
-            messages::ReportError::InvalidMessage => Self::InvalidMessage,
-            messages::ReportError::ReportTooEarly => Self::ReportTooEarly,
-            messages::ReportError::TaskNotStarted => Self::TaskNotStarted,
-        }
-    }
-}
-
-impl From<initialized_report::ReportError> for messages::ReportError {
-    fn from(val: initialized_report::ReportError) -> Self {
-        match val {
-            initialized_report::ReportError::Reserved => Self::Reserved,
-            initialized_report::ReportError::BatchCollected => Self::BatchCollected,
-            initialized_report::ReportError::ReportReplayed => Self::ReportReplayed,
-            initialized_report::ReportError::ReportDropped => Self::ReportDropped,
-            initialized_report::ReportError::HpkeUnknownConfigId => Self::HpkeUnknownConfigId,
-            initialized_report::ReportError::HpkeDecryptError => Self::HpkeDecryptError,
-            initialized_report::ReportError::VdafPrepError => Self::VdafPrepError,
-            initialized_report::ReportError::BatchSaturated => Self::BatchSaturated,
-            initialized_report::ReportError::TaskExpired => Self::TaskExpired,
-            initialized_report::ReportError::InvalidMessage => Self::InvalidMessage,
-            initialized_report::ReportError::ReportTooEarly => Self::ReportTooEarly,
-            initialized_report::ReportError::TaskNotStarted => Self::TaskNotStarted,
-        }
-    }
-}
-
 fn to_capnp<E: ToString>(e: E) -> capnp::Error {
     capnp::Error {
         kind: capnp::ErrorKind::Failed,

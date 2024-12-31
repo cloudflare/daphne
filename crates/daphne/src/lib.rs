@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! This crate implements the core protocol logic for the Distributed Aggregation Protocol
@@ -47,7 +47,7 @@ pub mod hpke;
 pub mod messages;
 pub mod metrics;
 pub mod pine;
-pub(crate) mod protocol;
+pub mod protocol;
 pub mod roles;
 pub mod taskprov;
 #[cfg(any(test, feature = "test-utils"))]
@@ -355,7 +355,9 @@ impl<T> IntoIterator for DapAggregateSpan<T> {
 }
 
 impl ReportId {
-    fn shard(&self, num_shards: NonZeroUsize) -> usize {
+    /// Deterministically calculate a number between 0 and `num_shards` based on the report id.
+    /// Usefull for sharding datastores.
+    pub fn shard(&self, num_shards: NonZeroUsize) -> usize {
         // NOTE This sharding scheme does not evenly distribute reports across all shards.
         //
         // First, the clients are supposed to choose the report ID at random; by finding collisions

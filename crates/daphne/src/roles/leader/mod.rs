@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod in_memory_leader;
@@ -23,7 +23,7 @@ use crate::{
         CollectionReq, Extension, Interval, PartialBatchSelector, Query, Report, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
-    protocol,
+    protocol::{self, ReadyAggregationJobResp},
     roles::resolve_task_config,
     DapAggregationParam, DapCollectionJob, DapError, DapLeaderProcessTelemetry, DapRequest,
     DapRequestMeta, DapResponse, DapTaskConfig, DapVersion,
@@ -39,6 +39,7 @@ struct LeaderHttpRequestOptions<'p, P> {
 }
 
 enum LeaderHttpRequestMethod {
+    Get,
     Post,
     Put,
 }
@@ -74,6 +75,7 @@ where
     };
 
     let resp = match method {
+        LeaderHttpRequestMethod::Get => role.send_http_get(meta, url).await?,
         LeaderHttpRequestMethod::Put => role.send_http_put(meta, url, req_data).await?,
         LeaderHttpRequestMethod::Post => role.send_http_post(meta, url, req_data).await?,
     };
@@ -150,6 +152,8 @@ pub trait DapLeader: DapAggregator {
         coll_job_id: &CollectionJobId,
         collect_resp: &Collection,
     ) -> Result<(), DapError>;
+
+    async fn send_http_get(&self, req: DapRequestMeta, url: Url) -> Result<DapResponse, DapError>;
 
     /// Send an HTTP POST request.
     async fn send_http_post<P>(
@@ -369,20 +373,39 @@ async fn run_agg_job<A: DapLeader>(
         },
     )
     .await?;
-    let agg_job_resp =
+    let mut agg_job_resp =
         AggregationJobResp::get_decoded_with_param(&task_config.version, &resp.payload)
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
-    let agg_job_resp = match agg_job_resp {
-        AggregationJobResp::Ready { prep_resps } => {
-            crate::protocol::ReadyAggregationJobResp { prep_resps }
-        }
-        AggregationJobResp::Processing => todo!("polling not implemented yet"),
+    let ready = loop {
+        let resp = match agg_job_resp {
+            AggregationJobResp::Ready { prep_resps } => {
+                break ReadyAggregationJobResp { prep_resps }
+            }
+            AggregationJobResp::Processing => {
+                leader_send_http_request(
+                    aggregator,
+                    task_id,
+                    task_config,
+                    LeaderHttpRequestOptions {
+                        path: &url_path,
+                        req_media_type: DapMediaType::AggregationJobInitReq,
+                        resp_media_type: DapMediaType::AggregationJobResp,
+                        req_data: (),
+                        method: LeaderHttpRequestMethod::Get,
+                        taskprov_advertisement: taskprov_advertisement.clone(),
+                    },
+                )
+                .await?
+            }
+        };
+        agg_job_resp =
+            AggregationJobResp::get_decoded_with_param(&task_config.version, &resp.payload)
+                .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
     };
 
     // Handle AggregationJobResp.
-    let agg_span =
-        task_config.consume_agg_job_resp(task_id, agg_job_state, agg_job_resp, metrics)?;
+    let agg_span = task_config.consume_agg_job_resp(task_id, agg_job_state, ready, metrics)?;
 
     let out_shares_count = agg_span.report_count() as u64;
     debug!("computed {out_shares_count} output shares");
@@ -441,7 +464,11 @@ async fn run_coll_job<A: DapLeader>(
     let metrics = aggregator.metrics();
 
     debug!("collecting id {coll_job_id}");
-    let leader_agg_share = aggregator.get_agg_share(task_id, batch_sel).await?;
+    let leader_agg_share = aggregator
+        // we need to hardcode the DAP version here because the leader uses the old aggregate store
+        // method of storing the aggregate share
+        .get_agg_share(DapVersion::Draft09, task_id, batch_sel)
+        .await?;
 
     let taskprov_advertisement = task_config.resolve_taskprove_advertisement()?;
 
@@ -522,7 +549,7 @@ async fn run_coll_job<A: DapLeader>(
 
     // Mark reports as collected.
     aggregator
-        .mark_collected(task_id, &agg_share_req_batch_sel)
+        .mark_collected(task_config.version, task_id, &agg_share_req_batch_sel)
         .await?;
 
     metrics.report_inc_by(ReportStatus::Collected, agg_share_req_report_count);

@@ -19,12 +19,14 @@
 //! To know what values to provide to the `name` and `class_name` fields see each type exported by
 //! this module as well as the [`instantiate_durable_object`] macro, respectively.
 
+pub(crate) mod agg_job_response_store;
 pub(crate) mod aggregate_store;
+pub(crate) mod aggregate_store_v2;
 pub(crate) mod aggregation_job_store;
+pub(crate) mod replay_checker;
 #[cfg(feature = "test-utils")]
 pub(crate) mod test_state_cleaner;
 
-use crate::tracing_utils::shorten_paths;
 use daphne_service_utils::{
     capnproto::{CapnprotoPayloadDecode, CapnprotoPayloadDecodeExt},
     durable_requests::bindings::DurableMethod,
@@ -33,8 +35,11 @@ use serde::{Deserialize, Serialize};
 use tracing::info_span;
 use worker::{Env, Error, Request, Response, Result, ScheduledTime, State};
 
+pub use agg_job_response_store::AggregationJobResp;
 pub use aggregate_store::AggregateStore;
+pub use aggregate_store_v2::AggregateStoreV2;
 pub use aggregation_job_store::AggregationJobStore;
+pub use replay_checker::ReplayChecker;
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
@@ -164,11 +169,92 @@ macro_rules! mk_durable_object {
             }
 
             #[allow(dead_code)]
+            /// Set a key/value pair unless the key already exists. If the key exists, then return the current
+            /// value. Otherwise return nothing.
             async fn put_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned + ::serde::Serialize,
             {
                 $crate::durable::state_set_if_not_exists(&self.state, key, val).await
+            }
+
+            #[allow(dead_code)]
+            async fn has(&self, key: &str) -> ::worker::Result<bool> {
+                $crate::durable::state_contains_key(&self.state, key).await
+            }
+
+            #[allow(dead_code)]
+            async fn load_chuncked_value<T>(&self, prefix: &str) -> ::worker::Result<Option<T>>
+                where
+                    T: daphne_service_utils::capnproto::CapnprotoPayloadDecode,
+            {
+                let Some(count) = self.get::<usize>(&format!("{prefix}_count")).await? else {
+                    return Ok(None);
+                };
+
+                let keys = &$crate::durable::calculate_chunk_keys(count, prefix);
+                let map = self.state.storage().get_multiple(keys.clone()).await?;
+                let bytes = keys
+                    .iter()
+                    .map(|k| wasm_bindgen::JsValue::from_str(k.as_ref()))
+                    .filter(|k| map.has(k))
+                    .map(|k| map.get(&k))
+                    .map(|js_v| {
+                        serde_wasm_bindgen::from_value::<Vec<u8>>(js_v).expect("expect an array of bytes")
+                    })
+                    .reduce(|mut buf, v| {
+                        buf.extend_from_slice(&v);
+                        buf
+                    });
+
+                let Some(bytes) = bytes else {
+                    return Ok(None);
+                };
+
+                <T as daphne_service_utils::capnproto::CapnprotoPayloadDecodeExt>::decode_from_bytes(&bytes)
+                    .map(Some)
+                    .map_err(|e| worker::Error::RustError(e.to_string()))
+            }
+
+            #[allow(dead_code)]
+            fn serialize_chunked_value<T>(
+                &self,
+                prefix: &str,
+                value: &T,
+                object_to_fill: impl Into<Option<worker::js_sys::Object>>
+            ) -> ::worker::Result<worker::js_sys::Object>
+                where
+                    T: daphne_service_utils::capnproto::CapnprotoPayloadEncode,
+            {
+                let object_to_fill = object_to_fill.into().unwrap_or_default();
+                use daphne_service_utils::capnproto::CapnprotoPayloadEncodeExt;
+                let bytes = value.encode_to_bytes();
+                let chunk_keys = $crate::durable::chunk_keys_for(&bytes, prefix);
+                let mut base_idx = 0;
+                for key in &chunk_keys {
+                    let end = usize::min(base_idx + $crate::durable::MAX_CHUNK_SIZE, bytes.len());
+                    let chunk = &bytes[base_idx..end];
+
+                    // unwrap cannot fail because chunk len is bounded by MAX_CHUNK_SIZE which is smaller than
+                    // u32::MAX
+                    let value = worker::js_sys::Uint8Array::new_with_length(u32::try_from(chunk.len()).unwrap());
+                    value.copy_from(chunk);
+
+                    worker::js_sys::Reflect::set(
+                        &object_to_fill,
+                        &wasm_bindgen::JsValue::from_str(key.as_ref()),
+                        &value.into(),
+                    )?;
+
+                    base_idx = end;
+                }
+                worker::js_sys::Reflect::set(
+                    &object_to_fill,
+                    &wasm_bindgen::JsValue::from_str(&format!("{prefix}_count")),
+                    &chunk_keys.len().into(),
+                )?;
+
+                Ok(object_to_fill)
             }
         }
     };
@@ -220,6 +306,20 @@ pub(crate) async fn state_set_if_not_exists<T: for<'a> Deserialize<'a> + Seriali
     Ok(None)
 }
 
+pub(crate) async fn state_contains_key(state: &State, key: &str) -> Result<bool> {
+    struct DevNull;
+    impl<'de> Deserialize<'de> for DevNull {
+        fn deserialize<D>(_: D) -> std::result::Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            Ok(Self)
+        }
+    }
+
+    Ok(state_get::<DevNull>(state, key).await?.is_some())
+}
+
 async fn req_parse<T>(req: &mut Request) -> Result<T>
 where
     T: CapnprotoPayloadDecode,
@@ -229,9 +329,34 @@ where
 
 fn create_span_from_request(req: &Request) -> tracing::Span {
     let path = req.path();
-    let span = info_span!("DO span", p = %shorten_paths(path.split('/')).display());
+    let span = info_span!("DO span", ?path);
     span.in_scope(|| tracing::info!(path, "DO handling new request"));
     span
+}
+
+/// The maximum chunk size as documented in
+/// [the worker docs](https://developers.cloudflare.com/durable-objects/platform/limits/)
+const MAX_CHUNK_SIZE: usize = 128_000;
+
+fn chunk_keys_for(bytes: &[u8], prefix: &str) -> Vec<String> {
+    // stolen from
+    // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
+    // because it's nightly only
+    fn div_ceil(lhs: usize, rhs: usize) -> usize {
+        let d = lhs / rhs;
+        let r = lhs % rhs;
+        if r > 0 && rhs > 0 {
+            d + 1
+        } else {
+            d
+        }
+    }
+
+    calculate_chunk_keys(div_ceil(bytes.len(), MAX_CHUNK_SIZE), prefix)
+}
+
+fn calculate_chunk_keys(count: usize, prefix: &str) -> Vec<String> {
+    (0..count).map(|i| format!("{prefix}_{i:04}")).collect()
 }
 
 /// Instantiate a durable object.

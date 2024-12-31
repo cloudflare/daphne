@@ -1,12 +1,13 @@
 # Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
-FROM rust:1.80-bookworm AS builder
+FROM rust:1.84.1-bookworm AS builder
 RUN apt update && apt install -y capnproto clang cmake
 
 # Pre-install worker-build and Rust's wasm32 target to speed up our custom build command
 RUN rustup target add wasm32-unknown-unknown
-RUN cargo install worker-build@0.1.1 --locked
+RUN echo Ola
+RUN cargo install worker-build@0.1.2 --locked
 
 # Build the worker.
 WORKDIR /tmp/dap_test

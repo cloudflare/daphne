@@ -12,7 +12,31 @@ instantiate_durable_object! {
 }
 
 instantiate_durable_object! {
+    struct ReplayChecker < durable::ReplayChecker;
+
+    fn init_user_data(_state: State, env: Env) {
+        daphne_worker::tracing_utils::initialize_tracing(env);
+    }
+}
+
+instantiate_durable_object! {
     struct AggregationJobStore < durable::AggregationJobStore;
+
+    fn init_user_data(_state: State, env: Env) {
+        daphne_worker::tracing_utils::initialize_tracing(env);
+    }
+}
+
+instantiate_durable_object! {
+    struct AggJobResponseStore < durable::AggregationJobResp;
+
+    fn init_user_data(_state: State, env: Env) {
+        daphne_worker::tracing_utils::initialize_tracing(env);
+    }
+}
+
+instantiate_durable_object! {
+    struct AggregateStoreV2 < durable::AggregateStoreV2;
 
     fn init_user_data(_state: State, env: Env) {
         daphne_worker::tracing_utils::initialize_tracing(env);

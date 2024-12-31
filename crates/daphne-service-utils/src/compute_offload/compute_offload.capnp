@@ -3,8 +3,6 @@
 
 @0xd932f3d934afce3b;
 
-# Utilities
-
 using Base = import "../capnproto/base.capnp";
 
 using VdafConfig = Text; # json encoded
@@ -94,26 +92,10 @@ struct PrepareInit @0x8192568cb3d03f59 {
 
 
 
-struct InitializedReports {
-    struct InitializedReport {
+struct InitializedReports @0xf36341397ae4a146 {
+    struct InitializedReport @0xfa833aa6b5d03d6d {
         using VdafPrepShare = Data;
         using VdafPrepState = Data;
-
-        enum ReportError {
-            reserved @0;
-            batchCollected @1;
-            reportReplayed @2;
-            reportDropped @3;
-            hpkeUnknownConfigId @4;
-            hpkeDecryptError @5;
-            vdafPrepError @6;
-            batchSaturated @7;
-            taskExpired @8;
-            invalidMessage @9;
-            reportTooEarly @10;
-            taskNotStarted @11;
-        }
-
 
         union {
             ready :group {
@@ -125,7 +107,7 @@ struct InitializedReports {
             }
             rejected :group {
                 metadata @5 :ReportMetadata;
-                failure @6 :ReportError;
+                failure @6 :Base.ReportError;
             }
         }
     }

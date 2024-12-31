@@ -56,8 +56,10 @@ impl GcDurableObject for AggregationJobStore {
 
                 Response::from_json(&response)
             }
-            Some(aggregation_job_store::Command::ListJobIds) => {
-                Response::from_json(&self.load_seen_agg_job_ids().await?)
+            Some(aggregation_job_store::Command::ContainsJob) => {
+                let agg_job_id = req_parse::<AggregationJobId>(&mut req).await?;
+                let has = self.has(&agg_job_id.to_string()).await?;
+                Response::from_json(&has)
             }
             None => Err(int_err(format!(
                 "AggregationJobStore: unexpected request: method={:?}; path={:?}",

@@ -5,13 +5,18 @@ use daphne_worker::{aggregator::App, initialize_tracing};
 use futures::stream;
 use std::convert::Infallible;
 use tracing::info;
-use worker::{event, Env, HttpRequest, ResponseBody};
+use worker::{event, Env, HttpRequest, MessageBatch, ResponseBody};
 
 mod durable;
 mod utils;
 
 #[global_allocator]
 static CAP: cap::Cap<std::alloc::System> = cap::Cap::new(std::alloc::System, 65_000_000);
+
+fn load_compute_offload_host(env: &worker::Env) -> String {
+    env.var("COMPUTE_OFFLOAD_HOST")
+        .map_or_else(|_| "localhost:5000".into(), |t| t.to_string())
+}
 
 #[event(fetch, respond_with_errors)]
 pub async fn main(
@@ -39,9 +44,7 @@ pub async fn main(
             daphne_worker::storage_proxy::handle_request(req, env, &registry).await
         }
         Some("aggregator") => {
-            let host = env
-                .var("COMPUTE_OFFLOAD_HOST")
-                .map_or_else(|_| "localhost:5000".into(), |t| t.to_string());
+            let host = load_compute_offload_host(&env);
 
             daphne_worker::aggregator::handle_dap_request(
                 App::new(env, &registry, None, Box::new(ComputeOffload { host })).unwrap(),
@@ -95,4 +98,17 @@ impl daphne_worker::aggregator::ComputeOffload for ComputeOffload {
             })
             .unwrap())
     }
+}
+
+#[event(queue)]
+pub async fn queue(
+    batch: MessageBatch<()>,
+    env: worker::Env,
+    _ctx: worker::Context,
+) -> worker::Result<()> {
+    let registry = prometheus::Registry::new();
+    let host = load_compute_offload_host(&env);
+    let app = App::new(env, &registry, None, Box::new(ComputeOffload { host })).unwrap();
+    daphne_worker::aggregator::queues::async_aggregate_batch(app, batch).await;
+    Ok(())
 }

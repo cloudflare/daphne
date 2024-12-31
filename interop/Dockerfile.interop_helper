@@ -6,14 +6,15 @@
 # NOTE: We must use debian (bookworm). We cannot use alpine because building
 # the service proxy requires OpenSSL, which is not compatible with the musl
 # target required by alpine.
-FROM rust:1.80-bookworm AS build-deps-common
+FROM rust:1.84.1-bookworm AS build-deps-common
 RUN apt update && apt install -y capnproto clang
 RUN capnp --version
 
 # Prepare dependencies for building the storage proxy.
 FROM build-deps-common AS build-deps-storage-proxy
 RUN rustup target add wasm32-unknown-unknown
-RUN cargo install worker-build@0.1.1 --locked
+RUN echo ola
+RUN cargo install worker-build@0.1.2 --locked
 
 # Build the service.
 FROM build-deps-common AS builder-service

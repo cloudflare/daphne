@@ -125,6 +125,10 @@ impl DapLeader for App {
     {
         self.send_http(meta, Method::PUT, url, payload).await
     }
+
+    async fn send_http_get(&self, meta: DapRequestMeta, url: Url) -> Result<DapResponse, DapError> {
+        self.send_http(meta, Method::GET, url, ()).await
+    }
 }
 
 impl App {
@@ -207,7 +211,7 @@ impl App {
 
         let req_builder = self
             .http
-            .request(method, url.clone())
+            .request(method.clone(), url.clone())
             .body(
                 payload
                     .get_encoded_with_param(&meta.version)
@@ -220,7 +224,10 @@ impl App {
             .send()
             .await
             .map_err(|e| fatal_error!(err = ?e, "failed to send request to the helper"))?;
-        info!("request to {} completed in {:?}", url, elapsed(&start));
+        info!(
+            "{method} request to {url} completed in {:?}",
+            elapsed(&start)
+        );
         let status = reqwest_resp.status();
 
         if status.is_success() {
