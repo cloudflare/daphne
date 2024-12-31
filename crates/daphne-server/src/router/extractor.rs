@@ -72,12 +72,12 @@ impl DecodeFromDapHttpBody for HashedAggregationJobReq {
     }
 }
 
-/// Using `()` ignores the body of a request.
 impl DecodeFromDapHttpBody for CollectionPollReq {
     fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
         Ok(Self)
     }
 }
+
 /// Using `()` ignores the body of a request.
 impl DecodeFromDapHttpBody for () {
     fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {

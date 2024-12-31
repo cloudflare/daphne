@@ -11,7 +11,7 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::{CollectionPollReq, RequestBody},
+        request::{CollectionPollReq, PollAggregationJob, RequestBody},
         taskprov::TaskprovAdvertisement,
         AggregateShareReq, AggregationJobInitReq, CollectionReq, Report, TaskId,
     },
@@ -65,6 +65,12 @@ impl DecodeFromDapHttpBody for HashedAggregationJobReq {
         // Decode the body
         HashedAggregationJobReq::get_decoded_with_param(&meta.version, bytes.as_ref())
             .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
+    }
+}
+
+impl DecodeFromDapHttpBody for PollAggregationJob {
+    fn decode_from_http_body(_bytes: Bytes, _meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        Ok(Self)
     }
 }
 

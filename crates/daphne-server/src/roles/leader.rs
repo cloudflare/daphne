@@ -121,6 +121,10 @@ impl DapLeader for crate::App {
     {
         self.send_http(meta, Method::PUT, url, payload).await
     }
+
+    async fn send_http_get(&self, meta: DapRequestMeta, url: Url) -> Result<DapResponse, DapError> {
+        self.send_http(meta, Method::PUT, url, ()).await
+    }
 }
 
 impl crate::App {

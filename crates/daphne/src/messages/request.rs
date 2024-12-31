@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::ops::Deref;
@@ -15,6 +15,9 @@ use crate::{
 pub trait RequestBody {
     type ResourceId;
 }
+
+/// A poll request has no body, but requires a `AggregationJobId`.
+pub struct PollAggregationJob;
 
 /// A poll request has no body, but requires a `CollectionJobId`.
 pub struct CollectionPollReq;
@@ -33,6 +36,7 @@ impl_req_body! {
     Report                  | ()
     AggregationJobInitReq   | AggregationJobId
     HashedAggregationJobReq | AggregationJobId
+    PollAggregationJob      | AggregationJobId
     AggregateShareReq       | ()
     CollectionReq           | CollectionJobId
     CollectionPollReq       | CollectionJobId

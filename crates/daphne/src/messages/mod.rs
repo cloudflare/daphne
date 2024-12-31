@@ -952,9 +952,36 @@ impl std::fmt::Display for ReportError {
 }
 
 /// An aggregate response sent from the Helper to the Leader.
-#[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct AggregationJobResp {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub enum AggregationJobResp {
+    Ready { transitions: Vec<Transition> },
+    Processing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub struct ReadyAggregationJobResp {
     pub transitions: Vec<Transition>,
+}
+
+impl From<ReadyAggregationJobResp> for AggregationJobResp {
+    fn from(value: ReadyAggregationJobResp) -> Self {
+        Self::Ready {
+            transitions: value.transitions,
+        }
+    }
+}
+
+impl AggregationJobResp {
+    #[cfg(any(test, feature = "test-utils"))]
+    #[track_caller]
+    pub fn unwrap_ready(self) -> ReadyAggregationJobResp {
+        match self {
+            Self::Ready { transitions } => ReadyAggregationJobResp { transitions },
+            Self::Processing => panic!("unwraped a Processing value"),
+        }
+    }
 }
 
 impl ParameterizedEncode<DapVersion> for AggregationJobResp {
@@ -963,7 +990,19 @@ impl ParameterizedEncode<DapVersion> for AggregationJobResp {
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u32_items(bytes, version, &self.transitions)
+        match (self, version) {
+            (Self::Ready { transitions }, DapVersion::Draft09) => {
+                encode_u32_items(bytes, version, transitions)
+            }
+            (Self::Ready { transitions }, DapVersion::Latest) => {
+                1u8.encode(bytes)?;
+                encode_u32_items(bytes, version, transitions)
+            }
+            (Self::Processing, DapVersion::Draft09) => Err(CodecError::Other(
+                "AggregationJobResp::Processing not supported in draft-09".into(),
+            )),
+            (Self::Processing, DapVersion::Latest) => 0u8.encode(bytes),
+        }
     }
 }
 
@@ -972,9 +1011,18 @@ impl ParameterizedDecode<DapVersion> for AggregationJobResp {
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        Ok(Self {
-            transitions: decode_u32_items(version, bytes)?,
-        })
+        match version {
+            DapVersion::Draft09 => Ok(Self::Ready {
+                transitions: decode_u32_items(version, bytes)?,
+            }),
+            DapVersion::Latest => match u8::decode(bytes)? {
+                0 => Ok(Self::Processing),
+                1 => Ok(Self::Ready {
+                    transitions: decode_u32_items(version, bytes)?,
+                }),
+                _ => Err(CodecError::UnexpectedValue),
+            },
+        }
     }
 }
 
@@ -1898,7 +1946,7 @@ mod test {
             17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 2, 7,
         ];
 
-        let want = AggregationJobResp {
+        let want = AggregationJobResp::Ready {
             transitions: vec![
                 Transition {
                     report_id: ReportId([22; 16]),
@@ -1916,14 +1964,18 @@ mod test {
                 },
             ],
         };
-        println!(
-            "want {:?}",
-            want.get_encoded_with_param(&DapVersion::Latest).unwrap()
-        );
-
         let got =
-            AggregationJobResp::get_decoded_with_param(&DapVersion::Latest, TEST_DATA).unwrap();
+            AggregationJobResp::get_decoded_with_param(&DapVersion::Draft09, TEST_DATA).unwrap();
         assert_eq!(got, want);
+        let draft_latest_data = [&[1], TEST_DATA].concat();
+        let got =
+            AggregationJobResp::get_decoded_with_param(&DapVersion::Latest, &draft_latest_data)
+                .unwrap();
+        assert_eq!(got, want);
+        assert_eq!(
+            AggregationJobResp::Processing,
+            AggregationJobResp::get_decoded_with_param(&DapVersion::Latest, &[0]).unwrap(),
+        );
     }
 
     #[test]

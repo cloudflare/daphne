@@ -36,6 +36,7 @@ impl DurableObject for TestStateCleaner {
 }
 
 impl TestStateCleaner {
+    #[tracing::instrument(skip_all)]
     async fn handle(&mut self, mut req: Request) -> Result<Response> {
         let durable = DurableConnector::new(&self.env);
         match bindings::TestStateCleaner::try_from_uri(&req.path()) {
@@ -69,19 +70,31 @@ impl TestStateCleaner {
                 let queued: Vec<DurableOrdered<DurableReference>> =
                     DurableOrdered::get_all(&self.state, "object").await?;
                 for durable_ref in queued.iter().map(|queued| queued.as_ref()) {
-                    durable
+                    let result = durable
                         .post_by_id_hex::<_, ()>(
                             &durable_ref.binding,
                             bindings::TestStateCleaner::DeleteAll.to_uri(),
                             durable_ref.id_hex.clone(),
                             &(),
                         )
-                        .await?;
-                    console_debug!(
-                        "deleted instance. binding: {binding}. instance: {instance}",
-                        binding = durable_ref.binding,
-                        instance = durable_ref.id_hex,
-                    );
+                        .await;
+                    match result {
+                        Ok(()) => {
+                            console_debug!(
+                                "deleted instance. binding: {binding}. instance: {instance}",
+                                binding = durable_ref.binding,
+                                instance = durable_ref.id_hex,
+                            );
+                        }
+                        Err(e) => {
+                            console_error!(
+                                "failed to delete instance. binding: {binding}. instance: {instance}. error: {e}",
+                                binding = durable_ref.binding,
+                                instance = durable_ref.id_hex,
+                                e = e,
+                            )
+                        }
+                    }
                 }
 
                 self.state.storage().delete_all().await?;
@@ -184,6 +197,7 @@ impl<T> AsRef<T> for DurableOrdered<T> {
     }
 }
 
+#[tracing::instrument(skip(state))]
 async fn get_front<T: for<'a> Deserialize<'a> + Serialize>(
     state: &State,
     prefix: &str,

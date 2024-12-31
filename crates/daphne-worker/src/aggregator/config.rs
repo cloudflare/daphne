@@ -194,9 +194,13 @@ pub fn load_config_from_env(env: &worker::Env) -> Result<DaphneServiceConfig, Da
     const SERVICE_CONFIG: &str = "SERVICE_CONFIG";
     const SIGNING_KEY: &str = "SIGNING_KEY";
 
-    let mut config = env
-        .object_var::<DaphneServiceConfig>(SERVICE_CONFIG)
+    // due to a bug where JsValue::UNDEFINED is not considered nullish in serde-wasm-bindgen we
+    // have to deserialize to serde_json::Value first and DaphneServiceConfig later.
+    let config = env
+        .object_var::<serde_json::Value>(SERVICE_CONFIG)
         .map_err(|e| fatal_error!(err = ?e, "failed to load SERVICE_CONFIG variable"))?;
+
+    let mut config = serde_json::from_value::<DaphneServiceConfig>(config).unwrap();
 
     if config.taskprov.is_some() {
         tracing::warn!("taskprov secrets are defined in plain text. Prefer using wrangler secrets");
@@ -236,9 +240,16 @@ mod taskprov_secrets {
 
     pub fn load(env: &worker::Env) -> Result<TaskprovConfig, DapError> {
         Ok(super::TaskprovConfig {
-            hpke_collector_config: env.object_var(TASKPROV_HPKE_COLLECTOR_CONFIG).map_err(
-                |e| fatal_error!(err = ?e, "failed to load TASKPROV_HPKE_COLLECTOR_CONFIG"),
-            )?,
+            hpke_collector_config: env
+                .object_var::<serde_json::Value>(TASKPROV_HPKE_COLLECTOR_CONFIG)
+                .map_err(
+                    |e| fatal_error!(err = ?e, "failed to load TASKPROV_HPKE_COLLECTOR_CONFIG"),
+                )
+                .and_then(|v| {
+                    serde_json::from_value(v).map_err(
+                        |e| fatal_error!(err = ?e, "failed to load TASKPROV_HPKE_COLLECTOR_CONFIG"),
+                    )
+                })?,
             vdaf_verify_key_init: {
                 let key = VDAF_VERIFY_KEY_INIT;
                 hex::decode(

@@ -19,6 +19,7 @@ crate-type = ["cdylib", "rlib"]
 async-trait = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header"] }
 bytes.workspace = true
+capnp = { workspace = true }
 chrono = { workspace = true, default-features = false, features = ["clock", "wasmbind"] }
 constcat.workspace = true
 daphne = { path = "../daphne", features = ["prometheus"] }
@@ -49,7 +50,8 @@ tracing-core.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"]}
 tracing.workspace = true
 url.workspace = true
-worker.workspace = true
+wasm-bindgen.workspace = true
+worker = { workspace = true , features = ["http", "queue"] }
 
 [dependencies.axum]
 workspace = true
@@ -66,6 +68,9 @@ rcgen.workspace = true
 reqwest.workspace = true # used in doc tests
 tokio.workspace = true
 webpki.workspace = true
+
+[build-dependencies]
+capnpc = { workspace = true }
 
 [features]
 test-utils = ["daphne-service-utils/test-utils"]

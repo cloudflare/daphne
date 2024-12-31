@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Trait definitions for Daphne backends.
@@ -67,7 +67,10 @@ async fn check_batch(
         }
         (DapBatchMode::LeaderSelected { .. }, Query::LeaderSelectedCurrentBatch) => (), // nothing to do
         (DapBatchMode::LeaderSelected { .. }, Query::LeaderSelectedByBatchId { batch_id }) => {
-            if !agg.batch_exists(task_id, batch_id).await? {
+            if !agg
+                .batch_exists(task_config.version, task_id, batch_id)
+                .await?
+            {
                 return Err(DapAbort::BatchInvalid {
                     detail: format!(
                         "The queried batch ({}) does not exist.",
@@ -83,7 +86,10 @@ async fn check_batch(
 
     // Check that the batch does not overlap with any previously collected batch.
     if let Some(batch_sel) = query.into_batch_sel() {
-        if agg.is_batch_overlapping(task_id, &batch_sel).await? {
+        if agg
+            .is_batch_overlapping(task_config.version, task_id, &batch_sel)
+            .await?
+        {
             return Err(DapAbort::batch_overlap(task_id, query).into());
         }
     }
@@ -91,7 +97,7 @@ async fn check_batch(
     Ok(())
 }
 
-async fn resolve_task_config(
+pub async fn resolve_task_config(
     agg: &impl DapAggregator,
     req: &DapRequestMeta,
 ) -> Result<DapTaskConfig, DapError> {
@@ -764,7 +770,7 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = &agg_job_resp.transitions[0];
+        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
 
         // Expect failure due to invalid ciphertext.
         assert_matches!(
@@ -878,7 +884,7 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = &agg_job_resp.transitions[0];
+        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
 
         // Expect success due to valid ciphertext.
         assert_matches!(transition.var, TransitionVar::Continued(_));

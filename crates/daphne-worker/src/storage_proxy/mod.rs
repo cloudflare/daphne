@@ -257,6 +257,7 @@ async fn retry<F, T, E, Fut>(mut f: F) -> Result<T, E>
 where
     F: FnMut(u8) -> Fut,
     Fut: Future<Output = Result<T, E>>,
+    E: std::fmt::Debug,
 {
     const RETRY_DELAYS: &[Duration] = &[
         Duration::from_millis(1_000),
@@ -272,8 +273,10 @@ where
             Err(error) => {
                 if attempt < attempts {
                     Delay::from(RETRY_DELAYS[usize::from(attempt - 1)]).await;
+                    tracing::warn!(attempt, error = ?error, "failed, retrying...");
                     attempt += 1;
                 } else {
+                    tracing::error!(attempt, error = ?error, "failed, aborting...");
                     return Err(error);
                 }
             }
@@ -461,7 +464,7 @@ pub async fn handle_do_request<P: AsRef<[u8]>>(
         let mut do_req = RequestInit::new();
         do_req.with_method(worker::Method::Post);
         do_req.with_headers(headers.into());
-        tracing::debug!(
+        tracing::trace!(
             len = durable_request.body().len(),
             "deserializing do request"
         );

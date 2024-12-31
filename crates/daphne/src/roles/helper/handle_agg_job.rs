@@ -5,15 +5,20 @@ use super::{check_part_batch, DapHelper, HashedAggregationJobReq};
 use crate::{
     error::DapAbort,
     messages::{
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportError, TaskId,
-        TransitionVar,
+        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReadyAggregationJobResp,
+        ReportError, ReportId, ReportMetadata, TaskId, TransitionVar,
     },
     metrics::ReportStatus,
     protocol::aggregator::ReportProcessedStatus,
     roles::{aggregator::MergeAggShareError, resolve_task_config},
-    DapError, DapRequest, DapTaskConfig, InitializedReport, WithPeerPrepShare,
+    DapAggregateShare, DapAggregateSpan, DapError, DapRequest, DapTaskConfig, InitializedReport,
+    WithPeerPrepShare,
 };
-use std::{collections::HashMap, sync::Once};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    sync::Once,
+};
 
 /// A state machine for the handling of aggregation jobs.
 pub struct HandleAggJob<S> {
@@ -38,7 +43,6 @@ pub struct WithTaskConfig {
 ///
 /// This type is returned by [`HandleAggJob::into_parts`] and [`Self::with_initialized_reports`]
 /// can be used to return to the [`HandleAggJob`] state machine flow.
-#[non_exhaustive]
 pub struct ToInitializedReportsTransition {
     pub task_id: TaskId,
     pub part_batch_sel: PartialBatchSelector,
@@ -52,6 +56,8 @@ pub struct InitializedReports {
     task_config: DapTaskConfig,
     reports: Vec<InitializedReport<WithPeerPrepShare>>,
 }
+
+pub struct UniqueInitializedReports(InitializedReports);
 
 macro_rules! impl_from {
     ($($t:ty),*$(,)?) => {
@@ -336,12 +342,59 @@ impl HandleAggJob<InitializedReports> {
                     0, /* vdaf step */
                 );
 
-                return Ok(agg_job_resp);
+                return Ok(agg_job_resp.into());
             }
         }
 
         // We need to prevent an attacker from keeping this loop running for too long, potentially
         // enabling an DOS attack.
         Err(DapAbort::BadRequest("aggregation job contained too many replays".into()).into())
+    }
+
+    pub async fn check_for_replays<F, Fut, E>(
+        mut self,
+        replay_check: F,
+    ) -> Result<HandleAggJob<UniqueInitializedReports>, E>
+    where
+        F: FnOnce(&mut dyn Iterator<Item = &ReportMetadata>) -> Fut,
+        Fut: Future<Output = Result<HashSet<ReportId>, E>>,
+    {
+        let replays = replay_check(
+            &mut self
+                .state
+                .reports
+                .iter()
+                .filter(|r| matches!(r, InitializedReport::Ready { .. }))
+                .map(|r| r.metadata()),
+        )
+        .await?;
+
+        for r in &mut self.state.reports {
+            if replays.contains(&r.metadata().id) {
+                *r = InitializedReport::Rejected {
+                    metadata: r.metadata().clone(),
+                    report_err: ReportError::ReportReplayed,
+                }
+            }
+        }
+
+        Ok(HandleAggJob {
+            state: UniqueInitializedReports(self.state),
+        })
+    }
+}
+
+impl HandleAggJob<UniqueInitializedReports> {
+    pub fn finish(
+        self,
+    ) -> Result<(DapAggregateSpan<DapAggregateShare>, ReadyAggregationJobResp), DapError> {
+        let InitializedReports {
+            task_id,
+            part_batch_sel,
+            task_config,
+            reports,
+        } = self.state.0;
+
+        task_config.produce_agg_job_resp(task_id, &Default::default(), &part_batch_sel, &reports)
     }
 }
