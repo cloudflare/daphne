@@ -214,6 +214,14 @@ pub async fn handle_upload_req<A: DapLeader>(
         }
         .into());
     }
+
+    if report.report_metadata.time < task_config.as_ref().not_before {
+        return Err(DapAbort::ReportRejected {
+            detail: "The timestamp preceeds the start of the task".into(),
+        }
+        .into());
+    }
+
     if report.report_metadata.time
         < task_config.as_ref().not_before - task_config.as_ref().time_precision
     {

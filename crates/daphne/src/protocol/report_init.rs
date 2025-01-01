@@ -111,6 +111,7 @@ impl<P> InitializedReport<P> {
         }
         match report_share.report_metadata.time {
             t if t >= task_config.not_after => reject!(TaskExpired),
+            t if t < task_config.not_before => reject!(TaskNotStarted),
             t if t < valid_report_range.start => reject!(ReportDropped),
             t if valid_report_range.end < t => reject!(ReportTooEarly),
             _ => {}
