@@ -100,6 +100,7 @@ impl InitializedReport<WithPeerPrepShare> {
 impl<'s> From<&'s DapTaskConfig> for PartialDapTaskConfigForReportInit<'s> {
     fn from(config: &'s DapTaskConfig) -> Self {
         PartialDapTaskConfigForReportInit {
+            not_before: config.not_before,
             not_after: config.not_after,
             method_is_taskprov: config.method_is_taskprov(),
             version: config.version,
@@ -112,6 +113,7 @@ impl<'s> From<&'s DapTaskConfig> for PartialDapTaskConfigForReportInit<'s> {
 impl<'s> From<&'s PartialDapTaskConfigForReportInit<'_>> for PartialDapTaskConfigForReportInit<'s> {
     fn from(config: &'s PartialDapTaskConfigForReportInit<'_>) -> Self {
         Self {
+            not_before: config.not_before,
             not_after: config.not_after,
             method_is_taskprov: config.method_is_taskprov,
             version: config.version,
@@ -122,6 +124,7 @@ impl<'s> From<&'s PartialDapTaskConfigForReportInit<'_>> for PartialDapTaskConfi
 }
 
 pub struct PartialDapTaskConfigForReportInit<'s> {
+    pub not_before: messages::Time,
     pub not_after: messages::Time,
     pub method_is_taskprov: bool,
     pub version: DapVersion,
@@ -153,6 +156,7 @@ impl<P> InitializedReport<P> {
         }
         match report_share.report_metadata.time {
             t if t >= task_config.not_after => reject!(TaskExpired),
+            t if t < task_config.not_before => reject!(TaskNotStarted),
             t if t < valid_report_range.start => reject!(ReportDropped),
             t if valid_report_range.end < t => reject!(ReportTooEarly),
             _ => {}
