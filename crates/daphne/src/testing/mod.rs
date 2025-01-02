@@ -640,7 +640,7 @@ impl HpkeProvider for InMemoryAggregator {
         Ok(&self.hpke_receiver_config_list[0].config)
     }
 
-    async fn get_receiver_configs<'s>(
+    async fn get_hpke_receiver_configs<'s>(
         &'s self,
         _version: DapVersion,
     ) -> Result<Self::ReceiverConfigs<'s>, DapError> {
