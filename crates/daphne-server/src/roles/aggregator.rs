@@ -422,7 +422,7 @@ impl HpkeProvider for crate::App {
             .unwrap_or(false))
     }
 
-    async fn get_receiver_configs<'s>(
+    async fn get_hpke_receiver_configs<'s>(
         &'s self,
         version: DapVersion,
     ) -> Result<Self::ReceiverConfigs<'s>, DapError> {

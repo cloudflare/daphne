@@ -235,7 +235,7 @@ pub trait HpkeProvider {
         task_id: Option<&TaskId>,
     ) -> Result<Self::WrappedHpkeConfig<'s>, DapError>;
 
-    async fn get_receiver_configs<'s>(
+    async fn get_hpke_receiver_configs<'s>(
         &'s self,
         version: DapVersion,
     ) -> Result<Self::ReceiverConfigs<'s>, DapError>;

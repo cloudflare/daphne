@@ -119,7 +119,9 @@ impl HandleAggJob<WithTaskConfig> {
         let task_id = request.task_id;
         let part_batch_sel = request.payload.part_batch_sel.clone();
         let initialized_reports = task_config.consume_agg_job_req(
-            &aggregator.get_receiver_configs(task_config.version).await?,
+            &aggregator
+                .get_hpke_receiver_configs(task_config.version)
+                .await?,
             aggregator.valid_report_time_range(),
             &task_id,
             request.payload,
