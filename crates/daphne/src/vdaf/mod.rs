@@ -441,7 +441,6 @@ pub enum VdafPrepState {
     Prio2(Prio2PrepareState),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareState<Field64Draft09, 32>),
     Prio3Field64(Prio3PrepareState<Field64, 32>),
-    Prio3Field64HmacSha256Aes128(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 32>),
     #[cfg(feature = "experimental")]
     Mastic {
@@ -459,7 +458,6 @@ impl Encode for VdafPrepState {
             }
 
             Self::Prio3Field64(state) => state.encode(bytes),
-            Self::Prio3Field64HmacSha256Aes128(state) => state.encode(bytes),
             Self::Prio3Field128(state) => state.encode(bytes),
 
             Self::Prio2(state) => state.encode(bytes),
@@ -500,7 +498,6 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             Self::Prio2(_)
             | Self::Prio3Draft09Field64HmacSha256Aes128(_)
             | Self::Prio3Field64(_)
-            | Self::Prio3Field64HmacSha256Aes128(_)
             | Self::Prio3Field128(_)
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
@@ -517,7 +514,6 @@ pub enum VdafPrepShare {
     Prio2(Prio2PrepareShare),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareShare<Field64Draft09, 32>),
     Prio3Field64(Prio3PrepareShare<Field64, 32>),
-    Prio3Field64HmacSha256Aes128(Prio3PrepareShare<Field64, 32>),
     Prio3Field128(Prio3PrepareShare<Field128, 32>),
     #[cfg(feature = "experimental")]
     Mastic(Field64),
@@ -538,7 +534,6 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
             // type.
             Self::Prio3Draft09Field64HmacSha256Aes128(..)
             | Self::Prio3Field64(..)
-            | Self::Prio3Field64HmacSha256Aes128(..)
             | Self::Prio3Field128(..)
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
@@ -555,7 +550,6 @@ impl Encode for VdafPrepShare {
                 share.encode(bytes).map_err(upgrade_codec_error)
             }
             Self::Prio3Field64(share) => share.encode(bytes),
-            Self::Prio3Field64HmacSha256Aes128(share) => share.encode(bytes),
             Self::Prio3Field128(share) => share.encode(bytes),
             Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
@@ -581,11 +575,6 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
             VdafPrepState::Prio3Field64(state) => Ok(VdafPrepShare::Prio3Field64(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),
-            VdafPrepState::Prio3Field64HmacSha256Aes128(state) => {
-                Ok(VdafPrepShare::Prio3Field64HmacSha256Aes128(
-                    Prio3PrepareShare::decode_with_param(state, bytes)?,
-                ))
-            }
             VdafPrepState::Prio3Field128(state) => Ok(VdafPrepShare::Prio3Field128(
                 Prio3PrepareShare::decode_with_param(state, bytes)?,
             )),

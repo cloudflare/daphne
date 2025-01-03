@@ -10,61 +10,41 @@ use crate::{
 
 use prio_draft09::{
     codec::{Encode, ParameterizedDecode},
-    flp::Type,
+    field::Field64,
+    flp::{
+        gadgets::{Mul, ParallelSum},
+        types::SumVec,
+        Type,
+    },
     vdaf::{
         prio3::{Prio3, Prio3InputShare, Prio3PrepareShare, Prio3PrepareState, Prio3PublicShare},
-        xof::Xof,
+        xof::{Xof, XofHmacSha256Aes128},
         Aggregator, Client, Collector, PrepareTransition, Vdaf,
     },
 };
 
-macro_rules! gen_prio3_sum_vec {
-    ($krate:ident, $alias:ident, $fn_name:ident) => {
-        type $alias =
-            $krate::vdaf::prio3::Prio3<
-                $krate::flp::types::SumVec<
-                    $krate::field::Field64,
-                    $krate::flp::gadgets::ParallelSum<
-                        $krate::field::Field64,
-                        $krate::flp::gadgets::Mul<$krate::field::Field64>
-                    >
-                >,
-                $krate::vdaf::xof::XofHmacSha256Aes128,
-                32
-            >;
+type Prio3SumVecField64MultiproofHmacSha256Aes128 =
+    Prio3<SumVec<Field64, ParallelSum<Field64, Mul<Field64>>>, XofHmacSha256Aes128, 32>;
 
-        pub(crate) fn $fn_name(
-            bits: usize,
-            length: usize,
-            chunk_length: usize,
-            num_proofs: u8,
-        ) -> Result<$alias, VdafError> {
-            $krate::vdaf::prio3::Prio3::new(
-                2,
-                num_proofs,
-                VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
-                $krate::flp::types::SumVec::new(bits, length, chunk_length).map_err(|e| {
-                    VdafError::Dap(fatal_error!(
-                        err = ?e,
-                        "failed to create sum vec from bits({bits}), length({length}), chunk_length({chunk_length})"
-                    ))
-                })?,
-            )
-            .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3")))
-        }
-    }
+pub(crate) fn new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+    bits: usize,
+    length: usize,
+    chunk_length: usize,
+    num_proofs: u8,
+) -> Result<Prio3SumVecField64MultiproofHmacSha256Aes128, VdafError> {
+    Prio3::new(
+        2,
+        num_proofs,
+        VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128,
+        SumVec::new(bits, length, chunk_length).map_err(|e| {
+            VdafError::Dap(fatal_error!(
+                err = ?e,
+                "failed to create sum vec from bits({bits}), length({length}), chunk_length({chunk_length})"
+            ))
+        })?,
+    )
+    .map_err(|e| VdafError::Dap(fatal_error!(err = ?e, "failed to create prio3")))
 }
-
-gen_prio3_sum_vec!(
-    prio_draft09,
-    Prio3SumVecField64MultiproofHmacSha256Aes128,
-    new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128
-);
-gen_prio3_sum_vec!(
-    prio,
-    LatestBridgePrio3SumVecField64MultiproofHmacSha256Aes128,
-    latest_bridge_new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128
-);
 
 type Prio3Draft09Prepared<T, const SEED_SIZE: usize> = (
     Prio3PrepareState<<T as Type>::Field, SEED_SIZE>,

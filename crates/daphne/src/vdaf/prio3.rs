@@ -616,13 +616,14 @@ pub(crate) fn decode_prep_state(
             chunk_length,
             num_proofs,
         } => {
-            let vdaf = super::draft09::latest_bridge_new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
+            use prio_draft09::{codec::ParameterizedDecode, vdaf::prio3::Prio3PrepareState};
+            let vdaf = super::draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                 *bits,
                 *length,
                 *chunk_length,
                 *num_proofs,
             )?;
-            Ok(VdafPrepState::Prio3Field64HmacSha256Aes128(
+            Ok(VdafPrepState::Prio3Draft09Field64HmacSha256Aes128(
                 Prio3PrepareState::decode_with_param(&(&vdaf, agg_id), bytes)?,
             ))
         }
