@@ -11,7 +11,7 @@ use daphne::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    capnproto_payload::{CapnprotoPayloadDecode, CapnprotoPayloadEncode},
+    capnproto::{CapnprotoPayloadDecode, CapnprotoPayloadEncode},
     durable_request_capnp::{aggregate_store_merge_req, dap_aggregate_share},
     durable_requests::ObjectIdFrom,
 };
@@ -284,9 +284,7 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::capnproto_payload::{
-        CapnprotoPayloadDecodeExt as _, CapnprotoPayloadEncodeExt as _,
-    };
+    use crate::capnproto::{CapnprotoPayloadDecodeExt as _, CapnprotoPayloadEncodeExt as _};
 
     use super::*;
 

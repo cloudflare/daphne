@@ -5,7 +5,7 @@
 
 pub mod bearer_token;
 #[cfg(feature = "durable_requests")]
-pub mod capnproto_payload;
+pub mod capnproto;
 #[cfg(feature = "durable_requests")]
 pub mod durable_requests;
 pub mod http_headers;
@@ -13,6 +13,15 @@ pub mod http_headers;
 pub mod test_route_types;
 
 // the generated code expects this module to be defined at the root of the library.
+#[cfg(feature = "durable_requests")]
+#[doc(hidden)]
+pub mod base_capnp {
+    #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::needless_lifetimes)]
+    include!(concat!(env!("OUT_DIR"), "/src/capnproto/base_capnp.rs"));
+}
+
 #[cfg(feature = "durable_requests")]
 mod durable_request_capnp {
     #![allow(dead_code)]

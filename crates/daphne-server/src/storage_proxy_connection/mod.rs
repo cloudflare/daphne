@@ -7,7 +7,7 @@ use std::fmt::Debug;
 
 use axum::http::StatusCode;
 use daphne_service_utils::{
-    capnproto_payload::{CapnprotoPayloadEncode, CapnprotoPayloadEncodeExt as _},
+    capnproto::{CapnprotoPayloadEncode, CapnprotoPayloadEncodeExt as _},
     durable_requests::{bindings::DurableMethod, DurableRequest, ObjectIdFrom, DO_PATH_PREFIX},
 };
 use serde::de::DeserializeOwned;
