@@ -1,8 +1,8 @@
-# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
 main = "build/worker/shim.mjs"
-compatibility_date = "2023-12-21"
+compatibility_date = "2025-01-08"
 
 # Don't ask to send metrics to Cloudflare. The worker may be run from a container.
 send_metrics = false
@@ -34,6 +34,11 @@ DAP_DURABLE_AGGREGATE_STORE_GC_AFTER_SECS = "30"
 TASKPROV_SECRETS_ENABLED = "true"
 TASKPROV_SECRETS_VDAF_VERIFY_KEY_INIT = "b029a72fa327931a5cb643dcadcaafa098fcbfac07d990cb9e7c9a8675fafb18"
 TASKPROV_SECRETS_PEER_AUTH_EXPECT_LEADER_TOKEN = "I-am-the-leader"
+SIGNING_KEY = """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIPg1ObFKii4YgTwltHaC/vgD6pwg5EtvW1YoyHVB5HfKoAoGCCqGSM49
+AwEHoUQDQgAEoXmHQ7CS7BuFBveW7NqpVa9UEHCuvpOnpgCUgwJa+2yBox1KC8FH
+SECvNfIPzYFS9L4oPdG+Lhk0uynSifaOCg==
+-----END EC PRIVATE KEY-----"""
 
 [env.helper.vars.SERVICE_CONFIG]
 env = "oxy"
@@ -53,6 +58,7 @@ kem_id = "p256_hkdf_sha256"
 kdf_id = "hkdf_sha256"
 aead_id = "aes128_gcm"
 public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+# PRIVATE KEY: 9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e
 
 [dev]
 ip = "0.0.0.0"
@@ -116,6 +122,7 @@ kem_id = "p256_hkdf_sha256"
 kdf_id = "hkdf_sha256"
 aead_id = "aes128_gcm"
 public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0160d9252b82b4b5c52354205f5ec945645cb79facff8d85c9c31b490cdf35466"
+# PRIVATE KEY: 9ce9851512df3ea674b108b305c3f8c424955a94d93fd53ecf3c3f17f7d1df9e
 
 [env.leader.durable_objects]
 bindings = [
@@ -147,11 +154,4 @@ tag = "v1"
 new_classes = [
     "AggregateStore",
     "GarbageCollector",
-    "HelperStateStore",
-]
-
-[[migrations]]
-tag = "v2"
-renamed_classes = [
-    { from = "GarbageCollector", to = "TestStateCleaner" },
 ]
