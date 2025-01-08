@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{check_part_batch, DapHelper};
@@ -22,6 +22,10 @@ pub struct HandleAggJob<S> {
 
 /// The initial state, the aggregation request has been received.
 pub struct Init(DapRequest<AggregationJobInitReq>);
+
+/// The aggregation job is legal. Which means that it's either new or it's parameters haven't
+/// changed since the last time we've received it.
+pub struct LegalAggregationJobReq(DapRequest<AggregationJobInitReq>);
 
 /// The task configuration associated with the incoming request has been resolved.
 pub struct WithTaskConfig {
@@ -72,6 +76,21 @@ impl HandleAggJob<Init> {
         }
     }
 
+    pub async fn check_aggregation_job_legality<A: DapHelper>(
+        self,
+        aggregator: &A,
+    ) -> Result<HandleAggJob<LegalAggregationJobReq>, DapError> {
+        let Self { state: Init(req) } = self;
+        aggregator
+            .assert_agg_job_is_immutable(req.resource_id, req.version, &req.task_id, &req.payload)
+            .await?;
+        Ok(HandleAggJob {
+            state: LegalAggregationJobReq(req),
+        })
+    }
+}
+
+impl HandleAggJob<LegalAggregationJobReq> {
     /// Resolve the task config in the default way.
     pub async fn resolve_task_config<A: DapHelper>(
         self,
@@ -87,7 +106,7 @@ impl HandleAggJob<Init> {
         task_config: DapTaskConfig,
     ) -> Result<HandleAggJob<WithTaskConfig>, DapError> {
         let Self {
-            state: Init(request),
+            state: LegalAggregationJobReq(request),
         } = self;
 
         check_part_batch(

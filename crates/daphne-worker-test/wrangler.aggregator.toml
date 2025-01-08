@@ -67,6 +67,7 @@ ip = "0.0.0.0"
 bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
     { name = "DAP_TEST_STATE_CLEANER", class_name = "TestStateCleaner" },
+    { name = "AGGREGATION_JOB_STORE", class_name = "AggregationJobStore" },
 ]
 
 
@@ -128,6 +129,7 @@ public_key = "047dab625e0d269abcc28c611bebf5a60987ddf7e23df0e0aa343e5774ad81a1d0
 bindings = [
     { name = "DAP_AGGREGATE_STORE", class_name = "AggregateStore" },
     { name = "DAP_TEST_STATE_CLEANER", class_name = "TestStateCleaner" },
+    { name = "AGGREGATION_JOB_STORE", class_name = "AggregationJobStore" },
 ]
 
 [[env.leader.kv_namespaces]]
@@ -154,4 +156,5 @@ tag = "v1"
 new_classes = [
     "AggregateStore",
     "GarbageCollector",
+    "AggregationJobStore",
 ]

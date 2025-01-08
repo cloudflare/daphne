@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! This module defines the durable objects' binding and methods as implementors of the
@@ -7,6 +7,7 @@
 //! It also defines types that are used as the body of requests sent to these objects.
 
 mod aggregate_store;
+pub mod aggregation_job_store;
 #[cfg(feature = "test-utils")]
 mod test_state_cleaner;
 

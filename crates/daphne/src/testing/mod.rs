@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Mock backend functionality to test DAP protocol.
@@ -34,7 +34,7 @@ use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     hash::Hash,
     num::NonZeroUsize,
     ops::{DerefMut, Range},
@@ -516,6 +516,9 @@ pub struct InMemoryAggregator {
     // Leader: Reference to peer. Used to simulate HTTP requests from Leader to Helper, i.e.,
     // implement `DapLeader::send_http_post()` for `InMemoryAggregator`. Not set by the Helper.
     peer: Option<Arc<InMemoryAggregator>>,
+
+    // Helper: aggregation jobs
+    processed_jobs: Mutex<HashMap<AggregationJobId, AggregationJobInitReq>>,
 }
 
 impl DeepSizeOf for InMemoryAggregator {
@@ -531,6 +534,7 @@ impl DeepSizeOf for InMemoryAggregator {
             audit_log: _,
             taskprov_vdaf_verify_key_init,
             peer,
+            processed_jobs,
         } = self;
         global_config.deep_size_of_children(context)
             + tasks.deep_size_of_children(context)
@@ -540,6 +544,7 @@ impl DeepSizeOf for InMemoryAggregator {
             + collector_hpke_config.deep_size_of_children(context)
             + taskprov_vdaf_verify_key_init.deep_size_of_children(context)
             + peer.deep_size_of_children(context)
+            + processed_jobs.deep_size_of_children(context)
     }
 }
 
@@ -563,6 +568,7 @@ impl InMemoryAggregator {
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             peer: None,
+            processed_jobs: Default::default(),
         }
     }
 
@@ -586,6 +592,7 @@ impl InMemoryAggregator {
             audit_log: MockAuditLog::default(),
             taskprov_vdaf_verify_key_init,
             peer: peer.into(),
+            processed_jobs: Default::default(),
         }
     }
 
@@ -866,7 +873,32 @@ impl DapAggregator for InMemoryAggregator {
 }
 
 #[async_trait]
-impl DapHelper for InMemoryAggregator {}
+impl DapHelper for InMemoryAggregator {
+    async fn assert_agg_job_is_immutable(
+        &self,
+        id: AggregationJobId,
+        _version: DapVersion,
+        _task_id: &TaskId,
+        req: &AggregationJobInitReq,
+    ) -> Result<(), DapError> {
+        match self.processed_jobs.lock().unwrap().entry(id) {
+            Entry::Occupied(occupied_entry) => {
+                if occupied_entry.get() == req {
+                    Ok(())
+                } else {
+                    Err(DapAbort::BadRequest(
+                        "chaning aggregation job parameters is illegal".to_string(),
+                    )
+                    .into())
+                }
+            }
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(req.clone());
+                Ok(())
+            }
+        }
+    }
+}
 
 #[async_trait]
 impl DapLeader for InMemoryAggregator {

@@ -35,7 +35,6 @@ impl<'h> Do<'h> {
         Self { env, retry: false }
     }
 
-    #[expect(dead_code)]
     pub fn with_retry(self) -> Self {
         Self {
             retry: true,

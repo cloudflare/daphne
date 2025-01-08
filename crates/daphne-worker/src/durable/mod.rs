@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! This module defines the durable object implementations needed to run the DAP service. It
@@ -20,6 +20,7 @@
 //! this module as well as the [`instantiate_durable_object`] macro, respectively.
 
 pub(crate) mod aggregate_store;
+pub(crate) mod aggregation_job_store;
 #[cfg(feature = "test-utils")]
 pub(crate) mod test_state_cleaner;
 
@@ -33,6 +34,7 @@ use tracing::info_span;
 use worker::{Env, Error, Request, Response, Result, ScheduledTime, State};
 
 pub use aggregate_store::AggregateStore;
+pub use aggregation_job_store::AggregationJobStore;
 
 const ERR_NO_VALUE: &str = "No such value in storage.";
 
@@ -115,7 +117,7 @@ macro_rules! mk_durable_object {
             }
 
             #[doc(hidden)]
-            pub async fn alarm(&mut self) -> Result<Response> {
+            pub async fn alarm(&mut self) -> ::worker::Result<Response> {
                 ::tracing::trace!(
                     instance = self.state.id().to_string(),
                     "{}: alarm triggered, deleting...",
@@ -137,6 +139,7 @@ macro_rules! mk_durable_object {
                 &self.env
             }
 
+            #[allow(dead_code)]
             async fn get<T>(&self, key: &str) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned,
@@ -144,6 +147,7 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get(&self.state, key).await
             }
 
+            #[allow(dead_code)]
             async fn get_or_default<T>(&self, key: &str) -> ::worker::Result<T>
                 where
                     T: ::serde::de::DeserializeOwned + std::default::Default,
@@ -151,8 +155,16 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get_or_default(&self.state, key).await
             }
 
-            #[expect(dead_code)]
-            async fn set_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
+            #[allow(dead_code)]
+            async fn put<T>(&self, key: &str, val: &T) -> ::worker::Result<()>
+                where
+                    T: ::serde::Serialize,
+            {
+                self.state.storage().put(key, val).await
+            }
+
+            #[allow(dead_code)]
+            async fn put_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned + ::serde::Serialize,
             {

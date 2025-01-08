@@ -951,6 +951,7 @@ dependencies = [
  "prio 0.16.7",
  "prio 0.17.0-alpha.0",
  "rand",
+ "ring",
  "serde",
  "url",
 ]
