@@ -1,0 +1,43 @@
+# Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+---
+version: "3.9"
+
+networks:
+  dap_network:
+    driver: bridge
+
+services:
+  leader:
+    networks:
+      - dap_network
+    ports:
+      - "8787"
+    build:
+      context: ../../..
+      dockerfile: crates/daphne-worker-test/docker/aggregator.Dockerfile
+      target: leader
+    environment:
+      - RUST_LOG=info
+  helper:
+    networks:
+      - dap_network
+    ports:
+      - "8788"
+    build:
+      context: ../../..
+      dockerfile: crates/daphne-worker-test/docker/aggregator.Dockerfile
+      target: helper
+    environment:
+      - RUST_LOG=info
+  test:
+    networks:
+      - dap_network
+    build:
+      context: ../../..
+      dockerfile: crates/daphne-worker-test/docker/runtests.Dockerfile
+    depends_on:
+      - leader
+      - helper
+    environment:
+      - "E2E_TEST_HPKE_SIGNING_CERTIFICATE=-----BEGIN CERTIFICATE-----\nMIICCTCCAa+gAwIBAgIUBECNyioI8d+hgXsgmVI+TcRD8wUwCgYIKoZIzj0EAwIw\nWjELMAkGA1UEBhMCUFQxDjAMBgNVBAcMBUJyYWdhMRcwFQYDVQQKDA5DbG91ZGZs\nYXJlIExkYTEiMCAGA1UEAwwZaGVscGVyLmRhcC5jbG91ZGZsYXJlLmNvbTAeFw0y\nNTAxMDYxMTAwNDdaFw0yNjAxMDYxMTAwNDdaMFoxCzAJBgNVBAYTAlBUMQ4wDAYD\nVQQHDAVCcmFnYTEXMBUGA1UECgwOQ2xvdWRmbGFyZSBMZGExIjAgBgNVBAMMGWhl\nbHBlci5kYXAuY2xvdWRmbGFyZS5jb20wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC\nAASheYdDsJLsG4UG95bs2qlVr1QQcK6+k6emAJSDAlr7bIGjHUoLwUdIQK818g/N\ngVL0vig90b4uGTS7KdKJ9o4Ko1MwUTAdBgNVHQ4EFgQUeOUaahWphjiaQotYoRfb\nVBdby+wwHwYDVR0jBBgwFoAUeOUaahWphjiaQotYoRfbVBdby+wwDwYDVR0TAQH/\nBAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiEAl0pg+5iQC3yskSbZrz8gyEgAaKx2\niyrASYsFh2gdfkICIAgkOlAOHsUHlhh0zRt9m283dLR0/ZYVoEhII8ZMkb1/\n-----END CERTIFICATE-----"

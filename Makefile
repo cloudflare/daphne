@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
 .PHONY: accept acceptance e2e load leader l helper h storage-proxy s
@@ -41,6 +41,12 @@ e2e: /tmp/private-key /tmp/certificate
 	docker compose -f ./crates/daphne-server/docker-compose-e2e.yaml up \
 		--no-attach leader_storage \
 		--no-attach helper_storage \
+		--build \
+		--abort-on-container-exit \
+		--exit-code-from test
+
+e2e-worker:
+	docker compose -f ./crates/daphne-worker-test/docker/docker-compose-e2e.yaml up \
 		--build \
 		--abort-on-container-exit \
 		--exit-code-from test

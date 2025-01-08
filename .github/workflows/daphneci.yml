@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+# Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 ---
 name: DaphneCI
@@ -80,3 +80,15 @@ jobs:
         env:
           HPKE_SIGNING_KEY: ${{ steps.hpke_signing_key.outputs.hpke_signing_key }}
           E2E_TEST_HPKE_SIGNING_CERTIFICATE: ${{ steps.hpke_signing_cert.outputs.hpke_signing_cert }}
+
+  e2e-worker-aggregator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checking out
+        uses: actions/checkout@v3
+
+      - name: Run integration tests
+        uses: hoverkraft-tech/compose-action@v2.0.1
+        with:
+          compose-file: "./crates/daphne-worker-test/docker/docker-compose-e2e.yaml"
+          up-flags: "--build --abort-on-container-exit --exit-code-from test"
