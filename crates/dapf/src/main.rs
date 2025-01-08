@@ -907,6 +907,10 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                         || 604_800u64,
                         "task should expire in",
                     )?,
+                task_commencement: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
             };
 
             print_json(&internal_task);

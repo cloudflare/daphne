@@ -216,7 +216,6 @@ pub async fn handle_upload_req<A: DapLeader>(
         .into());
     }
 
-    // Check that the report was generated after the task's `not_before` time.
     if report.report_metadata.time
         < task_config.as_ref().not_before - task_config.as_ref().time_precision
     {
@@ -225,6 +224,13 @@ pub async fn handle_upload_req<A: DapLeader>(
         }
         .into());
     }
+
+    // Check that the report was generated after the task's `not_before` time.
+    println!(
+        "report_metadata.time - task_config.not_before: {}",
+        report.report_metadata.time as i128 - task_config.as_ref().not_before as i128
+    );
+    println!("report_metadata.time: {}", report.report_metadata.time);
 
     if let Some(public_extensions) = &report.report_metadata.public_extensions {
         // We can be sure at this point that the ReportMetadata is well formed

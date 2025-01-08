@@ -1545,7 +1545,7 @@ mod test {
         }
         .to_config_with_taskprov(
             b"cool task".to_vec(),
-            t.now,
+            t.now + 1,
             t.leader.get_taskprov_config().unwrap(),
         )
         .unwrap();

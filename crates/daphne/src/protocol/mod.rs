@@ -274,7 +274,7 @@ mod test {
     test_versions! { produce_agg_job_req_skip_hpke_decrypt_err }
 
     fn produce_agg_job_req_skip_time_too_stale(version: DapVersion) {
-        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
         let reports = vec![t
             .task_config
             .vdaf
@@ -287,6 +287,7 @@ mod test {
             )
             .unwrap()];
 
+        t.task_config.not_before = t.valid_report_time_range().start - 2;
         let (agg_job_state, _agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
         assert_eq!(agg_job_state.report_count(), 0);
@@ -297,6 +298,30 @@ mod test {
     }
 
     test_versions! { produce_agg_job_req_skip_time_too_stale }
+
+    fn produce_agg_job_req_skip_time_before_not_before(version: DapVersion) {
+        let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.task_config.not_before - 1,
+                &t.task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                t.task_config.version,
+            )
+            .unwrap()];
+        let (agg_job_state, _agg_job_init_req) =
+            t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
+        assert_eq!(agg_job_state.report_count(), 0);
+
+        assert_metrics_include!(t.leader_registry, {
+            r#"report_counter{env="test_leader",host="leader.com",status="rejected_task_not_started"}"#: 1,
+        });
+    }
+
+    test_versions! {produce_agg_job_req_skip_time_before_not_before}
 
     fn produce_agg_job_req_skip_time_too_early(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -403,6 +428,7 @@ mod test {
             // Temporarily overwrite the valid report time range so that the Leader accepts the
             // out-of-range report and produces the request.
             let tmp = t.valid_report_range.clone();
+            t.task_config.not_before = t.valid_report_time_range().start - 2;
             t.valid_report_range = 0..u64::MAX;
             let (_, agg_job_init_req) =
                 t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
@@ -419,6 +445,40 @@ mod test {
     }
 
     test_versions! { handle_agg_job_req_skip_time_too_stale }
+
+    fn handle_agg_job_req_skip_time_before_not_before(version: DapVersion) {
+        let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
+        let reports = vec![t
+            .task_config
+            .vdaf
+            .produce_report(
+                &t.client_hpke_config_list,
+                t.task_config.not_before - 1,
+                &t.task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                t.task_config.version,
+            )
+            .unwrap()];
+
+        let agg_job_init_req = {
+            // Temporarily overwrite the task_config not_before time so that the Leader accepts the
+            // out-of-range report and produces the request.
+            t.task_config.not_before -= 2;
+            let (_, agg_job_init_req) =
+                t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
+            t.task_config.not_before += 2;
+            agg_job_init_req
+        };
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_matches!(
+            agg_job_resp.transitions[0].var,
+            TransitionVar::Failed(ReportError::TaskNotStarted)
+        );
+    }
+
+    test_versions! {handle_agg_job_req_skip_time_before_not_before}
 
     fn handle_agg_job_req_skip_time_too_early(version: DapVersion) {
         let mut t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);

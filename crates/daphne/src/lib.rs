@@ -596,7 +596,7 @@ impl DapTaskParameters {
         )
         .unwrap()
         .into_opted_in(&taskprov::OptInParam {
-            not_before: now,
+            not_before: now - (now % self.time_precision) - 1,
             num_agg_span_shards: self.num_agg_span_shards,
         });
 

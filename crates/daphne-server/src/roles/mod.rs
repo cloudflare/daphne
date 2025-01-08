@@ -111,7 +111,6 @@ mod test_utils {
         fatal_error,
         hpke::{HpkeConfig, HpkeReceiverConfig},
         messages::decode_base64url_vec,
-        roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
         DapBatchMode, DapError, DapTaskConfig, DapVersion,
     };
@@ -306,7 +305,7 @@ mod test_utils {
                         leader_url: cmd.leader,
                         helper_url: cmd.helper,
                         time_precision: cmd.time_precision,
-                        not_before: self.get_current_time(),
+                        not_before: cmd.task_commencement,
                         not_after: cmd.task_expiration,
                         min_batch_size: cmd.min_batch_size,
                         query,

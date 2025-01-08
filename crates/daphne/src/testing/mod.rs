@@ -679,7 +679,7 @@ impl DapAggregator for InMemoryAggregator {
     ) -> Result<DapTaskConfig, DapError> {
         // Always opt-in with four shards.
         Ok(task_config.into_opted_in(&taskprov::OptInParam {
-            not_before: self.get_current_time(),
+            not_before: self.get_current_time() - 60,
             num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
         }))
     }
