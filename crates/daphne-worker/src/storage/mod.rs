@@ -6,7 +6,7 @@ pub(crate) mod kv;
 use crate::storage_proxy;
 use axum::http::StatusCode;
 use daphne_service_utils::{
-    capnproto_payload::{CapnprotoPayloadEncode, CapnprotoPayloadEncodeExt},
+    capnproto::{CapnprotoPayloadEncode, CapnprotoPayloadEncodeExt},
     durable_requests::{bindings::DurableMethod, DurableRequest, ObjectIdFrom},
 };
 pub(crate) use kv::Kv;

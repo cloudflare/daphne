@@ -25,7 +25,7 @@ pub(crate) mod test_state_cleaner;
 
 use crate::tracing_utils::shorten_paths;
 use daphne_service_utils::{
-    capnproto_payload::{CapnprotoPayloadDecode, CapnprotoPayloadDecodeExt},
+    capnproto::{CapnprotoPayloadDecode, CapnprotoPayloadDecodeExt},
     durable_requests::bindings::DurableMethod,
 };
 use serde::{Deserialize, Serialize};
