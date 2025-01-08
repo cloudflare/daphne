@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Messages in the DAP protocol.
@@ -585,6 +585,7 @@ impl ParameterizedDecode<DapVersion> for PrepareInit {
 
 /// Aggregate initialization request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct AggregationJobInitReq {
     pub agg_param: Vec<u8>,
     pub part_batch_sel: PartialBatchSelector,

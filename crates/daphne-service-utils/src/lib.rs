@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #![cfg_attr(not(test), deny(unused_crate_dependencies))]
@@ -30,5 +30,16 @@ mod durable_request_capnp {
     include!(concat!(
         env!("OUT_DIR"),
         "/src/durable_requests/durable_request_capnp.rs"
+    ));
+}
+
+#[cfg(feature = "durable_requests")]
+mod aggregation_job_store_capnp {
+    #![allow(dead_code)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::needless_lifetimes)]
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/src/durable_requests/bindings/aggregation_job_store_capnp.rs"
     ));
 }

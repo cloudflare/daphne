@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod handle_agg_job;
@@ -11,17 +11,29 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobInitReq,
-        PartialBatchSelector, TaskId,
+        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
+        AggregationJobInitReq, PartialBatchSelector, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     protocol::aggregator::ReplayProtection,
-    DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig,
+    DapAggregationParam, DapError, DapRequest, DapResponse, DapTaskConfig, DapVersion,
 };
 
 /// DAP Helper functionality.
 #[async_trait]
-pub trait DapHelper: DapAggregator {}
+pub trait DapHelper: DapAggregator {
+    /// Asserts that either:
+    /// - this the first time we see this aggregation job
+    /// - this aggregation job has been seen before and it hasn't changed since the last time we
+    ///     saw it.
+    async fn assert_agg_job_is_immutable(
+        &self,
+        id: AggregationJobId,
+        version: DapVersion,
+        task_id: &TaskId,
+        req: &AggregationJobInitReq,
+    ) -> Result<(), DapError>;
+}
 
 pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     aggregator: &A,
@@ -34,6 +46,8 @@ pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     let version = req.version;
 
     let agg_job_resp = handle_agg_job::start(req)
+        .check_aggregation_job_legality(aggregator)
+        .await?
         .resolve_task_config(aggregator)
         .await?
         .initialize_reports(aggregator, replay_protection)
