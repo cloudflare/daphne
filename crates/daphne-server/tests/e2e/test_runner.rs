@@ -113,7 +113,7 @@ impl TestRunner {
             version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
-            not_before: now,
+            not_before: now - (now % TIME_PRECISION) - 1,
             not_after: now + 604_800, // one week from now
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
