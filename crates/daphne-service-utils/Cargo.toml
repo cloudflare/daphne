@@ -18,7 +18,6 @@ prio_draft09 = { workspace = true, optional = true }
 prio = { workspace = true, optional = true }
 serde.workspace = true
 url = { workspace = true, optional = true }
-ring = { workspace = true, optional = true }
 
 [dev-dependencies]
 daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
@@ -34,7 +33,6 @@ durable_requests = [
     "dep:capnpc",
     "dep:prio_draft09",
     "dep:prio",
-    "dep:ring"
 ]
 experimental = ["daphne/experimental"]
 

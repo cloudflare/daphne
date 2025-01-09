@@ -136,10 +136,11 @@ mod test {
         constants::DapMediaType,
         hpke::{HpkeKemId, HpkeProvider, HpkeReceiverConfig},
         messages::{
-            request::RequestBody, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
-            AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportError,
-            TaskId, Time, TransitionVar,
+            request::{HashedAggregationJobReq, RequestBody},
+            AggregateShareReq, AggregationJobId, AggregationJobInitReq, AggregationJobResp,
+            BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq, Extension,
+            HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportError, TaskId,
+            Time, TransitionVar,
         },
         roles::{leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -582,13 +583,16 @@ mod test {
             &task_config,
             agg_job_id,
             DapMediaType::AggregationJobInitReq,
-            AggregationJobInitReq {
-                agg_param: Vec::default(),
-                part_batch_sel: PartialBatchSelector::LeaderSelectedByBatchId {
-                    batch_id: BatchId(rng.gen()),
+            HashedAggregationJobReq::from_aggregation_req(
+                version,
+                AggregationJobInitReq {
+                    agg_param: Vec::default(),
+                    part_batch_sel: PartialBatchSelector::LeaderSelectedByBatchId {
+                        batch_id: BatchId(rng.gen()),
+                    },
+                    prep_inits: Vec::default(),
                 },
-                prep_inits: Vec::default(),
-            },
+            ),
         );
         assert_matches!(
             helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
@@ -748,10 +752,14 @@ mod test {
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded_with_param(
             &version,
-            &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
-                .await
-                .unwrap()
-                .payload,
+            &helper::handle_agg_job_init_req(
+                &*t.helper,
+                req.map(|req| HashedAggregationJobReq::from_aggregation_req(version, req)),
+                Default::default(),
+            )
+            .await
+            .unwrap()
+            .payload,
         )
         .unwrap();
         let transition = &agg_job_resp.transitions[0];
@@ -777,10 +785,14 @@ mod test {
         // Get AggregationJobResp and then extract the transition data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded_with_param(
             &version,
-            &helper::handle_agg_job_init_req(&*t.helper, req, Default::default())
-                .await
-                .unwrap()
-                .payload,
+            &helper::handle_agg_job_init_req(
+                &*t.helper,
+                req.map(|req| HashedAggregationJobReq::from_aggregation_req(version, req)),
+                Default::default(),
+            )
+            .await
+            .unwrap()
+            .payload,
         )
         .unwrap();
         let transition = &agg_job_resp.transitions[0];

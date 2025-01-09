@@ -3,7 +3,7 @@
 
 use axum::async_trait;
 use daphne::{
-    messages::{AggregationJobId, AggregationJobInitReq, TaskId},
+    messages::{request::AggregationJobRequestHash, AggregationJobId, TaskId},
     roles::DapHelper,
     DapError, DapVersion,
 };
@@ -15,7 +15,7 @@ impl DapHelper for crate::App {
         _id: AggregationJobId,
         _version: DapVersion,
         _task_id: &TaskId,
-        _req: &AggregationJobInitReq,
+        _req: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         // the server implementation can't check for this
         Ok(())

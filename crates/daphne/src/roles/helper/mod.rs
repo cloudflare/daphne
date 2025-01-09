@@ -11,8 +11,9 @@ use crate::{
     constants::DapMediaType,
     error::DapAbort,
     messages::{
-        constant_time_eq, AggregateShare, AggregateShareReq, AggregationJobId,
-        AggregationJobInitReq, PartialBatchSelector, TaskId,
+        constant_time_eq,
+        request::{AggregationJobRequestHash, HashedAggregationJobReq},
+        AggregateShare, AggregateShareReq, AggregationJobId, PartialBatchSelector, TaskId,
     },
     metrics::{DaphneRequestType, ReportStatus},
     protocol::aggregator::ReplayProtection,
@@ -31,13 +32,13 @@ pub trait DapHelper: DapAggregator {
         id: AggregationJobId,
         version: DapVersion,
         task_id: &TaskId,
-        req: &AggregationJobInitReq,
+        req: &AggregationJobRequestHash,
     ) -> Result<(), DapError>;
 }
 
 pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
     aggregator: &A,
-    req: DapRequest<AggregationJobInitReq>,
+    req: DapRequest<HashedAggregationJobReq>,
     replay_protection: ReplayProtection,
 ) -> Result<DapResponse, DapError> {
     let metrics = aggregator.metrics();

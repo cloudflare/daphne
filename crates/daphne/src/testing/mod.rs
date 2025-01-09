@@ -12,9 +12,9 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
-        self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, Base64Encode, BatchId,
-        BatchSelector, Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector,
-        Report, ReportId, TaskId, Time,
+        self, request::AggregationJobRequestHash, AggregationJobId, AggregationJobInitReq,
+        AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
+        HpkeCiphertext, Interval, PartialBatchSelector, Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::{
@@ -518,7 +518,7 @@ pub struct InMemoryAggregator {
     peer: Option<Arc<InMemoryAggregator>>,
 
     // Helper: aggregation jobs
-    processed_jobs: Mutex<HashMap<AggregationJobId, AggregationJobInitReq>>,
+    processed_jobs: Mutex<HashMap<AggregationJobId, AggregationJobRequestHash>>,
 }
 
 impl DeepSizeOf for InMemoryAggregator {
@@ -879,7 +879,7 @@ impl DapHelper for InMemoryAggregator {
         id: AggregationJobId,
         _version: DapVersion,
         _task_id: &TaskId,
-        req: &AggregationJobInitReq,
+        req: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         match self.processed_jobs.lock().unwrap().entry(id) {
             Entry::Occupied(occupied_entry) => {

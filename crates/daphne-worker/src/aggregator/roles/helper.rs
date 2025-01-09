@@ -5,11 +5,12 @@ use crate::aggregator::App;
 use daphne::{
     error::DapAbort,
     fatal_error,
-    messages::{AggregationJobId, AggregationJobInitReq, TaskId},
+    messages::{request::AggregationJobRequestHash, AggregationJobId, TaskId},
     roles::DapHelper,
     DapError, DapVersion,
 };
 use daphne_service_utils::durable_requests::bindings::aggregation_job_store;
+use std::borrow::Cow;
 
 #[axum::async_trait]
 impl DapHelper for App {
@@ -18,7 +19,7 @@ impl DapHelper for App {
         id: AggregationJobId,
         version: DapVersion,
         task_id: &TaskId,
-        req: &AggregationJobInitReq,
+        req: &AggregationJobRequestHash,
     ) -> Result<(), DapError> {
         let response = self
             .durable()
@@ -26,7 +27,7 @@ impl DapHelper for App {
             .request(aggregation_job_store::Command::NewJob, (version, task_id))
             .encode(&aggregation_job_store::NewJobRequest {
                 id,
-                agg_job_hash: req.into(),
+                agg_job_hash: Cow::Borrowed(req.get()),
             })
             .send::<aggregation_job_store::NewJobResponse>()
             .await
