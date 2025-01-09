@@ -5,8 +5,8 @@ use super::{check_part_batch, DapHelper};
 use crate::{
     error::DapAbort,
     messages::{
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportError, TaskId,
-        TransitionVar,
+        request::HashedAggregationJobReq, AggregationJobInitReq, AggregationJobResp,
+        PartialBatchSelector, ReportError, TaskId, TransitionVar,
     },
     metrics::ReportStatus,
     protocol::aggregator::ReportProcessedStatus,
@@ -21,7 +21,7 @@ pub struct HandleAggJob<S> {
 }
 
 /// The initial state, the aggregation request has been received.
-pub struct Init(DapRequest<AggregationJobInitReq>);
+pub struct Init(DapRequest<HashedAggregationJobReq>);
 
 /// The aggregation job is legal. Which means that it's either new or it's parameters haven't
 /// changed since the last time we've received it.
@@ -65,12 +65,12 @@ macro_rules! impl_from {
 
 impl_from!(Init, WithTaskConfig, InitializedReports);
 
-pub fn start(request: DapRequest<AggregationJobInitReq>) -> HandleAggJob<Init> {
+pub fn start(request: DapRequest<HashedAggregationJobReq>) -> HandleAggJob<Init> {
     HandleAggJob::new(request)
 }
 
 impl HandleAggJob<Init> {
-    pub fn new(request: DapRequest<AggregationJobInitReq>) -> Self {
+    pub fn new(request: DapRequest<HashedAggregationJobReq>) -> Self {
         Self {
             state: Init(request),
         }
@@ -82,10 +82,15 @@ impl HandleAggJob<Init> {
     ) -> Result<HandleAggJob<LegalAggregationJobReq>, DapError> {
         let Self { state: Init(req) } = self;
         aggregator
-            .assert_agg_job_is_immutable(req.resource_id, req.version, &req.task_id, &req.payload)
+            .assert_agg_job_is_immutable(
+                req.resource_id,
+                req.version,
+                &req.task_id,
+                &req.payload.hash,
+            )
             .await?;
         Ok(HandleAggJob {
-            state: LegalAggregationJobReq(req),
+            state: LegalAggregationJobReq(req.map(|r| r.request)),
         })
     }
 }

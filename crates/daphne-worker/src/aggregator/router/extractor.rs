@@ -13,7 +13,7 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::{CollectionPollReq, RequestBody},
+        request::{CollectionPollReq, HashedAggregationJobReq, RequestBody},
         taskprov::TaskprovAdvertisement,
         AggregateShareReq, AggregationJobInitReq, CollectionReq, Report, TaskId,
     },
@@ -59,6 +59,17 @@ impl_decode_from_dap_http_body!(
     Report,
     CollectionReq,
 );
+
+impl DecodeFromDapHttpBody for HashedAggregationJobReq {
+    fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
+        let mut cursor = Cursor::new(bytes.as_ref());
+        // Check that media type matches.
+        meta.get_checked_media_type(DapMediaType::AggregationJobInitReq)?;
+        // Decode the body
+        HashedAggregationJobReq::decode_with_param(&meta.version, &mut cursor)
+            .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
+    }
+}
 
 /// Using `()` ignores the body of a request.
 impl DecodeFromDapHttpBody for CollectionPollReq {
