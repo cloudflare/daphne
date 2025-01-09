@@ -1,8 +1,6 @@
 // Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::Cursor;
-
 use axum::{
     async_trait,
     body::Bytes,
@@ -41,11 +39,10 @@ macro_rules! impl_decode_from_dap_http_body {
                     bytes: Bytes,
                     meta: &DapRequestMeta,
                 ) -> Result<Self, DapAbort> {
-                    let mut cursor = Cursor::new(bytes.as_ref());
                     // Check that media type matches.
                     meta.get_checked_media_type(DapMediaType::$type)?;
                     // Decode the body
-                    $type::decode_with_param(&meta.version, &mut cursor)
+                    $type::get_decoded_with_param(&meta.version, bytes.as_ref())
                         .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
                 }
             }
@@ -62,11 +59,10 @@ impl_decode_from_dap_http_body!(
 
 impl DecodeFromDapHttpBody for HashedAggregationJobReq {
     fn decode_from_http_body(bytes: Bytes, meta: &DapRequestMeta) -> Result<Self, DapAbort> {
-        let mut cursor = Cursor::new(bytes.as_ref());
         // Check that media type matches.
         meta.get_checked_media_type(DapMediaType::AggregationJobInitReq)?;
         // Decode the body
-        HashedAggregationJobReq::decode_with_param(&meta.version, &mut cursor)
+        HashedAggregationJobReq::get_decoded_with_param(&meta.version, bytes.as_ref())
             .map_err(|e| DapAbort::from_codec_error(e, meta.task_id))
     }
 }
