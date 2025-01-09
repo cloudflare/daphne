@@ -43,14 +43,6 @@ impl TestStateCleaner {
             Some(bindings::TestStateCleaner::Put) => {
                 let durable_ref: DurableReference =
                     serde_json::from_slice(&req.bytes().await?).unwrap();
-                match durable_ref.binding.as_ref() {
-                    bindings::AggregateStore::BINDING => (),
-                    s => {
-                        let message = format!("GarbageCollector: unrecognized binding: {s}");
-                        console_error!("{}", message);
-                        return Err(int_err(message));
-                    }
-                };
 
                 let queued = DurableOrdered::new_roughly_ordered(durable_ref, "object");
                 queued.put(&self.state).await?;
