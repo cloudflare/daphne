@@ -236,6 +236,7 @@ impl TestRunner {
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.not_after,
+            "task_commencement": t.task_config.not_before,
         });
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestCommandResult = t
@@ -263,6 +264,7 @@ impl TestRunner {
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.not_after,
+            "task_commencement": t.task_config.not_before,
         });
         let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)
