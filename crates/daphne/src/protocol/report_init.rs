@@ -24,7 +24,7 @@ use std::ops::{Deref, Range};
 /// The `Peer` parameter can be:
 /// - `()` if the report came from a client.
 /// - [`WithPeerPrepShare`] if the report came from the leader.
-#[expect(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug, deepsize::DeepSizeOf))]
 pub enum InitializedReport<Peer> {
@@ -103,7 +103,7 @@ impl<P> InitializedReport<P> {
         prep_init_payload: S,
         // We need to use this variable for Mastic, which is currently fenced by the
         // "experimental" feature.
-        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "experimental"), allow(unused_variables))]
         agg_param: &DapAggregationParam,
     ) -> Result<Self, DapError>
     where

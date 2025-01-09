@@ -64,7 +64,7 @@ impl ReplayProtection {
 impl DapTaskConfig {
     /// Leader -> Helper: Initialize the aggregation flow for a sequence of reports. The outputs are the Leader's
     /// state for the aggregation flow and the outbound `AggregationJobInitReq` message.
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn produce_agg_job_req<S>(
         &self,
         decrypter: impl HpkeDecrypter,
@@ -90,7 +90,7 @@ impl DapTaskConfig {
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn produce_agg_job_req_impl<S>(
         &self,
         decrypter: impl HpkeDecrypter,
@@ -197,7 +197,7 @@ impl DapTaskConfig {
         ))
     }
 
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_produce_agg_job_req<S>(
         &self,

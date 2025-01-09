@@ -19,6 +19,7 @@ license = "BSD-3-Clause"
 readme = "README.md"
 homepage = "https://github.com/cloudflare/daphne"
 repository = "https://github.com/cloudflare/daphne"
+rust-version = "1.80"
 
 [profile.release]
 opt-level = "s"

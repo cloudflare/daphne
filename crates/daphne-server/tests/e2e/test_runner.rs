@@ -418,7 +418,7 @@ impl TestRunner {
         Ok(())
     }
 
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn leader_request_expect_abort(
         &self,
         client: &reqwest::Client,

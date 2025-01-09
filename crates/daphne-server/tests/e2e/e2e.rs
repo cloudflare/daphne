@@ -1432,7 +1432,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
         .poll_collection_url_using_token(client, &collect_uri, DAP_TASKPROV_COLLECTOR_TOKEN)
         .await
         .unwrap();
-    #[expect(clippy::format_in_format_args)]
+    #[allow(clippy::format_in_format_args)]
     {
         assert_eq!(
             resp.status(),

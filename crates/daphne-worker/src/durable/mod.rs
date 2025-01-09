@@ -150,7 +150,7 @@ macro_rules! mk_durable_object {
                 $crate::durable::state_get_or_default(&self.state, key).await
             }
 
-            #[expect(dead_code)]
+            #[allow(dead_code)]
             async fn set_if_not_exists<T>(&self, key: &str, val: &T) -> ::worker::Result<Option<T>>
                 where
                     T: ::serde::de::DeserializeOwned + ::serde::Serialize,

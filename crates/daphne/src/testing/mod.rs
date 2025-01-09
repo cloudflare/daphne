@@ -63,7 +63,7 @@ pub struct AggregationJobTest {
     pub(crate) valid_report_range: Range<Time>,
 
     // operational parameters
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) leader_registry: prometheus::Registry,
     pub(crate) leader_metrics: DaphnePromMetrics,
 }

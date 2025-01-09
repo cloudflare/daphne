@@ -846,7 +846,7 @@ impl TryFrom<TransitionFailureLatest> for TransitionFailure {
     }
 }
 
-#[expect(clippy::match_wildcard_for_single_variants)]
+#[allow(clippy::match_wildcard_for_single_variants)]
 impl TryFrom<&TransitionFailure> for TransitionFailureLatest {
     type Error = CodecError;
 
