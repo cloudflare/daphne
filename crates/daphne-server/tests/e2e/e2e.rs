@@ -1490,6 +1490,11 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     )
     .unwrap();
 
+    println!("Now - not_before: {}", t.now - task_config.not_before);
+    println!(
+        "Now - batch_interval.start: {}",
+        t.now - batch_interval.start
+    );
     let path = TestRunner::upload_path_for_task(&task_id);
     let method = match version {
         DapVersion::Draft09 => &Method::PUT,

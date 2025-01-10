@@ -216,19 +216,23 @@ pub async fn handle_upload_req<A: DapLeader>(
         .into());
     }
 
-    // Check that the report was generated after the task's `not_before` time.
-    if report.report_metadata.time < task_config.as_ref().not_before {
-        return Err(DapAbort::ReportRejected {
-            detail: "The timestamp preceeds the start of the task".into(),
-        }
-        .into());
-    }
-
     if report.report_metadata.time
         < task_config.as_ref().not_before - task_config.as_ref().time_precision
     {
         return Err(DapAbort::ReportRejected {
             detail: "The timestamp preceeds the start of the task's validity window".into(),
+        }
+        .into());
+    }
+
+    // Check that the report was generated after the task's `not_before` time.
+    println!(
+        "report_metadata.time - task_config.not_before: {}",
+        report.report_metadata.time - task_config.as_ref().not_before
+    );
+    if report.report_metadata.time < task_config.as_ref().not_before {
+        return Err(DapAbort::ReportRejected {
+            detail: "The timestamp preceeds the start of the task".into(),
         }
         .into());
     }
