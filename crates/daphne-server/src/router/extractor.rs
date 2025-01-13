@@ -671,17 +671,25 @@ mod test {
             helper_url: daphne::messages::taskprov::UrlBytes {
                 bytes: b"http://helper".into(),
             },
-            query_config: daphne::messages::taskprov::QueryConfig {
-                time_precision: 1,
-                max_batch_query_count: 1,
-                min_batch_size: 1,
-                batch_mode: daphne::messages::taskprov::BatchMode::TimeInterval,
+            time_precision: 1,
+            min_batch_size: 1,
+            query_config: daphne::messages::taskprov::QueryConfig::TimeInterval,
+            lifetime: match version {
+                DapVersion::Draft09 => {
+                    daphne::messages::taskprov::TaskLifetime::Draft09 { expiration: 1 }
+                }
+                DapVersion::Latest => daphne::messages::taskprov::TaskLifetime::Latest {
+                    start: 0,
+                    duration: 1,
+                },
             },
-            task_expiration: 1,
-            vdaf_config: daphne::messages::taskprov::VdafConfig {
-                dp_config: daphne::messages::taskprov::DpConfig::None,
-                var: daphne::messages::taskprov::VdafTypeVar::Prio2 { dimension: 1 },
+            vdaf_config: daphne::messages::taskprov::VdafConfig::Prio2 { dimension: 1 },
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match version {
+                DapVersion::Draft09 => Some(1),
+                DapVersion::Latest => None,
             },
+            draft09_dp_config: Some(daphne::messages::taskprov::DpConfig::None),
         };
 
         let req = test::<()>(

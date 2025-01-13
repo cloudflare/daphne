@@ -227,7 +227,7 @@ impl DapGlobalConfig {
     }
 }
 
-/// DAP Query configuration.
+/// DAP batch configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
@@ -241,7 +241,8 @@ pub enum DapBatchMode {
     /// Aggregators are meant to stop aggregating reports when this limit is reached.
     LeaderSelected {
         #[serde(default)]
-        max_batch_size: Option<NonZeroU32>,
+        #[serde(rename = "max_batch_size")]
+        draft09_max_batch_size: Option<NonZeroU32>,
     },
 }
 
@@ -553,6 +554,9 @@ impl DapTaskParameters {
         now: Time,
         taskprov_config: roles::aggregator::TaskprovConfig<'_>,
     ) -> Result<(DapTaskConfig, TaskId, TaskprovAdvertisement), DapError> {
+        let not_before = now;
+        let not_after = now + 86400 * 14; // expires in two weeks
+
         let taskprov_advertisement = messages::taskprov::TaskprovAdvertisement {
             task_info,
             leader_url: messages::taskprov::UrlBytes {
@@ -561,16 +565,23 @@ impl DapTaskParameters {
             helper_url: messages::taskprov::UrlBytes {
                 bytes: self.helper_url.to_string().into_bytes(),
             },
-            query_config: messages::taskprov::QueryConfig {
-                time_precision: self.time_precision,
-                max_batch_query_count: 1,
-                min_batch_size: self.min_batch_size.try_into().unwrap(),
-                batch_mode: (&self.query).try_into()?,
+            time_precision: self.time_precision,
+            min_batch_size: self.min_batch_size.try_into().unwrap(),
+            query_config: (&self.query).try_into()?,
+            lifetime: messages::taskprov::TaskLifetime::from_validity_range(
+                self.version,
+                not_before,
+                not_after,
+            ),
+            vdaf_config: (&self.vdaf).try_into()?,
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match self.version {
+                DapVersion::Draft09 => Some(1),
+                DapVersion::Latest => None,
             },
-            task_expiration: now + 86400 * 14, // expires in two weeks
-            vdaf_config: messages::taskprov::VdafConfig {
-                dp_config: messages::taskprov::DpConfig::None,
-                var: (&self.vdaf).try_into()?,
+            draft09_dp_config: match self.version {
+                DapVersion::Draft09 => Some(messages::taskprov::DpConfig::None),
+                DapVersion::Latest => None,
             },
         };
 
@@ -736,7 +747,7 @@ impl DapTaskConfig {
     ) -> Result<bool, DapAbort> {
         match self.query {
             DapBatchMode::LeaderSelected {
-                max_batch_size: Some(max_batch_size),
+                draft09_max_batch_size: Some(max_batch_size),
             } => {
                 if report_count > u64::from(max_batch_size.get()) {
                     return Err(DapAbort::InvalidBatchSize {
@@ -749,7 +760,7 @@ impl DapTaskConfig {
             }
             DapBatchMode::TimeInterval
             | DapBatchMode::LeaderSelected {
-                max_batch_size: None,
+                draft09_max_batch_size: None,
             } => (),
         };
 

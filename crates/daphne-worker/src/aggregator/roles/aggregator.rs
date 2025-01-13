@@ -195,7 +195,7 @@ impl DapAggregator for App {
                             num_agg_span_shards: global_config.default_num_agg_span_shards,
                         })
                     },
-                    Some(task_config.task_expiration),
+                    Some(task_config.not_after()),
                 ),
         )
         .await

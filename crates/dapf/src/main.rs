@@ -845,7 +845,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             let CliDapBatchMode(query) = use_or_request_from_user_or_default(
                 query,
                 || DapBatchMode::LeaderSelected {
-                    max_batch_size: None,
+                    draft09_max_batch_size: None,
                 },
                 "query",
             )?;
@@ -885,7 +885,9 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 )?,
                 max_batch_size: match query {
                     DapBatchMode::TimeInterval => None,
-                    DapBatchMode::LeaderSelected { max_batch_size } => max_batch_size,
+                    DapBatchMode::LeaderSelected {
+                        draft09_max_batch_size,
+                    } => draft09_max_batch_size,
                 },
                 time_precision: use_or_request_from_user_or_default(
                     time_precision,
