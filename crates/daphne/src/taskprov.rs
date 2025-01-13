@@ -11,11 +11,7 @@ use crate::{
     error::DapAbort,
     fatal_error,
     hpke::HpkeConfig,
-    messages::{
-        self,
-        taskprov::{BatchMode, TaskprovAdvertisement, VdafTypeVar},
-        Duration, TaskId, Time,
-    },
+    messages::{self, taskprov::TaskprovAdvertisement, Duration, TaskId, Time},
     roles::aggregator::TaskprovConfig,
     vdaf::VdafVerifyKey,
     DapBatchMode, DapError, DapTaskConfig, DapTaskConfigMethod, DapVersion, VdafConfig,
@@ -117,16 +113,23 @@ fn url_from_bytes(task_id: &TaskId, url_bytes: &[u8]) -> Result<Url, DapAbort> {
 }
 
 impl DapBatchMode {
-    fn try_from_taskprov_advertisement(task_id: &TaskId, var: BatchMode) -> Result<Self, DapAbort> {
+    fn try_from_taskprov_advertisement(
+        task_id: &TaskId,
+        var: messages::taskprov::QueryConfig,
+    ) -> Result<Self, DapAbort> {
         match var {
-            BatchMode::LeaderSelected { max_batch_size } => {
-                Ok(DapBatchMode::LeaderSelected { max_batch_size })
-            }
-            BatchMode::TimeInterval => Ok(DapBatchMode::TimeInterval),
-            BatchMode::NotImplemented { mode, .. } => Err(DapAbort::InvalidTask {
-                detail: format!("unimplemented batch mode ({mode})"),
-                task_id: *task_id,
+            messages::taskprov::QueryConfig::LeaderSelected {
+                draft09_max_batch_size,
+            } => Ok(DapBatchMode::LeaderSelected {
+                draft09_max_batch_size,
             }),
+            messages::taskprov::QueryConfig::TimeInterval => Ok(DapBatchMode::TimeInterval),
+            messages::taskprov::QueryConfig::NotImplemented { mode, .. } => {
+                Err(DapAbort::InvalidTask {
+                    detail: format!("unimplemented batch mode ({mode})"),
+                    task_id: *task_id,
+                })
+            }
         }
     }
 }
@@ -166,12 +169,12 @@ impl VdafConfig {
     fn try_from_taskprov_advertisement(
         task_id: &TaskId,
         version: DapVersion,
-        var: VdafTypeVar,
+        vdaf_config: messages::taskprov::VdafConfig,
     ) -> Result<Self, DapAbort> {
         const PRIO3_MAX_PROOFS: u8 = 3;
 
-        match (version, var) {
-            (_, VdafTypeVar::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
+        match (version, vdaf_config) {
+            (_, messages::taskprov::VdafConfig::Prio2 { dimension }) => Ok(VdafConfig::Prio2 {
                 dimension: dimension.try_into().map_err(|_| DapAbort::InvalidTask {
                     detail: "dimension is larger than the system's word size".to_string(),
                     task_id: *task_id,
@@ -179,7 +182,7 @@ impl VdafConfig {
             }),
             (
                 DapVersion::Draft09,
-                VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                messages::taskprov::VdafConfig::Prio3SumVecField64MultiproofHmacSha256Aes128 {
                     bits,
                     length,
                     chunk_length,
@@ -212,7 +215,10 @@ impl VdafConfig {
                     },
                 ))
             }
-            (DapVersion::Draft09, VdafTypeVar::Pine32HmacSha256Aes128 { param }) => {
+            (
+                DapVersion::Draft09,
+                messages::taskprov::VdafConfig::Pine32HmacSha256Aes128 { param },
+            ) => {
                 if let Err(e) = pine32_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
                         detail: format!("invalid parameters for Pine32: {e}"),
@@ -229,7 +235,10 @@ impl VdafConfig {
                     }))
                 }
             }
-            (DapVersion::Draft09, VdafTypeVar::Pine64HmacSha256Aes128 { param }) => {
+            (
+                DapVersion::Draft09,
+                messages::taskprov::VdafConfig::Pine64HmacSha256Aes128 { param },
+            ) => {
                 if let Err(e) = pine64_hmac_sha256_aes128(&param) {
                     Err(DapAbort::InvalidTask {
                         detail: format!("invalid parameters for Pine64: {e}"),
@@ -246,10 +255,12 @@ impl VdafConfig {
                     }))
                 }
             }
-            (_, VdafTypeVar::NotImplemented { typ, .. }) => Err(DapAbort::InvalidTask {
-                detail: format!("unimplemented VDAF type ({typ})"),
-                task_id: *task_id,
-            }),
+            (_, messages::taskprov::VdafConfig::NotImplemented { typ, .. }) => {
+                Err(DapAbort::InvalidTask {
+                    detail: format!("unimplemented VDAF type ({typ})"),
+                    task_id: *task_id,
+                })
+            }
             (_, _) => Err(DapAbort::InvalidTask {
                 detail: format!("VDAF not supported in {version}"),
                 task_id: *task_id,
@@ -283,11 +294,21 @@ pub struct DapTaskConfigNeedsOptIn {
     pub(crate) collector_hpke_config: HpkeConfig,
     pub(crate) method: DapTaskConfigMethod,
 
-    /// The time at which the task expires.
-    pub task_expiration: Time,
+    /// Lifetime of the task.
+    ///
+    /// draft09: Only the expiration date is conveyed by the taskprov advertisement.
+    pub lifetime: messages::taskprov::TaskLifetime,
 }
 
 impl DapTaskConfigNeedsOptIn {
+    /// Return the time after which the task is no longer valid.
+    pub fn not_after(&self) -> Time {
+        match self.lifetime {
+            messages::taskprov::TaskLifetime::Draft09 { expiration } => expiration,
+            messages::taskprov::TaskLifetime::Latest { start, duration } => start + duration,
+        }
+    }
+
     pub(crate) fn try_from_taskprov_advertisement(
         version: DapVersion,
         task_id: &TaskId,
@@ -295,11 +316,14 @@ impl DapTaskConfigNeedsOptIn {
         taskprov_config: TaskprovConfig<'_>,
     ) -> Result<Self, DapAbort> {
         // Only one query per batch is currently supported.
-        if taskprov_advertisement.query_config.max_batch_query_count != 1 {
+        if !matches!(
+            taskprov_advertisement.draft09_max_batch_query_count,
+            None | Some(1)
+        ) {
             return Err(DapAbort::InvalidTask {
                 detail: format!(
-                    "unsupported max batch query count {}",
-                    taskprov_advertisement.query_config.max_batch_query_count
+                    "unsupported max batch query count {:?}",
+                    taskprov_advertisement.draft09_max_batch_query_count
                 ),
                 task_id: *task_id,
             });
@@ -308,7 +332,7 @@ impl DapTaskConfigNeedsOptIn {
         let vdaf = VdafConfig::try_from_taskprov_advertisement(
             task_id,
             version,
-            taskprov_advertisement.vdaf_config.var,
+            taskprov_advertisement.vdaf_config,
         )?;
         let vdaf_verify_key =
             compute_vdaf_verify_key(version, taskprov_config.vdaf_verify_key_init, task_id);
@@ -316,12 +340,12 @@ impl DapTaskConfigNeedsOptIn {
             version,
             leader_url: url_from_bytes(task_id, &taskprov_advertisement.leader_url.bytes)?,
             helper_url: url_from_bytes(task_id, &taskprov_advertisement.helper_url.bytes)?,
-            time_precision: taskprov_advertisement.query_config.time_precision,
-            task_expiration: taskprov_advertisement.task_expiration,
-            min_batch_size: taskprov_advertisement.query_config.min_batch_size.into(),
+            time_precision: taskprov_advertisement.time_precision,
+            lifetime: taskprov_advertisement.lifetime,
+            min_batch_size: taskprov_advertisement.min_batch_size.into(),
             query: DapBatchMode::try_from_taskprov_advertisement(
                 task_id,
-                taskprov_advertisement.query_config.batch_mode,
+                taskprov_advertisement.query_config,
             )?,
             vdaf,
             vdaf_verify_key,
@@ -334,6 +358,17 @@ impl DapTaskConfigNeedsOptIn {
 
     /// Complete configuration of a task via taskprov using the supplied parameters.
     pub fn into_opted_in(self, param: &OptInParam) -> DapTaskConfig {
+        let (not_before, not_after) = match self.lifetime {
+            messages::taskprov::TaskLifetime::Latest { start, duration } => {
+                (start, start.saturating_add(duration))
+            }
+            // draft09 compatibility: Previously the task start time was not conveyed by the
+            // taskprov advertisement, so we need to get this value from the opt-in parameters.
+            messages::taskprov::TaskLifetime::Draft09 { expiration } => {
+                (param.not_before, expiration)
+            }
+        };
+
         DapTaskConfig {
             version: self.version,
             leader_url: self.leader_url,
@@ -342,8 +377,8 @@ impl DapTaskConfigNeedsOptIn {
             min_batch_size: self.min_batch_size,
             query: self.query,
             vdaf: self.vdaf,
-            not_before: param.not_before,
-            not_after: self.task_expiration,
+            not_before,
+            not_after,
             vdaf_verify_key: self.vdaf_verify_key,
             collector_hpke_config: self.collector_hpke_config,
             method: self.method,
@@ -352,22 +387,22 @@ impl DapTaskConfigNeedsOptIn {
     }
 }
 
-impl TryFrom<&DapBatchMode> for messages::taskprov::BatchMode {
+impl TryFrom<&DapBatchMode> for messages::taskprov::QueryConfig {
     type Error = DapError;
 
     fn try_from(query_config: &DapBatchMode) -> Result<Self, DapError> {
         Ok(match query_config {
-            DapBatchMode::TimeInterval => messages::taskprov::BatchMode::TimeInterval,
-            DapBatchMode::LeaderSelected { max_batch_size } => {
-                messages::taskprov::BatchMode::LeaderSelected {
-                    max_batch_size: *max_batch_size,
-                }
-            }
+            DapBatchMode::TimeInterval => messages::taskprov::QueryConfig::TimeInterval,
+            DapBatchMode::LeaderSelected {
+                draft09_max_batch_size,
+            } => messages::taskprov::QueryConfig::LeaderSelected {
+                draft09_max_batch_size: *draft09_max_batch_size,
+            },
         })
     }
 }
 
-impl TryFrom<&VdafConfig> for messages::taskprov::VdafTypeVar {
+impl TryFrom<&VdafConfig> for messages::taskprov::VdafConfig {
     type Error = DapError;
 
     fn try_from(vdaf_config: &VdafConfig) -> Result<Self, DapError> {
@@ -428,18 +463,26 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
             helper_url: messages::taskprov::UrlBytes {
                 bytes: task_config.helper_url.to_string().into_bytes(),
             },
-            query_config: messages::taskprov::QueryConfig {
-                time_precision: task_config.time_precision,
-                min_batch_size: task_config.min_batch_size.try_into().map_err(|_| {
-                    fatal_error!(err = "task min batch size is too large for taskprov")
-                })?,
-                max_batch_query_count: 1,
-                batch_mode: (&task_config.query).try_into()?,
+            time_precision: task_config.time_precision,
+            min_batch_size: task_config
+                .min_batch_size
+                .try_into()
+                .map_err(|_| fatal_error!(err = "task min batch size is too large for taskprov"))?,
+            query_config: (&task_config.query).try_into()?,
+            lifetime: messages::taskprov::TaskLifetime::from_validity_range(
+                task_config.version,
+                task_config.not_before,
+                task_config.not_after,
+            ),
+            vdaf_config: (&task_config.vdaf).try_into()?,
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match task_config.version {
+                DapVersion::Draft09 => Some(1),
+                DapVersion::Latest => None,
             },
-            task_expiration: task_config.not_after,
-            vdaf_config: messages::taskprov::VdafConfig {
-                dp_config: messages::taskprov::DpConfig::None,
-                var: (&task_config.vdaf).try_into()?,
+            draft09_dp_config: match task_config.version {
+                DapVersion::Draft09 => Some(messages::taskprov::DpConfig::None),
+                DapVersion::Latest => None,
             },
         })
     }
@@ -472,18 +515,24 @@ mod test {
             helper_url: messages::taskprov::UrlBytes {
                 bytes: b"http://helper.org:8788/".to_vec(),
             },
-            query_config: messages::taskprov::QueryConfig {
-                time_precision: 3600,
-                max_batch_query_count: 1,
-                min_batch_size: 1,
-                batch_mode: messages::taskprov::BatchMode::LeaderSelected {
-                    max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+            time_precision: 3600,
+            min_batch_size: 1,
+            query_config: messages::taskprov::QueryConfig::LeaderSelected {
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(2).unwrap()),
+                    DapVersion::Latest => None,
                 },
             },
-            task_expiration: 1337,
-            vdaf_config: messages::taskprov::VdafConfig {
-                dp_config: messages::taskprov::DpConfig::None,
-                var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 10 },
+            lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 1337, 1337),
+            vdaf_config: messages::taskprov::VdafConfig::Prio2 { dimension: 10 },
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match version {
+                DapVersion::Draft09 => Some(1),
+                DapVersion::Latest => None,
+            },
+            draft09_dp_config: match version {
+                DapVersion::Draft09 => Some(messages::taskprov::DpConfig::None),
+                DapVersion::Latest => None,
             },
         };
 
@@ -551,22 +600,28 @@ mod test {
                 helper_url: messages::taskprov::UrlBytes {
                     bytes: b"http://helper.org:8788/".to_vec(),
                 },
-                query_config: messages::taskprov::QueryConfig {
-                    time_precision: 3600,
-                    max_batch_query_count: 1,
-                    min_batch_size: 1,
-                    batch_mode: messages::taskprov::BatchMode::LeaderSelected {
-                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                time_precision: 3600,
+                min_batch_size: 1,
+                query_config: messages::taskprov::QueryConfig::LeaderSelected {
+                    draft09_max_batch_size: match version {
+                        DapVersion::Draft09 => Some(NonZeroU32::new(2).unwrap()),
+                        DapVersion::Latest => None,
                     },
                 },
-                task_expiration: 0,
-                vdaf_config: messages::taskprov::VdafConfig {
-                    dp_config: messages::taskprov::DpConfig::None,
-                    // unrecognized VDAF
-                    var: messages::taskprov::VdafTypeVar::NotImplemented {
-                        typ: 1337,
-                        param: b"vdaf type param".to_vec(),
-                    },
+                lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 0, 0),
+                // unrecognized VDAF
+                vdaf_config: messages::taskprov::VdafConfig::NotImplemented {
+                    typ: 1337,
+                    param: b"vdaf type param".to_vec(),
+                },
+                extensions: Vec::new(),
+                draft09_max_batch_query_count: match version {
+                    DapVersion::Draft09 => Some(1),
+                    DapVersion::Latest => None,
+                },
+                draft09_dp_config: match version {
+                    DapVersion::Draft09 => Some(messages::taskprov::DpConfig::None),
+                    DapVersion::Latest => None,
                 },
             };
             let task_id = {
@@ -618,21 +673,27 @@ mod test {
                 helper_url: messages::taskprov::UrlBytes {
                     bytes: b"http://helper.org:8788/".to_vec(),
                 },
-                query_config: messages::taskprov::QueryConfig {
-                    time_precision: 3600,
-                    max_batch_query_count: 1,
-                    min_batch_size: 1,
-                    batch_mode: messages::taskprov::BatchMode::LeaderSelected {
-                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                time_precision: 3600,
+                min_batch_size: 1,
+                query_config: messages::taskprov::QueryConfig::LeaderSelected {
+                    draft09_max_batch_size: match version {
+                        DapVersion::Draft09 => Some(NonZeroU32::new(2).unwrap()),
+                        DapVersion::Latest => None,
                     },
                 },
-                task_expiration: 0,
-                vdaf_config: messages::taskprov::VdafConfig {
-                    dp_config: messages::taskprov::DpConfig::NotImplemented {
+                lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 0, 0),
+                vdaf_config: messages::taskprov::VdafConfig::Prio2 { dimension: 1337 },
+                extensions: Vec::new(),
+                draft09_max_batch_query_count: match version {
+                    DapVersion::Draft09 => Some(1),
+                    DapVersion::Latest => None,
+                },
+                draft09_dp_config: match version {
+                    DapVersion::Draft09 => Some(messages::taskprov::DpConfig::NotImplemented {
                         typ: 99,
                         param: b"Just, do it!".to_vec(),
-                    },
-                    var: messages::taskprov::VdafTypeVar::Prio2 { dimension: 1337 },
+                    }),
+                    DapVersion::Latest => None,
                 },
             };
             let task_id = {

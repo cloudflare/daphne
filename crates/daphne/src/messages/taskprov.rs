@@ -10,8 +10,8 @@ use crate::messages::{
 use crate::pine::PineParam;
 use crate::{DapError, DapVersion};
 use prio::codec::{
-    decode_u8_items, encode_u8_items, CodecError, Decode, Encode, ParameterizedDecode,
-    ParameterizedEncode,
+    decode_u16_items, decode_u8_items, encode_u16_items, encode_u8_items, CodecError, Decode,
+    Encode, ParameterizedDecode, ParameterizedEncode,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
@@ -34,7 +34,7 @@ const DP_MECHANISM_NONE: u8 = 0x01;
 
 /// A VDAF type along with its type-specific data.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub enum VdafTypeVar {
+pub enum VdafConfig {
     Prio2 {
         dimension: u32,
     },
@@ -128,82 +128,168 @@ impl Decode for PineParam {
     }
 }
 
-impl ParameterizedEncode<DapVersion> for VdafTypeVar {
+impl ParameterizedEncode<DapVersion> for VdafConfig {
     fn encode_with_param(
         &self,
-        _version: &DapVersion,
+        version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        match self {
-            Self::Prio2 { dimension } => {
-                VDAF_TYPE_PRIO2.encode(bytes)?;
-                dimension.encode(bytes)?;
-            }
-            Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
-                length,
-                bits,
-                chunk_length,
-                num_proofs,
-            } => {
-                VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128.encode(bytes)?;
-                length.encode(bytes)?;
-                bits.encode(bytes)?;
-                chunk_length.encode(bytes)?;
-                num_proofs.encode(bytes)?;
-            }
-            Self::Pine32HmacSha256Aes128 { param } => {
-                VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128.encode(bytes)?;
-                param.encode(bytes)?;
-            }
-            Self::Pine64HmacSha256Aes128 { param } => {
-                VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128.encode(bytes)?;
-                param.encode(bytes)?;
-            }
-            Self::NotImplemented { typ, param } => {
-                typ.encode(bytes)?;
-                bytes.extend_from_slice(param);
-            }
+        match version {
+            DapVersion::Draft09 => match self {
+                Self::Prio2 { dimension } => {
+                    VDAF_TYPE_PRIO2.encode(bytes)?;
+                    dimension.encode(bytes)?;
+                }
+                Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                    length,
+                    bits,
+                    chunk_length,
+                    num_proofs,
+                } => {
+                    VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128.encode(bytes)?;
+                    length.encode(bytes)?;
+                    bits.encode(bytes)?;
+                    chunk_length.encode(bytes)?;
+                    num_proofs.encode(bytes)?;
+                }
+                Self::Pine32HmacSha256Aes128 { param } => {
+                    VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128.encode(bytes)?;
+                    param.encode(bytes)?;
+                }
+                Self::Pine64HmacSha256Aes128 { param } => {
+                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128.encode(bytes)?;
+                    param.encode(bytes)?;
+                }
+                Self::NotImplemented { typ, param } => {
+                    typ.encode(bytes)?;
+                    bytes.extend_from_slice(param);
+                }
+            },
+            DapVersion::Latest => match self {
+                Self::Prio2 { dimension } => {
+                    VDAF_TYPE_PRIO2.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_version, bytes| {
+                        dimension.encode(bytes)?;
+                        Ok(())
+                    })?;
+                }
+                Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                    length,
+                    bits,
+                    chunk_length,
+                    num_proofs,
+                } => {
+                    VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_version, bytes| {
+                        length.encode(bytes)?;
+                        bits.encode(bytes)?;
+                        chunk_length.encode(bytes)?;
+                        num_proofs.encode(bytes)?;
+                        Ok(())
+                    })?;
+                }
+                Self::Pine32HmacSha256Aes128 { param } => {
+                    VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_version, bytes| {
+                        param.encode(bytes)?;
+                        Ok(())
+                    })?;
+                }
+                Self::Pine64HmacSha256Aes128 { param } => {
+                    VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_version, bytes| {
+                        param.encode(bytes)?;
+                        Ok(())
+                    })?;
+                }
+                Self::NotImplemented { typ, param } => {
+                    typ.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_version, bytes| {
+                        bytes.extend_from_slice(param);
+                        Ok(())
+                    })?;
+                }
+            },
         };
         Ok(())
     }
 }
 
-impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafTypeVar {
+impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafConfig {
     fn decode_with_param(
-        (_version, bytes_left): &(DapVersion, Option<usize>),
+        (version, bytes_left): &(DapVersion, Option<usize>),
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let vdaf_type = u32::decode(bytes)?;
-        match (bytes_left, vdaf_type) {
-            (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
-                dimension: u32::decode(bytes)?,
-            }),
-            (.., VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128) => {
-                Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
-                    length: u32::decode(bytes)?,
-                    bits: u8::decode(bytes)?,
-                    chunk_length: u32::decode(bytes)?,
-                    num_proofs: u8::decode(bytes)?,
-                })
-            }
-            (.., VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128) => Ok(Self::Pine32HmacSha256Aes128 {
-                param: PineParam::decode(bytes)?,
-            }),
-            (.., VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128) => Ok(Self::Pine64HmacSha256Aes128 {
-                param: PineParam::decode(bytes)?,
-            }),
-            (Some(bytes_left), ..) => {
-                let mut param = vec![0; bytes_left - 4];
-                bytes.read_exact(&mut param)?;
-                Ok(Self::NotImplemented {
-                    typ: vdaf_type,
-                    param,
-                })
-            }
-            (None, ..) => Err(CodecError::Other(
-                "cannot decode VdafConfig variant without knowing the length of the remainder"
-                    .into(),
-            )),
+        match version {
+            DapVersion::Draft09 => match (bytes_left, u32::decode(bytes)?) {
+                (.., VDAF_TYPE_PRIO2) => Ok(Self::Prio2 {
+                    dimension: u32::decode(bytes)?,
+                }),
+                (.., VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128) => {
+                    Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                        length: u32::decode(bytes)?,
+                        bits: u8::decode(bytes)?,
+                        chunk_length: u32::decode(bytes)?,
+                        num_proofs: u8::decode(bytes)?,
+                    })
+                }
+                (.., VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128) => {
+                    Ok(Self::Pine32HmacSha256Aes128 {
+                        param: PineParam::decode(bytes)?,
+                    })
+                }
+                (.., VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128) => {
+                    Ok(Self::Pine64HmacSha256Aes128 {
+                        param: PineParam::decode(bytes)?,
+                    })
+                }
+                (Some(bytes_left), typ) => {
+                    let mut param = vec![0; bytes_left - 4];
+                    bytes.read_exact(&mut param)?;
+                    Ok(Self::NotImplemented { typ, param })
+                }
+                (None, ..) => Err(CodecError::Other(
+                    "cannot decode VdafConfig variant without knowing the length of the remainder"
+                        .into(),
+                )),
+            },
+            DapVersion::Latest => match u32::decode(bytes)? {
+                VDAF_TYPE_PRIO2 => {
+                    decode_u16_prefixed(*version, bytes, |_version, bytes, _bytes_left| {
+                        Ok(Self::Prio2 {
+                            dimension: u32::decode(bytes)?,
+                        })
+                    })
+                }
+                VDAF_TYPE_PRIO3_SUM_VEC_FIELD64_MULTIPROOF_HMAC_SHA256_AES128 => {
+                    decode_u16_prefixed(*version, bytes, |_version, bytes, _bytes_left| {
+                        Ok(Self::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+                            length: u32::decode(bytes)?,
+                            bits: u8::decode(bytes)?,
+                            chunk_length: u32::decode(bytes)?,
+                            num_proofs: u8::decode(bytes)?,
+                        })
+                    })
+                }
+                VDAF_TYPE_PINE_FIELD32_HMAC_SHA256_AES128 => {
+                    decode_u16_prefixed(*version, bytes, |_version, bytes, _bytes_left| {
+                        Ok(Self::Pine32HmacSha256Aes128 {
+                            param: PineParam::decode(bytes)?,
+                        })
+                    })
+                }
+                VDAF_TYPE_PINE_FIELD64_HMAC_SHA256_AES128 => {
+                    decode_u16_prefixed(*version, bytes, |_version, bytes, _bytes_left| {
+                        Ok(Self::Pine64HmacSha256Aes128 {
+                            param: PineParam::decode(bytes)?,
+                        })
+                    })
+                }
+                typ => Ok(Self::NotImplemented {
+                    typ,
+                    param: decode_u16_bytes(bytes)?,
+                }),
+            },
         }
     }
 }
@@ -253,47 +339,6 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for DpConfig {
     }
 }
 
-/// A VDAF configuration, made up from a differential privacy configuration,
-/// a VDAF type, and type-specific configuration.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VdafConfig {
-    pub dp_config: DpConfig,
-    pub var: VdafTypeVar,
-}
-
-impl ParameterizedEncode<DapVersion> for VdafConfig {
-    fn encode_with_param(
-        &self,
-        version: &DapVersion,
-        bytes: &mut Vec<u8>,
-    ) -> Result<(), CodecError> {
-        encode_u16_prefixed(*version, bytes, |_version, inner| {
-            self.dp_config.encode(inner)
-        })?;
-        self.var.encode_with_param(version, bytes)?;
-        Ok(())
-    }
-}
-
-impl ParameterizedDecode<(DapVersion, Option<usize>)> for VdafConfig {
-    fn decode_with_param(
-        (version, bytes_left): &(DapVersion, Option<usize>),
-        bytes: &mut Cursor<&[u8]>,
-    ) -> Result<Self, CodecError> {
-        let prefix_start = bytes.position();
-        let dp_config = decode_u16_prefixed(*version, bytes, |version, inner, bytes_left| {
-            DpConfig::decode_with_param(&(version, bytes_left), inner)
-        })?;
-        let prefix_len = usize::try_from(bytes.position() - prefix_start)
-            .map_err(|e| CodecError::Other(e.into()))?;
-        let bytes_left = bytes_left.map(|l| l - prefix_len);
-        Ok(Self {
-            dp_config,
-            var: VdafTypeVar::decode_with_param(&(*version, bytes_left), bytes)?,
-        })
-    }
-}
-
 /// A URL encode / decode helper struct, essentially a box for
 /// a `Vec<u8>`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -317,36 +362,15 @@ impl Decode for UrlBytes {
 
 /// A `QueryConfig` type and its associated task configuration data.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum BatchMode {
+pub enum QueryConfig {
     TimeInterval,
-    LeaderSelected { max_batch_size: Option<NonZeroU32> },
-    NotImplemented { mode: u8, param: Vec<u8> },
-}
-
-/// A query configuration.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct QueryConfig {
-    pub time_precision: Duration,
-    pub max_batch_query_count: u16,
-    pub min_batch_size: u32,
-    pub batch_mode: BatchMode,
-}
-
-impl QueryConfig {
-    fn encode_batch_mode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
-        match &self.batch_mode {
-            BatchMode::TimeInterval => {
-                BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
-            }
-            BatchMode::LeaderSelected { .. } => {
-                BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
-            }
-            BatchMode::NotImplemented { mode, .. } => {
-                mode.encode(bytes)?;
-            }
-        };
-        Ok(())
-    }
+    LeaderSelected {
+        draft09_max_batch_size: Option<NonZeroU32>,
+    },
+    NotImplemented {
+        mode: u8,
+        param: Vec<u8>,
+    },
 }
 
 impl ParameterizedEncode<DapVersion> for QueryConfig {
@@ -355,27 +379,49 @@ impl ParameterizedEncode<DapVersion> for QueryConfig {
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        self.time_precision.encode(bytes)?;
-        if *version == DapVersion::Draft09 {
-            self.max_batch_query_count.encode(bytes)?;
+        match version {
+            DapVersion::Draft09 => match self {
+                Self::TimeInterval => {
+                    BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
+                }
+                Self::LeaderSelected {
+                    draft09_max_batch_size,
+                } => {
+                    BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
+                    match draft09_max_batch_size {
+                        Some(ref max_batch_size) => max_batch_size.get().encode(bytes)?,
+                        None => 0_u32.encode(bytes)?,
+                    }
+                }
+                Self::NotImplemented { mode, ref param } => {
+                    mode.encode(bytes)?;
+                    bytes.extend_from_slice(param);
+                }
+            },
+            DapVersion::Latest => match self {
+                Self::TimeInterval => {
+                    BATCH_MODE_TIME_INTERVAL.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_, _| Ok(()))?;
+                }
+                Self::LeaderSelected {
+                    draft09_max_batch_size: None,
+                } => {
+                    BATCH_MODE_LEADER_SELECTED.encode(bytes)?;
+                    encode_u16_prefixed(*version, bytes, |_, _| Ok(()))?;
+                }
+                Self::LeaderSelected {
+                    draft09_max_batch_size: Some(_),
+                } => {
+                    return Err(CodecError::Other(
+                        "expected max batch size to not be set".into(),
+                    ))
+                }
+                Self::NotImplemented { mode, ref param } => {
+                    mode.encode(bytes)?;
+                    encode_u16_bytes(bytes, param)?;
+                }
+            },
         }
-        self.min_batch_size.encode(bytes)?;
-        self.encode_batch_mode(bytes)?;
-        match &self.batch_mode {
-            BatchMode::TimeInterval => (),
-            BatchMode::LeaderSelected { max_batch_size } => {
-                match version {
-                    DapVersion::Draft09 => match max_batch_size {
-                        Some(x) => x.get().encode(bytes)?,
-                        None => 0u32.encode(bytes)?,
-                    },
-                    DapVersion::Latest => (),
-                };
-            }
-            BatchMode::NotImplemented { mode: _, param } => {
-                bytes.extend_from_slice(param);
-            }
-        };
         Ok(())
     }
 }
@@ -385,46 +431,97 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
         (version, bytes_left): &(DapVersion, Option<usize>),
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let time_precision = Duration::decode(bytes)?;
-        let max_batch_query_count = match version {
-            DapVersion::Draft09 => u16::decode(bytes)?,
-            DapVersion::Latest => 1,
-        };
-        let fixed_size = match version {
-            DapVersion::Draft09 => 15,
-            DapVersion::Latest => 13,
-        };
-        let min_batch_size = u32::decode(bytes)?;
-        let batch_mode_number = u8::decode(bytes)?;
-        let batch_mode =
-            match (bytes_left, batch_mode_number) {
-                (.., BATCH_MODE_TIME_INTERVAL) => BatchMode::TimeInterval,
-                (.., BATCH_MODE_LEADER_SELECTED) => BatchMode::LeaderSelected {
-                    max_batch_size: match version {
-                        DapVersion::Draft09 => NonZeroU32::new(u32::decode(bytes)?),
-                        DapVersion::Latest => None,
-                    },
-                },
-                (Some(bytes_left), ..) => {
-                    let mut param = vec![0; bytes_left - fixed_size];
+        match (version, bytes_left) {
+            (DapVersion::Draft09, Some(bytes_left)) => match u8::decode(bytes)? {
+                BATCH_MODE_TIME_INTERVAL => Ok(Self::TimeInterval),
+                BATCH_MODE_LEADER_SELECTED => Ok(Self::LeaderSelected {
+                    draft09_max_batch_size: NonZeroU32::new(u32::decode(bytes)?),
+                }),
+                mode => {
+                    let mut param = vec![0; *bytes_left - 1];
                     bytes.read_exact(&mut param)?;
-
-                    BatchMode::NotImplemented {
-                        mode: batch_mode_number,
-                        param,
-                    }
+                    Ok(Self::NotImplemented { mode, param })
                 }
-                (None, ..) => return Err(CodecError::Other(
-                    "cannot decode QueryConfig variant without knowing the length of the remainder"
-                        .into(),
-                )),
-            };
+            },
+            (DapVersion::Draft09, None) => Err(CodecError::Other(
+                "draft 09: can't decode query config without knowing the number of bytes remaining"
+                    .into(),
+            )),
+            (DapVersion::Latest, _) => match u8::decode(bytes)? {
+                BATCH_MODE_TIME_INTERVAL => {
+                    decode_u16_prefixed(*version, bytes, |_, _, _| Ok(()))?;
+                    Ok(Self::TimeInterval)
+                }
+                BATCH_MODE_LEADER_SELECTED => {
+                    decode_u16_prefixed(*version, bytes, |_, _, _| Ok(()))?;
+                    Ok(Self::LeaderSelected {
+                        draft09_max_batch_size: None,
+                    })
+                }
+                mode => Ok(Self::NotImplemented {
+                    mode,
+                    param: decode_u16_bytes(bytes)?,
+                }),
+            },
+        }
+    }
+}
 
-        Ok(Self {
-            time_precision,
-            max_batch_query_count,
-            min_batch_size,
-            batch_mode,
+/// Task lifetime parameters.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum TaskLifetime {
+    Latest {
+        /// Task start time.
+        start: Time,
+        /// Task duration.
+        duration: Duration,
+    },
+    /// draft09 compatibility: Previously the DAP task parameters (and thus Taskprov) only
+    /// expressed an end time and not a start time.
+    Draft09 { expiration: Time },
+}
+
+impl TaskLifetime {
+    pub(crate) fn from_validity_range(
+        version: DapVersion,
+        not_before: Time,
+        not_after: Time,
+    ) -> Self {
+        match version {
+            DapVersion::Draft09 => Self::Draft09 {
+                expiration: not_after,
+            },
+            DapVersion::Latest => Self::Latest {
+                start: not_before,
+                duration: not_after - not_before,
+            },
+        }
+    }
+}
+
+/// Taskprov extensions.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum TaskprovExtension {
+    NotImplemented { typ: u16, payload: Vec<u8> },
+}
+
+impl Encode for TaskprovExtension {
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError> {
+        match self {
+            Self::NotImplemented { typ, payload } => {
+                typ.encode(bytes)?;
+                encode_u16_bytes(bytes, payload)?;
+            }
+        };
+        Ok(())
+    }
+}
+
+impl Decode for TaskprovExtension {
+    fn decode(bytes: &mut Cursor<&[u8]>) -> Result<Self, CodecError> {
+        Ok(Self::NotImplemented {
+            typ: u16::decode(bytes)?,
+            payload: decode_u16_bytes(bytes)?,
         })
     }
 }
@@ -435,9 +532,14 @@ pub struct TaskprovAdvertisement {
     pub task_info: Vec<u8>,
     pub leader_url: UrlBytes,
     pub helper_url: UrlBytes,
+    pub time_precision: Duration,
+    pub min_batch_size: u32,
     pub query_config: QueryConfig,
-    pub task_expiration: Time,
+    pub lifetime: TaskLifetime,
     pub vdaf_config: VdafConfig,
+    pub extensions: Vec<TaskprovExtension>,
+    pub draft09_max_batch_query_count: Option<u16>,
+    pub draft09_dp_config: Option<DpConfig>,
 }
 
 impl TaskprovAdvertisement {
@@ -486,16 +588,60 @@ impl ParameterizedEncode<DapVersion> for TaskprovAdvertisement {
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u8_items(bytes, &(), &self.task_info)?;
-        self.leader_url.encode(bytes)?;
-        self.helper_url.encode(bytes)?;
-        encode_u16_prefixed(*version, bytes, |version, inner| {
-            self.query_config.encode_with_param(&version, inner)
-        })?;
-        self.task_expiration.encode(bytes)?;
-        encode_u16_prefixed(*version, bytes, |version, inner| {
-            self.vdaf_config.encode_with_param(&version, inner)
-        })?;
+        match version {
+            DapVersion::Draft09 => {
+                encode_u8_items(bytes, &(), &self.task_info)?;
+                self.leader_url.encode(bytes)?;
+                self.helper_url.encode(bytes)?;
+                encode_u16_prefixed(*version, bytes, |version, bytes| {
+                    self.time_precision.encode(bytes)?;
+                    let Some(max_batch_query_count) = self.draft09_max_batch_query_count else {
+                        return Err(CodecError::Other(
+                            "max batch query count should be set".into(),
+                        ));
+                    };
+                    max_batch_query_count.encode(bytes)?;
+                    self.min_batch_size.encode(bytes)?;
+                    self.query_config.encode_with_param(&version, bytes)?;
+                    Ok(())
+                })?;
+                let TaskLifetime::Draft09 { expiration } = self.lifetime else {
+                    return Err(CodecError::Other("task expiration should be set".into()));
+                };
+                expiration.encode(bytes)?;
+                encode_u16_prefixed(*version, bytes, |version, bytes| {
+                    encode_u16_prefixed(version, bytes, |_version, bytes| {
+                        let Some(ref dp_config) = self.draft09_dp_config else {
+                            return Err(CodecError::Other("dp config should be set".into()));
+                        };
+                        dp_config.encode(bytes)?;
+                        Ok(())
+                    })?;
+                    self.vdaf_config.encode_with_param(&version, bytes)
+                })?;
+                if !self.extensions.is_empty() {
+                    return Err(CodecError::Other("extensions field should be empty".into()));
+                }
+            }
+
+            DapVersion::Latest => {
+                encode_u8_items(bytes, &(), &self.task_info)?;
+                self.leader_url.encode(bytes)?;
+                self.helper_url.encode(bytes)?;
+                self.time_precision.encode(bytes)?;
+                self.min_batch_size.encode(bytes)?;
+                self.query_config.encode_with_param(version, bytes)?;
+                let TaskLifetime::Latest { start, duration } = self.lifetime else {
+                    return Err(CodecError::Other(
+                        "task start time and duration should be set".into(),
+                    ));
+                };
+                start.encode(bytes)?;
+                duration.encode(bytes)?;
+                self.vdaf_config.encode_with_param(version, bytes)?;
+                encode_u16_items(bytes, &(), &self.extensions)?;
+            }
+        }
         Ok(())
     }
 }
@@ -505,35 +651,96 @@ impl ParameterizedDecode<DapVersion> for TaskprovAdvertisement {
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
-        let task_info = decode_u8_items(&(), bytes)?;
-        let leader_url = UrlBytes::decode(bytes)?;
-        let helper_url = UrlBytes::decode(bytes)?;
-        let query_config = decode_u16_prefixed(*version, bytes, |version, inner, len| {
-            // We need to know the length of the `QueryConfig` in order to decode variants we don't
-            // recognize. Likewise for `VdafConfig` below.
-            //
-            // Ideally the message can be decoded without knowing the length of the remainder. This
-            // is not possible because of taskprov's choice to prefix the `QueryConfig` with its
-            // length, rather than prefix the variant part (everything after the "select"). We
-            // could modify taskprov so that the length prefix immediately precedes the bits that
-            // we don't know how to parse. This would be consistent with other protocols that use
-            // TLS syntax. We could also consider dropping TLS syntax in the DAP spec in favor of a
-            // format that is better at being self-describing.
-            QueryConfig::decode_with_param(&(version, len), inner)
-        })?;
-        let task_expiration = Time::decode(bytes)?;
-        let vdaf_config = decode_u16_prefixed(*version, bytes, |version, inner, len| {
-            VdafConfig::decode_with_param(&(version, len), inner)
-        })?;
+        match version {
+            DapVersion::Draft09 => {
+                let task_info = decode_u8_items(&(), bytes)?;
+                let leader_url = UrlBytes::decode(bytes)?;
+                let helper_url = UrlBytes::decode(bytes)?;
+                let (time_precision, draft09_max_batch_query_count, min_batch_size, query_config) =
+                    decode_u16_prefixed(*version, bytes, |version, bytes, mut bytes_left| {
+                        let time_precision = Time::decode(bytes)?;
+                        let max_batch_query_count = u16::decode(bytes)?;
+                        let min_batch_size = u32::decode(bytes)?;
+                        // We need to know the length of the `QueryConfig` in order to decode variants we don't
+                        // recognize. Likewise for `VdafConfig` below.
+                        //
+                        // Ideally the message can be decoded without knowing the length of the remainder. This
+                        // is not possible because of taskprov's choice to prefix the `QueryConfig` with its
+                        // length, rather than prefix the variant part (everything after the "select"). We
+                        // could modify taskprov so that the length prefix immediately precedes the bits that
+                        // we don't know how to parse. This would be consistent with other protocols that use
+                        // TLS syntax. We could also consider dropping TLS syntax in the DAP spec in favor of a
+                        // format that is better at being self-describing.
+                        bytes_left = bytes_left.map(|l| l - 14);
+                        let query_config =
+                            QueryConfig::decode_with_param(&(version, bytes_left), bytes)?;
+                        Ok((
+                            time_precision,
+                            Some(max_batch_query_count),
+                            min_batch_size,
+                            query_config,
+                        ))
+                    })?;
+                let lifetime = TaskLifetime::Draft09 {
+                    expiration: Time::decode(bytes)?,
+                };
+                let (draft09_dp_config, vdaf_config) =
+                    decode_u16_prefixed(*version, bytes, |version, bytes, mut bytes_left| {
+                        let dp_config_bytes = decode_u16_bytes(bytes)?;
+                        let dp_config = DpConfig::get_decoded_with_param(
+                            &(version, Some(dp_config_bytes.len())),
+                            &dp_config_bytes,
+                        )?;
+                        bytes_left = bytes_left.map(|len| len - dp_config_bytes.len());
+                        let vdaf_config =
+                            VdafConfig::decode_with_param(&(version, bytes_left), bytes)?;
+                        Ok((Some(dp_config), vdaf_config))
+                    })?;
 
-        Ok(TaskprovAdvertisement {
-            task_info,
-            leader_url,
-            helper_url,
-            query_config,
-            task_expiration,
-            vdaf_config,
-        })
+                Ok(TaskprovAdvertisement {
+                    task_info,
+                    leader_url,
+                    helper_url,
+                    time_precision,
+                    min_batch_size,
+                    query_config,
+                    lifetime,
+                    vdaf_config,
+                    extensions: Vec::new(),
+                    draft09_dp_config,
+                    draft09_max_batch_query_count,
+                })
+            }
+
+            DapVersion::Latest => {
+                let task_info = decode_u8_items(&(), bytes)?;
+                let leader_url = UrlBytes::decode(bytes)?;
+                let helper_url = UrlBytes::decode(bytes)?;
+                let time_precision = Duration::decode(bytes)?;
+                let min_batch_size = u32::decode(bytes)?;
+                let query_config = QueryConfig::decode_with_param(&(*version, None), bytes)?;
+                let lifetime = TaskLifetime::Latest {
+                    start: Time::decode(bytes)?,
+                    duration: Duration::decode(bytes)?,
+                };
+                let vdaf_config = VdafConfig::decode_with_param(&(*version, None), bytes)?;
+                let extensions = decode_u16_items(&(), bytes)?;
+
+                Ok(TaskprovAdvertisement {
+                    task_info,
+                    leader_url,
+                    helper_url,
+                    time_precision,
+                    min_batch_size,
+                    query_config,
+                    lifetime,
+                    vdaf_config,
+                    extensions,
+                    draft09_dp_config: None,
+                    draft09_max_batch_query_count: None,
+                })
+            }
+        }
     }
 }
 
@@ -552,24 +759,36 @@ mod tests {
             helper_url: UrlBytes {
                 bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
             },
-            query_config: QueryConfig {
-                time_precision: 12_341_234,
-                max_batch_query_count: match version {
-                    DapVersion::Draft09 => 1337,
-                    DapVersion::Latest => 1,
-                },
-                min_batch_size: 55,
-                batch_mode: BatchMode::LeaderSelected {
-                    max_batch_size: match version {
-                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
-                        DapVersion::Latest => None,
-                    },
+            time_precision: 12_341_234,
+            min_batch_size: 55,
+            query_config: QueryConfig::LeaderSelected {
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                    DapVersion::Latest => None,
                 },
             },
-            task_expiration: 23_232_232_232,
-            vdaf_config: VdafConfig {
-                dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
+            extensions: match version {
+                DapVersion::Latest => vec![
+                    TaskprovExtension::NotImplemented {
+                        typ: 1337,
+                        payload: b"collecter.com".to_vec(),
+                    },
+                    TaskprovExtension::NotImplemented {
+                        typ: 42,
+                        payload: b"hey, don't forget the differential privacy!!".to_vec(),
+                    },
+                ],
+                DapVersion::Draft09 => Vec::new(),
+            },
+            draft09_max_batch_query_count: match version {
+                DapVersion::Draft09 => Some(1337),
+                DapVersion::Latest => None,
+            },
+            draft09_dp_config: match version {
+                DapVersion::Draft09 => Some(DpConfig::None),
+                DapVersion::Latest => None,
             },
         };
         println!("want {:?}", want.get_encoded_with_param(&version).unwrap());
@@ -591,8 +810,12 @@ mod tests {
                 101, 46, 99, 111, 109, 47, 118, 48, 50, 0, 42, 104, 116, 116, 112, 115, 58, 47, 47,
                 115, 111, 109, 101, 115, 101, 114, 118, 105, 99, 101, 46, 99, 108, 111, 117, 100,
                 102, 108, 97, 114, 101, 114, 101, 115, 101, 97, 114, 99, 104, 46, 99, 111, 109, 0,
-                13, 0, 0, 0, 0, 0, 188, 79, 242, 0, 0, 0, 55, 2, 0, 0, 0, 5, 104, 191, 187, 40, 0,
-                11, 0, 1, 1, 255, 255, 0, 0, 0, 1, 134, 159,
+                0, 0, 0, 0, 188, 79, 242, 0, 0, 0, 55, 2, 0, 0, 0, 0, 0, 5, 104, 191, 187, 40, 0,
+                0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 0, 4, 0, 1, 134, 159, 0, 65, 5, 57, 0, 13, 99,
+                111, 108, 108, 101, 99, 116, 101, 114, 46, 99, 111, 109, 0, 42, 0, 44, 104, 101,
+                121, 44, 32, 100, 111, 110, 39, 116, 32, 102, 111, 114, 103, 101, 116, 32, 116,
+                104, 101, 32, 100, 105, 102, 102, 101, 114, 101, 110, 116, 105, 97, 108, 32, 112,
+                114, 105, 118, 97, 99, 121, 33, 33,
             ]
             .as_slice(),
         };
@@ -604,15 +827,7 @@ mod tests {
     test_versions! { read_task_config }
 
     fn roundtrip_query_config(version: DapVersion) {
-        let query_config = QueryConfig {
-            time_precision: 12_345_678,
-            max_batch_query_count: match version {
-                DapVersion::Draft09 => 1337,
-                DapVersion::Latest => 1,
-            },
-            min_batch_size: 12_345_678,
-            batch_mode: BatchMode::TimeInterval,
-        };
+        let query_config = QueryConfig::TimeInterval;
         let encoded = query_config.get_encoded_with_param(&version).unwrap();
 
         assert_eq!(
@@ -620,18 +835,10 @@ mod tests {
             query_config
         );
 
-        let query_config = QueryConfig {
-            time_precision: 12_345_678,
-            max_batch_query_count: match version {
-                DapVersion::Draft09 => 1337,
-                DapVersion::Latest => 1,
-            },
-            min_batch_size: 12_345_678,
-            batch_mode: BatchMode::LeaderSelected {
-                max_batch_size: match version {
-                    DapVersion::Draft09 => Some(NonZeroU32::new(12_345_678).unwrap()),
-                    DapVersion::Latest => None,
-                },
+        let query_config = QueryConfig::LeaderSelected {
+            draft09_max_batch_size: match version {
+                DapVersion::Draft09 => Some(NonZeroU32::new(12_345_678).unwrap()),
+                DapVersion::Latest => None,
             },
         };
         let encoded = query_config.get_encoded_with_param(&version).unwrap();
@@ -645,14 +852,9 @@ mod tests {
     test_versions! { roundtrip_query_config }
 
     fn roundtrip_query_config_not_implemented(version: DapVersion) {
-        let query_config = QueryConfig {
-            time_precision: 12_345_678,
-            max_batch_query_count: 1,
-            min_batch_size: 12_345_678,
-            batch_mode: BatchMode::NotImplemented {
-                mode: 0,
-                param: b"query config param".to_vec(),
-            },
+        let query_config = QueryConfig::NotImplemented {
+            mode: 0,
+            param: b"query config param".to_vec(),
         };
         let encoded = query_config.get_encoded_with_param(&version).unwrap();
 
@@ -693,10 +895,7 @@ mod tests {
     test_versions! { roundtrip_dp_config_not_implemented }
 
     fn roundtrip_vdaf_config_prio2(version: DapVersion) {
-        let vdaf_config = VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio2 { dimension: 1337 },
-        };
+        let vdaf_config = VdafConfig::Prio2 { dimension: 1337 };
         assert_eq!(
             VdafConfig::get_decoded_with_param(
                 &(version, None),
@@ -712,14 +911,11 @@ mod tests {
     fn roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
         version: DapVersion,
     ) {
-        let vdaf_config = VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Prio3SumVecField64MultiproofHmacSha256Aes128 {
-                bits: 23,
-                length: 1337,
-                chunk_length: 42,
-                num_proofs: 99,
-            },
+        let vdaf_config = VdafConfig::Prio3SumVecField64MultiproofHmacSha256Aes128 {
+            bits: 23,
+            length: 1337,
+            chunk_length: 42,
+            num_proofs: 99,
         };
         let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
 
@@ -732,20 +928,17 @@ mod tests {
     test_versions! { roundtrip_vdaf_config_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128 }
 
     fn roundtrip_vdaf_config_pine32_hmac_sha256_aes128(version: DapVersion) {
-        let vdaf_config = VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Pine32HmacSha256Aes128 {
-                param: PineParam {
-                    norm_bound: 1337,
-                    dimension: 1_000_000,
-                    frac_bits: 15,
-                    chunk_len: 999,
-                    chunk_len_sq_norm_equal: 1400,
-                    num_proofs: 15,
-                    num_proofs_sq_norm_equal: 1,
-                    num_wr_tests: 50,
-                    num_wr_successes: 17,
-                },
+        let vdaf_config = VdafConfig::Pine32HmacSha256Aes128 {
+            param: PineParam {
+                norm_bound: 1337,
+                dimension: 1_000_000,
+                frac_bits: 15,
+                chunk_len: 999,
+                chunk_len_sq_norm_equal: 1400,
+                num_proofs: 15,
+                num_proofs_sq_norm_equal: 1,
+                num_wr_tests: 50,
+                num_wr_successes: 17,
             },
         };
         let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
@@ -759,20 +952,17 @@ mod tests {
     test_versions! { roundtrip_vdaf_config_pine32_hmac_sha256_aes128 }
 
     fn roundtrip_vdaf_config_pine64_hmac_sha256_aes128(version: DapVersion) {
-        let vdaf_config = VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::Pine64HmacSha256Aes128 {
-                param: PineParam {
-                    norm_bound: 1337,
-                    dimension: 1_000_000,
-                    frac_bits: 15,
-                    chunk_len: 999,
-                    chunk_len_sq_norm_equal: 1400,
-                    num_proofs: 15,
-                    num_proofs_sq_norm_equal: 17,
-                    num_wr_tests: 50,
-                    num_wr_successes: 17,
-                },
+        let vdaf_config = VdafConfig::Pine64HmacSha256Aes128 {
+            param: PineParam {
+                norm_bound: 1337,
+                dimension: 1_000_000,
+                frac_bits: 15,
+                chunk_len: 999,
+                chunk_len_sq_norm_equal: 1400,
+                num_proofs: 15,
+                num_proofs_sq_norm_equal: 17,
+                num_wr_tests: 50,
+                num_wr_successes: 17,
             },
         };
         let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
@@ -794,24 +984,25 @@ mod tests {
             helper_url: UrlBytes {
                 bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
             },
-            query_config: QueryConfig {
-                time_precision: 12_341_234,
-                max_batch_query_count: match version {
-                    DapVersion::Draft09 => 1337,
-                    DapVersion::Latest => 1,
-                },
-                min_batch_size: 55,
-                batch_mode: BatchMode::LeaderSelected {
-                    max_batch_size: match version {
-                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
-                        DapVersion::Latest => None,
-                    },
+            time_precision: 12_341_234,
+            min_batch_size: 55,
+            query_config: QueryConfig::LeaderSelected {
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                    DapVersion::Latest => None,
                 },
             },
-            task_expiration: 23_232_232_232,
-            vdaf_config: VdafConfig {
-                dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match version {
+                DapVersion::Draft09 => Some(1337),
+                DapVersion::Latest => None,
+            },
+
+            draft09_dp_config: match version {
+                DapVersion::Draft09 => Some(DpConfig::None),
+                DapVersion::Latest => None,
             },
         };
 
@@ -831,12 +1022,9 @@ mod tests {
     test_versions! { roundtrip_taskprov_advertisement }
 
     fn roundtrip_vdaf_config_not_implemented(version: DapVersion) {
-        let vdaf_config = VdafConfig {
-            dp_config: DpConfig::None,
-            var: VdafTypeVar::NotImplemented {
-                typ: 1337,
-                param: b"vdaf type param".to_vec(),
-            },
+        let vdaf_config = VdafConfig::NotImplemented {
+            typ: 1337,
+            param: b"vdaf type param".to_vec(),
         };
         let encoded = vdaf_config.get_encoded_with_param(&version).unwrap();
 
@@ -857,24 +1045,24 @@ mod tests {
             helper_url: UrlBytes {
                 bytes: b"https://someservice.cloudflareresearch.com".to_vec(),
             },
-            query_config: QueryConfig {
-                time_precision: 12_341_234,
-                max_batch_query_count: match version {
-                    DapVersion::Draft09 => 1337,
-                    DapVersion::Latest => 1,
-                },
-                min_batch_size: 55,
-                batch_mode: BatchMode::LeaderSelected {
-                    max_batch_size: match version {
-                        DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
-                        DapVersion::Latest => None,
-                    },
+            time_precision: 12_341_234,
+            min_batch_size: 55,
+            query_config: QueryConfig::LeaderSelected {
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(57).unwrap()),
+                    DapVersion::Latest => None,
                 },
             },
-            task_expiration: 23_232_232_232,
-            vdaf_config: VdafConfig {
-                dp_config: DpConfig::None,
-                var: VdafTypeVar::Prio2 { dimension: 99_999 },
+            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
+            extensions: Vec::new(),
+            draft09_max_batch_query_count: match version {
+                DapVersion::Draft09 => Some(1337),
+                DapVersion::Latest => None,
+            },
+            draft09_dp_config: match version {
+                DapVersion::Draft09 => Some(DpConfig::None),
+                DapVersion::Latest => None,
             },
         };
 

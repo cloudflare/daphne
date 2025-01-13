@@ -243,7 +243,10 @@ mod test {
                     not_after: now + Self::TASK_TIME_PRECISION,
                     min_batch_size: 1,
                     query: DapBatchMode::LeaderSelected {
-                        max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                        draft09_max_batch_size: match version {
+                            DapVersion::Draft09 => Some(NonZeroU32::new(2).unwrap()),
+                            DapVersion::Latest => None,
+                        },
                     },
                     vdaf: vdaf_config,
                     vdaf_verify_key: vdaf_config.gen_verify_key(),
@@ -1532,7 +1535,10 @@ mod test {
             version,
             min_batch_size: 1,
             query: DapBatchMode::LeaderSelected {
-                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => Some(NonZeroU32::new(2).unwrap()),
+                    DapVersion::Latest => None,
+                },
             },
             vdaf: vdaf_config,
             ..Default::default()
@@ -1694,7 +1700,7 @@ mod test {
             version,
             min_batch_size: 1,
             query: DapBatchMode::LeaderSelected {
-                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                draft09_max_batch_size: None,
             },
             ..Default::default()
         }
@@ -1777,7 +1783,7 @@ mod test {
             version,
             min_batch_size: 1,
             query: DapBatchMode::LeaderSelected {
-                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                draft09_max_batch_size: None,
             },
             ..Default::default()
         }
@@ -1884,7 +1890,7 @@ mod test {
             version,
             min_batch_size: 1,
             query: DapBatchMode::LeaderSelected {
-                max_batch_size: Some(NonZeroU32::new(2).unwrap()),
+                draft09_max_batch_size: None,
             },
             ..Default::default()
         }

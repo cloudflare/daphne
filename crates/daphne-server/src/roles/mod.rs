@@ -287,7 +287,9 @@ mod test_utils {
                         err = "command failed: unexpected max batch size"
                     ))
                 }
-                (2, max_batch_size) => DapBatchMode::LeaderSelected { max_batch_size },
+                (2, max_batch_size) => DapBatchMode::LeaderSelected {
+                    draft09_max_batch_size: max_batch_size,
+                },
                 _ => {
                     return Err(fatal_error!(
                         err = "command failed: unrecognized batch mode"

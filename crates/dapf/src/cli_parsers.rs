@@ -155,7 +155,7 @@ impl FromStr for CliDapBatchMode {
             Ok(Self(DapBatchMode::TimeInterval))
         } else if let Some(size) = s.strip_prefix("leader-selected") {
             Ok(Self(DapBatchMode::LeaderSelected {
-                max_batch_size: if let Some(size) = size.strip_prefix("-") {
+                draft09_max_batch_size: if let Some(size) = size.strip_prefix("-") {
                     Some(
                         size.parse()
                             .map_err(|e| format!("{s} is an invalid max batch size: {e:?}"))?,

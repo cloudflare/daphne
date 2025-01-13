@@ -381,7 +381,10 @@ impl Test {
             lifetime: 60,
             min_batch_size: reports_per_batch.try_into().unwrap(),
             query: DapBatchMode::LeaderSelected {
-                max_batch_size: NonZeroU32::new(reports_per_batch.try_into().unwrap()),
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => NonZeroU32::new(reports_per_batch.try_into().unwrap()),
+                    DapVersion::Latest => None,
+                },
             },
             vdaf: self.vdaf_config,
             ..Default::default()

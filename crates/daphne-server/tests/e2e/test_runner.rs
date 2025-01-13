@@ -68,7 +68,10 @@ impl TestRunner {
         Self::with(
             version,
             &DapBatchMode::LeaderSelected {
-                max_batch_size: Some(NonZeroU32::new(MAX_BATCH_SIZE).unwrap()),
+                draft09_max_batch_size: match version {
+                    DapVersion::Draft09 => NonZeroU32::new(MAX_BATCH_SIZE),
+                    DapVersion::Latest => None,
+                },
             },
         )
         .await
@@ -178,7 +181,9 @@ impl TestRunner {
 
         let (batch_mode, max_batch_size) = match t.task_config.query {
             DapBatchMode::TimeInterval => (1, None),
-            DapBatchMode::LeaderSelected { max_batch_size } => (2, Some(max_batch_size)),
+            DapBatchMode::LeaderSelected {
+                draft09_max_batch_size,
+            } => (2, draft09_max_batch_size),
         };
 
         const MAX_ATTEMPTS: usize = 10;
