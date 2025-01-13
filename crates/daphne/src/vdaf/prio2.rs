@@ -55,18 +55,12 @@ pub(crate) fn prio2_shard(
 /// Consume an input share and return the corresponding prep state and share.
 pub(crate) fn prio2_prep_init(
     dimension: usize,
-    verify_key: &VdafVerifyKey,
+    VdafVerifyKey(verify_key): &VdafVerifyKey,
     agg_id: usize,
     nonce: &[u8; 16],
     public_share_data: &[u8],
     input_share_data: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-    let VdafVerifyKey::L32(verify_key) = verify_key else {
-        return Err(VdafError::Dap(fatal_error!(
-            err = "unhandled verify key type"
-        )));
-    };
-
     let vdaf = Prio2::new(dimension).map_err(|e| {
         VdafError::Dap(fatal_error!(err = ?e, "failed to create prio2 from {dimension}"))
     })?;

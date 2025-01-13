@@ -111,15 +111,15 @@ impl Prio3Config {
     pub(crate) fn prep_init(
         &self,
         version: DapVersion,
-        verify_key: &VdafVerifyKey,
+        VdafVerifyKey(verify_key): &VdafVerifyKey,
         task_id: TaskId,
         agg_id: usize,
         nonce: &[u8; 16],
         public_share_data: &[u8],
         input_share_data: &[u8],
     ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-        return match (version, self, verify_key) {
-            (DapVersion::Latest, Prio3Config::Count, VdafVerifyKey::L32(verify_key)) => {
+        return match (version, self) {
+            (DapVersion::Latest, Prio3Config::Count) => {
                 let vdaf = Prio3::new_count(2).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
@@ -137,11 +137,7 @@ impl Prio3Config {
                     VdafPrepShare::Prio3Field64(share),
                 ))
             }
-            (
-                DapVersion::Latest,
-                Prio3Config::Sum { max_measurement },
-                VdafVerifyKey::L32(verify_key),
-            ) => {
+            (DapVersion::Latest, Prio3Config::Sum { max_measurement }) => {
                 let vdaf = Prio3::new_sum(2, *max_measurement).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
@@ -165,7 +161,6 @@ impl Prio3Config {
                     length,
                     chunk_length,
                 },
-                VdafVerifyKey::L32(verify_key),
             ) => {
                 let vdaf = Prio3::new_histogram(2, *length, *chunk_length).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
@@ -191,7 +186,6 @@ impl Prio3Config {
                     length,
                     chunk_length,
                 },
-                VdafVerifyKey::L32(verify_key),
             ) => {
                 let vdaf = Prio3::new_sum_vec(2, *bits, *length, *chunk_length).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
@@ -218,7 +212,6 @@ impl Prio3Config {
                     chunk_length,
                     num_proofs,
                 },
-                VdafVerifyKey::L32(verify_key),
             ) => {
                 let vdaf = draft09::new_prio3_sum_vec_field64_multiproof_hmac_sha256_aes128(
                     *bits,

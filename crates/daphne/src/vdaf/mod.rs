@@ -388,38 +388,23 @@ impl std::fmt::Display for Prio3Config {
     any(test, feature = "test-utils"),
     derive(deepsize::DeepSizeOf, PartialEq, Debug)
 )]
-pub enum VdafVerifyKey {
-    /// Prio3 with the standard XOF.
-    L16(#[serde(with = "hex")] [u8; 16]),
-
-    /// Prio2 and Prio3 with `XofHmacSha256Aes128`.
-    L32(#[serde(with = "hex")] [u8; 32]),
-}
+pub struct VdafVerifyKey(#[serde(with = "hex")] pub(crate) [u8; 32]);
 
 impl KeyType for VdafVerifyKey {
     fn len(&self) -> usize {
-        match self {
-            Self::L16(bytes) => bytes.len(),
-            Self::L32(bytes) => bytes.len(),
-        }
+        32
     }
 }
 
 impl AsRef<[u8]> for VdafVerifyKey {
     fn as_ref(&self) -> &[u8] {
-        match self {
-            Self::L16(bytes) => &bytes[..],
-            Self::L32(bytes) => &bytes[..],
-        }
+        &self.0
     }
 }
 
 impl AsMut<[u8]> for VdafVerifyKey {
     fn as_mut(&mut self) -> &mut [u8] {
-        match self {
-            Self::L16(bytes) => &mut bytes[..],
-            Self::L32(bytes) => &mut bytes[..],
-        }
+        &mut self.0
     }
 }
 
@@ -646,39 +631,17 @@ impl Encode for VdafAggregateShare {
 }
 
 impl VdafConfig {
-    pub(crate) fn uninitialized_verify_key(&self) -> VdafVerifyKey {
-        match self {
-            Self::Prio2 { .. } | Self::Prio3(..) => VdafVerifyKey::L32([0; 32]),
-            #[cfg(feature = "experimental")]
-            Self::Mastic { .. } => VdafVerifyKey::L16([0; 16]),
-            Self::Pine(..) => VdafVerifyKey::L32([0; 32]),
-        }
-    }
-
     /// Parse a verification key from raw bytes.
     pub fn get_decoded_verify_key(&self, bytes: &[u8]) -> Result<VdafVerifyKey, CodecError> {
-        match self {
-            Self::Prio2 { .. } | Self::Prio3(..) => Ok(VdafVerifyKey::L32(
-                <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(upgrade_codec_error)?,
-            )),
-            #[cfg(feature = "experimental")]
-            Self::Mastic { .. } => Ok(VdafVerifyKey::L16(
-                <[u8; 16]>::try_from(bytes).map_err(|e| CodecError::Other(Box::new(e)))?,
-            )),
-            Self::Pine(..) => Ok(VdafVerifyKey::L32(
-                <[u8; 32]>::try_from(bytes)
-                    .map_err(|e| CodecErrorDraft09::Other(Box::new(e)))
-                    .map_err(upgrade_codec_error)?,
-            )),
-        }
+        Ok(VdafVerifyKey(
+            <[u8; 32]>::try_from(bytes).map_err(|_| CodecError::UnexpectedValue)?,
+        ))
     }
 
     /// Generate the Aggregators' shared verification parameters.
     pub fn gen_verify_key(&self) -> VdafVerifyKey {
         let mut rng = thread_rng();
-        let mut verify_key = self.uninitialized_verify_key();
+        let mut verify_key = VdafVerifyKey([0; 32]);
         rng.fill(verify_key.as_mut());
         verify_key
     }
