@@ -81,14 +81,14 @@ impl PineConfig {
 
     pub(crate) fn prep_init(
         &self,
-        verify_key: &VdafVerifyKey,
+        VdafVerifyKey(verify_key): &VdafVerifyKey,
         agg_id: usize,
         nonce: &[u8; 16],
         public_share_data: &[u8],
         input_share_data: &[u8],
     ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-        match (self, verify_key) {
-            (PineConfig::Field32HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
+        match self {
+            PineConfig::Field32HmacSha256Aes128 { param } => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
                 let (state, share) = prep_init(
                     vdaf,
@@ -103,7 +103,7 @@ impl PineConfig {
                     VdafPrepShare::Pine32HmacSha256Aes128(share),
                 ))
             }
-            (PineConfig::Field64HmacSha256Aes128 { param }, VdafVerifyKey::L32(verify_key)) => {
+            PineConfig::Field64HmacSha256Aes128 { param } => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (state, share) = prep_init(
                     vdaf,
@@ -118,9 +118,6 @@ impl PineConfig {
                     VdafPrepShare::Pine64HmacSha256Aes128(share),
                 ))
             }
-            _ => Err(VdafError::Dap(fatal_error!(
-                err = "unhandled config and verify key combination",
-            ))),
         }
     }
 

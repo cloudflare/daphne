@@ -70,17 +70,11 @@ pub(crate) fn mastic_shard(
 pub(crate) fn mastic_prep_init(
     input_size: usize,
     weight_config: MasticWeightConfig,
-    verify_key: &VdafVerifyKey,
+    _verify_key: &VdafVerifyKey,
     agg_param: &DapAggregationParam,
     public_share_bytes: &[u8],
     input_share_bytes: &[u8],
 ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-    let VdafVerifyKey::L16(_verify_key) = verify_key else {
-        return Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected verify key type"
-        )));
-    };
-
     match (weight_config, agg_param) {
         (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
             // Simulate Mastic, insecurely. The public share encodes the plaintext input; the input

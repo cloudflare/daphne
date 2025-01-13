@@ -63,16 +63,14 @@ pub(crate) fn extract_prk_from_verify_key_init(
     Salt::new(HKDF_SHA256, &TASKPROV_SALT).extract(verify_key_init)
 }
 
-impl VdafConfig {
-    fn expand_into_taskprov_verify_key(&self, prk: &Prk, task_id: &TaskId) -> VdafVerifyKey {
-        let mut verify_key = self.uninitialized_verify_key();
-        let info = [task_id.as_ref()];
-        // This expand(), and the associated fill() below can only fail if the length is wrong,
-        // and it won't be, so we unwrap().
-        let okm = prk.expand(&info, verify_key.clone()).unwrap();
-        okm.fill(verify_key.as_mut()).unwrap();
-        verify_key
-    }
+fn expand_into_taskprov_verify_key(prk: &Prk, task_id: &TaskId) -> VdafVerifyKey {
+    let mut verify_key = VdafVerifyKey([0; 32]);
+    let info = [task_id.as_ref()];
+    // This expand(), and the associated fill() below can only fail if the length is wrong,
+    // and it won't be, so we unwrap().
+    let okm = prk.expand(&info, verify_key.clone()).unwrap();
+    okm.fill(verify_key.as_mut()).unwrap();
+    verify_key
 }
 
 /// Compute the VDAF verify key for `task_id` and the specified VDAF type using the
@@ -86,9 +84,8 @@ fn compute_vdaf_verify_key(
     version: DapVersion,
     verify_key_init: &[u8; 32],
     task_id: &TaskId,
-    vdaf_config: &VdafConfig,
 ) -> VdafVerifyKey {
-    vdaf_config.expand_into_taskprov_verify_key(
+    expand_into_taskprov_verify_key(
         &extract_prk_from_verify_key_init(version, verify_key_init),
         task_id,
     )
@@ -313,12 +310,8 @@ impl DapTaskConfigNeedsOptIn {
             version,
             taskprov_advertisement.vdaf_config.var,
         )?;
-        let vdaf_verify_key = compute_vdaf_verify_key(
-            version,
-            taskprov_config.vdaf_verify_key_init,
-            task_id,
-            &vdaf,
-        );
+        let vdaf_verify_key =
+            compute_vdaf_verify_key(version, taskprov_config.vdaf_verify_key_init, task_id);
         Ok(Self {
             version,
             leader_url: url_from_bytes(task_id, &taskprov_advertisement.leader_url.bytes)?,
@@ -465,7 +458,7 @@ mod test {
         messages::{self, TaskId},
         taskprov::{DapTaskConfigNeedsOptIn, OptInParam},
         test_versions,
-        vdaf::{VdafConfig, VdafVerifyKey},
+        vdaf::VdafVerifyKey,
         DapRequestMeta, DapVersion,
     };
 
@@ -536,20 +529,13 @@ mod test {
             0x0f, 0x32, 0xd7, 0xe1, 0xbc, 0x6c, 0x75, 0x10, 0x05, 0x60, 0x7b, 0x81, 0xda, 0xc3,
             0xa7, 0xda, 0x76, 0x1d,
         ];
-        let vk = compute_vdaf_verify_key(
-            version,
-            &verify_key_init,
-            &task_id,
-            &VdafConfig::Prio2 { dimension: 10 },
-        );
+        let VdafVerifyKey(verify_key) =
+            compute_vdaf_verify_key(version, &verify_key_init, &task_id);
         let expected: [u8; 32] = [
             251, 209, 125, 181, 57, 15, 148, 158, 227, 45, 38, 52, 220, 73, 159, 91, 145, 40, 123,
             204, 49, 124, 7, 97, 221, 4, 232, 53, 194, 171, 19, 51,
         ];
-        match &vk {
-            VdafVerifyKey::L32(bytes) => assert_eq!(*bytes, expected),
-            VdafVerifyKey::L16(..) => unreachable!(),
-        }
+        assert_eq!(verify_key, expected);
     }
 
     test_versions! { check_vdaf_key_computation }
