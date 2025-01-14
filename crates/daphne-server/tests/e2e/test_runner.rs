@@ -328,7 +328,7 @@ impl TestRunner {
         const REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: u64 = 300;
         // This is a portion of the interval which is guaranteed to be a valid report time
         // provided that the interval start time is valid.
-        interval.start..interval.start + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
+        interval.start..interval.start + interval.duration + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
     }
 
     pub async fn get_hpke_configs(

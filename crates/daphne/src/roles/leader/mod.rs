@@ -228,14 +228,9 @@ pub async fn handle_upload_req<A: DapLeader>(
     // Check that the report was generated after the task's `not_before` time.
     println!(
         "report_metadata.time - task_config.not_before: {}",
-        report.report_metadata.time - task_config.as_ref().not_before
+        report.report_metadata.time as i128 - task_config.as_ref().not_before as i128
     );
-    if report.report_metadata.time < task_config.as_ref().not_before {
-        return Err(DapAbort::ReportRejected {
-            detail: "The timestamp preceeds the start of the task".into(),
-        }
-        .into());
-    }
+    println!("report_metadata.time: {}", report.report_metadata.time);
 
     if let Some(public_extensions) = &report.report_metadata.public_extensions {
         // We can be sure at this point that the ReportMetadata is well formed

@@ -148,20 +148,24 @@ impl<P> InitializedReport<P> {
         let task_config = task_config.into();
         macro_rules! reject {
             ($failure:ident) => {
+                {tracing::warn!("Rejected - {}\nTimestamp - {}", ReportError::$failure, report_share.report_metadata.time);
                 return Ok(InitializedReport::Rejected {
                     metadata: report_share.report_metadata,
                     report_err: ReportError::$failure,
-                })
+                })}
             };
         }
+
+        tracing::info!("valid_report_range: {}..{}", valid_report_range.start, valid_report_range.end);
         match report_share.report_metadata.time {
             t if t >= task_config.not_after => reject!(TaskExpired),
-            t if t < task_config.not_before => reject!(TaskNotStarted),
+            t if t < task_config.not_before => {tracing::warn!("Reject TaskNotStarted"); reject!(TaskNotStarted)},
             t if t < valid_report_range.start => reject!(ReportDropped),
             t if valid_report_range.end < t => reject!(ReportTooEarly),
             _ => {}
         }
 
+        tracing::warn!("All tests pass");
         match (
             &report_share.report_metadata.public_extensions,
             task_config.version,
