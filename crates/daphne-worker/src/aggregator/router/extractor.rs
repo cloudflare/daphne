@@ -11,10 +11,11 @@ use daphne::{
     error::DapAbort,
     fatal_error,
     messages::{
-        request::{CollectionPollReq, HashedAggregationJobReq, RequestBody},
+        request::{CollectionPollReq, RequestBody},
         taskprov::TaskprovAdvertisement,
         AggregateShareReq, AggregationJobInitReq, CollectionReq, Report, TaskId,
     },
+    roles::helper::HashedAggregationJobReq,
     DapError, DapRequest, DapRequestMeta, DapVersion,
 };
 use daphne_service_utils::{bearer_token::BearerToken, http_headers};
