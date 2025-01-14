@@ -3,8 +3,8 @@
 
 use axum::async_trait;
 use daphne::{
-    messages::{request::AggregationJobRequestHash, AggregationJobId, TaskId},
-    roles::DapHelper,
+    messages::{AggregationJobId, TaskId},
+    roles::{helper::AggregationJobRequestHash, DapHelper},
     DapError, DapVersion,
 };
 

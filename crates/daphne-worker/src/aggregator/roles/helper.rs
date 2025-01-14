@@ -5,8 +5,8 @@ use crate::aggregator::App;
 use daphne::{
     error::DapAbort,
     fatal_error,
-    messages::{request::AggregationJobRequestHash, AggregationJobId, TaskId},
-    roles::DapHelper,
+    messages::{AggregationJobId, TaskId},
+    roles::{helper::AggregationJobRequestHash, DapHelper},
     DapError, DapVersion,
 };
 use daphne_service_utils::durable_requests::bindings::aggregation_job_store;

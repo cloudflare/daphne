@@ -1,12 +1,12 @@
 // Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{check_part_batch, DapHelper};
+use super::{check_part_batch, DapHelper, HashedAggregationJobReq};
 use crate::{
     error::DapAbort,
     messages::{
-        request::HashedAggregationJobReq, AggregationJobInitReq, AggregationJobResp,
-        PartialBatchSelector, ReportError, TaskId, TransitionVar,
+        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportError, TaskId,
+        TransitionVar,
     },
     metrics::ReportStatus,
     protocol::aggregator::ReportProcessedStatus,

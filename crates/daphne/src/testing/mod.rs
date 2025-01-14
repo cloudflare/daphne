@@ -12,14 +12,14 @@ use crate::{
     fatal_error,
     hpke::{HpkeConfig, HpkeKemId, HpkeProvider, HpkeReceiverConfig},
     messages::{
-        self, request::AggregationJobRequestHash, AggregationJobId, AggregationJobInitReq,
-        AggregationJobResp, Base64Encode, BatchId, BatchSelector, Collection, CollectionJobId,
-        HpkeCiphertext, Interval, PartialBatchSelector, Report, ReportId, TaskId, Time,
+        self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, Base64Encode, BatchId,
+        BatchSelector, Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector,
+        Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::{
         aggregator::{MergeAggShareError, TaskprovConfig},
-        helper,
+        helper::{self, AggregationJobRequestHash},
         leader::{in_memory_leader::InMemoryLeaderState, WorkItem},
         DapAggregator, DapHelper, DapLeader,
     },
