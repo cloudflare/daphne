@@ -22,7 +22,7 @@ use std::{
 /// The `Peer` parameter can be:
 /// - `()` if the report came from a client.
 /// - [`WithPeerPrepShare`] if the report came from the leader.
-#[expect(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(Debug, deepsize::DeepSizeOf))]
 pub enum InitializedReport<Peer> {

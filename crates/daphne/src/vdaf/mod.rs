@@ -160,7 +160,7 @@ impl VdafConfig {
         task_id: TaskId,
         agg_id: usize,
         // This is used by Mastic, which for the moment is behind the "experimental" flag.
-        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "experimental"), allow(unused_variables))]
         agg_param: &DapAggregationParam,
         nonce: &[u8; 16],
         public_share_data: &[u8],
@@ -289,7 +289,7 @@ impl VdafConfig {
         &self,
         version: DapVersion,
         // This is used by Mastic, which for the moment is behind the "experimental" flag.
-        #[cfg_attr(not(feature = "experimental"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "experimental"), allow(unused_variables))]
         agg_param: &DapAggregationParam,
         num_measurements: usize,
         agg_shares: M,

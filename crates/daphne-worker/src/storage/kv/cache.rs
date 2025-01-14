@@ -74,7 +74,7 @@ impl Cache {
         );
     }
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn delete<P>(&mut self, key: &str) -> CacheResult<P::Value>
     where
         P: KvPrefix,

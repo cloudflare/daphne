@@ -36,7 +36,7 @@ impl Iterator for ReportGenerator {
 }
 
 impl ReportGenerator {
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vdaf: &VdafConfig,
         hpke_config_list: &[HpkeConfig; 2],

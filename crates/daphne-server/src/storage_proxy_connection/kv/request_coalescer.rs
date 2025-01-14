@@ -487,8 +487,10 @@ mod test {
                     Ok(Some(Marc::new(fut.await)))
                 })
                 .await;
-            let Ok(s) = result.map(|opt| *opt.unwrap()).map_err(|e| *e);
-            s
+            match result.map(|opt| *opt.unwrap()).map_err(|e| *e) {
+                Ok(s) => s,
+                Err(infallible) => match infallible {},
+            }
         }
     }
 }
