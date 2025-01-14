@@ -13,7 +13,7 @@ pub struct HttpClient {
     inner: HttpClientInner,
 }
 
-#[expect(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)]
 enum HttpClientInner {
     /// Never reuse the same reqwest client for two different http requests. Usefull for specific
     /// debugging or load testing scenarios.

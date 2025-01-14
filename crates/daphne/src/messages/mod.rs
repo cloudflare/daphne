@@ -841,7 +841,7 @@ impl TryFrom<ReportErrorLatest> for ReportError {
     }
 }
 
-#[expect(clippy::match_wildcard_for_single_variants)]
+#[allow(clippy::match_wildcard_for_single_variants)]
 impl TryFrom<&ReportError> for ReportErrorLatest {
     type Error = CodecError;
 

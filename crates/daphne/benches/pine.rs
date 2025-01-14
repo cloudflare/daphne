@@ -14,7 +14,7 @@ use prio_draft09::{
 
 fn pine(c: &mut Criterion) {
     // NOTE We ignore this clippy warning because we may want to benchmark more parameters later.
-    #[expect(clippy::single_element_loop)]
+    #[allow(clippy::single_element_loop)]
     for (dimension, chunk_len, chunk_len_sq_norm_equal) in [(200_000, 150 * 2, 447 * 18)] {
         let pine =
             Pine::new_64(1 << 15, dimension, 15, chunk_len, chunk_len_sq_norm_equal).unwrap();

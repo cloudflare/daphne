@@ -118,7 +118,7 @@ pub async fn handle_dap_request(app: App, req: HttpRequest) -> Response {
     }
 
     let aggregator = Arc::new(app);
-    let Ok(response) = router
+    let response = router
         .with_state(aggregator.clone())
         .layer(
             tower::ServiceBuilder::new().layer(axum::middleware::from_fn_with_state(
@@ -129,7 +129,10 @@ pub async fn handle_dap_request(app: App, req: HttpRequest) -> Response {
         .oneshot(req)
         .await;
 
-    response
+    match response {
+        Ok(response) => response,
+        Err(infallible) => match infallible {},
+    }
 }
 
 struct AxumDapResponse(axum::response::Response);

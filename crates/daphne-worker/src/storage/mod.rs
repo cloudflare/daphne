@@ -115,7 +115,7 @@ impl Do<'_> {
         }
     }
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn request_with_id<B: DurableMethod + Copy>(
         &self,
         path: B,

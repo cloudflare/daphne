@@ -349,7 +349,7 @@ impl<'h> Kv<'h> {
         self.put_internal::<P>(key, value, Some(expiration)).await
     }
 
-    #[cfg_attr(not(feature = "test-utils"), expect(dead_code))]
+    #[cfg_attr(not(feature = "test-utils"), allow(dead_code))]
     pub async fn put<P>(&self, key: &P::Key, value: P::Value) -> Result<Marc<P::Value>, Error>
     where
         P: KvPrefix,
@@ -395,7 +395,7 @@ impl<'h> Kv<'h> {
         }
     }
 
-    #[cfg_attr(not(feature = "test-utils"), expect(dead_code))]
+    #[cfg_attr(not(feature = "test-utils"), allow(dead_code))]
     pub async fn put_if_not_exists_with_expiration<P>(
         &self,
         key: &P::Key,
@@ -411,7 +411,7 @@ impl<'h> Kv<'h> {
             .await
     }
 
-    #[cfg_attr(not(feature = "test-utils"), expect(dead_code))]
+    #[cfg_attr(not(feature = "test-utils"), allow(dead_code))]
     pub async fn put_if_not_exists<P>(
         &self,
         key: &P::Key,

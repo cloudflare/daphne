@@ -46,8 +46,10 @@ pub async fn bearer_auth(
         return (StatusCode::UNAUTHORIZED, "Incorrect authorization token").into_response();
     }
 
-    let Ok(response) = next.call(request.map(axum::body::Body::new)).await;
-    response
+    match next.call(request.map(axum::body::Body::new)).await {
+        Ok(r) => r,
+        Err(infalible) => match infalible {},
+    }
 }
 
 #[worker::send]
@@ -58,7 +60,10 @@ pub async fn time_kv_requests(
     mut next: Next,
 ) -> axum::response::Response {
     let start = worker::Date::now();
-    let Ok(response) = next.call(request).await;
+    let response = match next.call(request).await {
+        Ok(r) => r,
+        Err(infalible) => match infalible {},
+    };
     let elapsed = elapsed(&start);
 
     let op = match method {
@@ -90,7 +95,10 @@ pub async fn time_do_requests(
     mut next: Next,
 ) -> axum::response::Response {
     let start = worker::Date::now();
-    let Ok(response) = next.call(request).await;
+    let response = match next.call(request).await {
+        Ok(r) => r,
+        Err(infalible) => match infalible {},
+    };
     let elapsed = elapsed(&start);
     ctx.metrics.durable_request_time_seconds_observe(
         &uri,
