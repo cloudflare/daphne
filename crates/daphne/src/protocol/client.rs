@@ -30,13 +30,15 @@ impl VdafConfig {
     /// * `extensions` are the extensions.
     ///
     /// * `version` is the `DapVersion` to use.
+    #[allow(clippy::too_many_arguments)]
     pub fn produce_report_with_extensions(
         &self,
         hpke_config_list: &[HpkeConfig; 2],
         time: Time,
         task_id: &TaskId,
         measurement: DapMeasurement,
-        extensions: Vec<Extension>,
+        public_extensions: Option<Vec<Extension>>,
+        private_extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
         let mut rng = thread_rng();
@@ -51,7 +53,8 @@ impl VdafConfig {
             time,
             task_id,
             &report_id,
-            extensions,
+            public_extensions,
+            private_extensions,
             version,
         )
     }
@@ -65,21 +68,28 @@ impl VdafConfig {
         time: Time,
         task_id: &TaskId,
         report_id: &ReportId,
-        extensions: Vec<Extension>,
+        public_extensions: Option<Vec<Extension>>,
+        private_extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
+        match (&public_extensions, version) {
+            (Some(_), DapVersion::Draft09) | (None, DapVersion::Latest) => {
+                return Err(DapError::ReportError(
+                    crate::messages::ReportError::InvalidMessage,
+                ))
+            }
+            _ => (),
+        }
+
         let mut plaintext_input_share = PlaintextInputShare {
-            extensions,
+            private_extensions,
             payload: Vec::default(),
         };
 
         let metadata = ReportMetadata {
             id: *report_id,
             time,
-            public_extensions: match version {
-                DapVersion::Draft09 => None,
-                DapVersion::Latest => Some(Vec::new()),
-            },
+            public_extensions,
         };
 
         let encoded_input_shares = input_shares.into_iter().map(|input_share| {
@@ -147,6 +157,10 @@ impl VdafConfig {
             time,
             task_id,
             measurement,
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(Vec::new()),
+            },
             Vec::new(),
             version,
         )

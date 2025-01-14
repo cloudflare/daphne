@@ -11,7 +11,7 @@ pub(crate) mod report_init;
 
 /// checks if an iterator has no duplicate items, returns the ok if there are no dups or an error
 /// with the first offending item.
-pub(crate) fn no_duplicates<I>(iterator: I) -> Result<(), I::Item>
+pub(crate) fn check_no_duplicates<I>(iterator: I) -> Result<(), I::Item>
 where
     I: Iterator,
     I::Item: Eq + std::hash::Hash,
@@ -752,6 +752,10 @@ mod test {
                 t.now,
                 &t.task_id,
                 DapMeasurement::U32Vec(vec![1; 10]),
+                match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(vec![]),
+                },
                 vec![Extension::NotImplemented {
                     typ: 0xffff,
                     payload: b"some extension data".to_vec(),
@@ -784,29 +788,32 @@ mod test {
 
     test_versions! { handle_unrecognized_report_extensions }
 
-    fn handle_unknown_public_extensions_in_report(version: DapVersion) {
+    #[test]
+    fn handle_unknown_public_extensions_in_report() {
+        let version = DapVersion::Latest;
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
-        let mut report = t
+        let report = t
             .task_config
             .vdaf
-            .produce_report(
+            .produce_report_with_extensions(
                 &t.client_hpke_config_list,
                 t.now,
                 &t.task_id,
                 DapMeasurement::U32Vec(vec![1; 10]),
+                Some(vec![
+                    Extension::NotImplemented {
+                        typ: 0x01,
+                        payload: b"This is ignored".to_vec(),
+                    },
+                    Extension::NotImplemented {
+                        typ: 0x02,
+                        payload: b"This is ignored too".to_vec(),
+                    },
+                ]),
+                vec![],
                 version,
             )
             .unwrap();
-        report.report_metadata.public_extensions = Some(vec![
-            Extension::NotImplemented {
-                typ: 0x01,
-                payload: b"This is ignored".to_vec(),
-            },
-            Extension::NotImplemented {
-                typ: 0x02,
-                payload: b"This is ignored too".to_vec(),
-            },
-        ]);
         let report_metadata = report.report_metadata.clone();
         let [leader_share, _] = report.encrypted_input_shares;
         let initialized_report = InitializedReport::from_client(
@@ -832,7 +839,6 @@ mod test {
             }
         );
     }
-    test_versions! {handle_unknown_public_extensions_in_report}
 
     fn handle_repeated_report_extensions(version: DapVersion) {
         let t = AggregationJobTest::new(TEST_VDAF, HpkeKemId::X25519HkdfSha256, version);
@@ -844,6 +850,10 @@ mod test {
                 t.now,
                 &t.task_id,
                 DapMeasurement::U32Vec(vec![1; 10]),
+                match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(vec![]),
+                },
                 vec![
                     Extension::NotImplemented {
                         typ: 23,
@@ -906,6 +916,10 @@ mod test {
                 self.now,
                 &self.task_id,
                 &report_id,
+                match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(vec![]),
+                },
                 Vec::new(), // extensions
                 version,
             )
@@ -937,6 +951,10 @@ mod test {
                 self.now,
                 &self.task_id,
                 &report_id,
+                match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(vec![]),
+                },
                 Vec::new(), // extensions
                 version,
             )
@@ -969,6 +987,10 @@ mod test {
                 self.now,
                 &self.task_id,
                 &report_id,
+                match version {
+                    DapVersion::Draft09 => None,
+                    DapVersion::Latest => Some(vec![]),
+                },
                 Vec::new(), // extensions
                 version,
             )

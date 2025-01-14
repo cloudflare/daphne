@@ -428,6 +428,10 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -455,6 +459,10 @@ async fn leader_upload_taskprov() {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -520,6 +528,10 @@ async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
             t.now,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            match version {
+                DapVersion::Draft09 => None,
+                DapVersion::Latest => Some(vec![]),
+            },
             vec![Extension::Taskprov],
             version,
         )
@@ -1548,18 +1560,18 @@ async fn leader_collect_taskprov_repeated_abort() {
                     .unwrap(),
             ),
             {
-                let mut report = task_config
+                let report = task_config
                     .vdaf
                     .produce_report_with_extensions(
                         &hpke_config_list,
                         now,
                         &task_id,
                         DapMeasurement::U32Vec(vec![1; 10]),
+                        Some(vec![Extension::Taskprov]),
                         extensions,
                         version,
                     )
                     .unwrap();
-                report.report_metadata.public_extensions = Some(vec![Extension::Taskprov]);
                 report.get_encoded_with_param(&version).unwrap()
             },
         )
@@ -1666,6 +1678,10 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
                     now,
                     &task_id,
                     DapMeasurement::U32Vec(vec![1; 10]),
+                    match version {
+                        DapVersion::Draft09 => None,
+                        DapVersion::Latest => Some(vec![]),
+                    },
                     extensions,
                     version,
                 )

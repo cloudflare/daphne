@@ -179,7 +179,7 @@ impl HandleAggJob<WithTaskConfig> {
     > {
         let task_id = self.state.request.task_id;
         if replay_protection.enabled() {
-            crate::protocol::no_duplicates(
+            crate::protocol::check_no_duplicates(
                 self.state
                     .request
                     .payload

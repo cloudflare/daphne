@@ -7,7 +7,7 @@ use crate::{
     messages::{
         self, Extension, PlaintextInputShare, ReportError, ReportMetadata, ReportShare, TaskId,
     },
-    protocol::{decode_ping_pong_framed, no_duplicates, PingPongMessageType},
+    protocol::{check_no_duplicates, decode_ping_pong_framed, PingPongMessageType},
     vdaf::{VdafConfig, VdafPrepShare, VdafPrepState, VdafVerifyKey},
     DapAggregationParam, DapError, DapTaskConfig, DapVersion,
 };
@@ -158,31 +158,16 @@ impl<P> InitializedReport<P> {
             _ => {}
         }
 
-        // We don't check for duplicates here, because we check for them later
-        // on, and the taskprov extension, the only one we support, has no
-        // side-effects if processed when the report should have been rejected.
-
-        let mut taskprov_indicated = false;
         match (
             &report_share.report_metadata.public_extensions,
             task_config.version,
         ) {
-            (Some(extensions), crate::DapVersion::Latest) => {
-                for extension in extensions {
-                    match extension {
-                        Extension::Taskprov { .. } => {
-                            taskprov_indicated |= task_config.method_is_taskprov;
-                        }
-                        Extension::NotImplemented { .. } => reject!(InvalidMessage),
-                    }
-                }
-            }
-            (None, crate::DapVersion::Draft09) => (),
+            (Some(..), crate::DapVersion::Latest) | (None, crate::DapVersion::Draft09) => (),
             (_, _) => reject!(InvalidMessage),
         }
         // decrypt input share
         let PlaintextInputShare {
-            extensions,
+            private_extensions,
             payload: input_share,
         } = {
             let info = info_and_aad::InputShare {
@@ -217,8 +202,8 @@ impl<P> InitializedReport<P> {
         // Handle report extensions.
         {
             // Check for duplicates in public and private extensions
-            if no_duplicates(
-                extensions
+            if check_no_duplicates(
+                private_extensions
                     .iter()
                     .chain(
                         report_share
@@ -234,10 +219,17 @@ impl<P> InitializedReport<P> {
                 reject!(InvalidMessage)
             }
 
-            for extension in extensions {
+            let mut taskprov_indicated = false;
+            for extension in private_extensions.iter().chain(
+                report_share
+                    .report_metadata
+                    .public_extensions
+                    .as_deref()
+                    .unwrap_or_default(),
+            ) {
                 match extension {
                     Extension::Taskprov { .. } => {
-                        taskprov_indicated |= task_config.method_is_taskprov;
+                        taskprov_indicated = task_config.method_is_taskprov;
                     }
                     // Reject reports with unrecognized extensions.
                     Extension::NotImplemented { .. } => reject!(InvalidMessage),

@@ -268,14 +268,10 @@ impl DapAbort {
         task_id: &TaskId,
         unknown_extensions: &[u16],
     ) -> Result<Self, DapError> {
-        let detail = serde_json::to_string(&unknown_extensions);
-        match detail {
-            Ok(s) => Ok(Self::UnsupportedExtension {
-                detail: s,
-                task_id: *task_id,
-            }),
-            Err(x) => Err(fatal_error!(err = %x,)),
-        }
+        Ok(Self::UnsupportedExtension {
+            detail: format!("{unknown_extensions:?}"),
+            task_id: *task_id,
+        })
     }
 
     fn title_and_type(&self) -> (&'static str, Option<String>) {

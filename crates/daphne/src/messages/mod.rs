@@ -1419,7 +1419,7 @@ impl Decode for HpkeCiphertext {
 /// A plaintext input share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaintextInputShare {
-    pub extensions: Vec<Extension>,
+    pub private_extensions: Vec<Extension>,
     pub payload: Vec<u8>,
 }
 
@@ -1429,7 +1429,7 @@ impl ParameterizedEncode<DapVersion> for PlaintextInputShare {
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
-        encode_u16_items(bytes, version, &self.extensions)?;
+        encode_u16_items(bytes, version, &self.private_extensions)?;
         encode_u32_bytes(bytes, &self.payload)?;
         Ok(())
     }
@@ -1441,7 +1441,7 @@ impl ParameterizedDecode<DapVersion> for PlaintextInputShare {
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
-            extensions: decode_u16_items(version, bytes)?,
+            private_extensions: decode_u16_items(version, bytes)?,
             payload: decode_u32_bytes(bytes)?,
         })
     }
@@ -1648,6 +1648,24 @@ mod test {
     }
 
     test_versions! {report_metadata_encode_decode}
+
+    #[test]
+    fn report_metadata_encode_latest_decode_draft09() {
+        let ext_rm = ReportMetadata {
+            id: ReportId([15; 16]),
+            time: 123_456,
+            public_extensions: Some(vec![Extension::NotImplemented {
+                typ: 0x10,
+                payload: vec![0x11, 0x12],
+            }]),
+        };
+        let bytes = ext_rm.get_encoded_with_param(&DapVersion::Latest).unwrap();
+        assert!(matches!(
+            ReportMetadata::get_decoded_with_param(&DapVersion::Draft09, bytes.as_slice())
+                .unwrap_err(),
+            CodecError::BytesLeftOver(..)
+        ));
+    }
 
     fn partial_batch_selector_encode_decode(version: DapVersion) {
         const TEST_DATA_DRAFT09: &[u8] = &[1];
