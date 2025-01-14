@@ -556,7 +556,7 @@ impl TaskprovAdvertisement {
             )
         })?;
 
-        if compute_task_id(taskprov_data.as_ref()) != *task_id {
+        if compute_task_id(version, taskprov_data.as_ref()) != *task_id {
             // Return unrecognizedTask following section 5.1 of the taskprov draft.
             return Err(DapAbort::UnrecognizedTask { task_id: *task_id });
         }
@@ -578,7 +578,7 @@ impl TaskprovAdvertisement {
 
     #[cfg(any(test, feature = "test-utils"))]
     pub fn compute_task_id(&self, version: DapVersion) -> TaskId {
-        compute_task_id(&self.get_encoded_with_param(&version).unwrap())
+        compute_task_id(version, &self.get_encoded_with_param(&version).unwrap())
     }
 }
 
