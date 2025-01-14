@@ -1,10 +1,9 @@
 // Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{anyhow, Context};
 use daphne::{
     constants::DapMediaType,
-    error::aborts::ProblemDetails,
     messages::{Collection, CollectionJobId, CollectionReq, Report, TaskId},
     DapVersion,
 };
@@ -16,7 +15,7 @@ use url::Url;
 
 use crate::HttpClient;
 
-use super::response_to_anyhow;
+use super::{retry, retry_and_decode};
 
 impl HttpClient {
     pub async fn upload(
@@ -37,22 +36,17 @@ impl HttpClient {
             )
             .expect("failecd to construct content-type header"),
         );
-        let resp = self
-            .put(url.join(&format!("tasks/{task_id}/reports")).unwrap())
-            .body(report.get_encoded_with_param(&version)?)
-            .headers(headers)
-            .send()
-            .await?;
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails =
-                serde_json::from_str(&resp.text().await?).with_context(|| "unexpected response")?;
-            Err(anyhow!(serde_json::to_string(&problem_details)?))
-        } else if resp.status() != 200 {
-            Err(response_to_anyhow(resp).await)
-        } else {
-            Ok(())
-        }
+        retry_and_decode(&(), || async {
+            self.put(url.join(&format!("tasks/{task_id}/reports")).unwrap())
+                .body(report.get_encoded_with_param(&version).unwrap())
+                .headers(headers.clone())
+                .send()
+                .await
+                .context("uploading a report")
+        })
+        .await
     }
+
     pub async fn start_collection_job(
         &self,
         url: &Url,
@@ -78,21 +72,17 @@ impl HttpClient {
                 reqwest::header::HeaderValue::from_str(collector_auth_token.as_str())?,
             );
         }
-        let resp = self
-            .put(url.join(&format!("tasks/{task_id}/collection_jobs/{collect_job_id}"))?)
-            .body(collect_req.get_encoded_with_param(&version)?)
-            .headers(headers)
-            .send()
-            .await?;
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails =
-                serde_json::from_str(&resp.text().await?).with_context(|| "unexpected response")?;
-            Err(anyhow!(serde_json::to_string(&problem_details)?))
-        } else if resp.status().as_u16() > 400 {
-            Err(response_to_anyhow(resp).await)
-        } else {
-            Ok(collect_job_id)
-        }
+        let () = retry_and_decode(&(), || async {
+            self.put(url.join(&format!("tasks/{task_id}/collection_jobs/{collect_job_id}"))?)
+                .body(collect_req.get_encoded_with_param(&version)?)
+                .headers(headers.clone())
+                .send()
+                .await
+                .context("starting a collection job ")
+        })
+        .await?;
+
+        Ok(collect_job_id)
     }
 
     pub async fn poll_collection_job(
@@ -110,25 +100,26 @@ impl HttpClient {
                 reqwest::header::HeaderValue::from_str(collector_auth_token.as_str())?,
             );
         }
-        let resp = self
-            .post(url.join(&format!("tasks/{task_id}/collection_jobs/{collect_job_id}"))?)
-            .headers(headers)
-            .send()
-            .await?;
-        if resp.status() == 400 {
-            let problem_details: ProblemDetails =
-                serde_json::from_str(&resp.text().await?).with_context(|| "unexpected response")?;
-            Err(anyhow!(serde_json::to_string(&problem_details)?))
-        } else if resp.status().as_u16() > 400 {
-            Err(response_to_anyhow(resp).await)
-        } else if resp.status() == StatusCode::ACCEPTED {
-            Ok(None)
-        } else {
-            let bytes = resp.bytes().await.context("reading bytes from wire")?;
-            Ok(Some(
-                Collection::get_decoded_with_param(&version, &bytes)
-                    .context("decoding Collection body")?,
-            ))
-        }
+        retry(
+            || async {
+                self.post(url.join(&format!("tasks/{task_id}/collection_jobs/{collect_job_id}"))?)
+                    .headers(headers.clone())
+                    .send()
+                    .await
+                    .context("polling collection job")
+            },
+            |resp| async {
+                if resp.status() == StatusCode::ACCEPTED {
+                    Ok(None)
+                } else {
+                    let bytes = resp.bytes().await.context("reading bytes from wire")?;
+                    Ok(Some(
+                        Collection::get_decoded_with_param(&version, &bytes)
+                            .context("decoding Collection body")?,
+                    ))
+                }
+            },
+        )
+        .await
     }
 }

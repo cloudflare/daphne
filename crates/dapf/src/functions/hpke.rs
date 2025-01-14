@@ -13,7 +13,7 @@ use x509_parser::pem::Pem;
 
 use crate::HttpClient;
 
-use super::response_to_anyhow;
+use super::retry;
 
 impl HttpClient {
     pub async fn get_hpke_config(
@@ -22,36 +22,40 @@ impl HttpClient {
         certificate_file: Option<&Path>,
     ) -> anyhow::Result<HpkeConfigList> {
         let url = base_url.join("hpke_config")?;
-        let resp = self
-            .get(url.as_str())
-            .send()
-            .await
-            .with_context(|| "request failed")?;
-        if !resp.status().is_success() {
-            return Err(response_to_anyhow(resp).await);
-        }
-        let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
-        let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
-        if let Some(cert_path) = certificate_file {
-            let cert = std::fs::read_to_string(cert_path).context("reading the certificate")?;
-            let Some(signature) = maybe_signature else {
-                anyhow::bail!("Aggregator did not sign its response");
-            };
-            let signature_bytes =
-                decode_base64url_vec(signature.as_bytes()).context("decoding the signature")?;
-            let (cert_pem, _bytes_read) =
-                Pem::read(Cursor::new(cert.as_bytes())).context("reading PEM certificate")?;
-            let cert = EndEntityCert::try_from(cert_pem.contents.as_ref())
-                .map_err(|e| anyhow!("{e:?}")) // webpki::Error does not implement std::error::Error
-                .context("parsing PEM certificate")?;
+        retry(
+            || async {
+                self.get(url.as_str())
+                    .send()
+                    .await
+                    .with_context(|| "request failed")
+            },
+            |resp| async {
+                let maybe_signature = resp.headers().get(http_headers::HPKE_SIGNATURE).cloned();
+                let hpke_config_bytes = resp.bytes().await.context("failed to read hpke config")?;
+                if let Some(cert_path) = certificate_file {
+                    let cert =
+                        std::fs::read_to_string(cert_path).context("reading the certificate")?;
+                    let Some(signature) = maybe_signature else {
+                        anyhow::bail!("Aggregator did not sign its response");
+                    };
+                    let signature_bytes = decode_base64url_vec(signature.as_bytes())
+                        .context("decoding the signature")?;
+                    let (cert_pem, _bytes_read) = Pem::read(Cursor::new(cert.as_bytes()))
+                        .context("reading PEM certificate")?;
+                    let cert = EndEntityCert::try_from(cert_pem.contents.as_ref())
+                        .map_err(|e| anyhow!("{e:?}")) // webpki::Error does not implement std::error::Error
+                        .context("parsing PEM certificate")?;
 
-            cert.verify_signature(
-                &ECDSA_P256_SHA256,
-                &hpke_config_bytes,
-                signature_bytes.as_ref(),
-            )
-            .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
-        }
-        Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
+                    cert.verify_signature(
+                        &ECDSA_P256_SHA256,
+                        &hpke_config_bytes,
+                        signature_bytes.as_ref(),
+                    )
+                    .map_err(|e| anyhow!("signature not verified: {}", e.to_string()))?;
+                }
+                Ok(HpkeConfigList::get_decoded(&hpke_config_bytes)?)
+            },
+        )
+        .await
     }
 }
