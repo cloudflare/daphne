@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use assert_matches::assert_matches;
 use daphne::{
     constants::{DapAggregatorRole, DapMediaType},
@@ -16,16 +16,17 @@ use daphne::{
 use daphne_service_utils::http_headers;
 use futures::StreamExt;
 use hpke_rs::{HpkePrivateKey, HpkePublicKey};
+use http::StatusCode;
 use prio::codec::{Decode, Encode};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::time::SystemTime;
 use std::{
     any::{self, Any},
     num::{NonZeroU32, NonZeroUsize},
     ops::Range,
 };
+use std::{future::Future, time::SystemTime};
 use tokio::time::timeout;
 use url::Url;
 
@@ -401,13 +402,16 @@ impl TestRunner {
                 reqwest::header::HeaderValue::from_str(taskprov_advertisement)?,
             );
         }
-        let resp = client
-            .request(method.clone(), url.as_str())
-            .body(data)
-            .headers(headers)
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .request(method.clone(), url.as_str())
+                .body(data)
+                .headers(headers)
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::OK,
@@ -455,13 +459,16 @@ impl TestRunner {
             );
         }
 
-        let resp = client
-            .request(method.clone(), url.as_str())
-            .body(data)
-            .headers(headers)
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .request(method.clone(), url.as_str())
+                .body(data)
+                .headers(headers)
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
 
         anyhow::ensure!(
             resp.status() == reqwest::StatusCode::from_u16(expected_status).unwrap(),
@@ -520,13 +527,16 @@ impl TestRunner {
             );
         }
 
-        let builder = client.put(url.as_str());
-        let resp = builder
-            .body(data)
-            .headers(headers)
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .put(url.as_str())
+                .body(data)
+                .headers(headers)
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
 
         let expected_status = 201;
         anyhow::ensure!(
@@ -554,11 +564,14 @@ impl TestRunner {
         let mut url = self.leader_url.clone();
         url.set_path("internal/process");
 
-        let resp = client
-            .post(url.as_str())
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .post(url.as_str())
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
         anyhow::ensure!(
             resp.status() == 200,
             "unexpected response status. Expected {} got {}: Body is {:?}",
@@ -581,12 +594,15 @@ impl TestRunner {
             DapAggregatorRole::Helper => self.helper_url.clone(),
         };
         url.set_path(path); // Overwrites the version path (i.e., "/v09")
-        let resp = client
-            .post(url.clone())
-            .json(data)
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .post(url.clone())
+                .json(data)
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
         anyhow::ensure!(
             resp.status() == 200,
             "request to {url} failed: response: {} {}",
@@ -643,11 +659,14 @@ impl TestRunner {
             "internal/current_batch/task/{}",
             task_id.to_base64url()
         ));
-        let resp = client
-            .get(url.clone())
-            .send()
-            .await
-            .context("request failed")?;
+        let resp = retry(|| async {
+            client
+                .get(url.clone())
+                .send()
+                .await
+                .context("request failed")
+        })
+        .await?;
         if resp.status() == 200 {
             let batch_id_base64url = resp.text().await?;
             BatchId::try_from_base64url(batch_id_base64url)
@@ -698,7 +717,7 @@ impl TestRunner {
             reqwest::header::HeaderName::from_static(http_headers::DAP_AUTH_TOKEN),
             reqwest::header::HeaderValue::from_str(token)?,
         );
-        Ok(builder.headers(headers).send().await?)
+        retry(|| builder.try_clone().unwrap().headers(headers).send()).await
     }
 }
 
@@ -719,7 +738,7 @@ async fn get_raw_hpke_config(
             DapVersion::Draft09 => client.get(url.as_str()).query(&query),
             DapVersion::Latest => client.get(url.as_str()),
         };
-        match req.send().await {
+        match retry(|| req.try_clone().unwrap().send()).await {
             Ok(resp) => {
                 if resp.status() == 200 {
                     println!("{svc} is up.");
@@ -754,14 +773,41 @@ async fn post_internal_delete_all(
     let mut url = base_url.clone();
     url.set_path("internal/delete_all");
 
-    let req = client
-        .post(url.as_str())
-        .body(serde_json::to_string(batch_interval)?);
-    let resp = req.send().await.context("request failed")?;
+    let resp = retry(|| async {
+        client
+            .post(url.as_str())
+            .body(serde_json::to_string(batch_interval)?)
+            .send()
+            .await
+            .context("request failed")
+    })
+    .await?;
     anyhow::ensure!(
         resp.status() == 200,
         "request to {url} failed: response {:?}",
         resp.text().await?,
     );
     Ok(())
+}
+
+pub async fn retry<F, Fut, E>(request: F) -> anyhow::Result<reqwest::Response>
+where
+    F: FnOnce() -> Fut + Clone,
+    Fut: Future<Output = Result<reqwest::Response, E>>,
+    anyhow::Error: From<E>,
+{
+    const RETRY_COUNT: usize = 5;
+    for i in 1..=RETRY_COUNT {
+        let resp = (request.clone())().await?;
+
+        return match resp.status() {
+            StatusCode::SERVICE_UNAVAILABLE if i == RETRY_COUNT => bail!("service unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE => {
+                tracing::info!("retrying....");
+                continue;
+            }
+            _ => Ok(resp),
+        };
+    }
+    unreachable!()
 }

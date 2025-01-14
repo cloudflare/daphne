@@ -3,6 +3,8 @@
 
 //! End-to-end tests for daphne.
 use super::test_runner::TestRunner;
+use crate::test_runner::retry;
+use anyhow::Context as _;
 use daphne::{
     async_test_versions,
     constants::DapMediaType,
@@ -294,35 +296,39 @@ async fn leader_upload(version: DapVersion) {
             .parse()
             .unwrap(),
     );
-    let builder = client.request(method.clone(), url.as_str());
-    let resp = builder
-        .body(
-            Report {
-                report_metadata: ReportMetadata {
-                    id: ReportId([1; 16]),
-                    time: t.now,
-                },
-                public_share: b"public share".to_vec(),
-                encrypted_input_shares: [
-                    HpkeCiphertext {
-                        config_id: hpke_config_list[0].id,
-                        enc: b"encapsulated key".to_vec(),
-                        payload: b"ciphertext".to_vec(),
+    let resp = retry(|| async {
+        client
+            .request(method.clone(), url.as_str())
+            .body(
+                Report {
+                    report_metadata: ReportMetadata {
+                        id: ReportId([1; 16]),
+                        time: t.now,
                     },
-                    HpkeCiphertext {
-                        config_id: hpke_config_list[1].id,
-                        enc: b"encapsulated key".to_vec(),
-                        payload: b"ciphertext".to_vec(),
-                    },
-                ],
-            }
-            .get_encoded_with_param(&version)
-            .unwrap(),
-        )
-        .headers(headers)
-        .send()
-        .await
-        .expect("request failed");
+                    public_share: b"public share".to_vec(),
+                    encrypted_input_shares: [
+                        HpkeCiphertext {
+                            config_id: hpke_config_list[0].id,
+                            enc: b"encapsulated key".to_vec(),
+                            payload: b"ciphertext".to_vec(),
+                        },
+                        HpkeCiphertext {
+                            config_id: hpke_config_list[1].id,
+                            enc: b"encapsulated key".to_vec(),
+                            payload: b"ciphertext".to_vec(),
+                        },
+                    ],
+                }
+                .get_encoded_with_param(&version)
+                .unwrap(),
+            )
+            .headers(headers)
+            .send()
+            .await
+            .context("request failed")
+    })
+    .await
+    .unwrap();
     assert_eq!(
         200,
         resp.status(),
@@ -366,13 +372,15 @@ async fn leader_back_compat_upload(version: DapVersion) {
             .parse()
             .unwrap(),
     );
-    let builder = client.request(method.clone(), url.as_str());
-    let resp = builder
-        .body(report.get_encoded_with_param(&version).unwrap())
-        .headers(headers)
-        .send()
-        .await
-        .unwrap_or_else(|_| panic!("route not implemented for version {version}"));
+    let resp = retry(|| {
+        client
+            .request(method.clone(), url.as_str())
+            .body(report.get_encoded_with_param(&version).unwrap())
+            .headers(headers)
+            .send()
+    })
+    .await
+    .unwrap_or_else(|_| panic!("route not implemented for version {version}"));
     assert_eq!(
         405,
         resp.status(),
@@ -974,9 +982,7 @@ async fn leader_collect_back_compat(version: DapVersion) {
         reqwest::header::HeaderValue::from_str(&t.collector_bearer_token)
             .expect("couldn't parse bearer token"),
     );
-    let resp = builder
-        .headers(headers)
-        .send()
+    let resp = retry(|| builder.try_clone().unwrap().headers(headers).send())
         .await
         .expect("failed to get a response");
 
@@ -1507,8 +1513,9 @@ async_test_versions! { leader_collect_taskprov_ok }
 async fn helper_hpke_config_signature(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let url = t.helper_url.join("hpke_config").unwrap();
-    let req = t.http_client().get(url.as_str());
-    let resp = req.send().await.unwrap();
+    let resp = retry(|| t.http_client().get(url.as_str()).send())
+        .await
+        .unwrap();
     let signature = resp
         .headers()
         .get(http_headers::HPKE_SIGNATURE)

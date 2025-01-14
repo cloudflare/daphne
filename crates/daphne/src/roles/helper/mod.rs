@@ -67,7 +67,7 @@ pub async fn handle_agg_job_init_req<A: DapHelper + Sync>(
 
 /// Handle a request for an aggregate share. This is called by the Leader to complete a
 /// collection job.
-pub async fn handle_agg_share_req<'req, A: DapHelper>(
+pub async fn handle_agg_share_req<A: DapHelper>(
     aggregator: &A,
     req: DapRequest<AggregateShareReq>,
 ) -> Result<DapResponse, DapError> {

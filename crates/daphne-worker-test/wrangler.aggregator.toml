@@ -25,6 +25,7 @@ fallthrough = false
 name = "daphne-helper-aggregator"
 
 [env.helper.vars]
+DAP_TRACING="debug"
 DAP_DEPLOYMENT = "dev"
 DAP_WORKER_MODE = "aggregator"
 DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"
