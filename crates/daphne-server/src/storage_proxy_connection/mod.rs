@@ -57,7 +57,7 @@ pub struct RequestBuilder<'d, B: DurableMethod, P: AsRef<[u8]>> {
     request: DurableRequest<P>,
 }
 
-impl<'d, B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'d, B, P> {
+impl<B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'_, B, P> {
     #[tracing::instrument(skip_all, fields(path = ?self.path))]
     pub async fn send<R>(self) -> Result<R, Error>
     where
