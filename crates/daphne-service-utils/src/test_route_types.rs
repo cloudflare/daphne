@@ -113,5 +113,6 @@ pub struct InternalTestAddTask {
     pub max_batch_size: Option<NonZeroU32>,
     pub time_precision: Duration,
     pub collector_hpke_config: String, // base64url
+    pub task_commencement: Time,
     pub task_expiration: Time,
 }

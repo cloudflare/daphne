@@ -113,7 +113,7 @@ impl TestRunner {
             version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
-            not_before: now,
+            not_before: now - (now % TIME_PRECISION) - 1,
             not_after: now + 604_800, // one week from now
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
@@ -236,6 +236,7 @@ impl TestRunner {
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.not_after,
+            "task_commencement": t.task_config.not_before,
         });
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestCommandResult = t
@@ -263,6 +264,7 @@ impl TestRunner {
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
             "task_expiration": t.task_config.not_after,
+            "task_commencement": t.task_config.not_before,
         });
         let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)
@@ -326,7 +328,7 @@ impl TestRunner {
         const REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: u64 = 300;
         // This is a portion of the interval which is guaranteed to be a valid report time
         // provided that the interval start time is valid.
-        interval.start..interval.start + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
+        interval.start..interval.start + interval.duration + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
     }
 
     pub async fn get_hpke_configs(

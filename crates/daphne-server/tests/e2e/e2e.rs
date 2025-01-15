@@ -1490,6 +1490,12 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     )
     .unwrap();
 
+    println!("Now - not_before: {}", t.now - task_config.not_before);
+    println!(
+        "Now - batch_interval.start: {}",
+        t.now - batch_interval.start
+    );
+    println!("t.now: {}", t.now);
     let path = TestRunner::upload_path_for_task(&task_id);
     let method = match version {
         DapVersion::Draft09 => &Method::PUT,
@@ -1501,6 +1507,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     for _ in 0..t.task_config.min_batch_size {
         let extensions = vec![Extension::Taskprov];
         let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
+        println!("\tnow: {}", now);
         t.leader_request_expect_ok(
             client,
             &path,
