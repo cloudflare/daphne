@@ -256,7 +256,11 @@ impl ParameterizedEncode<DapVersion> for ReportMetadata {
             (DapVersion::Latest, Some(extensions)) => {
                 encode_u16_items(bytes, version, extensions.as_slice())?;
             }
-            _ => return Err(CodecError::UnexpectedValue),
+            _ => {
+                return Err(CodecError::Other(
+                    "encountered incorrectly set public extensions".into(),
+                ))
+            }
         }
 
         Ok(())
@@ -1638,7 +1642,7 @@ mod test {
         };
         assert!(matches!(
             bad_rm.get_encoded_with_param(&version).unwrap_err(),
-            CodecError::UnexpectedValue
+            CodecError::Other(..)
         ));
         let bytes = good_rm.get_encoded_with_param(&version).unwrap();
         assert_eq!(

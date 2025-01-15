@@ -779,11 +779,36 @@ mod test {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
-        let mut report = t.gen_test_report(task_id).await;
-        report.report_metadata.public_extensions = Some(vec![Extension::NotImplemented {
-            typ: 0x01,
-            payload: vec![0x01],
-        }]);
+
+        // Construct HPKE config list.
+        let hpke_config_list = [
+            t.leader
+                .get_hpke_config_for(task_config.version, Some(task_id))
+                .await
+                .unwrap()
+                .clone(),
+            t.helper
+                .get_hpke_config_for(task_config.version, Some(task_id))
+                .await
+                .unwrap()
+                .clone(),
+        ];
+
+        let report = task_config
+            .vdaf
+            .produce_report_with_extensions(
+                &hpke_config_list,
+                t.now,
+                task_id,
+                DapMeasurement::U32Vec(vec![1; 10]),
+                Some(vec![Extension::NotImplemented {
+                    typ: 0x01,
+                    payload: vec![0x01],
+                }]),
+                vec![],
+                task_config.version,
+            )
+            .unwrap();
 
         let req = DapRequest {
             meta: DapRequestMeta {
@@ -812,6 +837,8 @@ mod test {
         let task_id = &t.time_interval_task_id;
         let task_config = t.leader.unchecked_get_task_config(task_id).await;
         let mut report = t.gen_test_report(task_id).await;
+        // This change breaks the HPKE decryption, but triggers a failure
+        // before the HPKE data is checked.
         report.report_metadata.public_extensions = Some(vec![]);
 
         let req = DapRequest {

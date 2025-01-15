@@ -227,8 +227,8 @@ pub async fn handle_upload_req<A: DapLeader>(
     }
 
     if let Some(public_extensions) = &report.report_metadata.public_extensions {
-        // We can be sure at this point that the ReportMetadata is well formed (as
-        // the decoding / error checking happens in the extractor).
+        // We can be sure at this point that the ReportMetadata is well formed
+        // because the decoding / error checking happens in the extractor.
         assert_eq!(DapVersion::Latest, task_config.version);
         let mut unknown_extensions = Vec::<u16>::new();
         if protocol::check_no_duplicates(public_extensions.iter()).is_err() {

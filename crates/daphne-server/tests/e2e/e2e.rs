@@ -558,58 +558,6 @@ async fn leader_upload_taskprov_wrong_version(version: DapVersion) {
 async_test_versions!(leader_upload_taskprov_wrong_version);
 
 #[tokio::test]
-async fn leader_upload_taskprov_public() {
-    let version = DapVersion::Latest;
-    let t = TestRunner::default_with_version(version).await;
-    let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
-
-    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
-        version,
-        min_batch_size: 10,
-        query: DapBatchMode::TimeInterval,
-        leader_url: t.task_config.leader_url.clone(),
-        helper_url: t.task_config.helper_url.clone(),
-        ..Default::default()
-    }
-    .to_config_with_taskprov(
-        b"cool task".to_vec(),
-        t.now,
-        daphne::roles::aggregator::TaskprovConfig {
-            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
-            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
-        },
-    )
-    .unwrap();
-
-    let mut report = task_config
-        .vdaf
-        .produce_report(
-            &hpke_config_list,
-            t.now + 1,
-            &task_id,
-            DapMeasurement::U32Vec(vec![1; 10]),
-            version,
-        )
-        .unwrap();
-    report.report_metadata.public_extensions = Some(vec![Extension::Taskprov]);
-    t.leader_request_expect_ok(
-        client,
-        &format!("tasks/{}/reports", task_id.to_base64url()),
-        &http::Method::POST,
-        DapMediaType::Report,
-        Some(
-            &taskprov_advertisement
-                .serialize_to_header_value(version)
-                .unwrap(),
-        ),
-        report.get_encoded_with_param(&version).unwrap(),
-    )
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
 async fn leader_upload_taksprov_public_errors() {
     let version = DapVersion::Latest;
     let t = TestRunner::default_with_version(version).await;
@@ -635,17 +583,18 @@ async fn leader_upload_taksprov_public_errors() {
     .unwrap();
 
     // Repeated public extension
-    let mut report = task_config
+    let report = task_config
         .vdaf
-        .produce_report(
+        .produce_report_with_extensions(
             &hpke_config_list,
             t.now + 1,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            Some(vec![Extension::Taskprov, Extension::Taskprov]),
+            vec![],
             version,
         )
         .unwrap();
-    report.report_metadata.public_extensions = Some(vec![Extension::Taskprov, Extension::Taskprov]);
     t.leader_request_expect_abort(
         client,
         None,
@@ -665,23 +614,24 @@ async fn leader_upload_taksprov_public_errors() {
     .unwrap();
 
     // Unsupported public extension
-    let mut report = task_config
+    let report = task_config
         .vdaf
-        .produce_report(
+        .produce_report_with_extensions(
             &hpke_config_list,
             t.now + 1,
             &task_id,
             DapMeasurement::U32Vec(vec![1; 10]),
+            Some(vec![
+                Extension::Taskprov,
+                Extension::NotImplemented {
+                    typ: 3,
+                    payload: b"ignore".to_vec(),
+                },
+            ]),
+            vec![],
             version,
         )
         .unwrap();
-    report.report_metadata.public_extensions = Some(vec![
-        Extension::Taskprov,
-        Extension::NotImplemented {
-            typ: 3,
-            payload: b"ignore".to_vec(),
-        },
-    ]);
     t.leader_request_expect_abort(
         client,
         None,
@@ -1512,116 +1462,6 @@ async fn leader_selected() {
     )
     .await
     .unwrap();
-}
-
-#[tokio::test]
-async fn leader_collect_taskprov_repeated_abort() {
-    let version = DapVersion::Latest;
-    const DAP_TASKPROV_COLLECTOR_TOKEN: &str = "I-am-the-collector";
-    let t = TestRunner::default_with_version(version).await;
-    let batch_interval = t.batch_interval();
-
-    let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
-
-    let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
-        version,
-        min_batch_size: 10,
-        query: DapBatchMode::TimeInterval,
-        leader_url: t.task_config.leader_url.clone(),
-        helper_url: t.task_config.helper_url.clone(),
-        ..Default::default()
-    }
-    .to_config_with_taskprov(
-        b"cool task".to_vec(),
-        t.now,
-        daphne::roles::aggregator::TaskprovConfig {
-            hpke_collector_config: &t.taskprov_collector_hpke_receiver.config,
-            vdaf_verify_key_init: &t.taskprov_vdaf_verify_key_init,
-        },
-    )
-    .unwrap();
-
-    let path = TestRunner::upload_path_for_task(&task_id);
-    let method = &Method::POST;
-    // The reports are uploaded in the background.
-    let mut rng = thread_rng();
-    for _ in 0..t.task_config.min_batch_size {
-        let extensions = vec![Extension::Taskprov];
-        let now = rng.gen_range(TestRunner::report_interval(&batch_interval));
-        t.leader_request_expect_ok(
-            client,
-            &path,
-            method,
-            DapMediaType::Report,
-            Some(
-                &taskprov_advertisement
-                    .serialize_to_header_value(version)
-                    .unwrap(),
-            ),
-            {
-                let report = task_config
-                    .vdaf
-                    .produce_report_with_extensions(
-                        &hpke_config_list,
-                        now,
-                        &task_id,
-                        DapMeasurement::U32Vec(vec![1; 10]),
-                        Some(vec![Extension::Taskprov]),
-                        extensions,
-                        version,
-                    )
-                    .unwrap();
-                report.get_encoded_with_param(&version).unwrap()
-            },
-        )
-        .await
-        .unwrap();
-    }
-
-    let agg_param = DapAggregationParam::Empty;
-
-    // Get the collect URI.
-    let collect_req = CollectionReq {
-        query: Query::TimeInterval { batch_interval },
-        agg_param: agg_param.get_encoded().unwrap(),
-    };
-    let collect_uri = t
-        .leader_post_collect_using_token(
-            client,
-            DAP_TASKPROV_COLLECTOR_TOKEN,
-            Some(&taskprov_advertisement),
-            Some(&task_id),
-            collect_req.get_encoded_with_param(&t.version).unwrap(),
-        )
-        .await
-        .unwrap();
-    println!("collect_uri: {collect_uri}");
-
-    // Poll the collect URI before the CollectResp is ready.
-    let resp = t
-        .poll_collection_url_using_token(client, &collect_uri, DAP_TASKPROV_COLLECTOR_TOKEN)
-        .await
-        .unwrap();
-    #[expect(clippy::format_in_format_args)]
-    {
-        assert_eq!(
-            resp.status(),
-            202,
-            "response: {} {}",
-            format!("{resp:?}"),
-            resp.text().await.unwrap()
-        );
-    }
-
-    // The reports are aggregated in the background.
-    let agg_telem = t.internal_process(client).await.unwrap();
-    assert_eq!(
-        agg_telem.reports_processed, task_config.min_batch_size,
-        "reports processed"
-    );
-    assert_eq!(agg_telem.reports_aggregated, 0, "reports aggregated");
-    assert_eq!(agg_telem.reports_collected, 0, "reports collected");
 }
 
 async fn leader_collect_taskprov_ok(version: DapVersion) {

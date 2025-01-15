@@ -3,6 +3,7 @@
 
 use crate::{
     constants::DapAggregatorRole,
+    fatal_error,
     hpke::{info_and_aad, HpkeConfig},
     messages::{Extension, PlaintextInputShare, Report, ReportId, ReportMetadata, TaskId, Time},
     DapError, DapMeasurement, DapVersion, VdafConfig,
@@ -72,13 +73,12 @@ impl VdafConfig {
         private_extensions: Vec<Extension>,
         version: DapVersion,
     ) -> Result<Report, DapError> {
-        match (&public_extensions, version) {
-            (Some(_), DapVersion::Draft09) | (None, DapVersion::Latest) => {
-                return Err(DapError::ReportError(
-                    crate::messages::ReportError::InvalidMessage,
-                ))
-            }
-            _ => (),
+        if let (Some(_), DapVersion::Draft09) | (None, DapVersion::Latest) =
+            (&public_extensions, version)
+        {
+            return Err(fatal_error!(
+                err = format!("public extensions not set correctly for {version:?}")
+            ));
         }
 
         let mut plaintext_input_share = PlaintextInputShare {
