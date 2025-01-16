@@ -926,6 +926,7 @@ dependencies = [
  "prio 0.17.0-alpha.0",
  "prometheus",
  "rand",
+ "rayon",
  "rcgen",
  "reqwest",
  "serde",
@@ -952,6 +953,7 @@ dependencies = [
  "prio 0.17.0-alpha.0",
  "rand",
  "serde",
+ "serde_json",
  "url",
 ]
 
@@ -1003,10 +1005,12 @@ dependencies = [
 name = "daphne-worker-test"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "cap",
  "cfg-if",
  "console_error_panic_hook",
  "daphne-worker",
+ "futures",
  "prometheus",
  "tracing",
  "worker",
