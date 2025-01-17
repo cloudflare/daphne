@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{future::ready, num::NonZeroUsize, ops::Range, time::SystemTime};
@@ -79,6 +79,7 @@ impl DapAggregator for crate::App {
     #[tracing::instrument(skip(self))]
     async fn get_agg_share(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
@@ -115,6 +116,7 @@ impl DapAggregator for crate::App {
     #[tracing::instrument(skip(self))]
     async fn mark_collected(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
@@ -255,6 +257,7 @@ impl DapAggregator for crate::App {
 
     async fn is_batch_overlapping(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
@@ -288,7 +291,12 @@ impl DapAggregator for crate::App {
         )
     }
 
-    async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
+    async fn batch_exists(
+        &self,
+        _version: DapVersion,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?

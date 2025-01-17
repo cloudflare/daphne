@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{
@@ -11,9 +11,9 @@ use crate::{
     fatal_error,
     hpke::{info_and_aad, HpkeConfig, HpkeDecrypter},
     messages::{
-        self, encode_u32_bytes, AggregationJobInitReq, AggregationJobResp, Base64Encode,
-        BatchSelector, HpkeCiphertext, PartialBatchSelector, PrepareInit, Report, ReportError,
-        ReportId, ReportShare, TaskId, Transition, TransitionVar,
+        self, encode_u32_bytes, AggregationJobInitReq, Base64Encode, BatchSelector, HpkeCiphertext,
+        PartialBatchSelector, PrepareInit, ReadyAggregationJobResp, Report, ReportError, ReportId,
+        ReportShare, TaskId, Transition, TransitionVar,
     },
     metrics::{DaphneMetrics, ReportStatus},
     protocol::{decode_ping_pong_framed, PingPongMessageType},
@@ -279,7 +279,7 @@ impl DapTaskConfig {
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport<WithPeerPrepShare>],
-    ) -> Result<(DapAggregateSpan<DapAggregateShare>, AggregationJobResp), DapError> {
+    ) -> Result<(DapAggregateSpan<DapAggregateShare>, ReadyAggregationJobResp), DapError> {
         let num_reports = initialized_reports.len();
         let mut agg_span = DapAggregateSpan::default();
         let mut transitions = Vec::with_capacity(num_reports);
@@ -355,7 +355,7 @@ impl DapTaskConfig {
             });
         }
 
-        Ok((agg_span, AggregationJobResp { transitions }))
+        Ok((agg_span, ReadyAggregationJobResp { transitions }))
     }
 
     /// Leader: Consume the `AggregationJobResp` message sent by the Helper and compute the
@@ -364,7 +364,7 @@ impl DapTaskConfig {
         &self,
         task_id: &TaskId,
         state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
+        agg_job_resp: ReadyAggregationJobResp,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
         if agg_job_resp.transitions.len() != state.seq.len() {
@@ -380,7 +380,7 @@ impl DapTaskConfig {
         }
 
         let mut agg_span = DapAggregateSpan::default();
-        for (helper, leader) in zip(agg_job_resp.transitions, state.seq) {
+        for (helper, leader) in zip(&agg_job_resp.transitions, state.seq) {
             if helper.report_id != leader.report_id {
                 return Err(DapAbort::InvalidMessage {
                     detail: format!(

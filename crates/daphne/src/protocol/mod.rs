@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc. All rights reserved.
+// Copyright (c) 2025 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 use prio::codec::{CodecError, Decode as _};
@@ -67,8 +67,9 @@ mod test {
         error::DapAbort,
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
-            AggregationJobInitReq, BatchSelector, Extension, Interval, PartialBatchSelector,
-            PrepareInit, Report, ReportError, ReportId, ReportShare, Transition, TransitionVar,
+            AggregationJobInitReq, AggregationJobResp, BatchSelector, Extension, Interval,
+            PartialBatchSelector, PrepareInit, Report, ReportError, ReportId, ReportShare,
+            Transition, TransitionVar,
         },
         test_versions,
         testing::AggregationJobTest,
@@ -249,8 +250,11 @@ mod test {
         }
 
         let (agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
         assert_eq!(agg_span.report_count(), 3);
-        assert_eq!(agg_job_resp.transitions.len(), 3);
+        assert_eq!(transitions.len(), 3);
     }
 
     test_versions! { produce_agg_job_req }
@@ -376,9 +380,12 @@ mod test {
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
+        assert_eq!(transitions.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
+            transitions[0].var,
             TransitionVar::Failed(ReportError::HpkeDecryptError)
         );
     }
@@ -411,9 +418,12 @@ mod test {
         };
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
+        assert_eq!(transitions.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
+            transitions[0].var,
             TransitionVar::Failed(ReportError::ReportDropped)
         );
     }
@@ -446,9 +456,12 @@ mod test {
         };
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
+        assert_eq!(transitions.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
+            transitions[0].var,
             TransitionVar::Failed(ReportError::ReportTooEarly)
         );
     }
@@ -466,9 +479,12 @@ mod test {
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
+        assert_eq!(transitions.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
+            transitions[0].var,
             TransitionVar::Failed(ReportError::HpkeUnknownConfigId)
         );
     }
@@ -511,13 +527,17 @@ mod test {
 
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
-        assert_eq!(agg_job_resp.transitions.len(), 2);
+        let AggregationJobResp::Ready { transitions } = agg_job_resp else {
+            panic!("expected a ready response, got processing")
+        };
+
+        assert_eq!(transitions.len(), 2);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
+            transitions[0].var,
             TransitionVar::Failed(ReportError::VdafPrepError)
         );
         assert_matches!(
-            agg_job_resp.transitions[1].var,
+            transitions[1].var,
             TransitionVar::Failed(ReportError::VdafPrepError)
         );
     }
@@ -532,15 +552,15 @@ mod test {
         ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        let mut agg_job_resp = agg_job_resp.unwrap_ready();
 
         // Helper sends transitions out of order.
-        let tmp = agg_job_resp.transitions[0].clone();
-        agg_job_resp.transitions[0] = agg_job_resp.transitions[1].clone();
-        agg_job_resp.transitions[1] = tmp;
+        agg_job_resp.transitions.swap(0, 1);
 
         assert_matches!(
-            t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),
+            t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp,),
             DapError::Abort(DapAbort::InvalidMessage { .. })
         );
     }
@@ -555,7 +575,9 @@ mod test {
         ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        let mut agg_job_resp = agg_job_resp.unwrap_ready();
 
         // Helper sends a transition twice.
         let repeated_transition = agg_job_resp.transitions[0].clone();
@@ -578,7 +600,9 @@ mod test {
         ]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
-        let (_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+        let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        let mut agg_job_resp = agg_job_resp.unwrap_ready();
 
         // Helper sent a transition with an unrecognized report ID.
         agg_job_resp.transitions.push(Transition {
@@ -599,7 +623,9 @@ mod test {
         let reports = t.produce_reports(vec![DapMeasurement::U32Vec(vec![1; 10])]);
         let (leader_state, agg_job_init_req) =
             t.produce_agg_job_req(&DapAggregationParam::Empty, reports);
-        let (_helper_agg_span, mut agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+        let (_helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        let mut agg_job_resp = agg_job_resp.unwrap_ready();
 
         // Helper sent a transition with an unrecognized report ID. Simulate this by flipping the
         // first bit of the report ID.
@@ -628,6 +654,7 @@ mod test {
 
         let (leader_agg_span, helper_agg_span) = {
             let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+            let agg_job_resp = agg_job_resp.unwrap_ready();
             let leader_agg_span = t.consume_agg_job_resp(leader_state, agg_job_resp);
 
             (leader_agg_span, helper_agg_span)
@@ -680,6 +707,8 @@ mod test {
             .map(|r| r.report_share.report_metadata.id)
             .collect::<Vec<_>>();
         let (helper_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
+
+        let agg_job_resp = agg_job_resp.unwrap_ready();
 
         assert_eq!(2, helper_agg_span.report_count());
         assert_eq!(3, agg_job_resp.transitions.len());

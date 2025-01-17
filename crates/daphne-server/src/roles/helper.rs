@@ -3,7 +3,8 @@
 
 use axum::async_trait;
 use daphne::{
-    messages::{AggregationJobId, TaskId},
+    fatal_error,
+    messages::{AggregationJobId, AggregationJobResp, TaskId},
     roles::{helper::AggregationJobRequestHash, DapHelper},
     DapError, DapVersion,
 };
@@ -19,5 +20,14 @@ impl DapHelper for crate::App {
     ) -> Result<(), DapError> {
         // the server implementation can't check for this
         Ok(())
+    }
+
+    async fn poll_aggregated(
+        &self,
+        _version: DapVersion,
+        _task_id: &TaskId,
+        _agg_job_id: &AggregationJobId,
+    ) -> Result<AggregationJobResp, DapError> {
+        Err(fatal_error!(err = "polling not implemented"))
     }
 }

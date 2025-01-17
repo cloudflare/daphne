@@ -14,7 +14,7 @@ use crate::{
     messages::{
         self, AggregationJobId, AggregationJobInitReq, AggregationJobResp, Base64Encode, BatchId,
         BatchSelector, Collection, CollectionJobId, HpkeCiphertext, Interval, PartialBatchSelector,
-        Report, ReportId, TaskId, Time,
+        ReadyAggregationJobResp, Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
     roles::{
@@ -208,7 +208,8 @@ impl AggregationJobTest {
         &self,
         agg_job_init_req: AggregationJobInitReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
-        self.task_config
+        let (span, resp) = self
+            .task_config
             .produce_agg_job_resp(
                 self.task_id,
                 &HashMap::default(),
@@ -224,7 +225,8 @@ impl AggregationJobTest {
                     )
                     .unwrap(),
             )
-            .unwrap()
+            .unwrap();
+        (span, resp.into())
     }
 
     /// Leader: Handle `AggregationJobResp`, produce `AggregationJobContinueReq`.
@@ -233,7 +235,7 @@ impl AggregationJobTest {
     pub fn consume_agg_job_resp(
         &self,
         leader_state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
+        agg_job_resp: ReadyAggregationJobResp,
     ) -> DapAggregateSpan<DapAggregateShare> {
         self.task_config
             .consume_agg_job_resp(
@@ -249,7 +251,7 @@ impl AggregationJobTest {
     pub fn consume_agg_job_resp_expect_err(
         &self,
         leader_state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
+        agg_job_resp: ReadyAggregationJobResp,
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
@@ -337,8 +339,13 @@ impl AggregationJobTest {
         let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports);
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req);
-            let leader_agg_span = self.consume_agg_job_resp(leader_state, agg_job_resp);
+            let (helper_agg_span, AggregationJobResp::Ready { transitions }) =
+                self.handle_agg_job_req(agg_job_init_req)
+            else {
+                panic!("testing should not be async")
+            };
+            let leader_agg_span =
+                self.consume_agg_job_resp(leader_state, ReadyAggregationJobResp { transitions });
             (leader_agg_span, helper_agg_span)
         };
 
@@ -519,6 +526,7 @@ pub struct InMemoryAggregator {
 
     // Helper: aggregation jobs
     processed_jobs: Mutex<HashMap<AggregationJobId, AggregationJobRequestHash>>,
+    finished_jobs: Mutex<HashMap<AggregationJobId, ReadyAggregationJobResp>>,
 }
 
 impl DeepSizeOf for InMemoryAggregator {
@@ -535,6 +543,7 @@ impl DeepSizeOf for InMemoryAggregator {
             taskprov_vdaf_verify_key_init,
             peer,
             processed_jobs,
+            finished_jobs,
         } = self;
         global_config.deep_size_of_children(context)
             + tasks.deep_size_of_children(context)
@@ -545,6 +554,7 @@ impl DeepSizeOf for InMemoryAggregator {
             + taskprov_vdaf_verify_key_init.deep_size_of_children(context)
             + peer.deep_size_of_children(context)
             + processed_jobs.deep_size_of_children(context)
+            + finished_jobs.deep_size_of_children(context)
     }
 }
 
@@ -569,6 +579,7 @@ impl InMemoryAggregator {
             taskprov_vdaf_verify_key_init,
             peer: None,
             processed_jobs: Default::default(),
+            finished_jobs: Default::default(),
         }
     }
 
@@ -593,6 +604,7 @@ impl InMemoryAggregator {
             taskprov_vdaf_verify_key_init,
             peer: peer.into(),
             processed_jobs: Default::default(),
+            finished_jobs: Default::default(),
         }
     }
 
@@ -711,6 +723,7 @@ impl DapAggregator for InMemoryAggregator {
 
     async fn is_batch_overlapping(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
@@ -734,7 +747,12 @@ impl DapAggregator for InMemoryAggregator {
         Ok(false)
     }
 
-    async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
+    async fn batch_exists(
+        &self,
+        _version: DapVersion,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError> {
         let task_config = self
             .get_task_config_for(task_id)
             .await?
@@ -814,6 +832,7 @@ impl DapAggregator for InMemoryAggregator {
 
     async fn get_agg_share(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
@@ -842,6 +861,7 @@ impl DapAggregator for InMemoryAggregator {
 
     async fn mark_collected(
         &self,
+        _version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
@@ -897,6 +917,26 @@ impl DapHelper for InMemoryAggregator {
                 Ok(())
             }
         }
+    }
+
+    async fn poll_aggregated(
+        &self,
+        _version: DapVersion,
+        task_id: &TaskId,
+        agg_job_id: &AggregationJobId,
+    ) -> Result<AggregationJobResp, DapError> {
+        self.finished_jobs
+            .lock()
+            .unwrap()
+            .get(agg_job_id)
+            .cloned()
+            .map(Into::into)
+            .ok_or_else(|| {
+                DapError::Abort(DapAbort::UnrecognizedAggregationJob {
+                    task_id: *task_id,
+                    agg_job_id: *agg_job_id,
+                })
+            })
     }
 }
 
@@ -985,6 +1025,25 @@ impl DapLeader for InMemoryAggregator {
             .lock()
             .map_err(|_| fatal_error!(err = "leader_state_store poisoned"))?
             .finish_collect_job(task_id, coll_job_id, collection)
+    }
+
+    async fn send_http_get(&self, meta: DapRequestMeta, url: Url) -> Result<DapResponse, DapError> {
+        match meta.media_type {
+            Some(DapMediaType::AggregationJobInitReq) => Ok(helper::handle_agg_job_poll_req(
+                &**self.peer.as_ref().expect("peer not configured"),
+                DapRequest {
+                    meta,
+                    resource_id: AggregationJobId::try_from_base64url(
+                        url.path().split('/').last().unwrap(),
+                    )
+                    .unwrap(),
+                    payload: messages::request::PollAggregationJob,
+                },
+            )
+            .await
+            .expect("peer aborted unexpectedly")),
+            _ => unreachable!("unhandled media type: {:?}", meta.media_type),
+        }
     }
 
     async fn send_http_post<P>(

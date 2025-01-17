@@ -4,6 +4,7 @@
 use crate::base_capnp::{self, partial_batch_selector, u8_l16, u8_l32};
 use capnp::struct_list;
 use capnp::traits::{FromPointerBuilder, FromPointerReader};
+use daphne::messages;
 use daphne::{
     messages::{AggregationJobId, BatchId, PartialBatchSelector, ReportId, TaskId},
     DapVersion,
@@ -200,6 +201,44 @@ impl CapnprotoPayloadDecode for PartialBatchSelector {
                     batch_id: <_>::decode_from_reader(reader?)?,
                 })
             }
+        }
+    }
+}
+
+impl From<messages::ReportError> for base_capnp::ReportError {
+    fn from(failure: messages::ReportError) -> Self {
+        match failure {
+            messages::ReportError::Reserved => Self::Reserved,
+            messages::ReportError::BatchCollected => Self::BatchCollected,
+            messages::ReportError::ReportReplayed => Self::ReportReplayed,
+            messages::ReportError::ReportDropped => Self::ReportDropped,
+            messages::ReportError::HpkeUnknownConfigId => Self::HpkeUnknownConfigId,
+            messages::ReportError::HpkeDecryptError => Self::HpkeDecryptError,
+            messages::ReportError::VdafPrepError => Self::VdafPrepError,
+            messages::ReportError::BatchSaturated => Self::BatchSaturated,
+            messages::ReportError::TaskExpired => Self::TaskExpired,
+            messages::ReportError::InvalidMessage => Self::InvalidMessage,
+            messages::ReportError::ReportTooEarly => Self::ReportTooEarly,
+            messages::ReportError::TaskNotStarted => Self::TaskNotStarted,
+        }
+    }
+}
+
+impl From<base_capnp::ReportError> for messages::ReportError {
+    fn from(val: base_capnp::ReportError) -> Self {
+        match val {
+            base_capnp::ReportError::Reserved => Self::Reserved,
+            base_capnp::ReportError::BatchCollected => Self::BatchCollected,
+            base_capnp::ReportError::ReportReplayed => Self::ReportReplayed,
+            base_capnp::ReportError::ReportDropped => Self::ReportDropped,
+            base_capnp::ReportError::HpkeUnknownConfigId => Self::HpkeUnknownConfigId,
+            base_capnp::ReportError::HpkeDecryptError => Self::HpkeDecryptError,
+            base_capnp::ReportError::VdafPrepError => Self::VdafPrepError,
+            base_capnp::ReportError::BatchSaturated => Self::BatchSaturated,
+            base_capnp::ReportError::TaskExpired => Self::TaskExpired,
+            base_capnp::ReportError::InvalidMessage => Self::InvalidMessage,
+            base_capnp::ReportError::ReportTooEarly => Self::ReportTooEarly,
+            base_capnp::ReportError::TaskNotStarted => Self::TaskNotStarted,
         }
     }
 }

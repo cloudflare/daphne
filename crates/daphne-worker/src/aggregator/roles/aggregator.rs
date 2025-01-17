@@ -21,9 +21,10 @@ use daphne::{
     DapVersion,
 };
 use daphne_service_utils::durable_requests::bindings::{
-    self, AggregateStoreMergeOptions, AggregateStoreMergeReq, AggregateStoreMergeResp,
+    self, aggregate_store_v2, AggregateStoreMergeOptions, AggregateStoreMergeReq,
+    AggregateStoreMergeResp,
 };
-use futures::{future::try_join_all, StreamExt as _, TryFutureExt as _, TryStreamExt as _};
+use futures::{future::try_join_all, StreamExt, TryFutureExt as _, TryStreamExt};
 use mappable_rc::Marc;
 use std::{num::NonZeroUsize, ops::Range};
 use worker::send::SendFuture;
@@ -75,72 +76,31 @@ impl DapAggregator for App {
             .await
     }
 
+    // this implementation is hardcoded to for the helper
     #[tracing::instrument(skip(self))]
     async fn get_agg_share(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<DapAggregateShare, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
-                task_id: *task_id,
-            }))?;
-
-        let durable = self.durable();
-        let mut requests = Vec::new();
-        for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
-            requests.push(
-                durable
-                    .request(
-                        bindings::AggregateStore::Get,
-                        (task_config.as_ref().version, task_id, &bucket),
-                    )
-                    .send(),
-            );
+        match version {
+            DapVersion::Latest => self.get_agg_share_draft_latest(task_id, batch_sel).await,
+            DapVersion::Draft09 => self.get_agg_share_draft_09(task_id, batch_sel).await,
         }
-        let responses: Vec<DapAggregateShare> = try_join_all(requests)
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to get agg shares from durable objects"))?;
-        let mut agg_share = DapAggregateShare::default();
-        for agg_share_delta in responses {
-            agg_share.merge(agg_share_delta)?;
-        }
-
-        Ok(agg_share)
     }
 
     #[tracing::instrument(skip(self))]
     async fn mark_collected(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<(), DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
-                task_id: *task_id,
-            }))?;
-
-        let durable = self.durable();
-        let mut requests = Vec::new();
-        for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
-            requests.push(
-                durable
-                    .request(
-                        bindings::AggregateStore::MarkCollected,
-                        (task_config.as_ref().version, task_id, &bucket),
-                    )
-                    .send::<()>(),
-            );
+        match version {
+            DapVersion::Draft09 => self.mark_collected_draft09(task_id, batch_sel).await,
+            DapVersion::Latest => self.mark_collected_draft_latest(task_id, batch_sel).await,
         }
-
-        try_join_all(requests)
-            .await
-            .map_err(|e| fatal_error!(err = ?e, "failed to mark agg shares as collected"))?;
-        Ok(())
     }
 
     async fn get_global_config(&self) -> Result<DapGlobalConfig, DapError> {
@@ -251,89 +211,29 @@ impl DapAggregator for App {
 
     async fn is_batch_overlapping(
         &self,
+        version: DapVersion,
         task_id: &TaskId,
         batch_sel: &BatchSelector,
     ) -> Result<bool, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
-                task_id: *task_id,
-            }))?;
-
-        // Check whether the request overlaps with previous requests. This is done by
-        // checking the AggregateStore and seeing whether it requests for aggregate
-        // shares that have already been marked collected.
-        let durable = self.durable();
-        Ok(
-            futures::stream::iter(task_config.batch_span_for_sel(batch_sel)?)
-                .map(|bucket| {
-                    durable
-                        .request(
-                            bindings::AggregateStore::CheckCollected,
-                            (task_config.as_ref().version, task_id, &bucket),
-                        )
-                        .send()
-                })
-                .buffer_unordered(usize::MAX)
-                .try_any(std::future::ready)
-                .await
-                .map_err(
-                    |e| fatal_error!(err = ?e, "failed to check if agg shares are collected"),
-                )?,
-        )
+        match version {
+            DapVersion::Draft09 => self.is_batch_overlapping_draft09(task_id, batch_sel).await,
+            DapVersion::Latest => {
+                self.is_batch_overlapping_draft_latest(task_id, batch_sel)
+                    .await
+            }
+        }
     }
 
-    async fn batch_exists(&self, task_id: &TaskId, batch_id: &BatchId) -> Result<bool, DapError> {
-        let task_config = self
-            .get_task_config_for(task_id)
-            .await?
-            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
-                task_id: *task_id,
-            }))?;
-        let version = task_config.as_ref().version;
-
-        let agg_span = task_config.batch_span_for_sel(&BatchSelector::LeaderSelectedByBatchId {
-            batch_id: *batch_id,
-        })?;
-
-        futures::stream::iter(agg_span)
-            .map(|bucket| async move {
-                let durable = self.durable();
-                let params = (version, task_id, &bucket);
-
-                let get_report_count = || {
-                    durable
-                        .request(bindings::AggregateStore::ReportCount, params)
-                        .send::<u64>()
-                };
-
-                // TODO: remove this after the worker has this feature deployed.
-                let backwards_compat_get_report_count = || {
-                    durable
-                        .request(bindings::AggregateStore::Get, params)
-                        .send::<DapAggregateShare>()
-                        .map_ok(|r| r.report_count)
-                };
-
-                let count = get_report_count()
-                    .or_else(|_| backwards_compat_get_report_count())
-                    .await
-                    .map_err(|e| {
-                        fatal_error!(
-                            err = ?e,
-                            params = ?params,
-                            "failed fetching report count of an agg share"
-                        )
-                    })?;
-                Ok(count > 0)
-            })
-            .buffer_unordered(usize::MAX)
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .reduce(|a, b| Ok(a? || b?))
-            .unwrap_or(Ok(false))
+    async fn batch_exists(
+        &self,
+        version: DapVersion,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError> {
+        match version {
+            DapVersion::Draft09 => self.batch_exists_draft09(task_id, batch_id).await,
+            DapVersion::Latest => self.batch_exists_draft_latest(task_id, batch_id).await,
+        }
     }
 
     fn metrics(&self) -> &dyn DaphneMetrics {
@@ -432,5 +332,293 @@ impl hpke::HpkeProvider for App {
                 .map_err(|e| fatal_error!(err= ?e,"failed to get the hpke config"))?
                 .ok_or_else(|| fatal_error!(err="there are no hpke configs in kv!!", %version))?,
         ))
+    }
+}
+
+impl App {
+    async fn get_agg_share_draft_09(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<DapAggregateShare, DapError> {
+        tracing::debug!("gathering agg share");
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        let durable = self.durable();
+        let mut requests = Vec::new();
+        for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
+            requests.push(
+                durable
+                    .request(
+                        bindings::AggregateStore::Get,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send(),
+            );
+        }
+        let responses: Vec<DapAggregateShare> = try_join_all(requests)
+            .await
+            .map_err(|e| fatal_error!(err = ?e, "failed to get agg shares from durable objects"))?;
+        let mut agg_share = DapAggregateShare::default();
+        for agg_share_delta in responses {
+            agg_share.merge(agg_share_delta)?;
+        }
+
+        Ok(agg_share)
+    }
+
+    async fn mark_collected_draft09(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<(), DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        let durable = self.durable();
+        let mut requests = Vec::new();
+        for bucket in task_config.as_ref().batch_span_for_sel(batch_sel)? {
+            requests.push(
+                durable
+                    .request(
+                        bindings::AggregateStore::MarkCollected,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send::<()>(),
+            );
+        }
+
+        try_join_all(requests)
+            .await
+            .map_err(|e| fatal_error!(err = ?e, "failed to mark agg shares as collected"))?;
+        Ok(())
+    }
+
+    async fn is_batch_overlapping_draft09(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        // Check whether the request overlaps with previous requests. This is done by
+        // checking the AggregateStore and seeing whether it requests for aggregate
+        // shares that have already been marked collected.
+        let durable = self.durable();
+        futures::stream::iter(task_config.batch_span_for_sel(batch_sel)?)
+            .map(|bucket| {
+                durable
+                    .request(
+                        bindings::AggregateStore::CheckCollected,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send()
+            })
+            .buffer_unordered(usize::MAX)
+            .try_any(std::future::ready)
+            .await
+            .map_err(|e| fatal_error!(err = ?e, "failed to check if agg shares are collected"))
+    }
+
+    async fn batch_exists_draft09(
+        &self,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+        let version = task_config.as_ref().version;
+
+        let agg_span = task_config.batch_span_for_sel(&BatchSelector::LeaderSelectedByBatchId {
+            batch_id: *batch_id,
+        })?;
+
+        futures::stream::iter(agg_span)
+            .map(|bucket| async move {
+                let durable = self.durable();
+                let params = (version, task_id, &bucket);
+
+                let get_report_count = || {
+                    durable
+                        .request(bindings::AggregateStore::ReportCount, params)
+                        .send::<u64>()
+                };
+
+                // TODO: remove this after the worker has this feature deployed.
+                let backwards_compat_get_report_count = || {
+                    durable
+                        .request(bindings::AggregateStore::Get, params)
+                        .send::<DapAggregateShare>()
+                        .map_ok(|r| r.report_count)
+                };
+
+                let count = get_report_count()
+                    .or_else(|_| backwards_compat_get_report_count())
+                    .await
+                    .map_err(|e| {
+                        fatal_error!(
+                            err = ?e,
+                            params = ?params,
+                            "failed fetching report count of an agg share"
+                        )
+                    })?;
+                Ok(count > 0)
+            })
+            .buffer_unordered(usize::MAX)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .reduce(|a, b| Ok(a? || b?))
+            .unwrap_or(Ok(false))
+    }
+
+    async fn get_agg_share_draft_latest(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<DapAggregateShare, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        let durable = self.durable();
+        let agg_share = futures::stream::iter(task_config.as_ref().batch_span_for_sel(batch_sel)?)
+            .map(|bucket| {
+                durable
+                    .request(
+                        aggregate_store_v2::Command::Get,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send()
+                    .map_err(
+                        |e| fatal_error!(err = ?e, "failed to get agg shares from durable objects"),
+                    )
+            })
+            .buffer_unordered(6)
+            .try_fold(DapAggregateShare::default(), |mut acc, share| async move {
+                acc.merge(share).map(|()| acc)
+            })
+            .await?;
+
+        Ok(agg_share)
+    }
+
+    async fn mark_collected_draft_latest(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<(), DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        let durable = self.durable();
+        futures::stream::iter(task_config.as_ref().batch_span_for_sel(batch_sel)?)
+            .map(|bucket| {
+                durable
+                    .request(
+                        aggregate_store_v2::Command::MarkCollected,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send::<()>()
+                    .map_err(|e| fatal_error!(err = ?e, "failed to mark agg shares as collected"))
+            })
+            .buffer_unordered(6)
+            .try_collect::<()>()
+            .await?;
+
+        Ok(())
+    }
+
+    async fn is_batch_overlapping_draft_latest(
+        &self,
+        task_id: &TaskId,
+        batch_sel: &BatchSelector,
+    ) -> Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+
+        // Check whether the request overlaps with previous requests. This is done by
+        // checking the AggregateStore and seeing whether it requests for aggregate
+        // shares that have already been marked collected.
+        let durable = self.durable();
+        futures::stream::iter(task_config.batch_span_for_sel(batch_sel)?)
+            .map(|bucket| {
+                durable
+                    .request(
+                        aggregate_store_v2::Command::CheckCollected,
+                        (task_config.as_ref().version, task_id, &bucket),
+                    )
+                    .send()
+            })
+            .buffer_unordered(usize::MAX)
+            .try_any(std::future::ready)
+            .await
+            .map_err(|e| fatal_error!(err = ?e, "failed to check if agg shares are collected"))
+    }
+
+    async fn batch_exists_draft_latest(
+        &self,
+        task_id: &TaskId,
+        batch_id: &BatchId,
+    ) -> Result<bool, DapError> {
+        let task_config = self
+            .get_task_config_for(task_id)
+            .await?
+            .ok_or(DapError::Abort(DapAbort::UnrecognizedTask {
+                task_id: *task_id,
+            }))?;
+        let version = task_config.as_ref().version;
+
+        let agg_span = task_config.batch_span_for_sel(&BatchSelector::LeaderSelectedByBatchId {
+            batch_id: *batch_id,
+        })?;
+
+        futures::stream::iter(agg_span)
+            .map(|bucket| async move {
+                let params = (version, task_id, &bucket);
+                self.durable()
+                    .request(aggregate_store_v2::Command::AggregateShareCount, params)
+                    .send::<u32>()
+                    .await
+                    .map_err(|e| {
+                        fatal_error!(
+                            err = ?e,
+                            params = ?params,
+                            "failed fetching report count of an agg share"
+                        )
+                    })
+            })
+            .buffer_unordered(usize::MAX)
+            .try_all(|count| std::future::ready(count > 0))
+            .await
     }
 }

@@ -55,17 +55,12 @@ impl<B: DurableMethod + Debug, P: AsRef<[u8]>> RequestBuilder<'_, B, P> {
     where
         R: DeserializeOwned,
     {
-        tracing::debug!(
-            obj = std::any::type_name::<B>().split("::").last().unwrap(),
-            path = ?self.path,
-            "requesting DO",
-        );
         let resp = storage_proxy::handle_do_request(
             self.durable.env,
             Default::default(),
             self.path.to_uri(),
             self.request,
-            |_, _, _| {},
+            |_, _, _| {}, // retry metric
         )
         .await?;
 
