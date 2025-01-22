@@ -543,6 +543,7 @@ pub async fn process<A: DapLeader>(
 
     tracing::debug!("RUNNING read_work_stream");
 
+    tracing::warn!("Aggregator valid time range: {:?}", aggregator.valid_report_time_range());
     let mut agg_jobs = HashMap::new();
     let mut pending_coll_jobs = Vec::new();
     for work_item in aggregator.dequeue_work(num_items).await? {
@@ -565,6 +566,7 @@ pub async fn process<A: DapLeader>(
                         return Ok(0);
                     }
 
+                    tracing::warn!("Retrieved time range: {}..{}", task_config.not_before, task_config.not_after);
                     tracing::debug!(
                         "RUNNING run_agg_job FOR TID {task_id} AND {part_batch_sel:?} AND {host}"
                     );

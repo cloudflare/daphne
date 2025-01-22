@@ -63,11 +63,13 @@ impl InitializedReport<()> {
         report_share: ReportShare,
         agg_param: &DapAggregationParam,
     ) -> Result<Self, DapError> {
+        let tc: PartialDapTaskConfigForReportInit = task_config.into().clone();
+        tracing::warn!("DapTaskConfig times:{}..{}", tc.not_before, tc.not_after);
         Self::initialize(
             decrypter,
             valid_report_range,
             task_id,
-            task_config,
+            tc.clone(),
             report_share,
             (),
             agg_param,
@@ -123,6 +125,7 @@ impl<'s> From<&'s PartialDapTaskConfigForReportInit<'_>> for PartialDapTaskConfi
     }
 }
 
+#[derive(Clone)]
 pub struct PartialDapTaskConfigForReportInit<'s> {
     pub not_before: messages::Time,
     pub not_after: messages::Time,
@@ -156,7 +159,10 @@ impl<P> InitializedReport<P> {
             };
         }
 
+        tracing::info!("report timestamp: {}", report_share.report_metadata.time);
         tracing::info!("valid_report_range: {}..{}", valid_report_range.start, valid_report_range.end);
+        tracing::info!("task_config.range: {}..{}", task_config.not_before, task_config.not_after);
+
         match report_share.report_metadata.time {
             t if t >= task_config.not_after => reject!(TaskExpired),
             t if t < task_config.not_before => {tracing::warn!("Reject TaskNotStarted"); reject!(TaskNotStarted)},

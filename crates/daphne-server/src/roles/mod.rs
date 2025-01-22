@@ -296,6 +296,7 @@ mod test_utils {
                 }
             };
 
+            tracing::warn!("Add task: {}..{}", cmd.task_commencement, cmd.task_expiration);
             if self
                 .kv()
                 .put_if_not_exists_with_expiration::<kv::prefix::TaskConfig>(

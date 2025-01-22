@@ -100,6 +100,7 @@ impl DapTaskConfig {
     where
         S: Iterator<Item = Report>,
     {
+        tracing::warn!("DapTaskConfig times:{}..{}", self.not_before, self.not_after);
         let (report_count_hint, _upper_bound) = reports.size_hint();
 
         let mut states = Vec::with_capacity(report_count_hint);

@@ -689,6 +689,7 @@ impl DapAggregator for InMemoryAggregator {
         task_id: &TaskId,
         task_config: DapTaskConfig,
     ) -> Result<(), DapError> {
+        tracing::warn!("Put taskprov config");
         let mut tasks = self.tasks.lock().expect("tasks: lock failed");
         tasks.deref_mut().insert(*task_id, task_config);
         Ok(())

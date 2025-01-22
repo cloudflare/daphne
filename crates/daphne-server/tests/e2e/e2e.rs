@@ -1402,9 +1402,6 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     let t = TestRunner::default_with_version(version).await;
     let batch_interval = t.batch_interval();
 
-    let client = t.http_client();
-    let hpke_config_list = t.get_hpke_configs(version, client).await.unwrap();
-
     let (task_config, task_id, taskprov_advertisement) = DapTaskParameters {
         version,
         min_batch_size: 10,
@@ -1423,6 +1420,13 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     )
     .unwrap();
 
+    t.setup_endpoints(&task_id, version).await;
+
+    let client = &t.http_client();
+    let hpke_config_list = t.get_hpke_configs_task_id(version, client, &task_id).await.unwrap();
+    println!("Generated TaskID: {}",t.task_id);
+
+    println!("TaskID: {:?}", task_id);
     println!("Now - not_before: {}", t.now - task_config.not_before);
     println!(
         "Now - batch_interval.start: {}",
@@ -1559,7 +1563,7 @@ async fn leader_collect_taskprov_ok(version: DapVersion) {
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.bytes().await.unwrap(),
-        collection.get_encoded_with_param(&t.version).unwrap()
+        collection.get_encoded_with_param(&version).unwrap()
     );
 }
 

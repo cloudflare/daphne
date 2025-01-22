@@ -148,7 +148,7 @@ impl TestRunner {
         let leader_bearer_token = hex::encode(rng.gen::<[u8; 16]>());
         let collector_bearer_token = hex::encode(rng.gen::<[u8; 16]>());
         let t = Self {
-            global_config,
+            global_config, 
             task_id,
             now,
             task_config,
@@ -224,6 +224,8 @@ impl TestRunner {
         //
         // First, delete the data from the previous test.
         t.internal_delete_all(&t.batch_interval()).await.unwrap();
+        println!("Task_config.not_before: {}", t.task_config.not_before);
+        println!("t.task_id: {:}", t.task_id);
 
         // Configure the Leader with the task.
         let leader_add_task_cmd = json!({
@@ -314,8 +316,126 @@ impl TestRunner {
         );
 
         println!("############ starting test ############");
+
         t
     }
+
+    pub async fn setup_endpoints(&self, task_id: &TaskId, version: DapVersion){
+        // Configure the endpoints.
+        //
+        // First, delete the data from the previous test.
+        self.internal_delete_all(&self.batch_interval()).await.unwrap();
+        println!("Task_config.not_before: {}", self.task_config.not_before);
+        println!("self.task_id: {:}", self.task_id);
+
+        let vdaf_verify_key_base64url = encode_base64url(self.task_config.vdaf_verify_key.as_ref());
+
+        let (batch_mode, max_batch_size) = match self.task_config.query {
+            DapBatchMode::TimeInterval => (1, None),
+            DapBatchMode::LeaderSelected { max_batch_size } => (2, Some(max_batch_size)),
+        };
+
+        let collector_hpke_config_base64url =
+            encode_base64url(self.collector_hpke_receiver.config.get_encoded().unwrap());
+
+        let vdaf = json!({
+            "type": "Prio2",
+            "dimension": assert_matches!(
+                self.task_config.vdaf,
+                VdafConfig::Prio2{ dimension } => format!("{dimension}")
+            ),
+        });
+        // Configure the Leader with the task.
+        let leader_add_task_cmd = json!({
+            "task_id": task_id.to_base64url(),
+            "leader": self.leader_url,
+            "helper": self.helper_url,
+            "vdaf": vdaf.clone(),
+            "leader_authentication_token": self.leader_bearer_token.clone(),
+            "collector_authentication_token": self.collector_bearer_token.clone(),
+            "role": "leader",
+            "vdaf_verify_key": vdaf_verify_key_base64url,
+            "batch_mode": batch_mode,
+            "min_batch_size": self.task_config.min_batch_size,
+            "max_batch_size": max_batch_size,
+            "time_precision": self.task_config.time_precision,
+            "collector_hpke_config": collector_hpke_config_base64url.clone(),
+            "task_expiration": self.task_config.not_after,
+            "task_commencement": self.task_config.not_before,
+        });
+        let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
+        let res: InternalTestCommandResult = self
+            .leader_post_internal(&add_task_path, &leader_add_task_cmd)
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error: {:?}",
+            res.status, res.error
+        );
+
+        // Configure the Helper with the task.
+        let helper_add_task_cmd = json!({
+            "task_id": task_id.to_base64url(),
+            "leader": self.leader_url,
+            "helper": self.helper_url,
+            "vdaf": vdaf.clone(),
+            "leader_authentication_token": self.leader_bearer_token.clone(),
+            "role": "helper",
+            "vdaf_verify_key": vdaf_verify_key_base64url,
+            "batch_mode": batch_mode,
+            "min_batch_size": self.task_config.min_batch_size,
+            "max_batch_size": max_batch_size,
+            "time_precision": self.task_config.time_precision,
+            "collector_hpke_config": collector_hpke_config_base64url.clone(),
+            "task_expiration": self.task_config.not_after,
+            "task_commencement": self.task_config.not_before,
+        });
+        let res: InternalTestCommandResult = self 
+            .helper_post_internal(&add_task_path, &helper_add_task_cmd)
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error: {:?}",
+            res.status, res.error
+        );
+
+        let gen_config = || {
+            HpkeReceiverConfig::gen(0, HpkeKemId::X25519HkdfSha256)
+                .expect("failed to generate receiver config")
+        };
+        let res: InternalTestCommandResult = self 
+            .helper_post_internal(
+                &format!("{version}/internal/test/add_hpke_config"),
+                &gen_config(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error {:?}",
+            res.status, res.error
+        );
+
+        let res: InternalTestCommandResult = self 
+            .leader_post_internal(
+                &format!("{version}/internal/test/add_hpke_config"),
+                &gen_config(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            res.status, "success",
+            "response status: {}, error {:?}",
+            res.status, res.error
+        );
+
+        println!("############ starting test ############");
+    }
+    
 
     pub fn http_client(&self) -> &reqwest::Client {
         &self.http_client
@@ -356,6 +476,29 @@ impl TestRunner {
             helper_hpke_config_list.hpke_configs.pop().unwrap(),
         ])
     }
+
+    pub async fn get_hpke_configs_task_id(
+        &self,
+        _version: DapVersion,
+        client: &reqwest::Client,
+        task_id: &TaskId
+    ) -> anyhow::Result<[HpkeConfig; 2]> {
+        let raw_leader_hpke_config = get_raw_hpke_config(client, task_id.as_ref(), &self.leader_url, "leader", &self.version).await?;
+        let raw_helper_hpke_config = get_raw_hpke_config(client, task_id.as_ref(), &self.helper_url, "helper", &self.version).await?;
+
+        let mut leader_hpke_config_list = HpkeConfigList::get_decoded(&raw_leader_hpke_config)?;
+        let mut helper_hpke_config_list = HpkeConfigList::get_decoded(&raw_helper_hpke_config)?;
+        if leader_hpke_config_list.hpke_configs.len() != 1
+            || helper_hpke_config_list.hpke_configs.len() != 1
+        {
+            panic!("only a length 1 HpkeConfList is currently supported by the test suite")
+        }
+        Ok([
+            leader_hpke_config_list.hpke_configs.pop().unwrap(),
+            helper_hpke_config_list.hpke_configs.pop().unwrap(),
+        ])
+    }
+
 
     pub async fn leader_get_raw_hpke_config(
         &self,

@@ -14,7 +14,7 @@ use daphne::{
     constants::DapAggregatorRole,
     hpke::HpkeReceiverConfig,
     messages::{Base64Encode, TaskId},
-    roles::{leader, DapLeader},
+    roles::{leader, DapAggregator, DapLeader},
     DapVersion,
 };
 use daphne_service_utils::test_route_types::{InternalTestAddTask, InternalTestEndpointForTask};
@@ -129,6 +129,9 @@ async fn add_task(
     Path(version): Path<DapVersion>,
     Json(cmd): Json<InternalTestAddTask>,
 ) -> impl IntoResponse {
+    tracing::warn!("TaskID: {:?}", cmd.task_id);
+    tracing::warn!("task conf range: {}..{}", cmd.task_commencement, cmd.task_expiration);
+    tracing::warn!("Valid time range: {:?}", app.valid_report_time_range());
     match app.internal_add_task(version, cmd).await {
         Ok(()) => (
             StatusCode::OK,
