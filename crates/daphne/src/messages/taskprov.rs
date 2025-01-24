@@ -3,12 +3,16 @@
 
 //! draft-wang-ppm-dap-taskprov: Messages for the taskrpov extension for DAP.
 
-use crate::messages::{
-    decode_u16_bytes, encode_u16_bytes, Duration, Time, BATCH_MODE_LEADER_SELECTED,
-    BATCH_MODE_TIME_INTERVAL,
+use crate::{
+    error::DapAbort,
+    messages::{
+        decode_u16_bytes, encode_u16_bytes, Duration, Time, BATCH_MODE_LEADER_SELECTED,
+        BATCH_MODE_TIME_INTERVAL,
+    },
+    pine::PineParam,
+    taskprov::compute_task_id,
+    DapError, DapTaskLifetime, DapVersion,
 };
-use crate::pine::PineParam;
-use crate::{DapError, DapVersion};
 use prio::codec::{
     decode_u16_items, decode_u8_items, encode_u16_items, encode_u8_items, CodecError, Decode,
     Encode, ParameterizedDecode, ParameterizedEncode,
@@ -20,8 +24,6 @@ use std::num::NonZeroU32;
 use super::{
     decode_base64url_vec, decode_u16_prefixed, encode_base64url, encode_u16_prefixed, TaskId,
 };
-use crate::error::DapAbort;
-use crate::taskprov::compute_task_id;
 
 // VDAF type codes.
 const VDAF_TYPE_PRIO2: u32 = 0xFFFF_0000;
@@ -467,38 +469,6 @@ impl ParameterizedDecode<(DapVersion, Option<usize>)> for QueryConfig {
     }
 }
 
-/// Task lifetime parameters.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum TaskLifetime {
-    Latest {
-        /// Task start time.
-        start: Time,
-        /// Task duration.
-        duration: Duration,
-    },
-    /// draft09 compatibility: Previously the DAP task parameters (and thus Taskprov) only
-    /// expressed an end time and not a start time.
-    Draft09 { expiration: Time },
-}
-
-impl TaskLifetime {
-    pub(crate) fn from_validity_range(
-        version: DapVersion,
-        not_before: Time,
-        not_after: Time,
-    ) -> Self {
-        match version {
-            DapVersion::Draft09 => Self::Draft09 {
-                expiration: not_after,
-            },
-            DapVersion::Latest => Self::Latest {
-                start: not_before,
-                duration: not_after - not_before,
-            },
-        }
-    }
-}
-
 /// Taskprov extensions.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum TaskprovExtension {
@@ -535,7 +505,7 @@ pub struct TaskprovAdvertisement {
     pub time_precision: Duration,
     pub min_batch_size: u32,
     pub query_config: QueryConfig,
-    pub lifetime: TaskLifetime,
+    pub lifetime: DapTaskLifetime,
     pub vdaf_config: VdafConfig,
     pub extensions: Vec<TaskprovExtension>,
     pub draft09_max_batch_query_count: Option<u16>,
@@ -605,7 +575,7 @@ impl ParameterizedEncode<DapVersion> for TaskprovAdvertisement {
                     self.query_config.encode_with_param(&version, bytes)?;
                     Ok(())
                 })?;
-                let TaskLifetime::Draft09 { expiration } = self.lifetime else {
+                let DapTaskLifetime::Draft09 { expiration } = self.lifetime else {
                     return Err(CodecError::Other("task expiration should be set".into()));
                 };
                 expiration.encode(bytes)?;
@@ -631,7 +601,7 @@ impl ParameterizedEncode<DapVersion> for TaskprovAdvertisement {
                 self.time_precision.encode(bytes)?;
                 self.min_batch_size.encode(bytes)?;
                 self.query_config.encode_with_param(version, bytes)?;
-                let TaskLifetime::Latest { start, duration } = self.lifetime else {
+                let DapTaskLifetime::Latest { start, duration } = self.lifetime else {
                     return Err(CodecError::Other(
                         "task start time and duration should be set".into(),
                     ));
@@ -681,7 +651,7 @@ impl ParameterizedDecode<DapVersion> for TaskprovAdvertisement {
                             query_config,
                         ))
                     })?;
-                let lifetime = TaskLifetime::Draft09 {
+                let lifetime = DapTaskLifetime::Draft09 {
                     expiration: Time::decode(bytes)?,
                 };
                 let (draft09_dp_config, vdaf_config) =
@@ -719,7 +689,7 @@ impl ParameterizedDecode<DapVersion> for TaskprovAdvertisement {
                 let time_precision = Duration::decode(bytes)?;
                 let min_batch_size = u32::decode(bytes)?;
                 let query_config = QueryConfig::decode_with_param(&(*version, None), bytes)?;
-                let lifetime = TaskLifetime::Latest {
+                let lifetime = DapTaskLifetime::Latest {
                     start: Time::decode(bytes)?,
                     duration: Duration::decode(bytes)?,
                 };
@@ -767,7 +737,7 @@ mod tests {
                     DapVersion::Latest => None,
                 },
             },
-            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            lifetime: DapTaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
             vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
             extensions: match version {
                 DapVersion::Latest => vec![
@@ -992,7 +962,7 @@ mod tests {
                     DapVersion::Latest => None,
                 },
             },
-            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            lifetime: DapTaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
             vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
             extensions: Vec::new(),
             draft09_max_batch_query_count: match version {
@@ -1053,7 +1023,7 @@ mod tests {
                     DapVersion::Latest => None,
                 },
             },
-            lifetime: TaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
+            lifetime: DapTaskLifetime::from_validity_range(version, 23_232_232_232, 23_232_232_232),
             vdaf_config: VdafConfig::Prio2 { dimension: 99_999 },
             extensions: Vec::new(),
             draft09_max_batch_query_count: match version {

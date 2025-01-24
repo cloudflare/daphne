@@ -378,6 +378,7 @@ async fn run_agg_job<A: DapLeader>(
         task_config.consume_agg_job_resp(task_id, agg_job_state, agg_job_resp, metrics)?;
 
     let out_shares_count = agg_span.report_count() as u64;
+    debug!("computed {out_shares_count} output shares");
     if out_shares_count == 0 {
         return Ok(0);
     }

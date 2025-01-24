@@ -12,16 +12,15 @@ use crate::{
     fatal_error,
     hpke::HpkeConfig,
     messages::{self, taskprov::TaskprovAdvertisement, Duration, TaskId, Time},
+    pine::PineParam,
     roles::aggregator::TaskprovConfig,
     vdaf::VdafVerifyKey,
-    DapBatchMode, DapError, DapTaskConfig, DapTaskConfigMethod, DapVersion, VdafConfig,
-};
-use crate::{
-    pine::PineParam,
     vdaf::{
         pine::{pine32_hmac_sha256_aes128, pine64_hmac_sha256_aes128, PineConfig},
         Prio3Config,
     },
+    DapBatchMode, DapError, DapTaskConfig, DapTaskConfigMethod, DapTaskLifetime, DapVersion,
+    VdafConfig,
 };
 use ring::{
     digest,
@@ -305,15 +304,15 @@ pub struct DapTaskConfigNeedsOptIn {
     /// Lifetime of the task.
     ///
     /// draft09: Only the expiration date is conveyed by the taskprov advertisement.
-    pub lifetime: messages::taskprov::TaskLifetime,
+    pub lifetime: DapTaskLifetime,
 }
 
 impl DapTaskConfigNeedsOptIn {
     /// Return the time after which the task is no longer valid.
     pub fn not_after(&self) -> Time {
         match self.lifetime {
-            messages::taskprov::TaskLifetime::Draft09 { expiration } => expiration,
-            messages::taskprov::TaskLifetime::Latest { start, duration } => start + duration,
+            DapTaskLifetime::Draft09 { expiration } => expiration,
+            DapTaskLifetime::Latest { start, duration } => start + duration,
         }
     }
 
@@ -367,14 +366,10 @@ impl DapTaskConfigNeedsOptIn {
     /// Complete configuration of a task via taskprov using the supplied parameters.
     pub fn into_opted_in(self, param: &OptInParam) -> DapTaskConfig {
         let (not_before, not_after) = match self.lifetime {
-            messages::taskprov::TaskLifetime::Latest { start, duration } => {
-                (start, start.saturating_add(duration))
-            }
+            DapTaskLifetime::Latest { start, duration } => (start, start.saturating_add(duration)),
             // draft09 compatibility: Previously the task start time was not conveyed by the
             // taskprov advertisement, so we need to get this value from the opt-in parameters.
-            messages::taskprov::TaskLifetime::Draft09 { expiration } => {
-                (param.not_before, expiration)
-            }
+            DapTaskLifetime::Draft09 { expiration } => (param.not_before, expiration),
         };
 
         DapTaskConfig {
@@ -477,11 +472,7 @@ impl TryFrom<&DapTaskConfig> for messages::taskprov::TaskprovAdvertisement {
                 .try_into()
                 .map_err(|_| fatal_error!(err = "task min batch size is too large for taskprov"))?,
             query_config: (&task_config.query).try_into()?,
-            lifetime: messages::taskprov::TaskLifetime::from_validity_range(
-                task_config.version,
-                task_config.not_before,
-                task_config.not_after,
-            ),
+            lifetime: task_config.lifetime(),
             vdaf_config: (&task_config.vdaf).try_into()?,
             extensions: Vec::new(),
             draft09_max_batch_query_count: match task_config.version {
@@ -510,7 +501,7 @@ mod test {
         taskprov::{DapTaskConfigNeedsOptIn, OptInParam},
         test_versions,
         vdaf::VdafVerifyKey,
-        DapRequestMeta, DapVersion,
+        DapRequestMeta, DapTaskLifetime, DapVersion,
     };
 
     /// Test conversion between the serialized task configuration and a `DapTaskConfig`.
@@ -531,7 +522,7 @@ mod test {
                     DapVersion::Latest => None,
                 },
             },
-            lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 1337, 1337),
+            lifetime: DapTaskLifetime::from_validity_range(version, 1337, 1337),
             vdaf_config: messages::taskprov::VdafConfig::Prio2 { dimension: 10 },
             extensions: Vec::new(),
             draft09_max_batch_query_count: match version {
@@ -613,7 +604,7 @@ mod test {
             query_config: messages::taskprov::QueryConfig::LeaderSelected {
                 draft09_max_batch_size: Some(NonZeroU32::new(2).unwrap()),
             },
-            lifetime: messages::taskprov::TaskLifetime::Draft09 { expiration: 23 },
+            lifetime: DapTaskLifetime::Draft09 { expiration: 23 },
             vdaf_config: messages::taskprov::VdafConfig::Prio2 { dimension: 10 },
             extensions: Vec::new(),
             draft09_max_batch_query_count: Some(23),
@@ -646,7 +637,7 @@ mod test {
             query_config: messages::taskprov::QueryConfig::LeaderSelected {
                 draft09_max_batch_size: None,
             },
-            lifetime: messages::taskprov::TaskLifetime::Latest {
+            lifetime: DapTaskLifetime::Latest {
                 start: 23,
                 duration: 23,
             },
@@ -686,7 +677,7 @@ mod test {
                         DapVersion::Latest => None,
                     },
                 },
-                lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 0, 0),
+                lifetime: DapTaskLifetime::from_validity_range(version, 0, 0),
                 // unrecognized VDAF
                 vdaf_config: messages::taskprov::VdafConfig::NotImplemented {
                     typ: 1337,
@@ -760,7 +751,7 @@ mod test {
                         DapVersion::Latest => None,
                     },
                 },
-                lifetime: messages::taskprov::TaskLifetime::from_validity_range(version, 0, 0),
+                lifetime: DapTaskLifetime::from_validity_range(version, 0, 0),
                 vdaf_config: messages::taskprov::VdafConfig::Prio2 { dimension: 1337 },
                 extensions: Vec::new(),
                 draft09_max_batch_query_count: match version {

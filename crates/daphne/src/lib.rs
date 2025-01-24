@@ -141,7 +141,7 @@ impl std::fmt::Display for DapVersion {
 pub struct DapGlobalConfig {
     /// Maximum interval duration permitted in [`CollectionReq`](messages::CollectionReq).
     ///
-    /// Prevents Collectors from requesting wide range or reports.
+    /// Prevents Collectors from requesting a wide range of reports.
     pub max_batch_duration: Duration,
 
     /// Lower bound of an acceptable batch interval for collect requests.
@@ -568,11 +568,7 @@ impl DapTaskParameters {
             time_precision: self.time_precision,
             min_batch_size: self.min_batch_size.try_into().unwrap(),
             query_config: (&self.query).try_into()?,
-            lifetime: messages::taskprov::TaskLifetime::from_validity_range(
-                self.version,
-                not_before,
-                not_after,
-            ),
+            lifetime: DapTaskLifetime::from_validity_range(self.version, not_before, not_after),
             vdaf_config: (&self.vdaf).try_into()?,
             extensions: Vec::new(),
             draft09_max_batch_query_count: match self.version {
@@ -783,6 +779,13 @@ impl DapTaskConfig {
     /// Returns true if the task configuration method is taskprov.
     pub fn method_is_taskprov(&self) -> bool {
         matches!(self.method, DapTaskConfigMethod::Taskprov { .. })
+    }
+
+    /// Return the task lifetime.
+    //
+    // draft09 compatibility: The information conveyed by the lifetime depends on the DAP version.
+    pub fn lifetime(&self) -> DapTaskLifetime {
+        DapTaskLifetime::from_validity_range(self.version, self.not_before, self.not_after)
     }
 }
 
@@ -1069,4 +1072,36 @@ pub struct DapLeaderProcessTelemetry {
 
     /// The number of reports processed.
     pub reports_processed: u64,
+}
+
+/// Task lifetime parameters.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum DapTaskLifetime {
+    Latest {
+        /// Task start time.
+        start: Time,
+        /// Task duration.
+        duration: Duration,
+    },
+    /// draft09 compatibility: Previously the DAP task parameters (and thus Taskprov) only
+    /// expressed an end time and not a start time.
+    Draft09 { expiration: Time },
+}
+
+impl DapTaskLifetime {
+    pub(crate) fn from_validity_range(
+        version: DapVersion,
+        not_before: Time,
+        not_after: Time,
+    ) -> Self {
+        match version {
+            DapVersion::Draft09 => Self::Draft09 {
+                expiration: not_after,
+            },
+            DapVersion::Latest => Self::Latest {
+                start: not_before,
+                duration: not_after - not_before,
+            },
+        }
+    }
 }

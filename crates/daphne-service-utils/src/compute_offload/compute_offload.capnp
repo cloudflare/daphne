@@ -44,13 +44,14 @@ struct HpkeReceiverConfig @0xeec9b4a50458edb7 {
     privateKey @1 :Data;
 }
 
-struct PartialDapTaskConfig @0xdcc9bf18fc62d406 {
+struct PartialDapTaskConfig @0xb11c76132b15968a {
 
     version             @0  :Base.DapVersion;
     methodIsTaskprov    @1  :Bool;
-    notAfter            @2  :Base.Time;
-    vdaf                @3  :VdafConfig;
-    vdafVerifyKey       @4  :VdafVerifyKey;
+    notBefore           @2  :Base.Time;
+    notAfter            @3  :Base.Time;
+    vdaf                @4  :VdafConfig;
+    vdafVerifyKey       @5  :VdafVerifyKey;
 }
 
 struct PublicExtensionsList @0x8b3c98c0ddd0043e {
