@@ -176,12 +176,14 @@ impl DapTaskConfig {
                     ..
                 } => {
                     // Skip report that can't be processed any further.
+                    tracing::warn!("produce_agg_job_req: rejected report: {failure:?}");
                     metrics.report_inc_by(ReportStatus::Rejected(failure), 1);
                     continue;
                 }
             }
         }
 
+        tracing::debug!("produce_agg_job_req: reports count: {}", prep_inits.len());
         Ok((
             DapAggregationJobState {
                 seq: states,
@@ -252,6 +254,10 @@ impl DapTaskConfig {
                 task_id: *task_id,
             })?;
         }
+        tracing::debug!(
+            "consume_agg_job_req: reports count: {}",
+            agg_job_init_req.prep_inits.len()
+        );
 
         agg_job_init_req
             .prep_inits
@@ -413,6 +419,7 @@ impl DapTaskConfig {
 
                 // Skip report that can't be processed any further.
                 TransitionVar::Failed(err) => {
+                    tracing::warn!("report rejected by Helper: {err:?}");
                     metrics.report_inc_by(ReportStatus::Rejected(*err), 1);
                     continue;
                 }

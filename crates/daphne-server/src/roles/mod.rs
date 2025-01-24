@@ -113,7 +113,7 @@ mod test_utils {
         messages::decode_base64url_vec,
         roles::DapAggregator,
         vdaf::{Prio3Config, VdafConfig},
-        DapBatchMode, DapError, DapTaskConfig, DapVersion,
+        DapBatchMode, DapError, DapTaskConfig, DapTaskLifetime, DapVersion,
     };
     use daphne_service_utils::{
         bearer_token::BearerToken,
@@ -297,6 +297,19 @@ mod test_utils {
                 }
             };
 
+            let (not_before, not_after) = match cmd.lifetime {
+                DapTaskLifetime::Latest { start, duration } => {
+                    (start, start.saturating_add(duration))
+                }
+                // draft09 compatibility: Previously the task start time was not conveyed by the
+                // taskprov advertisement, so just use the current time.
+                DapTaskLifetime::Draft09 { expiration } => (self.get_current_time(), expiration),
+            };
+
+            if not_before >= not_after {
+                tracing::warn!("task has empty validity interval: not_before={not_before}; not_after={not_after}");
+            }
+
             if self
                 .kv()
                 .put_if_not_exists_with_expiration::<kv::prefix::TaskConfig>(
@@ -306,8 +319,8 @@ mod test_utils {
                         leader_url: cmd.leader,
                         helper_url: cmd.helper,
                         time_precision: cmd.time_precision,
-                        not_before: self.get_current_time(),
-                        not_after: cmd.task_expiration,
+                        not_before,
+                        not_after,
                         min_batch_size: cmd.min_batch_size,
                         query,
                         vdaf,
@@ -316,7 +329,7 @@ mod test_utils {
                         method: Default::default(),
                         num_agg_span_shards: NonZeroUsize::new(4).unwrap(),
                     },
-                    cmd.task_expiration,
+                    not_after,
                 )
                 .await
                 .map_err(|e| fatal_error!(err = ?e, "failed to put task config in kv"))?

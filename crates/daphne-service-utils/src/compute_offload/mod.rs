@@ -203,12 +203,14 @@ impl CapnprotoPayloadEncode for PartialDapTaskConfigForReportInit<'_> {
 
     fn encode_to_builder(&self, mut builder: Self::Builder<'_>) {
         let PartialDapTaskConfigForReportInit {
+            not_before,
             not_after,
             method_is_taskprov,
             version,
             vdaf,
             vdaf_verify_key,
         } = self;
+        builder.set_not_before(*not_before);
         builder.set_not_after(*not_after);
         builder.set_method_is_taskprov(*method_is_taskprov);
         builder.set_version((*version).into());
@@ -227,6 +229,7 @@ impl CapnprotoPayloadDecode for PartialDapTaskConfigForReportInit<'static> {
         Self: Sized,
     {
         Ok(Self {
+            not_before: reader.get_not_before(),
             not_after: reader.get_not_after(),
             method_is_taskprov: reader.get_method_is_taskprov(),
             version: reader.get_version()?.into(),

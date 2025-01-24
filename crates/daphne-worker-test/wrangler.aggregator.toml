@@ -95,6 +95,7 @@ preview_id = "24c4dc92d5cf4680e508fe18eb8f0281"
 name = "daphne-leader-aggregator"
 
 [env.leader.vars]
+DAP_TRACING="debug"
 DAP_DEPLOYMENT = "dev"
 DAP_WORKER_MODE = "aggregator"
 DAP_DURABLE_HELPER_STATE_STORE_GC_AFTER_SECS = "30"

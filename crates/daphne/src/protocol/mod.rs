@@ -401,12 +401,15 @@ mod test {
 
         let agg_job_init_req = {
             // Temporarily overwrite the valid report time range so that the Leader accepts the
-            // out-of-range report and produces the request.
-            let tmp = t.valid_report_range.clone();
+            // out-of-range report and produces the request. Likewise for the task start time.
+            let tmp_valid_time_range = t.valid_report_range.clone();
+            let tmp_not_before = t.task_config.not_before;
             t.valid_report_range = 0..u64::MAX;
+            t.task_config.not_before = 0;
             let (_, agg_job_init_req) =
                 t.produce_agg_job_req(&DapAggregationParam::Empty, reports.clone());
-            t.valid_report_range = tmp;
+            t.valid_report_range = tmp_valid_time_range;
+            t.task_config.not_before = tmp_not_before;
             agg_job_init_req
         };
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);

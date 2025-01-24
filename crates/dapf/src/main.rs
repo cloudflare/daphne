@@ -19,7 +19,7 @@ use daphne::{
     messages::{
         self, encode_base64url, BatchSelector, CollectionReq, PartialBatchSelector, Query, TaskId,
     },
-    DapBatchMode, DapMeasurement, DapVersion,
+    DapBatchMode, DapMeasurement, DapTaskLifetime, DapVersion,
 };
 use daphne_service_utils::{
     bearer_token::BearerToken,
@@ -837,7 +837,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
             min_batch_size,
             collector_hpke_config,
             time_precision,
-            expires_in_seconds: task_expiration,
+            expires_in_seconds,
         } => {
             let vdaf = use_or_request_from_user_or_default(vdaf, CliVdafConfig::default, "vdaf")?
                 .into_vdaf_config();
@@ -850,7 +850,40 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                 "query",
             )?;
             let role = use_or_request_from_user(role, "role")?;
+
+            let leader = use_or_request_from_user(leader_url, "leader url")?;
+            let helper = use_or_request_from_user(helper_url, "helper url")?;
+
             let default_task_id = TaskId(thread_rng().gen());
+
+            let version = match role {
+                DapAggregatorRole::Leader => deduce_dap_version_from_url(&leader)?,
+                DapAggregatorRole::Helper => deduce_dap_version_from_url(&helper)?,
+            };
+
+            let lifetime = {
+                let not_before = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+
+                let task_duration = use_or_request_from_user_or_default(
+                    expires_in_seconds,
+                    || 604_800u64,
+                    "task should expire in",
+                )?;
+
+                match version {
+                    DapVersion::Latest => DapTaskLifetime::Latest {
+                        start: not_before,
+                        duration: task_duration,
+                    },
+                    DapVersion::Draft09 => DapTaskLifetime::Draft09 {
+                        expiration: not_before + task_duration,
+                    },
+                }
+            };
+
             let internal_task = InternalTestAddTask {
                 task_id: use_or_request_from_user_or_default(
                     task_id,
@@ -858,8 +891,8 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     "task id",
                 )?
                 .into(),
-                leader: use_or_request_from_user(leader_url, "leader url")?,
-                helper: use_or_request_from_user(helper_url, "helper url")?,
+                leader,
+                helper,
                 vdaf: InternalTestVdaf::from(vdaf),
                 leader_authentication_token: use_or_request_from_user(
                     leader_auth_token,
@@ -898,15 +931,7 @@ async fn handle_test_routes(action: TestAction, http_client: HttpClient) -> anyh
                     collector_hpke_config,
                     "collector hpke config",
                 )?,
-                task_expiration: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    + use_or_request_from_user_or_default(
-                        task_expiration,
-                        || 604_800u64,
-                        "task should expire in",
-                    )?,
+                lifetime,
             };
 
             print_json(&internal_task);

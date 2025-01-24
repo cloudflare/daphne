@@ -112,12 +112,15 @@ impl TestRunner {
             default_num_agg_span_shards: NonZeroUsize::new(1).unwrap(),
         };
 
+        let not_before = now;
+        let not_after = not_before + 604_800; // one week from now
+
         let task_config = DapTaskConfig {
             version,
             leader_url: leader_url.clone(),
             helper_url: helper_url.clone(),
-            not_before: now,
-            not_after: now + 604_800, // one week from now
+            not_before,
+            not_after,
             time_precision: TIME_PRECISION,
             min_batch_size: MIN_BATCH_SIZE,
             query: query_config.clone(),
@@ -240,7 +243,7 @@ impl TestRunner {
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
-            "task_expiration": t.task_config.not_after,
+            "lifetime": t.task_config.lifetime(),
         });
         let add_task_path = format!("{}/internal/test/add_task", version.as_ref());
         let res: InternalTestCommandResult = t
@@ -267,7 +270,7 @@ impl TestRunner {
             "max_batch_size": max_batch_size,
             "time_precision": t.task_config.time_precision,
             "collector_hpke_config": collector_hpke_config_base64url.clone(),
-            "task_expiration": t.task_config.not_after,
+            "lifetime": t.task_config.lifetime(),
         });
         let res: InternalTestCommandResult = t
             .helper_post_internal(&add_task_path, &helper_add_task_cmd)
@@ -327,11 +330,16 @@ impl TestRunner {
         }
     }
 
-    pub fn report_interval(interval: &Interval) -> Range<u64> {
+    pub fn report_interval(&self, interval: &Interval) -> Range<u64> {
         const REPORT_STORAGE_MAX_FUTURE_TIME_SKEW: u64 = 300;
         // This is a portion of the interval which is guaranteed to be a valid report time
         // provided that the interval start time is valid.
-        interval.start..interval.start + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW
+        let start = std::cmp::max(interval.start, self.task_config.not_before);
+        let end = std::cmp::min(
+            start + REPORT_STORAGE_MAX_FUTURE_TIME_SKEW,
+            self.task_config.not_after,
+        );
+        start..end
     }
 
     pub async fn get_hpke_configs(

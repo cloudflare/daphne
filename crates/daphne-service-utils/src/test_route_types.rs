@@ -7,8 +7,9 @@
 
 use daphne::{
     constants::DapAggregatorRole,
-    messages::{Duration, TaskId, Time},
+    messages::{Duration, TaskId},
     vdaf::{Prio3Config, VdafConfig},
+    DapTaskLifetime,
 };
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
@@ -113,5 +114,7 @@ pub struct InternalTestAddTask {
     pub max_batch_size: Option<NonZeroU32>,
     pub time_precision: Duration,
     pub collector_hpke_config: String, // base64url
-    pub task_expiration: Time,
+    // TODO(cjpatton) Align this with draft-dcook-ppm-dap-interop-test-design once it's updated to
+    // DAP-13. I'm pretty sure we won't need to be backwards compatible.
+    pub lifetime: DapTaskLifetime,
 }

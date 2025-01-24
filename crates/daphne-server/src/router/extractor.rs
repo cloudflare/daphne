@@ -675,10 +675,8 @@ mod test {
             min_batch_size: 1,
             query_config: daphne::messages::taskprov::QueryConfig::TimeInterval,
             lifetime: match version {
-                DapVersion::Draft09 => {
-                    daphne::messages::taskprov::TaskLifetime::Draft09 { expiration: 1 }
-                }
-                DapVersion::Latest => daphne::messages::taskprov::TaskLifetime::Latest {
+                DapVersion::Draft09 => daphne::DapTaskLifetime::Draft09 { expiration: 1 },
+                DapVersion::Latest => daphne::DapTaskLifetime::Latest {
                     start: 0,
                     duration: 1,
                 },
