@@ -11,7 +11,7 @@ use crate::{
     metrics::ReportStatus,
     protocol::aggregator::ReportProcessedStatus,
     roles::{aggregator::MergeAggShareError, resolve_task_config},
-    DapError, DapRequest, DapTaskConfig, InitializedReport, WithPeerPrepShare,
+    DapAggregationParam, DapError, DapRequest, DapTaskConfig, InitializedReport, WithPeerPrepShare,
 };
 use std::{collections::HashMap, sync::Once};
 
@@ -48,6 +48,7 @@ pub struct ToInitializedReportsTransition {
 /// The reports have been initialized and are ready for aggregation.
 pub struct InitializedReports {
     task_id: TaskId,
+    agg_param: DapAggregationParam,
     part_batch_sel: PartialBatchSelector,
     task_config: DapTaskConfig,
     reports: Vec<InitializedReport<WithPeerPrepShare>>,
@@ -142,7 +143,7 @@ impl HandleAggJob<WithTaskConfig> {
         } = self.state;
         let task_id = request.task_id;
         let part_batch_sel = request.payload.part_batch_sel.clone();
-        let initialized_reports = task_config.consume_agg_job_req(
+        let (agg_param, initialized_reports) = task_config.consume_agg_job_req(
             &aggregator
                 .get_hpke_receiver_configs(task_config.version)
                 .await?,
@@ -155,6 +156,7 @@ impl HandleAggJob<WithTaskConfig> {
         Ok(HandleAggJob {
             state: InitializedReports {
                 task_id,
+                agg_param,
                 task_config,
                 part_batch_sel,
                 reports: initialized_reports,
@@ -207,6 +209,7 @@ impl ToInitializedReportsTransition {
     /// Provide the initialized reports that should be aggregated.
     pub fn with_initialized_reports(
         self,
+        agg_param: DapAggregationParam,
         reports: Vec<InitializedReport<WithPeerPrepShare>>,
     ) -> HandleAggJob<InitializedReports> {
         let Self {
@@ -217,6 +220,7 @@ impl ToInitializedReportsTransition {
         HandleAggJob {
             state: InitializedReports {
                 task_id,
+                agg_param,
                 part_batch_sel,
                 task_config,
                 reports,
@@ -236,6 +240,7 @@ impl HandleAggJob<InitializedReports> {
             state:
                 InitializedReports {
                     task_id,
+                    agg_param,
                     part_batch_sel,
                     task_config,
                     reports,
@@ -257,6 +262,7 @@ impl HandleAggJob<InitializedReports> {
         for _ in 0..RETRY_COUNT {
             let (agg_span, agg_job_resp) = task_config.produce_agg_job_resp(
                 task_id,
+                &agg_param,
                 &report_status,
                 &part_batch_sel,
                 &reports,

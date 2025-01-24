@@ -97,7 +97,6 @@ where
 
 pub(crate) fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
     vdaf: &V,
-    agg_id: usize,
     host_state: V::PrepareState,
     host_share: V::PrepareShare,
     peer_share_data: &[u8],
@@ -105,18 +104,11 @@ pub(crate) fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NON
 where
     V: Vdaf<AggregationParam = ()> + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
 {
-    // Decode the Helper's inbound message.
+    // Decode the peer's inbound message.
     let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
 
     // Preprocess the inbound messages.
-    let message = vdaf.prepare_shares_to_prepare_message(
-        &(),
-        if agg_id == 0 {
-            [host_share, peer_share]
-        } else {
-            [peer_share, host_share]
-        },
-    )?;
+    let message = vdaf.prepare_shares_to_prepare_message(&(), [peer_share, host_share])?;
     let message_data = message.get_encoded()?;
 
     // Compute the host's output share.

@@ -505,7 +505,7 @@ pub mod info_and_aad {
         }
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct AggregateShare<'s> {
         // info
         pub version: DapVersion,

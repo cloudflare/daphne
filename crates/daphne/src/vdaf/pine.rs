@@ -123,7 +123,6 @@ impl PineConfig {
 
     pub(crate) fn prep_finish_from_shares(
         &self,
-        agg_id: usize,
         host_state: VdafPrepState,
         host_share: VdafPrepShare,
         peer_share_data: &[u8],
@@ -136,7 +135,7 @@ impl PineConfig {
             ) => {
                 let vdaf = pine32_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
-                    draft09::prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
+                    draft09::prep_finish_from_shares(&vdaf, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field32Draft09(AggregateShare::from(
                     OutputShare::from(out_share.0),
                 ));
@@ -149,7 +148,7 @@ impl PineConfig {
             ) => {
                 let vdaf = pine64_hmac_sha256_aes128(param)?;
                 let (out_share, outbound) =
-                    draft09::prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
+                    draft09::prep_finish_from_shares(&vdaf, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64Draft09(AggregateShare::from(
                     OutputShare::from(out_share.0),
                 ));

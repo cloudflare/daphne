@@ -209,22 +209,26 @@ impl AggregationJobTest {
         &self,
         agg_job_init_req: AggregationJobInitReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
+        let part_batch_sel = agg_job_init_req.part_batch_sel.clone();
+        let (agg_param, initialized_reports) = self
+            .task_config
+            .consume_agg_job_req(
+                &self.helper_hpke_receiver_config,
+                self.valid_report_time_range(),
+                &self.task_id,
+                agg_job_init_req,
+                self.replay_protection,
+            )
+            .unwrap();
+
         let (span, resp) = self
             .task_config
             .produce_agg_job_resp(
                 self.task_id,
+                &agg_param,
                 &HashMap::default(),
-                &agg_job_init_req.part_batch_sel.clone(),
-                &self
-                    .task_config
-                    .consume_agg_job_req(
-                        &self.helper_hpke_receiver_config,
-                        self.valid_report_time_range(),
-                        &self.task_id,
-                        agg_job_init_req,
-                        self.replay_protection,
-                    )
-                    .unwrap(),
+                &part_batch_sel,
+                &initialized_reports,
             )
             .unwrap();
         (span, resp.into())
