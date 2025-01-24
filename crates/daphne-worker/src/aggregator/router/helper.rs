@@ -11,6 +11,7 @@ use axum::{
     routing::{post, put},
 };
 use daphne::{
+    error::DapAbort,
     fatal_error,
     hpke::HpkeProvider,
     messages::AggregateShareReq,
@@ -18,11 +19,11 @@ use daphne::{
         helper::{self, HashedAggregationJobReq},
         DapAggregator, DapHelper,
     },
-    DapError, DapResponse,
+    DapAggregationParam, DapError, DapResponse,
 };
 use daphne_service_utils::compute_offload;
 use http::StatusCode;
-use prio::codec::ParameterizedEncode;
+use prio::codec::{ParameterizedDecode, ParameterizedEncode};
 use std::{borrow::Cow, sync::Arc};
 
 pub(super) fn add_helper_routes(router: super::Router<App>) -> super::Router<App> {
@@ -60,6 +61,12 @@ async fn agg_job(
 
         let hpke_receiver_configs = app.get_hpke_receiver_configs(req.version).await?;
 
+        let agg_param = DapAggregationParam::get_decoded_with_param(
+            &transition.task_config.vdaf,
+            &req.payload.agg_param,
+        )
+        .map_err(|e| DapAbort::from_codec_error(e, req.task_id))?;
+
         let initialized_reports: compute_offload::InitializedReports = app
             .compute_offload
             .compute(
@@ -77,7 +84,7 @@ async fn agg_job(
             .map_err(|e| fatal_error!(err = ?e, "failed to offload report initialization"))?;
 
         transition
-            .with_initialized_reports(initialized_reports.reports)
+            .with_initialized_reports(agg_param, initialized_reports.reports)
             .finish_and_aggregate(&*app)
             .await
     }

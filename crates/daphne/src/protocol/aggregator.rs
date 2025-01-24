@@ -236,7 +236,13 @@ impl DapTaskConfig {
         task_id: &TaskId,
         agg_job_init_req: AggregationJobInitReq,
         replay_protection: ReplayProtection,
-    ) -> Result<Vec<InitializedReport<WithPeerPrepShare>>, DapError>
+    ) -> Result<
+        (
+            DapAggregationParam,
+            Vec<InitializedReport<WithPeerPrepShare>>,
+        ),
+        DapError,
+    >
     where
         H: HpkeDecrypter + Sync,
     {
@@ -260,7 +266,7 @@ impl DapTaskConfig {
             agg_job_init_req.prep_inits.len()
         );
 
-        agg_job_init_req
+        let initialized_reports = agg_job_init_req
             .prep_inits
             .into_par_iter()
             .map(|prep_init| {
@@ -274,7 +280,8 @@ impl DapTaskConfig {
                     &agg_param,
                 )
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((agg_param, initialized_reports))
     }
 
     /// Helper -> Leader: Produce the `AggregationJobResp` message to send to the Leader and
@@ -283,6 +290,7 @@ impl DapTaskConfig {
     pub(crate) fn produce_agg_job_resp(
         &self,
         task_id: TaskId,
+        agg_param: &DapAggregationParam,
         report_status: &HashMap<ReportId, ReportProcessedStatus>,
         part_batch_sel: &PartialBatchSelector,
         initialized_reports: &[InitializedReport<WithPeerPrepShare>],
@@ -305,8 +313,8 @@ impl DapTaskConfig {
                     } => {
                         let res = self.vdaf.prep_finish_from_shares(
                             self.version,
-                            1,
                             task_id,
+                            agg_param,
                             helper_prep_state.clone(),
                             helper_prep_share.clone(),
                             leader_prep_share,

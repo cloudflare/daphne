@@ -12,20 +12,16 @@ use crate::{
     VdafPrepState,
 };
 
-use super::{prep_finish, prep_finish_from_shares, shard_then_encode, unshard};
+use super::{prep_finish, prep_finish_from_shares, prep_init, shard_then_encode, unshard};
 
 use prio::{
     codec::ParameterizedDecode,
-    flp::Type,
     vdaf::{
-        prio3::{Prio3, Prio3InputShare, Prio3PrepareShare, Prio3PrepareState, Prio3PublicShare},
-        xof::Xof,
+        prio3::{Prio3, Prio3PrepareState},
         Aggregator,
     },
 };
 use std::io::Cursor;
-
-const CTX_STRING_PREFIX: &[u8] = b"dap-13";
 
 impl Prio3Config {
     pub(crate) fn shard(
@@ -118,16 +114,17 @@ impl Prio3Config {
         public_share_data: &[u8],
         input_share_data: &[u8],
     ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-        return match (version, self) {
+        match (version, self) {
             (DapVersion::Latest, Prio3Config::Count) => {
                 let vdaf = Prio3::new_count(2).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (state, share) = prep_init(
-                    vdaf,
+                    &vdaf,
                     task_id,
                     verify_key,
                     agg_id,
+                    &(),
                     nonce,
                     public_share_data,
                     input_share_data,
@@ -142,10 +139,11 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (state, share) = prep_init(
-                    vdaf,
+                    &vdaf,
                     task_id,
                     verify_key,
                     agg_id,
+                    &(),
                     nonce,
                     public_share_data,
                     input_share_data,
@@ -166,10 +164,11 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (state, share) = prep_init(
-                    vdaf,
+                    &vdaf,
                     task_id,
                     verify_key,
                     agg_id,
+                    &(),
                     nonce,
                     public_share_data,
                     input_share_data,
@@ -191,10 +190,11 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (state, share) = prep_init(
-                    vdaf,
+                    &vdaf,
                     task_id,
                     verify_key,
                     agg_id,
+                    &(),
                     nonce,
                     public_share_data,
                     input_share_data,
@@ -236,53 +236,12 @@ impl Prio3Config {
                 err =
                     format!("unexpected verify key or {self:?} is not supported in DAP {version}")
             ))),
-        };
-
-        type Prio3Prepared<T, const SEED_SIZE: usize> = (
-            Prio3PrepareState<<T as Type>::Field, SEED_SIZE>,
-            Prio3PrepareShare<<T as Type>::Field, SEED_SIZE>,
-        );
-
-        fn prep_init<T, P, const SEED_SIZE: usize>(
-            vdaf: Prio3<T, P, SEED_SIZE>,
-            task_id: TaskId,
-            verify_key: &[u8; SEED_SIZE],
-            agg_id: usize,
-            nonce: &[u8; 16],
-            public_share_data: &[u8],
-            input_share_data: &[u8],
-        ) -> Result<Prio3Prepared<T, SEED_SIZE>, VdafError>
-        where
-            T: Type,
-            P: Xof<SEED_SIZE>,
-        {
-            // Parse the public share.
-            let public_share = Prio3PublicShare::get_decoded_with_param(&vdaf, public_share_data)?;
-
-            // Parse the input share.
-            let input_share =
-                Prio3InputShare::get_decoded_with_param(&(&vdaf, agg_id), input_share_data)?;
-
-            let mut ctx = [0; CTX_STRING_PREFIX.len() + 32];
-            ctx[..CTX_STRING_PREFIX.len()].copy_from_slice(CTX_STRING_PREFIX);
-            ctx[CTX_STRING_PREFIX.len()..].copy_from_slice(&task_id.0);
-            // Run the prepare-init algorithm, returning the initial state.
-            Ok(vdaf.prepare_init(
-                verify_key,
-                &ctx,
-                agg_id,
-                &(),
-                nonce,
-                &public_share,
-                &input_share,
-            )?)
         }
     }
 
     pub(crate) fn prep_finish_from_shares(
         &self,
         version: DapVersion,
-        agg_id: usize,
         task_id: TaskId,
         host_state: VdafPrepState,
         host_share: VdafPrepShare,
@@ -299,7 +258,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, task_id, agg_id, state, share, peer_share_data)?;
+                    prep_finish_from_shares(&vdaf, task_id, &(), state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
                 (agg_share, outbound)
             }
@@ -313,7 +272,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, task_id, agg_id, state, share, peer_share_data)?;
+                    prep_finish_from_shares(&vdaf, task_id, &(), state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64(vdaf.aggregate(&(), [out_share])?);
                 (agg_share, outbound)
             }
@@ -330,7 +289,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, task_id, agg_id, state, share, peer_share_data)?;
+                    prep_finish_from_shares(&vdaf, task_id, &(), state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
                 (agg_share, outbound)
             }
@@ -348,7 +307,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
                 let (out_share, outbound) =
-                    prep_finish_from_shares(&vdaf, task_id, agg_id, state, share, peer_share_data)?;
+                    prep_finish_from_shares(&vdaf, task_id, &(), state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field128(vdaf.aggregate(&(), [out_share])?);
                 (agg_share, outbound)
             }
@@ -370,7 +329,7 @@ impl Prio3Config {
                     *num_proofs,
                 )?;
                 let (out_share, outbound) =
-                    draft09::prep_finish_from_shares(&vdaf, agg_id, state, share, peer_share_data)?;
+                    draft09::prep_finish_from_shares(&vdaf, state, share, peer_share_data)?;
                 let agg_share = VdafAggregateShare::Field64Draft09(
                     prio_draft09::vdaf::Aggregator::aggregate(&vdaf, &(), [out_share])?,
                 );
@@ -490,7 +449,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
 
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard(&vdaf, &(), num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::U64(agg_res))
             }
             (DapVersion::Latest, Prio3Config::Sum { max_measurement }) => {
@@ -498,7 +457,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
 
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard(&vdaf, &(), num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::U64(agg_res))
             }
             (
@@ -512,7 +471,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
 
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard(&vdaf, &(), num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::U128Vec(agg_res))
             }
             (
@@ -527,7 +486,7 @@ impl Prio3Config {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
 
-                let agg_res = unshard(&vdaf, num_measurements, agg_shares)?;
+                let agg_res = unshard(&vdaf, &(), num_measurements, agg_shares)?;
                 Ok(DapAggregateResult::U128Vec(agg_res))
             }
             (

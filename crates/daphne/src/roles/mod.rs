@@ -130,7 +130,7 @@ async fn resolve_task_config(
 mod test {
     use super::{aggregator, helper, leader, DapLeader};
     #[cfg(feature = "experimental")]
-    use crate::vdaf::{mastic::MasticWeight, MasticWeightConfig};
+    use crate::vdaf::mastic::{MasticConfig, MasticWeight, MasticWeightConfig};
     use crate::{
         assert_metrics_include, async_test_versions,
         constants::DapMediaType,
@@ -151,7 +151,7 @@ mod test {
     use assert_matches::assert_matches;
     use prio::codec::{Encode, ParameterizedDecode};
     #[cfg(feature = "experimental")]
-    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
+    use prio::idpf::IdpfInput;
     use rand::{thread_rng, Rng};
     use std::{
         collections::HashMap,
@@ -275,10 +275,10 @@ mod test {
 
             #[cfg(feature = "experimental")]
             {
-                let mastic = VdafConfig::Mastic {
-                    input_size: 1,
+                let mastic = VdafConfig::Mastic(MasticConfig {
+                    bits: 8,
                     weight_config: MasticWeightConfig::Count,
-                };
+                });
                 tasks.insert(
                     mastic_task_id,
                     DapTaskConfig {
@@ -2018,6 +2018,8 @@ mod test {
     #[cfg(feature = "experimental")]
     #[tokio::test]
     async fn mastic() {
+        use prio::vdaf::mastic::MasticAggregationParam;
+
         let t = Test::new(DapVersion::Latest);
         let task_id = &t.mastic_task_id;
         let task_config = t
@@ -2043,11 +2045,14 @@ mod test {
         // Collector: Request result from the Leader.
         let query = task_config.query_for_current_batch_window(t.now);
         let agg_param = DapAggregationParam::Mastic(
-            Poplar1AggregationParam::try_from_prefixes(vec![
-                IdpfInput::from_bytes(&[0]),
-                IdpfInput::from_bytes(&[1]),
-                IdpfInput::from_bytes(&[7]),
-            ])
+            MasticAggregationParam::new(
+                vec![
+                    IdpfInput::from_bytes(&[0]),
+                    IdpfInput::from_bytes(&[1]),
+                    IdpfInput::from_bytes(&[7]),
+                ],
+                true,
+            )
             .unwrap(),
         );
         leader::handle_coll_job_req(

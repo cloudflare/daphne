@@ -14,7 +14,11 @@ pub(crate) mod prio3;
 use crate::pine::vdaf::PinePrepState;
 use crate::{fatal_error, messages::TaskId, DapError};
 use crate::{DapAggregateResult, DapAggregationParam, DapMeasurement, DapVersion};
+#[cfg(feature = "experimental")]
+use mastic::MasticConfig;
 use pine::PineConfig;
+#[cfg(feature = "experimental")]
+use prio::vdaf::mastic::{MasticPrepareShare, MasticPrepareState};
 use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
     field::{Field128, Field64, FieldPrio2},
@@ -25,7 +29,7 @@ use prio::{
     },
 };
 
-#[cfg(any(test, feature = "test-utils", feature = "experimental"))]
+#[cfg(any(test, feature = "test-utils"))]
 use prio::field::FieldElement;
 use prio_draft09::{
     codec::{CodecError as CodecErrorDraft09, Encode as EncodeDraft09},
@@ -43,8 +47,6 @@ use prio_draft09::{
 use rand::prelude::*;
 use ring::hkdf::KeyType;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "experimental")]
-use std::io::Read;
 
 #[cfg(feature = "experimental")]
 pub use self::mastic::MasticWeightConfig;
@@ -87,13 +89,7 @@ pub enum VdafConfig {
         dimension: usize,
     },
     #[cfg(feature = "experimental")]
-    Mastic {
-        /// Length of each input, in number of bytes.
-        input_size: usize,
-
-        /// The type of each weight.
-        weight_config: MasticWeightConfig,
-    },
+    Mastic(MasticConfig),
     Pine(PineConfig),
 }
 
@@ -111,10 +107,7 @@ impl std::fmt::Display for VdafConfig {
             VdafConfig::Prio3(prio3_config) => write!(f, "Prio3({prio3_config})"),
             VdafConfig::Prio2 { dimension } => write!(f, "Prio2({dimension})"),
             #[cfg(feature = "experimental")]
-            VdafConfig::Mastic {
-                input_size,
-                weight_config,
-            } => write!(f, "Mastic({input_size}, {weight_config})"),
+            VdafConfig::Mastic(mastic_config) => write!(f, "Mastic({mastic_config})"),
             VdafConfig::Pine(pine_config) => write!(f, "{pine_config}"),
         }
     }
@@ -135,17 +128,9 @@ impl VdafConfig {
             }
             (DapVersion::Draft09, Self::Pine(pine_config)) => pine_config.shard(measurement, nonce),
             #[cfg(feature = "experimental")]
-            (
-                DapVersion::Latest,
-                VdafConfig::Mastic {
-                    input_size,
-                    weight_config,
-                },
-            ) => Ok(mastic::mastic_shard(
-                *input_size,
-                *weight_config,
-                measurement,
-            )?),
+            (DapVersion::Latest, VdafConfig::Mastic(mastic_config)) => {
+                mastic_config.shard(measurement, nonce, task_id)
+            }
             _ => Err(VdafError::Dap(fatal_error!(
                 err = format!("{self:?} is not supported in DAP {version}")
             ))),
@@ -192,17 +177,12 @@ impl VdafConfig {
                 input_share_data,
             ),
             #[cfg(feature = "experimental")]
-            (
-                DapVersion::Latest,
-                Self::Mastic {
-                    input_size,
-                    weight_config,
-                },
-            ) => mastic::mastic_prep_init(
-                *input_size,
-                *weight_config,
+            (DapVersion::Latest, Self::Mastic(mastic_config)) => mastic_config.prep_init(
                 verify_key,
+                task_id,
+                agg_id,
                 agg_param,
+                nonce,
                 public_share_data,
                 input_share_data,
             ),
@@ -215,12 +195,15 @@ impl VdafConfig {
     pub(crate) fn prep_finish_from_shares(
         &self,
         version: DapVersion,
-        agg_id: usize,
         task_id: TaskId,
+        agg_param: &DapAggregationParam,
         host_state: VdafPrepState,
         host_share: VdafPrepShare,
         peer_share_data: &[u8],
     ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
+        #[cfg(not(feature = "experimental"))]
+        let _ = agg_param;
+
         match (version, self) {
             (_, Self::Prio2 { dimension }) => prio2::prio2_prep_finish_from_shares(
                 *dimension,
@@ -230,28 +213,23 @@ impl VdafConfig {
             ),
             (_, Self::Prio3(prio3_config)) => prio3_config.prep_finish_from_shares(
                 version,
-                agg_id,
                 task_id,
                 host_state,
                 host_share,
                 peer_share_data,
             ),
             (DapVersion::Draft09, Self::Pine(pine_config)) => {
-                pine_config.prep_finish_from_shares(agg_id, host_state, host_share, peer_share_data)
+                pine_config.prep_finish_from_shares(host_state, host_share, peer_share_data)
             }
             #[cfg(feature = "experimental")]
-            (
-                DapVersion::Latest,
-                Self::Mastic {
-                    input_size: _,
-                    weight_config,
-                },
-            ) => mastic::mastic_prep_finish_from_shares(
-                *weight_config,
-                host_state,
-                host_share,
-                peer_share_data,
-            ),
+            (DapVersion::Latest, Self::Mastic(mastic_config)) => mastic_config
+                .prep_finish_from_shares(
+                    task_id,
+                    agg_param,
+                    host_state,
+                    host_share,
+                    peer_share_data,
+                ),
             _ => Err(VdafError::Dap(fatal_error!(
                 err = format!("{self:?} is not supported in DAP {version}")
             ))),
@@ -276,8 +254,8 @@ impl VdafConfig {
                 pine_config.prep_finish(host_state, peer_message_data)
             }
             #[cfg(feature = "experimental")]
-            (DapVersion::Latest, Self::Mastic { .. }) => {
-                mastic::mastic_prep_finish(host_state, peer_message_data)
+            (DapVersion::Latest, Self::Mastic(mastic_config)) => {
+                mastic_config.prep_finish(host_state, peer_message_data, task_id)
             }
             _ => Err(VdafError::Dap(fatal_error!(
                 err = format!("{self:?} is not supported in DAP {version}")
@@ -305,13 +283,9 @@ impl VdafConfig {
                 pine_config.unshard(num_measurements, agg_shares)
             }
             #[cfg(feature = "experimental")]
-            (
-                DapVersion::Latest,
-                Self::Mastic {
-                    input_size: _,
-                    weight_config,
-                },
-            ) => mastic::mastic_unshard(*weight_config, agg_param, agg_shares),
+            (DapVersion::Latest, Self::Mastic(mastic_config)) => {
+                mastic_config.unshard(agg_param, agg_shares, num_measurements)
+            }
             _ => Err(VdafError::Dap(fatal_error!(
                 err = format!("{self:?} is not supported in DAP {version}")
             ))),
@@ -433,16 +407,14 @@ fn upgrade_codec_error(error: CodecErrorDraft09) -> CodecError {
 
 /// VDAF preparation state.
 #[derive(Clone)]
-#[cfg_attr(any(test, feature = "test-utils"), derive(Debug, Eq, PartialEq))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(Debug, PartialEq))]
 pub enum VdafPrepState {
     Prio2(Prio2PrepareState),
     Prio3Draft09Field64HmacSha256Aes128(Prio3Draft09PrepareState<Field64Draft09, 32>),
     Prio3Field64(Prio3PrepareState<Field64, 32>),
     Prio3Field128(Prio3PrepareState<Field128, 32>),
     #[cfg(feature = "experimental")]
-    Mastic {
-        out_share: Vec<Field64>,
-    },
+    MasticField64(MasticPrepareState<Field64>),
     Pine64HmacSha256Aes128(PinePrepState<Field64Draft09, 32>),
     Pine32HmacSha256Aes128(PinePrepState<FieldPrio2Draft09, 32>),
 }
@@ -461,7 +433,7 @@ impl Encode for VdafPrepState {
             Self::Pine64HmacSha256Aes128(state) => state.encode(bytes).map_err(upgrade_codec_error),
             Self::Pine32HmacSha256Aes128(state) => state.encode(bytes).map_err(upgrade_codec_error),
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } => todo!("encoding of prep state is not implemented"),
+            Self::MasticField64(state) => state.encode(bytes),
         }
     }
 }
@@ -499,7 +471,7 @@ impl deepsize::DeepSizeOf for VdafPrepState {
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
             #[cfg(feature = "experimental")]
-            Self::Mastic { .. } => 0,
+            Self::MasticField64(_) => 0,
         }
     }
 }
@@ -513,7 +485,7 @@ pub enum VdafPrepShare {
     Prio3Field64(Prio3PrepareShare<Field64, 32>),
     Prio3Field128(Prio3PrepareShare<Field128, 32>),
     #[cfg(feature = "experimental")]
-    Mastic(Field64),
+    MasticField64(MasticPrepareShare<Field64>),
     Pine64HmacSha256Aes128(crate::pine::msg::PrepShare<Field64Draft09, 32>),
     Pine32HmacSha256Aes128(crate::pine::msg::PrepShare<FieldPrio2Draft09, 32>),
 }
@@ -535,7 +507,7 @@ impl deepsize::DeepSizeOf for VdafPrepShare {
             | Self::Pine64HmacSha256Aes128(_)
             | Self::Pine32HmacSha256Aes128(_) => 0,
             #[cfg(feature = "experimental")]
-            Self::Mastic(..) => 0,
+            Self::MasticField64(..) => 0,
         }
     }
 }
@@ -550,7 +522,7 @@ impl Encode for VdafPrepShare {
             Self::Prio3Field128(share) => share.encode(bytes),
             Self::Prio2(share) => share.encode(bytes),
             #[cfg(feature = "experimental")]
-            Self::Mastic(share) => share.encode(bytes),
+            Self::MasticField64(share) => share.encode(bytes),
             Self::Pine64HmacSha256Aes128(share) => share.encode(bytes).map_err(upgrade_codec_error),
             Self::Pine32HmacSha256Aes128(share) => share.encode(bytes).map_err(upgrade_codec_error),
         }
@@ -579,9 +551,9 @@ impl ParameterizedDecode<VdafPrepState> for VdafPrepShare {
                 Prio2PrepareShare::decode_with_param(state, bytes)?,
             )),
             #[cfg(feature = "experimental")]
-            VdafPrepState::Mastic { .. } => {
-                todo!("mastic: decoding of prep messages is not implemented")
-            }
+            VdafPrepState::MasticField64(state) => Ok(VdafPrepShare::MasticField64(
+                MasticPrepareShare::decode_with_param(state, bytes)?,
+            )),
             VdafPrepState::Pine64HmacSha256Aes128(state) => {
                 Ok(VdafPrepShare::Pine64HmacSha256Aes128(
                     crate::pine::msg::PrepShare::decode_with_param(state, bytes)
@@ -670,22 +642,6 @@ impl VdafConfig {
     }
 }
 
-#[cfg(feature = "experimental")]
-pub(crate) fn decode_field_vec<F: FieldElement>(
-    bytes: &[u8],
-    len: usize,
-) -> Result<Vec<F>, CodecError> {
-    debug_assert!(F::ENCODED_SIZE < 64);
-    let mut buf = [0; 64];
-    let mut r = std::io::Cursor::new(bytes);
-    let mut v = Vec::with_capacity(len);
-    for _ in 0..len {
-        r.read_exact(&mut buf[..F::ENCODED_SIZE])?;
-        v.push(F::get_decoded(&buf[..F::ENCODED_SIZE])?);
-    }
-    Ok(v)
-}
-
 fn shard_then_encode<V: Vdaf + Client<16>>(
     vdaf: &V,
     task_id: TaskId,
@@ -712,18 +668,54 @@ fn shard_then_encode<V: Vdaf + Client<16>>(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn prep_init<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
+    vdaf: &V,
+    task_id: TaskId,
+    verify_key: &[u8; VERIFY_KEY_SIZE],
+    agg_id: usize,
+    agg_param: &V::AggregationParam,
+    nonce: &[u8; NONCE_SIZE],
+    public_share_data: &[u8],
+    input_share_data: &[u8],
+) -> Result<(V::PrepareState, V::PrepareShare), VdafError>
+where
+    V: Vdaf + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+{
+    // Parse the public share.
+    let public_share = V::PublicShare::get_decoded_with_param(vdaf, public_share_data)?;
+
+    // Parse the input share.
+    let input_share = V::InputShare::get_decoded_with_param(&(vdaf, agg_id), input_share_data)?;
+
+    let mut ctx = [0; CTX_STRING_PREFIX.len() + 32];
+    ctx[..CTX_STRING_PREFIX.len()].copy_from_slice(CTX_STRING_PREFIX);
+    ctx[CTX_STRING_PREFIX.len()..].copy_from_slice(&task_id.0);
+    let (prep_state, prep_share) = vdaf.prepare_init(
+        verify_key,
+        &ctx,
+        agg_id,
+        agg_param,
+        nonce,
+        &public_share,
+        &input_share,
+    )?;
+
+    Ok((prep_state, prep_share))
+}
+
 fn prep_finish_from_shares<V, const VERIFY_KEY_SIZE: usize, const NONCE_SIZE: usize>(
     vdaf: &V,
     task_id: TaskId,
-    agg_id: usize,
+    agg_param: &V::AggregationParam,
     host_state: V::PrepareState,
     host_share: V::PrepareShare,
     peer_share_data: &[u8],
 ) -> Result<(V::OutputShare, Vec<u8>), VdafError>
 where
-    V: Vdaf<AggregationParam = ()> + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
+    V: Vdaf + Aggregator<VERIFY_KEY_SIZE, NONCE_SIZE>,
 {
-    // Decode the Helper's inbound message.
+    // Decode the peer's inbound message.
     let peer_share = V::PrepareShare::get_decoded_with_param(&host_state, peer_share_data)?;
 
     let mut ctx = [0; CTX_STRING_PREFIX.len() + 32];
@@ -731,15 +723,8 @@ where
     ctx[CTX_STRING_PREFIX.len()..].copy_from_slice(&task_id.0);
 
     // Preprocess the inbound messages.
-    let message = vdaf.prepare_shares_to_prepare_message(
-        &ctx,
-        &(),
-        if agg_id == 0 {
-            [host_share, peer_share]
-        } else {
-            [peer_share, host_share]
-        },
-    )?;
+    let message =
+        vdaf.prepare_shares_to_prepare_message(&ctx, agg_param, [peer_share, host_share])?;
     let message_data = message.get_encoded()?;
 
     // Compute the host's output share.
@@ -778,17 +763,19 @@ where
 
 fn unshard<V, M>(
     vdaf: &V,
+    agg_param: &V::AggregationParam,
     num_measurements: usize,
     agg_shares: M,
 ) -> Result<V::AggregateResult, VdafError>
 where
-    V: Vdaf<AggregationParam = ()> + Collector,
+    V: Vdaf + Collector,
     M: IntoIterator<Item = Vec<u8>>,
 {
     let mut agg_shares_vec = Vec::with_capacity(vdaf.num_aggregators());
     for data in agg_shares {
-        let agg_share = V::AggregateShare::get_decoded_with_param(&(vdaf, &()), data.as_ref())?;
+        let agg_share =
+            V::AggregateShare::get_decoded_with_param(&(vdaf, agg_param), data.as_ref())?;
         agg_shares_vec.push(agg_share);
     }
-    Ok(vdaf.unshard(&(), agg_shares_vec, num_measurements)?)
+    Ok(vdaf.unshard(agg_param, agg_shares_vec, num_measurements)?)
 }

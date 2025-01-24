@@ -70,7 +70,7 @@ use error::FatalDapError;
 use hpke::{HpkeConfig, HpkeKemId};
 use messages::taskprov::TaskprovAdvertisement;
 #[cfg(feature = "experimental")]
-use prio::{codec::Decode, vdaf::poplar1::Poplar1AggregationParam};
+use prio::{codec::Decode, vdaf::mastic::MasticAggregationParam};
 use prio::{
     codec::{CodecError, Encode, ParameterizedDecode},
     vdaf::Aggregatable as AggregatableTrait,
@@ -813,11 +813,11 @@ pub enum DapMeasurement {
 }
 
 /// An aggregation parameter.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DapAggregationParam {
     Empty,
     #[cfg(feature = "experimental")]
-    Mastic(Poplar1AggregationParam),
+    Mastic(MasticAggregationParam),
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -877,7 +877,7 @@ impl ParameterizedDecode<VdafConfig> for DapAggregationParam {
         let _ = bytes;
         match vdaf_config {
             #[cfg(feature = "experimental")]
-            VdafConfig::Mastic { .. } => Ok(Self::Mastic(Poplar1AggregationParam::decode(bytes)?)),
+            VdafConfig::Mastic(_) => Ok(Self::Mastic(MasticAggregationParam::decode(bytes)?)),
             _ => Ok(Self::Empty),
         }
     }

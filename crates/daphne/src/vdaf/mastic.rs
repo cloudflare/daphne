@@ -7,20 +7,30 @@
 //!
 //! [draft-mouris-cfrg-mastic]: https://datatracker.ietf.org/doc/draft-mouris-cfrg-mastic/
 
-use std::array;
-
-use crate::{fatal_error, DapAggregateResult, DapAggregationParam, DapMeasurement};
-
-use super::{
-    decode_field_vec, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey,
+use crate::{
+    fatal_error,
+    messages::TaskId,
+    vdaf::{prep_finish, prep_finish_from_shares, prep_init, shard_then_encode},
+    DapAggregateResult, DapAggregationParam, DapMeasurement,
 };
 
-use prio::{
-    codec::{CodecError, Decode},
-    field::{Field64, FieldElement},
-    vdaf::AggregateShare,
-};
+use super::{unshard, VdafAggregateShare, VdafError, VdafPrepShare, VdafPrepState, VdafVerifyKey};
+
+use prio::{vdaf::mastic::Mastic, vidpf::VidpfInput};
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
+pub struct MasticConfig {
+    pub bits: usize,
+    pub weight_config: MasticWeightConfig,
+}
+
+impl std::fmt::Display for MasticConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}, Weight({})", self.bits, self.weight_config)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
@@ -44,185 +54,144 @@ pub enum MasticWeight {
     Bool(bool),
 }
 
-pub(crate) fn mastic_shard(
-    input_size: usize,
-    weight_config: MasticWeightConfig,
-    measurement: DapMeasurement,
-) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
-    match (weight_config, measurement) {
-        (
-            MasticWeightConfig::Count,
-            DapMeasurement::Mastic {
-                input,
-                weight: MasticWeight::Bool(counter),
-            },
-        ) if input.len() == input_size => {
-            // Simulate Mastic, insecurely. Set the public share to the input and each input share
-            // to the weight.
-            Ok((input, array::from_fn(|_| vec![u8::from(counter)])))
+impl MasticConfig {
+    pub(crate) fn shard(
+        self,
+        measurement: DapMeasurement,
+        nonce: &[u8; 16],
+        task_id: TaskId,
+    ) -> Result<(Vec<u8>, [Vec<u8>; 2]), VdafError> {
+        match (self.weight_config, measurement) {
+            (
+                MasticWeightConfig::Count,
+                DapMeasurement::Mastic {
+                    input,
+                    weight: MasticWeight::Bool(counter),
+                },
+            ) => {
+                let vdaf = Mastic::new_count(self.bits).map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
+                })?;
+
+                let alpha = VidpfInput::from_bytes(&input);
+                shard_then_encode(&vdaf, task_id, &(alpha, counter), nonce)
+            }
+            _ => todo!(),
         }
-        _ => Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected measurement type"
-        ))),
     }
-}
 
-pub(crate) fn mastic_prep_init(
-    input_size: usize,
-    weight_config: MasticWeightConfig,
-    _verify_key: &VdafVerifyKey,
-    agg_param: &DapAggregationParam,
-    public_share_bytes: &[u8],
-    input_share_bytes: &[u8],
-) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
-    match (weight_config, agg_param) {
-        (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
-            // Simulate Mastic, insecurely. The public share encodes the plaintext input; the input
-            // share encodes the plaintext weight.
-            if public_share_bytes.len() != input_size {
-                return Err(VdafError::Codec(prio::codec::CodecError::Other(
-                    "mastic: malformed public share".into(),
-                )));
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prep_init(
+        self,
+        VdafVerifyKey(verify_key): &VdafVerifyKey,
+        task_id: TaskId,
+        agg_id: usize,
+        agg_param: &DapAggregationParam,
+        nonce: &[u8; 16],
+        public_share_data: &[u8],
+        input_share_data: &[u8],
+    ) -> Result<(VdafPrepState, VdafPrepShare), VdafError> {
+        match (self.weight_config, agg_param) {
+            (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
+                let vdaf = Mastic::new_count(self.bits).map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
+                })?;
+
+                let (prep_state, prep_share) = prep_init(
+                    &vdaf,
+                    task_id,
+                    verify_key,
+                    agg_id,
+                    agg_param,
+                    nonce,
+                    public_share_data,
+                    input_share_data,
+                )?;
+
+                Ok((
+                    VdafPrepState::MasticField64(prep_state),
+                    VdafPrepShare::MasticField64(prep_share),
+                ))
             }
-
-            if input_share_bytes.len() != 1 {
-                return Err(VdafError::Codec(CodecError::Other(
-                    "mastic: malformed input share".into(),
-                )));
-            }
-
-            let weight = Field64::from(u64::from(input_share_bytes[0]));
-            let out_share = agg_param
-                .prefixes()
-                .iter()
-                .map(|prefix| {
-                    let prefix_bytes = prefix.to_bytes();
-                    if prefix_bytes.len() > input_size {
-                        return Err(VdafError::Codec(CodecError::Other(
-                            "mastic: malformed agg param: path with invalid length".into(),
-                        )));
-                    }
-
-                    // If the path is a prefix of the input, then the value is the
-                    // weight; otherwise the value is 0.
-                    let value = if prefix_bytes == public_share_bytes[..prefix_bytes.len()] {
-                        weight
-                    } else {
-                        Field64::zero()
-                    };
-
-                    // Each Aggregator computes a share of the value, so divide by 2.
-                    Ok(value / Field64::from(2))
-                })
-                .collect::<Result<Vec<Field64>, _>>()?;
-
-            Ok((
-                VdafPrepState::Mastic { out_share },
-                VdafPrepShare::Mastic(weight),
-            ))
+            (_, DapAggregationParam::Empty) => todo!(),
         }
-        _ => Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected agg param type"
-        ))),
     }
-}
 
-pub(crate) fn mastic_prep_finish_from_shares(
-    weight_config: MasticWeightConfig,
-    host_state: VdafPrepState,
-    host_share: VdafPrepShare,
-    peer_share_bytes: &[u8],
-) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
-    match (weight_config, host_state, host_share) {
-        (
-            MasticWeightConfig::Count,
-            VdafPrepState::Mastic { out_share },
-            VdafPrepShare::Mastic(host_weight),
-        ) => {
-            // Simulate Mastic. Check that both Aggregators got the same weight, and the weight is
-            // valid. This is not secure because the weight is revealed to the caller.
-            let peer_weight = Field64::get_decoded(peer_share_bytes)?;
-            if peer_weight != host_weight {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
-                    "mastic: weights do not match".into(),
-                )));
+    pub(crate) fn prep_finish_from_shares(
+        self,
+        task_id: TaskId,
+        agg_param: &DapAggregationParam,
+        host_state: VdafPrepState,
+        host_share: VdafPrepShare,
+        peer_share_data: &[u8],
+    ) -> Result<(VdafAggregateShare, Vec<u8>), VdafError> {
+        match (self.weight_config, agg_param, host_state, host_share) {
+            (
+                MasticWeightConfig::Count,
+                DapAggregationParam::Mastic(agg_param),
+                VdafPrepState::MasticField64(host_state),
+                VdafPrepShare::MasticField64(host_share),
+            ) => {
+                let vdaf = Mastic::new_count(self.bits).map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
+                })?;
+
+                let (out_share, prep_msg_data) = prep_finish_from_shares(
+                    &vdaf,
+                    task_id,
+                    agg_param,
+                    host_state,
+                    host_share,
+                    peer_share_data,
+                )?;
+                Ok((VdafAggregateShare::Field64(out_share.into()), prep_msg_data))
             }
-
-            if peer_weight != Field64::one() && peer_weight != Field64::zero() {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
-                    "mastic: weight is out of range".into(),
-                )));
-            }
-
-            Ok((
-                VdafAggregateShare::Field64(AggregateShare::from(out_share)),
-                // Empty prep message for now.
-                Vec::new(),
-            ))
+            _ => todo!(),
         }
-        _ => Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected prep state"
-        ))),
     }
-}
 
-pub(crate) fn mastic_prep_finish(
-    host_state: VdafPrepState,
-    peer_message_bytes: &[u8],
-) -> Result<VdafAggregateShare, VdafError> {
-    match host_state {
-        VdafPrepState::Mastic { out_share } => {
-            // Simulate Mastic: If the prep message is empty, then accept the output share.
-            if !peer_message_bytes.is_empty() {
-                return Err(VdafError::Vdaf(prio::vdaf::VdafError::Uncategorized(
-                    "mastic: invalid prep message".into(),
-                )));
+    pub(crate) fn prep_finish(
+        self,
+        host_state: VdafPrepState,
+        peer_message_data: &[u8],
+        task_id: TaskId,
+    ) -> Result<VdafAggregateShare, VdafError> {
+        match (self.weight_config, host_state) {
+            (MasticWeightConfig::Count, VdafPrepState::MasticField64(host_state)) => {
+                let vdaf = Mastic::new_count(self.bits).map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
+                })?;
+
+                let out_share = prep_finish(&vdaf, task_id, host_state, peer_message_data)?;
+                Ok(VdafAggregateShare::Field64(out_share.into()))
             }
-
-            Ok(VdafAggregateShare::Field64(AggregateShare::from(out_share)))
+            _ => todo!(),
         }
-        _ => Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected prep state"
-        ))),
     }
-}
 
-pub(crate) fn mastic_unshard<M: IntoIterator<Item = Vec<u8>>>(
-    weight_config: MasticWeightConfig,
-    agg_param: &DapAggregationParam,
-    agg_share_bytes: M,
-) -> Result<DapAggregateResult, VdafError> {
-    match (weight_config, agg_param) {
-        (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
-            let agg: Vec<Field64> = agg_share_bytes
-                .into_iter()
-                .map(|bytes| decode_field_vec(&bytes, agg_param.prefixes().len()))
-                .reduce(|r, agg_share| {
-                    let mut agg = r?;
-                    for (x, y) in agg.iter_mut().zip(agg_share?.into_iter()) {
-                        *x += y;
-                    }
-                    Ok(agg)
-                })
-                .ok_or_else(|| {
-                    VdafError::Dap(fatal_error!(
-                        err = "mastic: unexpected number of agg shares"
-                    ))
-                })??;
+    pub(crate) fn unshard<M: IntoIterator<Item = Vec<u8>>>(
+        self,
+        agg_param: &DapAggregationParam,
+        agg_shares: M,
+        num_measurements: usize,
+    ) -> Result<DapAggregateResult, VdafError> {
+        match (self.weight_config, agg_param) {
+            (MasticWeightConfig::Count, DapAggregationParam::Mastic(agg_param)) => {
+                let vdaf = Mastic::new_count(self.bits).map_err(|e| {
+                    VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
+                })?;
 
-            Ok(DapAggregateResult::U64Vec(
-                agg.into_iter().map(u64::from).collect(),
-            ))
+                let agg_result = unshard(&vdaf, agg_param, num_measurements, agg_shares)?;
+                Ok(DapAggregateResult::U64Vec(agg_result))
+            }
+            _ => todo!(),
         }
-        _ => Err(VdafError::Dap(fatal_error!(
-            err = "mastic: unexpected agg param type"
-        ))),
     }
 }
 
 #[cfg(test)]
 mod test {
-    use prio::{idpf::IdpfInput, vdaf::poplar1::Poplar1AggregationParam};
+    use prio::{idpf::IdpfInput, vdaf::mastic::MasticAggregationParam};
 
     use super::*;
     use crate::{
@@ -233,19 +202,22 @@ mod test {
     #[test]
     fn roundtrip_count() {
         let mut t = AggregationJobTest::new(
-            &VdafConfig::Mastic {
-                input_size: 4,
+            &VdafConfig::Mastic(MasticConfig {
+                bits: 32,
                 weight_config: MasticWeightConfig::Count,
-            },
+            }),
             HpkeKemId::X25519HkdfSha256,
             DapVersion::Latest,
         );
         let got = t.roundtrip(
             DapAggregationParam::Mastic(
-                Poplar1AggregationParam::try_from_prefixes(vec![
-                    IdpfInput::from_bytes(b"cool"),
-                    IdpfInput::from_bytes(b"trip"),
-                ])
+                MasticAggregationParam::new(
+                    vec![
+                        IdpfInput::from_bytes(b"cool"),
+                        IdpfInput::from_bytes(b"trip"),
+                    ],
+                    true,
+                )
                 .unwrap(),
             ),
             vec![
