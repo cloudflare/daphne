@@ -374,8 +374,8 @@ async fn run_agg_job<A: DapLeader>(
             .map_err(|e| DapAbort::from_codec_error(e, *task_id))?;
 
     let agg_job_resp = match agg_job_resp {
-        AggregationJobResp::Ready { transitions } => {
-            crate::protocol::ReadyAggregationJobResp { transitions }
+        AggregationJobResp::Ready { prep_resps } => {
+            crate::protocol::ReadyAggregationJobResp { prep_resps }
         }
         AggregationJobResp::Processing => todo!("polling not implemented yet"),
     };

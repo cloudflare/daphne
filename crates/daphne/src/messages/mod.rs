@@ -632,16 +632,15 @@ impl ParameterizedDecode<DapVersion> for AggregationJobInitReq {
     }
 }
 
-/// Transition message. This conveyes a message sent from one Aggregator to another during the
-/// preparation phase of VDAF evaluation.
+/// The `PrepareResp` message.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub struct Transition {
+pub struct PrepareResp {
     pub report_id: ReportId,
-    pub var: TransitionVar,
+    pub var: PrepareRespVar,
 }
 
-impl ParameterizedEncode<DapVersion> for Transition {
+impl ParameterizedEncode<DapVersion> for PrepareResp {
     fn encode_with_param(
         &self,
         version: &DapVersion,
@@ -652,38 +651,38 @@ impl ParameterizedEncode<DapVersion> for Transition {
         Ok(())
     }
 }
-impl ParameterizedDecode<DapVersion> for Transition {
+impl ParameterizedDecode<DapVersion> for PrepareResp {
     fn decode_with_param(
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         Ok(Self {
             report_id: ReportId::decode(bytes)?,
-            var: TransitionVar::decode_with_param(version, bytes)?,
+            var: PrepareRespVar::decode_with_param(version, bytes)?,
         })
     }
 }
 
-/// Transition message variant.
+/// A variant of `PrepareResp`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
-pub enum TransitionVar {
-    Continued(Vec<u8>),
-    Failed(ReportError),
+pub enum PrepareRespVar {
+    Continue(Vec<u8>),
+    Reject(ReportError),
 }
 
-impl ParameterizedEncode<DapVersion> for TransitionVar {
+impl ParameterizedEncode<DapVersion> for PrepareRespVar {
     fn encode_with_param(
         &self,
         version: &DapVersion,
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         match self {
-            TransitionVar::Continued(vdaf_message) => {
+            PrepareRespVar::Continue(vdaf_message) => {
                 0_u8.encode(bytes)?;
                 encode_u32_bytes(bytes, vdaf_message)?;
             }
-            TransitionVar::Failed(err) => {
+            PrepareRespVar::Reject(err) => {
                 2_u8.encode(bytes)?;
                 err.encode_with_param(version, bytes)?;
             }
@@ -692,22 +691,23 @@ impl ParameterizedEncode<DapVersion> for TransitionVar {
     }
 }
 
-impl ParameterizedDecode<DapVersion> for TransitionVar {
+impl ParameterizedDecode<DapVersion> for PrepareRespVar {
     fn decode_with_param(
         version: &DapVersion,
         bytes: &mut Cursor<&[u8]>,
     ) -> Result<Self, CodecError> {
         match u8::decode(bytes)? {
-            0 => Ok(Self::Continued(decode_u32_bytes(bytes)?)),
-            2 => Ok(Self::Failed(ReportError::decode_with_param(
+            0 => Ok(Self::Continue(decode_u32_bytes(bytes)?)),
+            2 => Ok(Self::Reject(ReportError::decode_with_param(
                 version, bytes,
             )?)),
+            // Treat `finished` as an unexpected value, since we don't implement multi-round VDAFs.
             _ => Err(CodecError::UnexpectedValue),
         }
     }
 }
 
-/// Transition error.
+/// Report error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error, Hash)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
@@ -958,7 +958,7 @@ const AGG_JOB_RESP_READY: u8 = 1;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub enum AggregationJobResp {
-    Ready { transitions: Vec<Transition> },
+    Ready { prep_resps: Vec<PrepareResp> },
     Processing,
 }
 
@@ -967,7 +967,7 @@ impl AggregationJobResp {
     #[track_caller]
     pub fn unwrap_ready(self) -> crate::protocol::ReadyAggregationJobResp {
         match self {
-            Self::Ready { transitions } => crate::protocol::ReadyAggregationJobResp { transitions },
+            Self::Ready { prep_resps } => crate::protocol::ReadyAggregationJobResp { prep_resps },
             Self::Processing => panic!("unwrapped a Processing value"),
         }
     }
@@ -980,12 +980,12 @@ impl ParameterizedEncode<DapVersion> for AggregationJobResp {
         bytes: &mut Vec<u8>,
     ) -> Result<(), CodecError> {
         match (self, version) {
-            (Self::Ready { transitions }, DapVersion::Draft09) => {
-                encode_u32_items(bytes, version, transitions)
+            (Self::Ready { prep_resps }, DapVersion::Draft09) => {
+                encode_u32_items(bytes, version, prep_resps)
             }
-            (Self::Ready { transitions }, DapVersion::Latest) => {
+            (Self::Ready { prep_resps }, DapVersion::Latest) => {
                 AGG_JOB_RESP_READY.encode(bytes)?;
-                encode_u32_items(bytes, version, transitions)
+                encode_u32_items(bytes, version, prep_resps)
             }
             (Self::Processing, DapVersion::Draft09) => Err(CodecError::Other(
                 "draft09: can't represent an agg job resp that's being processed".into(),
@@ -1002,12 +1002,12 @@ impl ParameterizedDecode<DapVersion> for AggregationJobResp {
     ) -> Result<Self, CodecError> {
         match version {
             DapVersion::Draft09 => Ok(Self::Ready {
-                transitions: decode_u32_items(version, bytes)?,
+                prep_resps: decode_u32_items(version, bytes)?,
             }),
             DapVersion::Latest => match u8::decode(bytes)? {
                 AGG_JOB_RESP_PROCESSING => Ok(Self::Processing),
                 AGG_JOB_RESP_READY => Ok(Self::Ready {
-                    transitions: decode_u32_items(version, bytes)?,
+                    prep_resps: decode_u32_items(version, bytes)?,
                 }),
                 _ => Err(CodecError::UnexpectedValue),
             },
@@ -1936,20 +1936,20 @@ mod test {
         ];
 
         let want = AggregationJobResp::Ready {
-            transitions: vec![
-                Transition {
+            prep_resps: vec![
+                PrepareResp {
                     report_id: ReportId([22; 16]),
-                    var: TransitionVar::Continued(b"this is a VDAF-specific message".to_vec()),
+                    var: PrepareRespVar::Continue(b"this is a VDAF-specific message".to_vec()),
                 },
-                Transition {
+                PrepareResp {
                     report_id: ReportId([255; 16]),
-                    var: TransitionVar::Continued(
+                    var: PrepareRespVar::Continue(
                         b"believe it or not this is *also* a VDAF-specific message".to_vec(),
                     ),
                 },
-                Transition {
+                PrepareResp {
                     report_id: ReportId([17; 16]),
-                    var: TransitionVar::Failed(ReportError::TaskExpired),
+                    var: PrepareRespVar::Reject(ReportError::TaskExpired),
                 },
             ],
         };

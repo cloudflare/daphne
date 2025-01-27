@@ -13,8 +13,8 @@ use crate::{
     hpke::{info_and_aad, HpkeConfig, HpkeDecrypter},
     messages::{
         self, encode_u32_bytes, AggregationJobInitReq, Base64Encode, BatchSelector, HpkeCiphertext,
-        PartialBatchSelector, PrepareInit, Report, ReportError, ReportId, ReportShare, TaskId,
-        Transition, TransitionVar,
+        PartialBatchSelector, PrepareInit, PrepareResp, PrepareRespVar, Report, ReportError,
+        ReportId, ReportShare, TaskId,
     },
     metrics::{DaphneMetrics, ReportStatus},
     protocol::{decode_ping_pong_framed, PingPongMessageType},
@@ -289,12 +289,12 @@ impl DapTaskConfig {
     ) -> Result<(DapAggregateSpan<DapAggregateShare>, ReadyAggregationJobResp), DapError> {
         let num_reports = initialized_reports.len();
         let mut agg_span = DapAggregateSpan::default();
-        let mut transitions = Vec::with_capacity(num_reports);
+        let mut prep_resps = Vec::with_capacity(num_reports);
 
         for initialized_report in initialized_reports {
             let status = report_status.get(&initialized_report.metadata().id);
             let var = match status {
-                Some(ReportProcessedStatus::Rejected(err)) => TransitionVar::Failed(*err),
+                Some(ReportProcessedStatus::Rejected(err)) => PrepareRespVar::Reject(*err),
                 Some(ReportProcessedStatus::Aggregated) | None => match initialized_report {
                     InitializedReport::Ready {
                         metadata,
@@ -332,7 +332,7 @@ impl DapTaskConfig {
                                 outbound.push(PingPongMessageType::Finish as u8);
                                 encode_u32_bytes(&mut outbound, &prep_msg)
                                     .map_err(DapError::encoding)?;
-                                TransitionVar::Continued(outbound)
+                                PrepareRespVar::Continue(outbound)
                             }
 
                             Err(
@@ -342,7 +342,7 @@ impl DapTaskConfig {
                                 | VdafError::Vdaf(..)),
                             ) => {
                                 tracing::warn!(error = ?e, "rejecting report");
-                                TransitionVar::Failed(ReportError::VdafPrepError)
+                                PrepareRespVar::Reject(ReportError::VdafPrepError)
                             }
 
                             Err(VdafError::Dap(e)) => return Err(e),
@@ -352,17 +352,17 @@ impl DapTaskConfig {
                     InitializedReport::Rejected {
                         metadata: _,
                         report_err,
-                    } => TransitionVar::Failed(*report_err),
+                    } => PrepareRespVar::Reject(*report_err),
                 },
             };
 
-            transitions.push(Transition {
+            prep_resps.push(PrepareResp {
                 report_id: initialized_report.metadata().id,
                 var,
             });
         }
 
-        Ok((agg_span, ReadyAggregationJobResp { transitions }))
+        Ok((agg_span, ReadyAggregationJobResp { prep_resps }))
     }
 
     /// Leader: Consume the `AggregationJobResp` message sent by the Helper and compute the
@@ -374,11 +374,11 @@ impl DapTaskConfig {
         agg_job_resp: ReadyAggregationJobResp,
         metrics: &dyn DaphneMetrics,
     ) -> Result<DapAggregateSpan<DapAggregateShare>, DapError> {
-        if agg_job_resp.transitions.len() != state.seq.len() {
+        if agg_job_resp.prep_resps.len() != state.seq.len() {
             return Err(DapAbort::InvalidMessage {
                 detail: format!(
                     "aggregation job response has {} reports; expected {}",
-                    agg_job_resp.transitions.len(),
+                    agg_job_resp.prep_resps.len(),
                     state.seq.len(),
                 ),
                 task_id: *task_id,
@@ -387,7 +387,7 @@ impl DapTaskConfig {
         }
 
         let mut agg_span = DapAggregateSpan::default();
-        for (helper, leader) in zip(agg_job_resp.transitions, state.seq) {
+        for (helper, leader) in zip(agg_job_resp.prep_resps, state.seq) {
             if helper.report_id != leader.report_id {
                 return Err(DapAbort::InvalidMessage {
                     detail: format!(
@@ -400,7 +400,7 @@ impl DapTaskConfig {
             }
 
             let prep_msg = match &helper.var {
-                TransitionVar::Continued(inbound) => {
+                PrepareRespVar::Continue(ref inbound) => {
                     // Decode the ping-pong "finish" message frame (draft-irtf-cfrg-vdaf-08,
                     // Section 5.8). Abort the aggregation job if not found.
                     let Ok(prep_msg) =
@@ -419,7 +419,7 @@ impl DapTaskConfig {
                 }
 
                 // Skip report that can't be processed any further.
-                TransitionVar::Failed(err) => {
+                PrepareRespVar::Reject(err) => {
                     tracing::warn!("report rejected by Helper: {err:?}");
                     metrics.report_inc_by(ReportStatus::Rejected(*err), 1);
                     continue;
