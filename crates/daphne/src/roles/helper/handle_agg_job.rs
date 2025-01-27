@@ -5,8 +5,8 @@ use super::{check_part_batch, DapHelper, HashedAggregationJobReq};
 use crate::{
     error::DapAbort,
     messages::{
-        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, ReportError, TaskId,
-        TransitionVar,
+        AggregationJobInitReq, AggregationJobResp, PartialBatchSelector, PrepareRespVar,
+        ReportError, TaskId,
     },
     metrics::ReportStatus,
     protocol::aggregator::ReportProcessedStatus,
@@ -247,7 +247,7 @@ impl HandleAggJob<InitializedReports> {
         // - try to aggregate the output shares into an `DapAggregateShareSpan`
         // - pass it to `try_put_agg_share_span`
         //   - if replays are found, then try again, rejecting the reports that were replayed
-        //   - else break with the finished (of failed) transitions
+        //   - else break with the finished (of failed) prep_resps
         //
         // The reason we do this is because we don't expect replays to happen but we have to guard
         // against them, as such, even though retrying is possibly very expensive, it probably
@@ -311,18 +311,18 @@ impl HandleAggJob<InitializedReports> {
             }
             if !inc_restart_metric.is_completed() {
                 let out_shares_count = agg_job_resp
-                    .transitions
+                    .prep_resps
                     .iter()
-                    .filter(|t| !matches!(t.var, TransitionVar::Failed(..)))
+                    .filter(|t| !matches!(t.var, PrepareRespVar::Reject(..)))
                     .count()
                     .try_into()
                     .expect("usize to fit in u64");
 
                 metrics.report_inc_by(ReportStatus::Aggregated, out_shares_count);
 
-                for transition in &agg_job_resp.transitions {
-                    if let TransitionVar::Failed(failure) = &transition.var {
-                        metrics.report_inc_by(ReportStatus::Rejected(*failure), 1);
+                for transition in &agg_job_resp.prep_resps {
+                    if let PrepareRespVar::Reject(err) = &transition.var {
+                        metrics.report_inc_by(ReportStatus::Rejected(*err), 1);
                     }
                 }
 
@@ -332,7 +332,7 @@ impl HandleAggJob<InitializedReports> {
                 helper.audit_log().on_aggregation_job(
                     &task_id,
                     &task_config,
-                    agg_job_resp.transitions.len() as u64,
+                    agg_job_resp.prep_resps.len() as u64,
                     0, /* vdaf step */
                 );
 

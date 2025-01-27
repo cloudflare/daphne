@@ -138,8 +138,8 @@ mod test {
         messages::{
             request::RequestBody, AggregateShareReq, AggregationJobId, AggregationJobInitReq,
             AggregationJobResp, BatchId, BatchSelector, Collection, CollectionJobId, CollectionReq,
-            Extension, HpkeCiphertext, Interval, PartialBatchSelector, Query, Report, ReportError,
-            TaskId, Time, TransitionVar,
+            Extension, HpkeCiphertext, Interval, PartialBatchSelector, PrepareRespVar, Query,
+            Report, ReportError, TaskId, Time,
         },
         roles::{helper::HashedAggregationJobReq, leader::WorkItem, DapAggregator},
         testing::InMemoryAggregator,
@@ -627,10 +627,10 @@ mod test {
     //
     //        let resp = t.helper.handle_agg_job_req(&req).await.unwrap();
     //        let agg_job_resp = AggregationJobResp::get_decoded(&resp.payload).unwrap();
-    //        assert_eq!(agg_job_resp.transitions.len(), 1);
+    //        assert_eq!(agg_job_resp.prep_resps.len(), 1);
     //        assert_matches!(
-    //            agg_job_resp.transitions[0].var,
-    //            TransitionVar::Failed(ReportError::TaskExpired)
+    //            agg_job_resp.prep_resps[0].var,
+    //            PrepareRespVar::Reject(ReportError::TaskExpired)
     //        );
     //
     //        assert_eq!(t.helper.audit_log.invocations(), 1);
@@ -751,7 +751,7 @@ mod test {
             .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
             .await;
 
-        // Get AggregationJobResp and then extract the transition data from inside.
+        // Get AggregationJobResp and then extract the prep_resp data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded_with_param(
             &version,
             &helper::handle_agg_job_init_req(
@@ -764,12 +764,12 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
+        let prep_resp = agg_job_resp.unwrap_ready().prep_resps.remove(0);
 
         // Expect failure due to invalid ciphertext.
         assert_matches!(
-            transition.var,
-            TransitionVar::Failed(ReportError::HpkeDecryptError)
+            prep_resp.var,
+            PrepareRespVar::Reject(ReportError::HpkeDecryptError)
         );
     }
 
@@ -856,7 +856,7 @@ mod test {
         _ = leader::handle_upload_req(&*t.leader, req).await;
     }
 
-    async fn handle_agg_job_req_transition_continue(version: DapVersion) {
+    async fn handle_agg_job_req_prep_resp_continue(version: DapVersion) {
         let t = Test::new(version);
         let task_id = &t.time_interval_task_id;
 
@@ -865,7 +865,7 @@ mod test {
             .gen_test_agg_job_init_req(task_id, DapAggregationParam::Empty, vec![report])
             .await;
 
-        // Get AggregationJobResp and then extract the transition data from inside.
+        // Get AggregationJobResp and then extract the prep_resp data from inside.
         let agg_job_resp = AggregationJobResp::get_decoded_with_param(
             &version,
             &helper::handle_agg_job_init_req(
@@ -878,13 +878,13 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
+        let prep_resp = agg_job_resp.unwrap_ready().prep_resps.remove(0);
 
         // Expect success due to valid ciphertext.
-        assert_matches!(transition.var, TransitionVar::Continued(_));
+        assert_matches!(prep_resp.var, PrepareRespVar::Continue(_));
     }
 
-    async_test_versions! { handle_agg_job_req_transition_continue }
+    async_test_versions! { handle_agg_job_req_prep_resp_continue }
 
     async fn handle_agg_job_req_failure_report_replayed(version: DapVersion) {
         let t = Test::new(version);

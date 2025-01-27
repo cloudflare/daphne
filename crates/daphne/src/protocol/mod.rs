@@ -64,13 +64,13 @@ fn decode_ping_pong_framed(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(deepsize::DeepSizeOf))]
 pub struct ReadyAggregationJobResp {
-    pub transitions: Vec<messages::Transition>,
+    pub prep_resps: Vec<messages::PrepareResp>,
 }
 
 impl From<ReadyAggregationJobResp> for messages::AggregationJobResp {
     fn from(value: ReadyAggregationJobResp) -> Self {
         Self::Ready {
-            transitions: value.transitions,
+            prep_resps: value.prep_resps,
         }
     }
 }
@@ -84,7 +84,7 @@ mod test {
         hpke::{HpkeAeadId, HpkeConfig, HpkeKdfId, HpkeKemId},
         messages::{
             AggregationJobInitReq, BatchSelector, Extension, Interval, PartialBatchSelector,
-            PrepareInit, Report, ReportError, ReportId, ReportShare, Transition, TransitionVar,
+            PrepareInit, PrepareResp, PrepareRespVar, Report, ReportError, ReportId, ReportShare,
         },
         test_versions,
         testing::AggregationJobTest,
@@ -266,7 +266,7 @@ mod test {
 
         let (agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
         assert_eq!(agg_span.report_count(), 3);
-        assert_eq!(agg_job_resp.unwrap_ready().transitions.len(), 3);
+        assert_eq!(agg_job_resp.unwrap_ready().prep_resps.len(), 3);
     }
 
     test_versions! { produce_agg_job_req }
@@ -393,10 +393,10 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let agg_job_resp = agg_job_resp.unwrap_ready();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_eq!(agg_job_resp.prep_resps.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(ReportError::HpkeDecryptError)
+            agg_job_resp.prep_resps[0].var,
+            PrepareRespVar::Reject(ReportError::HpkeDecryptError)
         );
     }
 
@@ -432,10 +432,10 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let agg_job_resp = agg_job_resp.unwrap_ready();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_eq!(agg_job_resp.prep_resps.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(ReportError::ReportDropped)
+            agg_job_resp.prep_resps[0].var,
+            PrepareRespVar::Reject(ReportError::ReportDropped)
         );
     }
 
@@ -468,10 +468,10 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let agg_job_resp = agg_job_resp.unwrap_ready();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_eq!(agg_job_resp.prep_resps.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(ReportError::ReportTooEarly)
+            agg_job_resp.prep_resps[0].var,
+            PrepareRespVar::Reject(ReportError::ReportTooEarly)
         );
     }
 
@@ -489,10 +489,10 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let agg_job_resp = agg_job_resp.unwrap_ready();
-        assert_eq!(agg_job_resp.transitions.len(), 1);
+        assert_eq!(agg_job_resp.prep_resps.len(), 1);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(ReportError::HpkeUnknownConfigId)
+            agg_job_resp.prep_resps[0].var,
+            PrepareRespVar::Reject(ReportError::HpkeUnknownConfigId)
         );
     }
 
@@ -535,14 +535,14 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let agg_job_resp = agg_job_resp.unwrap_ready();
-        assert_eq!(agg_job_resp.transitions.len(), 2);
+        assert_eq!(agg_job_resp.prep_resps.len(), 2);
         assert_matches!(
-            agg_job_resp.transitions[0].var,
-            TransitionVar::Failed(ReportError::VdafPrepError)
+            agg_job_resp.prep_resps[0].var,
+            PrepareRespVar::Reject(ReportError::VdafPrepError)
         );
         assert_matches!(
-            agg_job_resp.transitions[1].var,
-            TransitionVar::Failed(ReportError::VdafPrepError)
+            agg_job_resp.prep_resps[1].var,
+            PrepareRespVar::Reject(ReportError::VdafPrepError)
         );
     }
 
@@ -559,10 +559,10 @@ mod test {
         let (_agg_span, agg_job_resp) = t.handle_agg_job_req(agg_job_init_req);
 
         let mut agg_job_resp = agg_job_resp.unwrap_ready();
-        // Helper sends transitions out of order.
-        let tmp = agg_job_resp.transitions[0].clone();
-        agg_job_resp.transitions[0] = agg_job_resp.transitions[1].clone();
-        agg_job_resp.transitions[1] = tmp;
+        // Helper sends prep_resps out of order.
+        let tmp = agg_job_resp.prep_resps[0].clone();
+        agg_job_resp.prep_resps[0] = agg_job_resp.prep_resps[1].clone();
+        agg_job_resp.prep_resps[1] = tmp;
 
         assert_matches!(
             t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),
@@ -584,8 +584,8 @@ mod test {
 
         let mut agg_job_resp = agg_job_resp.unwrap_ready();
         // Helper sends a transition twice.
-        let repeated_transition = agg_job_resp.transitions[0].clone();
-        agg_job_resp.transitions.push(repeated_transition);
+        let repeated_transition = agg_job_resp.prep_resps[0].clone();
+        agg_job_resp.prep_resps.push(repeated_transition);
 
         assert_matches!(
             t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),
@@ -608,9 +608,9 @@ mod test {
 
         let mut agg_job_resp = agg_job_resp.unwrap_ready();
         // Helper sent a transition with an unrecognized report ID.
-        agg_job_resp.transitions.push(Transition {
+        agg_job_resp.prep_resps.push(PrepareResp {
             report_id: ReportId(rng.gen()),
-            var: TransitionVar::Continued(b"whatever".to_vec()),
+            var: PrepareRespVar::Continue(b"whatever".to_vec()),
         });
 
         assert_matches!(
@@ -631,7 +631,7 @@ mod test {
         let mut agg_job_resp = agg_job_resp.unwrap_ready();
         // Helper sent a transition with an unrecognized report ID. Simulate this by flipping the
         // first bit of the report ID.
-        agg_job_resp.transitions[0].report_id.0[0] ^= 1;
+        agg_job_resp.prep_resps[0].report_id.0[0] ^= 1;
 
         assert_matches!(
             t.consume_agg_job_resp_expect_err(leader_state, agg_job_resp),
@@ -712,8 +712,8 @@ mod test {
         let agg_job_resp = agg_job_resp.unwrap_ready();
 
         assert_eq!(2, helper_agg_span.report_count());
-        assert_eq!(3, agg_job_resp.transitions.len());
-        for (transition, prep_init_id) in zip(&agg_job_resp.transitions, prep_init_ids) {
+        assert_eq!(3, agg_job_resp.prep_resps.len());
+        for (transition, prep_init_id) in zip(&agg_job_resp.prep_resps, prep_init_ids) {
             assert_eq!(transition.report_id, prep_init_id);
         }
 

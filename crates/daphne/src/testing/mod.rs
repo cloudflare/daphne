@@ -340,13 +340,13 @@ impl AggregationJobTest {
         let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports);
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, AggregationJobResp::Ready { transitions }) =
+            let (helper_agg_span, AggregationJobResp::Ready { prep_resps }) =
                 self.handle_agg_job_req(agg_job_init_req)
             else {
                 panic!("testing should not be async")
             };
             let leader_agg_span =
-                self.consume_agg_job_resp(leader_state, ReadyAggregationJobResp { transitions });
+                self.consume_agg_job_resp(leader_state, ReadyAggregationJobResp { prep_resps });
             (leader_agg_span, helper_agg_span)
         };
 
