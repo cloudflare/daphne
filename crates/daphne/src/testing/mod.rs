@@ -17,6 +17,7 @@ use crate::{
         Report, ReportId, TaskId, Time,
     },
     metrics::{prometheus::DaphnePromMetrics, DaphneMetrics},
+    protocol::ReadyAggregationJobResp,
     roles::{
         aggregator::{MergeAggShareError, TaskprovConfig},
         helper::{self, AggregationJobRequestHash},
@@ -208,7 +209,8 @@ impl AggregationJobTest {
         &self,
         agg_job_init_req: AggregationJobInitReq,
     ) -> (DapAggregateSpan<DapAggregateShare>, AggregationJobResp) {
-        self.task_config
+        let (span, resp) = self
+            .task_config
             .produce_agg_job_resp(
                 self.task_id,
                 &HashMap::default(),
@@ -224,7 +226,8 @@ impl AggregationJobTest {
                     )
                     .unwrap(),
             )
-            .unwrap()
+            .unwrap();
+        (span, resp.into())
     }
 
     /// Leader: Handle `AggregationJobResp`, produce `AggregationJobContinueReq`.
@@ -233,7 +236,7 @@ impl AggregationJobTest {
     pub fn consume_agg_job_resp(
         &self,
         leader_state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
+        agg_job_resp: ReadyAggregationJobResp,
     ) -> DapAggregateSpan<DapAggregateShare> {
         self.task_config
             .consume_agg_job_resp(
@@ -249,7 +252,7 @@ impl AggregationJobTest {
     pub fn consume_agg_job_resp_expect_err(
         &self,
         leader_state: DapAggregationJobState,
-        agg_job_resp: AggregationJobResp,
+        agg_job_resp: ReadyAggregationJobResp,
     ) -> DapError {
         let metrics = &self.leader_metrics;
         self.task_config
@@ -337,8 +340,13 @@ impl AggregationJobTest {
         let (leader_state, agg_job_init_req) = self.produce_agg_job_req(&agg_param, reports);
 
         let (leader_agg_span, helper_agg_span) = {
-            let (helper_agg_span, agg_job_resp) = self.handle_agg_job_req(agg_job_init_req);
-            let leader_agg_span = self.consume_agg_job_resp(leader_state, agg_job_resp);
+            let (helper_agg_span, AggregationJobResp::Ready { transitions }) =
+                self.handle_agg_job_req(agg_job_init_req)
+            else {
+                panic!("testing should not be async")
+            };
+            let leader_agg_span =
+                self.consume_agg_job_resp(leader_state, ReadyAggregationJobResp { transitions });
             (leader_agg_span, helper_agg_span)
         };
 

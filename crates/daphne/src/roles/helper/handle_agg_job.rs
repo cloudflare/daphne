@@ -336,7 +336,7 @@ impl HandleAggJob<InitializedReports> {
                     0, /* vdaf step */
                 );
 
-                return Ok(agg_job_resp);
+                return Ok(agg_job_resp.into());
             }
         }
 

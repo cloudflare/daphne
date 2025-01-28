@@ -764,7 +764,7 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = &agg_job_resp.transitions[0];
+        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
 
         // Expect failure due to invalid ciphertext.
         assert_matches!(
@@ -878,7 +878,7 @@ mod test {
             .payload,
         )
         .unwrap();
-        let transition = &agg_job_resp.transitions[0];
+        let transition = agg_job_resp.unwrap_ready().transitions.remove(0);
 
         // Expect success due to valid ciphertext.
         assert_matches!(transition.var, TransitionVar::Continued(_));
