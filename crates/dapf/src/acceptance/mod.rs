@@ -533,7 +533,7 @@ impl Test {
         let agg_share_span = task_config.consume_agg_job_resp(
             task_id,
             agg_job_state,
-            agg_job_resp,
+            agg_job_resp.unwrap_ready(), // TODO: implement polling
             self.metrics(),
         )?;
 
