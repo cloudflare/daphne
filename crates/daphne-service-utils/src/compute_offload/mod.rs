@@ -23,6 +23,7 @@ use daphne::{
 use prio::codec::{Decode, Encode, ParameterizedDecode, ParameterizedEncode};
 use std::{borrow::Cow, ops::Range};
 
+#[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
 pub struct InitializeReports<'s> {
     pub hpke_keys: Cow<'s, [HpkeReceiverConfig]>,
     /// Output of [`DapAggregator::valid_report_time_range`](daphne::roles::DapAggregator) at the
@@ -489,11 +490,108 @@ fn to_capnp<E: ToString>(e: E) -> capnp::Error {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::capnproto::{CapnprotoPayloadDecodeExt, CapnprotoPayloadEncodeExt};
+    use crate::capnproto::roundtrip_test;
+    use daphne::{vdaf::VdafVerifyKey, DapVersion};
+    use rand::Rng;
 
     #[test]
     fn report_metadata_roundtrip() {
-        let report_metadata = ReportMetadata {
+        roundtrip_test(generate_random_report_metadata());
+    }
+
+    #[test]
+    fn test_encode_decode_range() {
+        let mut rng = rand::thread_rng();
+
+        let start = rng.gen::<messages::Time>();
+        let end = rng.gen::<messages::Time>();
+
+        roundtrip_test(start..end);
+    }
+
+    #[test]
+    fn test_encode_decode_partial_dap_task_config_for_report_init() {
+        roundtrip_test(generate_random_partial_task_config());
+    }
+
+    #[test]
+    fn test_encode_decode_prepare_init() {
+        roundtrip_test(generate_random_prepare_init());
+    }
+
+    #[test]
+    fn test_encode_decode_hpke_config() {
+        roundtrip_test(generate_random_hpke_config());
+    }
+
+    #[test]
+    fn test_encode_decode_hpke_receiver_config() {
+        roundtrip_test(HpkeReceiverConfig {
+            config: generate_random_hpke_config(),
+            private_key: generate_random_bytes().into(),
+        });
+    }
+
+    #[test]
+    fn test_encode_decode_initialize_reports() {
+        let initialize_reports = InitializeReports {
+            hpke_keys: generate_random_hpke_receiver_configs().into(),
+            valid_report_range: generate_random_valid_report_range(),
+            task_id: TaskId(rand::thread_rng().gen()),
+            task_config: generate_random_partial_task_config(),
+            agg_param: generate_random_bytes().into(),
+            prep_inits: generate_random_prep_inits(),
+        };
+
+        roundtrip_test(initialize_reports);
+    }
+
+    fn generate_random_partial_task_config() -> PartialDapTaskConfigForReportInit<'static> {
+        let mut rng = rand::thread_rng();
+        PartialDapTaskConfigForReportInit {
+            not_before: rng.gen::<u64>(),
+            not_after: rng.gen::<u64>(),
+            method_is_taskprov: rng.gen::<bool>(),
+            version: [DapVersion::Latest, DapVersion::Draft09][rng.gen_range(0..2)],
+            vdaf: Cow::Owned(generate_random_vdaf()),
+            vdaf_verify_key: VdafVerifyKey::from(rng.gen::<[u8; 32]>()),
+        }
+    }
+
+    fn generate_random_hpke_receiver_configs() -> Vec<HpkeReceiverConfig> {
+        (0..3)
+            .map(|_| generate_random_hpke_receiver_config())
+            .collect()
+    }
+
+    fn generate_random_hpke_receiver_config() -> HpkeReceiverConfig {
+        HpkeReceiverConfig {
+            config: generate_random_hpke_config(),
+            private_key: generate_random_bytes().into(),
+        }
+    }
+
+    fn generate_random_valid_report_range() -> std::ops::Range<u64> {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(0..1000)..rng.gen_range(1000..2000)
+    }
+
+    fn generate_random_prep_inits() -> Vec<PrepareInit> {
+        (0..2).map(|_| generate_random_prepare_init()).collect()
+    }
+
+    fn generate_random_hpke_config() -> HpkeConfig {
+        HpkeConfig {
+            id: rand::thread_rng().gen(),
+            kem_id: daphne::hpke::HpkeKemId::P256HkdfSha256,
+            kdf_id: daphne::hpke::HpkeKdfId::HkdfSha256,
+            aead_id: daphne::hpke::HpkeAeadId::Aes128Gcm,
+            public_key: generate_random_bytes().into(),
+        }
+    }
+
+    fn generate_random_report_metadata() -> ReportMetadata {
+        ReportMetadata {
             id: messages::ReportId(rand::random()),
             time: rand::random(),
             public_extensions: Some(vec![
@@ -503,27 +601,35 @@ mod test {
                     payload: b"some extension payload".to_vec(),
                 },
             ]),
-        };
-
-        assert_eq!(
-            report_metadata,
-            ReportMetadata::decode_from_bytes(&report_metadata.encode_to_bytes()).unwrap()
-        );
+        }
     }
 
-    #[test]
-    fn report_metadata_roundtrip_draft09() {
-        let report_metadata = ReportMetadata {
-            id: messages::ReportId(rand::random()),
-            time: rand::random(),
-            // draft09 compatibility: Previously there was no extensions field in the report
-            // metadata.
-            public_extensions: None,
-        };
+    fn generate_random_bytes() -> Vec<u8> {
+        let mut rng = rand::thread_rng();
+        (0..rng.gen_range(0..32)).map(|_| rng.gen()).collect()
+    }
 
-        assert_eq!(
-            report_metadata,
-            ReportMetadata::decode_from_bytes(&report_metadata.encode_to_bytes()).unwrap()
-        );
+    fn generate_random_vdaf() -> VdafConfig {
+        // Replace with the actual logic to generate random VdafConfig
+        VdafConfig::Prio2 { dimension: 1234 }
+    }
+
+    fn generate_random_prepare_init() -> PrepareInit {
+        PrepareInit {
+            report_share: generate_random_report_share(),
+            payload: generate_random_bytes(),
+        }
+    }
+
+    fn generate_random_report_share() -> ReportShare {
+        ReportShare {
+            report_metadata: generate_random_report_metadata(),
+            public_share: generate_random_bytes(),
+            encrypted_input_share: HpkeCiphertext {
+                config_id: rand::thread_rng().gen::<u8>(),
+                enc: generate_random_bytes(),
+                payload: generate_random_bytes(),
+            },
+        }
     }
 }
