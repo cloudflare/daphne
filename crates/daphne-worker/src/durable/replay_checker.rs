@@ -31,6 +31,11 @@ super::mk_durable_object! {
     ///
     /// - The report id has been seen but belongs to a different agg job id:
     ///     => We return it in duplicates set
+    ///
+    ///
+    /// This is only correct for as long as two invariants are upheld somewhere else in the code:
+    /// - We stricly require aggregation jobs to not change once submited (this is required per the DAP spec)
+    /// - All storage operations after this point that rely on replay protection are idempotent.
     struct ReplayChecker {
         state: State,
         env: Env,
@@ -59,6 +64,8 @@ impl GcDurableObject for ReplayChecker {
 
                 let mut duplicates = HashSet::new();
 
+                // Check the cache for duplicates and compute the set of report IDs we need to read
+                // from the disk.
                 let report_ids_as_string = report_ids
                     .iter()
                     .filter(|r| match self.seen.get(r) {
@@ -73,7 +80,7 @@ impl GcDurableObject for ReplayChecker {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>();
 
-                let aggregation_job_id_as_str = agg_job_id.to_string();
+                let agg_job_id_as_str = agg_job_id.to_string();
 
                 let result = self
                     .state
@@ -87,14 +94,14 @@ impl GcDurableObject for ReplayChecker {
 
                     let v = result.get(&JsValue::from_str(as_str));
                     if let Some(stored_agg_job_id) = v.as_string() {
-                        if stored_agg_job_id != aggregation_job_id_as_str {
+                        if stored_agg_job_id != agg_job_id_as_str {
                             duplicates.insert(*id);
                         }
                     } else {
                         js_sys::Reflect::set(
                             &obj_to_update,
                             &JsValue::from_str(as_str),
-                            &JsValue::from_str(aggregation_job_id_as_str.as_ref()),
+                            &JsValue::from_str(agg_job_id_as_str.as_ref()),
                         )?;
                     }
                 }

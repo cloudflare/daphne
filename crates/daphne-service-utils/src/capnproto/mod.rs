@@ -268,3 +268,80 @@ pub fn usize_to_capnp_len(u: usize) -> u32 {
     u.try_into()
         .expect("capnp can't encode more that u32::MAX of something")
 }
+
+#[cfg(test)]
+pub fn roundtrip_test<T>(before: T)
+where
+    T: CapnprotoPayloadDecode + CapnprotoPayloadEncode + PartialEq + std::fmt::Debug,
+{
+    assert_eq!(
+        before,
+        T::decode_from_bytes(&before.encode_to_bytes()).unwrap()
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    #[test]
+    fn test_u8_array_serialize_deserialize() {
+        roundtrip_test(rand::thread_rng().gen::<[u8; 32]>());
+        roundtrip_test(rand::thread_rng().gen::<[u8; 16]>());
+    }
+
+    #[test]
+    fn test_partial_batch_selector_serialize_deserialize() {
+        roundtrip_test(PartialBatchSelector::TimeInterval);
+
+        roundtrip_test(PartialBatchSelector::LeaderSelectedByBatchId {
+            batch_id: BatchId(rand::thread_rng().gen()),
+        });
+    }
+
+    #[test]
+    fn test_report_error_conversion() {
+        // cause a compilation error if the variants change
+        const _: () = {
+            #[allow(clippy::match_same_arms)]
+            match messages::ReportError::Reserved {
+                messages::ReportError::Reserved => (),
+                messages::ReportError::BatchCollected => (),
+                messages::ReportError::ReportReplayed => (),
+                messages::ReportError::ReportDropped => (),
+                messages::ReportError::HpkeUnknownConfigId => (),
+                messages::ReportError::HpkeDecryptError => (),
+                messages::ReportError::VdafPrepError => (),
+                messages::ReportError::BatchSaturated => (),
+                messages::ReportError::TaskExpired => (),
+                messages::ReportError::InvalidMessage => (),
+                messages::ReportError::ReportTooEarly => (),
+                messages::ReportError::TaskNotStarted => (),
+            }
+        };
+        let all_errors = vec![
+            messages::ReportError::Reserved,
+            messages::ReportError::BatchCollected,
+            messages::ReportError::ReportReplayed,
+            messages::ReportError::ReportDropped,
+            messages::ReportError::HpkeUnknownConfigId,
+            messages::ReportError::HpkeDecryptError,
+            messages::ReportError::VdafPrepError,
+            messages::ReportError::BatchSaturated,
+            messages::ReportError::TaskExpired,
+            messages::ReportError::InvalidMessage,
+            messages::ReportError::ReportTooEarly,
+            messages::ReportError::TaskNotStarted,
+        ];
+
+        for error in all_errors {
+            let converted: base_capnp::ReportError = error.into();
+            let back_converted: messages::ReportError = converted.into();
+            assert_eq!(
+                error, back_converted,
+                "Conversion symmetry failed for {error:?}",
+            );
+        }
+    }
+}

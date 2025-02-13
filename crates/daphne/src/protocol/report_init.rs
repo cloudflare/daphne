@@ -123,6 +123,8 @@ impl<'s> From<&'s PartialDapTaskConfigForReportInit<'_>> for PartialDapTaskConfi
     }
 }
 
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(PartialEq, Debug))]
 pub struct PartialDapTaskConfigForReportInit<'s> {
     pub not_before: messages::Time,
     pub not_after: messages::Time,

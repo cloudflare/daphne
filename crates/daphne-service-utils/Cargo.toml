@@ -21,7 +21,7 @@ serde_json = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
-daphne = { path = "../daphne", default-features = false, features = ["prometheus"] }
+daphne = { path = "../daphne", default-features = false, features = ["prometheus", "test-utils"] }
 rand.workspace = true
 
 [build-dependencies]
