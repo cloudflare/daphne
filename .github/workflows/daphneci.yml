@@ -19,7 +19,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.84.0
+          toolchain: 1.85.0
           components: clippy, rustfmt
           override: true
       - name: Machete
