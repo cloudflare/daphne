@@ -298,8 +298,7 @@ where
         Some(v) => Ok(v),
         None => request_from_user::<T>(field, None, || ControlFlow::Continue(()))
             .transpose()
-            .unwrap()
-            .map(Into::into),
+            .unwrap(),
     }
 }
 

@@ -183,20 +183,9 @@ super::mk_durable_object! {
 }
 
 fn number_of_chunks_needed_for(bytes: &[u8]) -> u8 {
-    // stolen from
-    // https://doc.rust-lang.org/std/primitive.usize.html#method.div_ceil
-    // because it's nightly only
-    fn div_ceil(lhs: usize, rhs: usize) -> usize {
-        let d = lhs / rhs;
-        let r = lhs % rhs;
-        if r > 0 && rhs > 0 {
-            d + 1
-        } else {
-            d
-        }
-    }
-
-    div_ceil(bytes.len(), MAX_CHUNK_SIZE)
+    bytes
+        .len()
+        .div_ceil(MAX_CHUNK_SIZE)
         .try_into()
         .expect("number of chunks must be below u8::MAX")
 }
