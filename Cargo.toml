@@ -83,7 +83,7 @@ static_assertions = "1"
 strum = { version = "0.26.3", features = ["derive"] }
 subtle = "2.6.1"
 thiserror = "1.0.61"
-tokio = { version = "1.38.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread"] }
 tower = "0.4.13"
 tower-service = "0.3"
 tracing = "0.1.40"
