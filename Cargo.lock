@@ -463,7 +463,16 @@ version = "0.18.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b671a5b39eadb909b0c2b81d22a400d446526e651e64be9eb6674b33644a4"
 dependencies = [
- "embedded-io",
+ "embedded-io 0.5.0",
+]
+
+[[package]]
+name = "capnp"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fe67a3f89b693d2163cf3d94129125463ac5913e1c4322f2db905aa631d3c67"
+dependencies = [
+ "embedded-io 0.7.1",
 ]
 
 [[package]]
@@ -472,7 +481,7 @@ version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a642faaaa78187e70bdcc0014c593c213553cfeda3b15054426d0d596048b131"
 dependencies = [
- "capnp",
+ "capnp 0.18.13",
 ]
 
 [[package]]
@@ -946,7 +955,7 @@ dependencies = [
 name = "daphne-service-utils"
 version = "0.3.0"
 dependencies = [
- "capnp",
+ "capnp 0.24.1",
  "capnpc",
  "daphne",
  "prio 0.16.7",
@@ -965,7 +974,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "bytes",
- "capnp",
+ "capnp 0.24.1",
  "capnpc",
  "chrono",
  "constcat",
@@ -1186,6 +1195,12 @@ name = "embedded-io"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
+
+[[package]]
+name = "embedded-io"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
 
 [[package]]
 name = "equivalent"

@@ -38,7 +38,7 @@ axum-extra = "0.9"
 base64 = "0.21.7"
 bytes = "1"
 cap = "0.1.2"
-capnp = "0.18.13"
+capnp = "0.24.0"
 capnpc = "0.18.1"
 cfg-if = "1.0.0"
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "wasmbind"] }
