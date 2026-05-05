@@ -66,7 +66,7 @@ prio_draft09 = { package = "prio", version = "0.16.7" }
 # TODO Point to version `0.17.0` once release. This revision is one commit ahead of `0.17.0-alpha.0`.
 prio = { git = "https://github.com/divviup/libprio-rs.git", rev = "e5e8a47ee4567f7588d0b5c8d20f75dde4061b2f" }
 prometheus = "0.13.4"
-rand = "0.8.5"
+rand = "0.8.6"
 rayon = "1.10.0"
 rcgen = "0.12.1"
 regex = "1.10.5"
