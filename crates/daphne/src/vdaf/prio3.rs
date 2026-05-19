@@ -22,6 +22,7 @@ use prio::{
     },
 };
 use std::io::Cursor;
+use subtle::ConstantTimeEq;
 
 impl Prio3Config {
     pub(crate) fn shard(
@@ -35,10 +36,11 @@ impl Prio3Config {
             (DapVersion::Latest, Prio3Config::Count, DapMeasurement::U64(measurement))
                 if measurement < 2 =>
             {
+                let measurement = bool::from(measurement.ct_eq(&1));
                 let vdaf = Prio3::new_count(2).map_err(|e| {
                     VdafError::Dap(fatal_error!(err = ?e, "initializing {self:?} failed"))
                 })?;
-                shard_then_encode(&vdaf, task_id, &(measurement != 0), nonce)
+                shard_then_encode(&vdaf, task_id, &measurement, nonce)
             }
             (
                 DapVersion::Latest,
@@ -610,6 +612,18 @@ mod test {
             ],
         );
         assert_eq!(got, DapAggregateResult::U64(3));
+    }
+
+    #[test]
+    fn count_rejects_non_binary_measurement() {
+        let got = Prio3Config::Count.shard(
+            DapVersion::Latest,
+            DapMeasurement::U64(2),
+            &[0; 16],
+            crate::messages::TaskId([0; 32]),
+        );
+
+        assert!(got.is_err());
     }
 
     #[test]

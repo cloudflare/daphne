@@ -22,6 +22,7 @@ use std::{
     fmt,
     io::{Cursor, Read},
 };
+use subtle::ConstantTimeEq;
 
 // Batch modes
 const BATCH_MODE_TIME_INTERVAL: u8 = 0x01;
@@ -1485,18 +1486,8 @@ impl ParameterizedDecode<DapVersion> for PlaintextInputShare {
     }
 }
 
-// NOTE ring provides a similar function, but as of version 0.16.20, it doesn't compile to
-// wasm32-unknown-unknown.
 pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let mut r = 0;
-    for (x, y) in left.iter().zip(right) {
-        r |= x ^ y;
-    }
-    r == 0
+    bool::from(left.ct_eq(right))
 }
 
 pub(crate) fn encode_u16_bytes(bytes: &mut Vec<u8>, input: &[u8]) -> Result<(), CodecError> {
@@ -1703,6 +1694,14 @@ mod test {
                 .unwrap_err(),
             CodecError::BytesLeftOver(..)
         ));
+    }
+
+    #[test]
+    fn constant_time_eq_matches_slice_equality() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"same bytes", b"same bytes"));
+        assert!(!constant_time_eq(b"same bytes", b"same bytez"));
+        assert!(!constant_time_eq(b"short", b"shorter"));
     }
 
     fn partial_batch_selector_encode_decode(version: DapVersion) {
